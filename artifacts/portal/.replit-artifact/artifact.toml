@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "TrapMaster Portal"
+version = "1.0.0"
+id = "artifacts/portal"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25265
+
+[services.development]
+run = "pnpm --filter @workspace/portal run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/portal", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/portal/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25265"
+BASE_PATH = "/"

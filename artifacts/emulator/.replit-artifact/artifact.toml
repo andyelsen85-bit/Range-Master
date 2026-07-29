@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/emulator/"
+title = "ESP32 Display Emulator"
+version = "1.0.0"
+id = "artifacts/emulator"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/emulator/" ]
+localPort = 21916
+
+[services.development]
+run = "pnpm --filter @workspace/emulator run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/emulator", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/emulator/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21916"
+BASE_PATH = "/emulator/"

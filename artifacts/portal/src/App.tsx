@@ -1,0 +1,75 @@
+import { useEffect } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from '@/components/ui/toaster';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
+import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react/custom-fetch';
+import { useAuthStore } from '@/store/use-auth-store';
+
+import Layout from '@/components/layout';
+import Login from '@/pages/login';
+import Dashboard from '@/pages/dashboard';
+import Resultater from '@/pages/resultater';
+import Rangliste from '@/pages/rangliste';
+import Statistiken from '@/pages/statistiken';
+import NotFound from '@/pages/not-found';
+
+const queryClient = new QueryClient();
+
+// Setup fetch interceptors
+setBaseUrl(null);
+setAuthTokenGetter(() => useAuthStore.getState().token);
+
+function PrivateRoute({ component: Component, ...rest }: any) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setLocation('/login');
+    }
+  }, [isAuthenticated, setLocation]);
+
+  if (!isAuthenticated) return null;
+
+  return <Component {...rest} />;
+}
+
+function Router() {
+  return (
+    <Switch>
+      <Route path="/login" component={Login} />
+      <Route>
+        <Layout>
+          <Switch>
+            <Route path="/" component={() => <PrivateRoute component={Dashboard} />} />
+            <Route path="/resultater" component={() => <PrivateRoute component={Resultater} />} />
+            <Route path="/rangliste" component={() => <PrivateRoute component={Rangliste} />} />
+            <Route path="/statistiken" component={() => <PrivateRoute component={Statistiken} />} />
+            <Route component={NotFound} />
+          </Switch>
+        </Layout>
+      </Route>
+    </Switch>
+  );
+}
+
+function App() {
+  // Force dark theme as the primary design language
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+          <Router />
+        </WouterRouter>
+        <Toaster />
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+}
+
+export default App;

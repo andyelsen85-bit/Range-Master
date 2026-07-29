@@ -3,20 +3,30 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: TrapMaster API — F.S.H.C.L. Sektioun Wolz
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: spieler
+    description: Player management
+  - name: rangliste
+    description: Leaderboard
+  - name: statistik
+    description: Statistics
+  - name: sync
+    description: ESP32 display sync
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +34,584 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── AUTH ──────────────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpielerProfile"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── SPIELER ───────────────────────────────────────────────────────────────
+  /spieler:
+    get:
+      operationId: listSpieler
+      tags: [spieler]
+      summary: List all players
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of players
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spieler:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SpielerProfile"
+                required: [spieler]
+
+  /spieler/{id}:
+    get:
+      operationId: getSpieler
+      tags: [spieler]
+      summary: Get player by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Player details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpielerProfile"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /spieler/{id}/ergebnisse:
+    get:
+      operationId: getSpielerErgebnisse
+      tags: [spieler]
+      summary: Get player results
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Player results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ergebnisse:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ErgebnisWithSpiel"
+                required: [ergebnisse]
+
+  # ── RANGLISTE ─────────────────────────────────────────────────────────────
+  /rangliste:
+    get:
+      operationId: getRangliste
+      tags: [rangliste]
+      summary: Get leaderboard
+      parameters:
+        - name: modus
+          in: query
+          schema:
+            $ref: "#/components/schemas/Modus"
+        - name: jahr
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Leaderboard
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rangliste:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RanglisteEntry"
+                required: [rangliste]
+
+  # ── STATISTIK ─────────────────────────────────────────────────────────────
+  /statistik/{spielerId}:
+    get:
+      operationId: getStatistik
+      tags: [statistik]
+      summary: Get player statistics
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: spielerId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Player statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpielerStatistik"
+
+  /statistik/{spielerId}/verlauf:
+    get:
+      operationId: getStatistikVerlauf
+      tags: [statistik]
+      summary: Get score history for sparkline charts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: spielerId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Score history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verlauf:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        datum:
+                          type: string
+                          format: date
+                        punkte:
+                          type: integer
+                        modus:
+                          $ref: "#/components/schemas/Modus"
+                      required: [datum, punkte, modus]
+                required: [verlauf]
+
+  # ── SYNC (ESP32 Display) ──────────────────────────────────────────────────
+  /sync/status:
+    get:
+      operationId: getSyncStatus
+      tags: [sync]
+      summary: Connectivity test for ESP32
+      security:
+        - apiKeyAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+                  spielerCount:
+                    type: integer
+                required: [status, timestamp, spielerCount]
+
+  /sync/spieler:
+    get:
+      operationId: getSyncSpieler
+      tags: [sync]
+      summary: Get player list for ESP32
+      security:
+        - apiKeyAuth: []
+      responses:
+        "200":
+          description: Player list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spieler:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SyncSpieler"
+                required: [spieler]
+    post:
+      operationId: postSyncSpieler
+      tags: [sync]
+      summary: Sync player list from ESP32
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                spieler:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SyncSpieler"
+              required: [spieler]
+      responses:
+        "200":
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  synced:
+                    type: integer
+                required: [synced]
+
+  /sync/spiele:
+    post:
+      operationId: postSyncSpiele
+      tags: [sync]
+      summary: Upload game results from ESP32
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                spiele:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SyncSpiel"
+              required: [spiele]
+      responses:
+        "200":
+          description: Sync results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        externalId:
+                          type: string
+                        status:
+                          type: string
+                          enum: [created, skipped]
+                      required: [externalId, status]
+                required: [results]
+
+# ── COMPONENTS ────────────────────────────────────────────────────────────
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+
   schemas:
     HealthStatus:
       type: object
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    Modus:
+      type: string
+      enum:
+        - NORMAL
+        - HARAKIRI
+        - HARAKIRI_DELAYED
+        - HARAKIRI_FULL
+        - CUSTOM_1
+        - CUSTOM_2
+        - CUSTOM_3
+
+    Maschine:
+      type: string
+      enum: [A, B, C, D, E, F, G, H]
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        passwort:
+          type: string
+          minLength: 6
+      required: [email, passwort]
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        spieler:
+          $ref: "#/components/schemas/SpielerProfile"
+      required: [token, spieler]
+
+    SpielerProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        mitgliedNr:
+          type: string
+          nullable: true
+        portalAktiv:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, portalAktiv, createdAt]
+
+    ErgebnisWithSpiel:
+      type: object
+      properties:
+        id:
+          type: integer
+        spielId:
+          type: integer
+        lauf:
+          type: integer
+        taube:
+          type: integer
+        maschine:
+          $ref: "#/components/schemas/Maschine"
+        posten:
+          type: integer
+        schuss1:
+          type: boolean
+        schuss2:
+          type: boolean
+        punkte:
+          type: integer
+        wiederholt:
+          type: boolean
+        spiel:
+          type: object
+          properties:
+            datum:
+              type: string
+              format: date-time
+            modus:
+              $ref: "#/components/schemas/Modus"
+          required: [datum, modus]
+      required: [id, spielId, lauf, taube, maschine, posten, schuss1, schuss2, punkte, wiederholt, spiel]
+
+    RanglisteEntry:
+      type: object
+      properties:
+        rang:
+          type: integer
+        spielerId:
+          type: integer
+        name:
+          type: string
+        gesamtPunkte:
+          type: integer
+        anzahlLauefe:
+          type: integer
+        durchschnitt:
+          type: number
+        bestPunkte:
+          type: integer
+      required: [rang, spielerId, name, gesamtPunkte, anzahlLauefe, durchschnitt, bestPunkte]
+
+    SpielerStatistik:
+      type: object
+      properties:
+        spielerId:
+          type: integer
+        gesamtLauefe:
+          type: integer
+        durchschnitt:
+          type: number
+        bestPunkte:
+          type: integer
+        trefferquote:
+          type: number
+        maschinen:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              versuche:
+                type: integer
+              treffer:
+                type: integer
+              quote:
+                type: number
+            required: [versuche, treffer, quote]
+      required: [spielerId, gesamtLauefe, durchschnitt, bestPunkte, trefferquote, maschinen]
+
+    SyncSpieler:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        mitgliedNr:
+          type: string
+          nullable: true
+      required: [id, name]
+
+    SyncSpiel:
+      type: object
+      properties:
+        externalId:
+          type: string
+          format: uuid
+        datum:
+          type: string
+          format: date-time
+        modus:
+          $ref: "#/components/schemas/Modus"
+        lauf:
+          type: integer
+          minimum: 1
+          maximum: 2
+        abgeschlossen:
+          type: boolean
+        teilnahmen:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncTeilnahme"
+        ergebnisse:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncErgebnis"
+      required: [externalId, datum, modus, lauf, abgeschlossen, teilnahmen, ergebnisse]
+
+    SyncTeilnahme:
+      type: object
+      properties:
+        spielerId:
+          type: integer
+        startPosten:
+          type: integer
+          minimum: 1
+          maximum: 6
+        punkte:
+          type: integer
+          minimum: 0
+          maximum: 36
+        lauf:
+          type: integer
+          minimum: 1
+          maximum: 2
+      required: [spielerId, startPosten, punkte, lauf]
+
+    SyncErgebnis:
+      type: object
+      properties:
+        spielerId:
+          type: integer
+        lauf:
+          type: integer
+          minimum: 1
+          maximum: 2
+        taube:
+          type: integer
+          minimum: 1
+          maximum: 9
+        maschine:
+          $ref: "#/components/schemas/Maschine"
+        posten:
+          type: integer
+          minimum: 1
+          maximum: 6
+        schuss1:
+          type: boolean
+        schuss2:
+          type: boolean
+        punkte:
+          type: integer
+          minimum: 0
+          maximum: 4
+        wiederholt:
+          type: boolean
+      required: [spielerId, lauf, taube, maschine, posten, schuss1, schuss2, punkte, wiederholt]

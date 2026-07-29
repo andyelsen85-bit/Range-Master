@@ -1,0 +1,116 @@
+import { useAuthStore } from "@/store/use-auth-store";
+import { useGetSpielerErgebnisse, getGetSpielerErgebnisseQueryKey, ErgebnisWithSpiel } from "@workspace/api-client-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { AlertCircle } from "lucide-react";
+
+export default function Resultater() {
+  const user = useAuthStore((s) => s.user);
+  
+  const { data, isLoading } = useGetSpielerErgebnisse(user?.id ?? 0, {
+    query: { enabled: !!user?.id, queryKey: getGetSpielerErgebnisseQueryKey(user?.id ?? 0) }
+  });
+
+  const grouped: Record<string, ErgebnisWithSpiel[]> = {};
+  if (data?.ergebnisse) {
+    data.ergebnisse.forEach(e => {
+      const key = `${e.spielId}-${e.lauf}`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(e);
+    });
+  }
+
+  const sortedGroups = Object.values(grouped).sort((a, b) => {
+    const dateA = new Date(a[0].spiel.datum).getTime();
+    const dateB = new Date(b[0].spiel.datum).getTime();
+    return dateB - dateA;
+  });
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <header className="border-b border-border/50 pb-6">
+        <h1 className="text-3xl font-bold tracking-tight">Meng Resultater</h1>
+        <p className="text-muted-foreground mt-2 text-sm font-medium">Detailléiert Analyse vun all Rond.</p>
+      </header>
+
+      {isLoading ? (
+        <div className="space-y-6">
+          {[1,2,3].map(i => <Skeleton key={i} className="h-48 w-full rounded-xl bg-card border border-border/50" />)}
+        </div>
+      ) : sortedGroups.length > 0 ? (
+        <div className="space-y-8">
+          {sortedGroups.map((group, idx) => (
+            <ResultGroup key={idx} ergebnisse={group} />
+          ))}
+        </div>
+      ) : (
+        <div className="p-12 text-center bg-card rounded-xl border border-border/50">
+          <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+          <h3 className="text-lg font-bold mb-1">Nach keng Resultater</h3>
+          <p className="text-muted-foreground font-medium">Dir hutt nach keng Spiller an dëser Saison ofgeschloss.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultGroup({ ergebnisse }: { ergebnisse: ErgebnisWithSpiel[] }) {
+  const first = ergebnisse[0];
+  const date = new Date(first.spiel.datum).toLocaleString('lb-LU', { 
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute:'2-digit' 
+  });
+  
+  const totalPoints = ergebnisse.reduce((sum, e) => sum + e.punkte, 0);
+  const sortedErgebnisse = [...ergebnisse].sort((a, b) => a.taube - b.taube);
+
+  return (
+    <div className="bg-card rounded-xl border border-border/50 overflow-hidden shadow-sm">
+      <div className="p-5 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/50 bg-secondary/10">
+        <div>
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <h3 className="text-lg font-bold tracking-tight">{date}</h3>
+            <Badge variant="outline" className="font-mono text-xs tracking-wider bg-background text-primary border-primary/30 uppercase font-bold">
+              {first.spiel.modus}
+            </Badge>
+            <Badge variant="secondary" className="font-mono text-xs tracking-wider uppercase font-bold">
+              LAUF {first.lauf}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest font-bold">18 Tauben • Posten 1-5</p>
+        </div>
+        <div className="flex flex-col md:items-end">
+          <div className="text-xs text-muted-foreground uppercase tracking-[0.2em] font-bold mb-1">Punkten</div>
+          <div className="text-3xl font-black tracking-tight text-primary">
+            {totalPoints} <span className="text-muted-foreground text-xl font-bold">/ 18</span>
+          </div>
+        </div>
+      </div>
+      
+      <div className="p-5 md:p-6 overflow-x-auto">
+        <div className="flex gap-3 min-w-max pb-2">
+          {sortedErgebnisse.map((e) => (
+            <ShotBadge key={e.id} ergebnis={e} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShotBadge({ ergebnis }: { ergebnis: ErgebnisWithSpiel }) {
+  const isHit = ergebnis.punkte > 0;
+  
+  return (
+    <div className="flex flex-col items-center p-3 rounded-lg border border-border bg-background min-w-[4rem] transition-colors hover:border-primary/50">
+      <span className="text-[10px] text-muted-foreground font-mono font-bold mb-2">#{ergebnis.taube}</span>
+      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-lg shadow-inner
+        ${isHit ? 'bg-primary/10 text-primary ring-1 ring-primary/30' : 'bg-destructive/10 text-destructive ring-1 ring-destructive/20'}`}>
+        {ergebnis.maschine}
+      </div>
+      <div className="flex gap-1.5 mt-3">
+        <div className={`w-2.5 h-2.5 rounded-full ${ergebnis.schuss1 ? (ergebnis.punkte > 0 ? 'bg-primary shadow-[0_0_8px_rgba(232,103,10,0.6)]' : 'bg-destructive') : 'bg-muted border border-border'}`} />
+        <div className={`w-2.5 h-2.5 rounded-full ${ergebnis.schuss2 ? (ergebnis.punkte > 0 ? 'bg-primary shadow-[0_0_8px_rgba(232,103,10,0.6)]' : 'bg-destructive') : 'bg-muted border border-border'}`} />
+      </div>
+    </div>
+  );
+}
