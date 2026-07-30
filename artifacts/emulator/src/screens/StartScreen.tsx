@@ -14,7 +14,7 @@ const MODI = [
   { value: 'CUSTOM_2' as const,           label: 'Custom 2',           desc: 'Benotzer-definéiert' },
 ];
 
-const POSTS = [1, 2, 3, 4, 5] as const;
+const POSTS = [1, 2, 3, 4, 5, 6] as const;
 
 export function StartScreen() {
   const store = useGameStore();
@@ -88,7 +88,7 @@ export function StartScreen() {
             <h2 className="text-base font-bold uppercase tracking-widest text-foreground/80">
               Posten{' '}
               <span className="text-primary font-black">{assignedCount}</span>
-              <span className="text-muted-foreground font-normal">/5 besetzt</span>
+              <span className="text-muted-foreground font-normal">/6 besetzt</span>
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               Tippen op <span className="text-primary font-bold">+</span> fir e Schützen ze wielen
