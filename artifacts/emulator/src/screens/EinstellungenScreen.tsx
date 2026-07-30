@@ -14,7 +14,7 @@ function CustomSequenzEditor({
   modus,
   label,
 }: {
-  modus: 'CUSTOM_1' | 'CUSTOM_2';
+  modus: 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4';
   label: string;
 }) {
   const store = useGameStore();
@@ -332,6 +332,8 @@ export function EinstellungenScreen() {
             </p>
             <CustomSequenzEditor modus="CUSTOM_1" label="Custom 1" />
             <CustomSequenzEditor modus="CUSTOM_2" label="Custom 2" />
+            <CustomSequenzEditor modus="CUSTOM_3" label="Custom 3" />
+            <CustomSequenzEditor modus="CUSTOM_4" label="Custom 4" />
           </div>
         )}
 
@@ -362,9 +364,7 @@ export function EinstellungenScreen() {
               <div className="flex flex-col gap-2 text-sm text-muted-foreground">
                 <div><span className="text-foreground font-bold">Normal:</span> A → B → C → D → E → F → G → H (Doublette)</div>
                 <div><span className="text-foreground font-bold">Harakiri:</span> A–G zufälleg, H ëmmer um Enn</div>
-                <div><span className="text-foreground font-bold">Harakiri Verspéit:</span> Wéi Harakiri, Sequenz mat méi Versatz</div>
-                <div><span className="text-foreground font-bold">Harakiri Full:</span> All Schanzen inkl. H zufälleg</div>
-                <div><span className="text-foreground font-bold">Custom 1/2:</span> Fräi konfiguréierbar (Tab: Custom Modi)</div>
+                <div><span className="text-foreground font-bold">Custom 1–4:</span> Fräi konfiguréierbar (Tab: Custom Modi)</div>
               </div>
             </div>
           </div>

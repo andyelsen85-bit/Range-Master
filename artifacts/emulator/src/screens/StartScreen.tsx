@@ -6,12 +6,12 @@ import { ArrowLeft, Coins, Play, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const MODI = [
-  { value: 'NORMAL' as const,             label: 'Normal',             desc: 'A→G→H der Rei no' },
-  { value: 'HARAKIRI' as const,           label: 'Harakiri',           desc: 'A–G gemëscht, H um Enn' },
-  { value: 'HARAKIRI_DELAYED' as const,   label: 'Harakiri Verspéit',  desc: 'Gemëscht mat Versatz' },
-  { value: 'HARAKIRI_FULL' as const,      label: 'Harakiri Full',      desc: 'All Schanzen gemëscht' },
-  { value: 'CUSTOM_1' as const,           label: 'Custom 1',           desc: 'Benotzer-definéiert' },
-  { value: 'CUSTOM_2' as const,           label: 'Custom 2',           desc: 'Benotzer-definéiert' },
+  { value: 'NORMAL' as const,   label: 'Normal',   desc: 'A→G→H der Rei no' },
+  { value: 'HARAKIRI' as const, label: 'Harakiri', desc: 'A–G gemëscht, H um Enn' },
+  { value: 'CUSTOM_1' as const, label: 'Custom 1', desc: 'Benotzer-definéiert' },
+  { value: 'CUSTOM_2' as const, label: 'Custom 2', desc: 'Benotzer-definéiert' },
+  { value: 'CUSTOM_3' as const, label: 'Custom 3', desc: 'Benotzer-definéiert' },
+  { value: 'CUSTOM_4' as const, label: 'Custom 4', desc: 'Benotzer-definéiert' },
 ];
 
 const POSTS = [1, 2, 3, 4, 5, 6] as const;
