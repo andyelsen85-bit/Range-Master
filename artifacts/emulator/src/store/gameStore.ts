@@ -156,8 +156,30 @@ function generateSpielId(): string {
 
 /** Current post for a player at a given taubeIndex (0-based) within the current lauf */
 export function getCurrentPosten(spieler: Spieler, taubeIndex: number, totalSpieler: number): number {
-  const n = Math.min(totalSpieler, 5); // only 5 posts
   return ((spieler.startPosten - 1 + taubeIndex) % 5) + 1;
+}
+
+/** True for all three Harakiri variants — in those modes each post faces a different machine */
+export function isHarakiriModus(modus: Modus): boolean {
+  return modus === 'HARAKIRI' || modus === 'HARAKIRI_DELAYED' || modus === 'HARAKIRI_FULL';
+}
+
+/**
+ * Returns the sequenz entry that a player at `posten` should shoot at step `taubeIndex`.
+ * Normal: every player shoots the same entry (sequenz[taubeIndex]).
+ * Harakiri: each post is offset, so player at post P shoots sequenz[(T + P - 1) % len].
+ */
+export function getEintragForPlayer(
+  sequenz: SequenzEintrag[],
+  taubeIndex: number,
+  posten: number,
+  modus: Modus,
+): SequenzEintrag | undefined {
+  if (!sequenz.length) return undefined;
+  if (isHarakiriModus(modus)) {
+    return sequenz[(taubeIndex + posten - 1) % sequenz.length];
+  }
+  return sequenz[taubeIndex];
 }
 
 /** Assign startPosten to players. Max 5 posts; player 6 gets startPosten=1 */
@@ -286,9 +308,16 @@ export const useGameStore = create<GameState>((set, get) => {
       const currentSpieler = state.spieler[state.spielerIndex];
       if (!currentSpieler) return state;
 
-      const eintrag = state.sequenz[state.taubeIndex];
-      // H2 fires from the same post as H1 — don't advance post for the second Doublette entry
-      const effectiveTaubeIdx = eintrag?.doubletteNr === 2 ? state.taubeIndex - 1 : state.taubeIndex;
+      // Look up the machine for this player — in Harakiri each post offsets into the sequenz
+      const rawPosten = getCurrentPosten(currentSpieler, state.taubeIndex, state.spieler.length);
+      const eintrag = getEintragForPlayer(state.sequenz, state.taubeIndex, rawPosten, state.modus);
+
+      // In Normal mode, H2 fires from the same post as H1 (no post advance between H1→H2).
+      // In Harakiri, each step advances posts naturally — no adjustment needed.
+      const effectiveTaubeIdx =
+        !isHarakiriModus(state.modus) && eintrag?.doubletteNr === 2
+          ? state.taubeIndex - 1
+          : state.taubeIndex;
       const posten = getCurrentPosten(currentSpieler, effectiveTaubeIdx, state.spieler.length);
 
       const neuesErgebnis: Ergebnis = {

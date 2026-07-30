@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { useGameStore, getCurrentPosten } from '@/store/gameStore';
+import { useGameStore, getCurrentPosten, isHarakiriModus, getEintragForPlayer } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import { SkipForward, RotateCcw, XOctagon, Zap, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-/** Returns players assigned to each of the 5 posts for the current taube */
+/** Returns players assigned to each of the 5 posts for the current step */
 function buildPositionMap(
   spieler: ReturnType<typeof useGameStore.getState>['spieler'],
   taubeIndex: number,
@@ -21,14 +21,22 @@ function buildPositionMap(
 export function SpielScreen() {
   const store = useGameStore();
   const aktiverSpieler = store.getAktivenSpieler();
-  const eintrag = store.sequenz[store.taubeIndex];
+  const harakiri = isHarakiriModus(store.modus);
+  const [confirmAbort, setConfirmAbort] = useState(false);
+
+  // In Harakiri each post offsets into the sequenz — compute active player's post first,
+  // then derive the eintrag from it. In Normal mode eintrag is just sequenz[taubeIndex].
+  const rawPosten = aktiverSpieler
+    ? getCurrentPosten(aktiverSpieler, store.taubeIndex, store.spieler.length)
+    : 1;
+  const eintrag = getEintragForPlayer(store.sequenz, store.taubeIndex, rawPosten, store.modus);
   const maschine = eintrag?.maschine ?? 'A';
   const istDoublette = maschine === 'H';
   const doubletteNr = eintrag?.doubletteNr;
-  const [confirmAbort, setConfirmAbort] = useState(false);
 
-  // H2 is shot from the same post as H1 — use taubeIndex-1 for post rotation
-  const effectiveTaubeIdx = doubletteNr === 2 ? store.taubeIndex - 1 : store.taubeIndex;
+  // H2 post-stays-same-as-H1 adjustment — Normal mode only; Harakiri advances naturally
+  const effectiveTaubeIdx =
+    !harakiri && doubletteNr === 2 ? store.taubeIndex - 1 : store.taubeIndex;
   const posMap = buildPositionMap(store.spieler, effectiveTaubeIdx);
   const aktuellePosten = aktiverSpieler
     ? getCurrentPosten(aktiverSpieler, effectiveTaubeIdx, store.spieler.length)
@@ -133,7 +141,9 @@ export function SpielScreen() {
         {/* ── 5 Positions Grid ── */}
         <div className="border-b-2 border-border bg-card/50 p-4">
           <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3">
-            Posten — Schanz {maschine} · Lauf {store.lauf}
+            {harakiri
+              ? `Harakiri — Schritt ${store.taubeIndex + 1} / ${store.sequenz.length} · Lauf ${store.lauf}`
+              : `Posten — Schanz ${maschine} · Lauf ${store.lauf}`}
           </div>
           <div className="grid grid-cols-5 gap-3">
             {[1, 2, 3, 4, 5].map(pos => {
@@ -142,6 +152,10 @@ export function SpielScreen() {
               const isNextPlayer = playersHere.some(s =>
                 s.id === store.spieler[Math.min(store.spielerIndex + 1, store.spieler.length - 1)]?.id
               ) && !hasActivePlayer;
+              // In Harakiri show which machine this post faces
+              const posEintrag = harakiri
+                ? getEintragForPlayer(store.sequenz, store.taubeIndex, pos, store.modus)
+                : undefined;
 
               return (
                 <div
@@ -155,11 +169,23 @@ export function SpielScreen() {
                         : "border-border/20 bg-background/30",
                   )}
                 >
-                  <div className={cn(
-                    "text-xs font-black uppercase tracking-widest",
-                    hasActivePlayer ? "text-primary" : "text-muted-foreground",
-                  )}>
-                    Posten {pos}
+                  <div className="flex items-center gap-1.5 w-full justify-between">
+                    <span className={cn(
+                      "text-xs font-black uppercase tracking-widest",
+                      hasActivePlayer ? "text-primary" : "text-muted-foreground",
+                    )}>
+                      Posten {pos}
+                    </span>
+                    {posEintrag && (
+                      <span className={cn(
+                        "text-xs font-black px-1.5 py-0.5 rounded font-mono",
+                        posEintrag.maschine === 'H'
+                          ? "bg-amber-500/20 text-amber-400"
+                          : "bg-primary/20 text-primary",
+                      )}>
+                        {posEintrag.maschine}{posEintrag.doubletteNr ? posEintrag.doubletteNr : ''}
+                      </span>
+                    )}
                   </div>
 
                   {playersHere.length === 0 ? (
