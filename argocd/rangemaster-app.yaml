@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rangemaster
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.com/YOUR_GITLAB_GROUP/YOUR_GITLAB_REPO.git
+    targetRevision: main
+    path: k8s/overlays/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rangemaster
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -17,6 +17,8 @@ spec:
     spec:
       # Wait for Postgres to accept connections before starting the api-server.
       # This avoids crash-loops when the StatefulSet pod is still initialising.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
       initContainers:
         - name: wait-for-postgres
           image: postgres:16-alpine
@@ -39,7 +41,7 @@ spec:
               memory: 64Mi
       containers:
         - name: api-server
-          image: ghcr.io/OWNER/REPO/api-server:latest
+          image: ghcr.io/andyelsen85-bit/range-master/api-server:latest
           imagePullPolicy: Always
           ports:
             - name: http

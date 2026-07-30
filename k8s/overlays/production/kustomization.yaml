@@ -9,9 +9,9 @@ resources:
 # Image tag substitution — ArgoCD Image Updater rewrites these automatically
 # when a new image is pushed to the registry.
 images:
-  - name: ghcr.io/OWNER/REPO/api-server
-    newName: ghcr.io/OWNER/REPO/api-server
+  - name: ghcr.io/andyelsen85-bit/range-master/api-server
+    newName: ghcr.io/andyelsen85-bit/range-master/api-server
     newTag: latest
-  - name: ghcr.io/OWNER/REPO/portal
-    newName: ghcr.io/OWNER/REPO/portal
+  - name: ghcr.io/andyelsen85-bit/range-master/portal
+    newName: ghcr.io/andyelsen85-bit/range-master/portal
     newTag: latest

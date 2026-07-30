@@ -19,9 +19,9 @@ metadata:
     # Let the external reverse proxy handle TLS; cluster traffic is plain HTTP
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
-  # ingressClassName: nginx   # uncomment and set to your ingress class
+  ingressClassName: nginx
   rules:
-    - host: trapmaster.example.com   # replace with your domain
+    - host: rangemaster.hostzone.lu
       http:
         paths:
           - path: /api(/|$)(.*)
