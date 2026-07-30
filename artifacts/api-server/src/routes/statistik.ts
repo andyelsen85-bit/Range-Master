@@ -67,6 +67,68 @@ router.get("/:spielerId", authenticate, async (req, res) => {
   });
 });
 
+// GET /api/statistik/:spielerId/modus-breakdown
+router.get("/:spielerId/modus-breakdown", authenticate, async (req, res) => {
+  const spielerId = Number(req.params.spielerId);
+
+  // Fetch all teilnahmen with their game's modus and max possible score
+  const rows = await db
+    .select({
+      spielId: spielTeilnahmenTable.spielId,
+      punkte: spielTeilnahmenTable.punkte,
+      modus: spieleTable.modus,
+      taubenProLauf: spieleTable.taubenProLauf,
+      lauf: spieleTable.lauf,
+    })
+    .from(spielTeilnahmenTable)
+    .innerJoin(spieleTable, eq(spielTeilnahmenTable.spielId, spieleTable.id))
+    .where(eq(spielTeilnahmenTable.spielerId, spielerId));
+
+  if (!rows.length) {
+    return res.json({ breakdown: [] });
+  }
+
+  // Step 1: Sum both Läufe per game → per-game totals
+  const perGame = new Map<number, { modus: string; total: number; maxPunkte: number }>();
+  for (const r of rows) {
+    if (!perGame.has(r.spielId)) {
+      perGame.set(r.spielId, {
+        modus: r.modus,
+        total: 0,
+        maxPunkte: r.taubenProLauf * 2 * r.lauf,
+      });
+    }
+    perGame.get(r.spielId)!.total += r.punkte;
+  }
+
+  // Step 2: Aggregate per modus (same normalization as rangliste)
+  const perModus = new Map<
+    string,
+    { gesamtPunkte: number; gesamtMaxPunkte: number; anzahlSpiele: number }
+  >();
+  for (const { modus, total, maxPunkte } of perGame.values()) {
+    if (!perModus.has(modus)) {
+      perModus.set(modus, { gesamtPunkte: 0, gesamtMaxPunkte: 0, anzahlSpiele: 0 });
+    }
+    const entry = perModus.get(modus)!;
+    entry.gesamtPunkte += total;
+    entry.gesamtMaxPunkte += maxPunkte;
+    entry.anzahlSpiele++;
+  }
+
+  const breakdown = Array.from(perModus.entries()).map(([modus, data]) => ({
+    modus,
+    anzahlSpiele: data.anzahlSpiele,
+    durchschnitt: Math.round((data.gesamtPunkte / data.anzahlSpiele) * 10) / 10,
+    durchschnittProzent:
+      data.gesamtMaxPunkte > 0
+        ? Math.round((data.gesamtPunkte / data.gesamtMaxPunkte) * 1000) / 10
+        : 0,
+  }));
+
+  return res.json({ breakdown });
+});
+
 // GET /api/statistik/:spielerId/verlauf
 router.get("/:spielerId/verlauf", authenticate, async (req, res) => {
   const spielerId = Number(req.params.spielerId);

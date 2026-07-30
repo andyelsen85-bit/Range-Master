@@ -209,6 +209,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/SpielerStatistik"
 
+  /statistik/{spielerId}/modus-breakdown:
+    get:
+      operationId: getStatistikModusBreakdown
+      tags: [statistik]
+      summary: Get per-format score breakdown for a player
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: spielerId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Per-format breakdown
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  breakdown:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ModusBreakdownEntry"
+                required: [breakdown]
+
   /statistik/{spielerId}/verlauf:
     get:
       operationId: getStatistikVerlauf
@@ -247,7 +274,9 @@ paths:
                           type: integer
                         modus:
                           $ref: "#/components/schemas/Modus"
-                      required: [datum, punkte, modus]
+                        maxPunkte:
+                          type: integer
+                      required: [datum, punkte, modus, maxPunkte]
                 required: [verlauf]
 
   # ── SYNC (ESP32 Display) ──────────────────────────────────────────────────
@@ -442,10 +471,12 @@ components:
           nullable: true
         portalAktiv:
           type: boolean
+        isAdmin:
+          type: boolean
         createdAt:
           type: string
           format: date-time
-      required: [id, name, portalAktiv, createdAt]
+      required: [id, name, portalAktiv, isAdmin, createdAt]
 
     ErgebnisWithSpiel:
       type: object
@@ -506,12 +537,27 @@ components:
           type: integer
       required: [rang, spielerId, name, gesamtPunkte, anzahlSpiele, durchschnitt, durchschnittProzent, bestPunkte]
 
+    ModusBreakdownEntry:
+      type: object
+      properties:
+        modus:
+          $ref: "#/components/schemas/Modus"
+        anzahlSpiele:
+          type: integer
+        durchschnitt:
+          type: number
+          description: Raw average points per game
+        durchschnittProzent:
+          type: number
+          description: Normalized average as % of max possible score (same method as leaderboard)
+      required: [modus, anzahlSpiele, durchschnitt, durchschnittProzent]
+
     SpielerStatistik:
       type: object
       properties:
         spielerId:
           type: integer
-        gesamtLauefe:
+        gesamtSpiele:
           type: integer
         durchschnitt:
           type: number
@@ -531,7 +577,7 @@ components:
               quote:
                 type: number
             required: [versuche, treffer, quote]
-      required: [spielerId, gesamtLauefe, durchschnitt, bestPunkte, trefferquote, maschinen]
+      required: [spielerId, gesamtSpiele, durchschnitt, bestPunkte, trefferquote, maschinen]
 
     SyncSpieler:
       type: object

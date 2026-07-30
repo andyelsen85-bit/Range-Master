@@ -1,8 +1,23 @@
 import { useAuthStore } from "@/store/use-auth-store";
-import { useGetStatistik, getGetStatistikQueryKey } from "@workspace/api-client-react";
+import {
+  useGetStatistik,
+  getGetStatistikQueryKey,
+  useGetStatistikModusBreakdown,
+  getGetStatistikModusBreakdownQueryKey,
+} from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+
+const MODUS_LABEL: Record<string, string> = {
+  NORMAL: "Normal",
+  HARAKIRI: "Harakiri",
+  HARAKIRI_DELAYED: "Harakiri Delayed",
+  HARAKIRI_FULL: "Harakiri Full",
+  CUSTOM_1: "Custom 1",
+  CUSTOM_2: "Custom 2",
+  CUSTOM_3: "Custom 3",
+};
 
 interface StatistikenProps {
   spielerId?: number;
@@ -14,6 +29,10 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
 
   const { data: stats, isLoading } = useGetStatistik(effectiveId, {
     query: { enabled: !!effectiveId, queryKey: getGetStatistikQueryKey(effectiveId) }
+  });
+
+  const { data: breakdownData, isLoading: isLoadingBreakdown } = useGetStatistikModusBreakdown(effectiveId, {
+    query: { enabled: !!effectiveId, queryKey: getGetStatistikModusBreakdownQueryKey(effectiveId) }
   });
 
   const machineData = stats?.maschinen 
@@ -80,6 +99,72 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Per-format leaderboard score breakdown */}
+      <Card className="bg-card border-border/50 shadow-sm overflow-hidden">
+        <CardHeader className="bg-secondary/20 border-b border-border/50 pb-5">
+          <CardTitle className="text-sm uppercase tracking-widest font-bold">Score pro Spillformat</CardTitle>
+          <CardDescription className="font-medium mt-1">
+            Wéi säi normaliséierte Leaderboard-Score sech pro Spillmodus zesummesetzt.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {isLoadingBreakdown ? (
+            <div className="divide-y divide-border/40">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center gap-4 py-4 px-6">
+                  <Skeleton className="h-5 w-28 bg-secondary/30 rounded" />
+                  <div className="flex-1 flex justify-end gap-8">
+                    <Skeleton className="h-4 w-14 bg-secondary/20 rounded" />
+                    <Skeleton className="h-4 w-14 bg-secondary/20 rounded" />
+                    <Skeleton className="h-4 w-14 bg-secondary/20 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : breakdownData?.breakdown?.length ? (
+            <>
+              {/* Header row */}
+              <div className="flex items-center gap-4 px-6 py-3 border-b border-border/40 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                <span className="flex-1">Format</span>
+                <span className="w-20 text-right">Spiller</span>
+                <span className="w-24 text-right">Ø Punkte</span>
+                <span className="w-24 text-right">Normaliséiert</span>
+              </div>
+              <div className="divide-y divide-border/40">
+                {breakdownData.breakdown
+                  .slice()
+                  .sort((a, b) => b.durchschnittProzent - a.durchschnittProzent)
+                  .map((entry) => (
+                    <div
+                      key={entry.modus}
+                      className="flex items-center gap-4 px-6 py-4 hover:bg-secondary/10 transition-colors group"
+                    >
+                      <span className="flex-1 text-sm font-bold text-foreground">
+                        {MODUS_LABEL[entry.modus] ?? entry.modus}
+                      </span>
+                      <span className="w-20 text-right text-sm font-mono font-bold text-muted-foreground">
+                        {entry.anzahlSpiele}
+                      </span>
+                      <span className="w-24 text-right text-sm font-mono font-bold text-muted-foreground">
+                        {entry.durchschnitt.toFixed(1)}
+                      </span>
+                      <span className="w-24 text-right">
+                        <span className="text-base font-black tracking-tight text-primary">
+                          {entry.durchschnittProzent.toFixed(1)}%
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </>
+          ) : (
+            <div className="py-12 flex items-center justify-center text-muted-foreground font-medium text-sm">
+              Keng Spiller Daten disponibel
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {machineData.length > 0 && (
         <Card className="bg-card border-border/50 shadow-sm overflow-hidden mt-6">

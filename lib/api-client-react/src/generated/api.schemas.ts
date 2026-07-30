@@ -87,9 +87,18 @@ export interface RanglisteEntry {
   gesamtPunkte: number;
   anzahlSpiele: number;
   durchschnitt: number;
-  /** Normalized average as percentage of max possible score. Use for cross-format comparisons. */
+  /** Normalized average as a percentage of the maximum possible score (gesamtPunkte / gesamtMaxPunkte × 100). Use this for cross-format comparisons because different game formats have different max scores. */
   durchschnittProzent: number;
   bestPunkte: number;
+}
+
+export interface ModusBreakdownEntry {
+  modus: Modus;
+  anzahlSpiele: number;
+  /** Raw average points per game */
+  durchschnitt: number;
+  /** Normalized average as % of max possible score (same method as leaderboard) */
+  durchschnittProzent: number;
 }
 
 export type SpielerStatistikMaschinen = {[key: string]: {
@@ -169,8 +178,6 @@ export interface SyncSpiel {
      * @maximum 2
      */
   lauf: number;
-  /** Number of clay targets per Lauf (default 9; custom games may differ) */
-  taubenProLauf?: number;
   abgeschlossen: boolean;
   teilnahmen: SyncTeilnahme[];
   ergebnisse: SyncErgebnis[];
@@ -191,6 +198,10 @@ jahr?: number;
 
 export type GetRangliste200 = {
   rangliste: RanglisteEntry[];
+};
+
+export type GetStatistikModusBreakdown200 = {
+  breakdown: ModusBreakdownEntry[];
 };
 
 export type GetStatistikVerlaufParams = {

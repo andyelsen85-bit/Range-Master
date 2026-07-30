@@ -24,6 +24,7 @@ import type {
   GetRangliste200,
   GetRanglisteParams,
   GetSpielerErgebnisse200,
+  GetStatistikModusBreakdown200,
   GetStatistikVerlauf200,
   GetStatistikVerlaufParams,
   GetSyncSpieler200,
@@ -672,6 +673,83 @@ export function useGetStatistik<TData = Awaited<ReturnType<typeof getStatistik>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetStatistikQueryOptions(spielerId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetStatistikModusBreakdownUrl = (spielerId: number,) => {
+
+
+
+
+  return `/api/statistik/${spielerId}/modus-breakdown`
+}
+
+/**
+ * @summary Get per-format score breakdown for a player
+ */
+export const getStatistikModusBreakdown = async (spielerId: number, options?: Parameters<typeof customFetch>[1]): Promise<GetStatistikModusBreakdown200> => {
+
+  return customFetch<GetStatistikModusBreakdown200>(getGetStatistikModusBreakdownUrl(spielerId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetStatistikModusBreakdownQueryKey = (spielerId: number,) => {
+    return [
+    `/api/statistik/${spielerId}/modus-breakdown`
+    ] as const;
+    }
+
+
+export const getGetStatistikModusBreakdownQueryOptions = <TData = Awaited<ReturnType<typeof getStatistikModusBreakdown>>, TError = ErrorType<unknown>>(spielerId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStatistikModusBreakdown>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetStatistikModusBreakdownQueryKey(spielerId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStatistikModusBreakdown>>> = ({ signal }) => getStatistikModusBreakdown(spielerId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: spielerId !== null && spielerId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getStatistikModusBreakdown>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetStatistikModusBreakdownQueryResult = NonNullable<Awaited<ReturnType<typeof getStatistikModusBreakdown>>>
+export type GetStatistikModusBreakdownQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get per-format score breakdown for a player
+ */
+
+export function useGetStatistikModusBreakdown<TData = Awaited<ReturnType<typeof getStatistikModusBreakdown>>, TError = ErrorType<unknown>>(
+ spielerId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStatistikModusBreakdown>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetStatistikModusBreakdownQueryOptions(spielerId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
