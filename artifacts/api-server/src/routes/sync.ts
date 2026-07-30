@@ -8,6 +8,18 @@ import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmai
 
 const router = Router();
 
+/** Auto-generate next WLZ number — same logic used by the admin player-create route */
+async function nextMitgliedNr(): Promise<string> {
+  const [maxRow] = await db
+    .select({
+      maxNr: sql<number | null>`MAX(CAST(SUBSTRING(${spielerTable.mitgliedNr} FROM 4) AS INTEGER))`,
+    })
+    .from(spielerTable)
+    .where(sql`${spielerTable.mitgliedNr} ~ '^WLZ[0-9]+$'`);
+  const next = (maxRow?.maxNr ?? 0) + 1;
+  return `WLZ${String(next).padStart(3, "0")}`;
+}
+
 const maschineValues = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 const modusValues = ["NORMAL", "HARAKIRI", "HARAKIRI_DELAYED", "HARAKIRI_FULL", "CUSTOM_1", "CUSTOM_2", "CUSTOM_3"] as const;
 
@@ -102,9 +114,10 @@ router.post("/spieler", requireApiKey, async (req, res) => {
       continue;
     }
 
+    const mitgliedNr = s.mitgliedNr ?? await nextMitgliedNr();
     const [inserted] = await db
       .insert(spielerTable)
-      .values({ name, mitgliedNr: s.mitgliedNr ?? null })
+      .values({ name, mitgliedNr })
       .returning({ id: spielerTable.id });
     synced++;
     mappings.push({ localId: s.id, id: inserted.id, name, status: "created" });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useGameStore, MASCHINEN_LIST } from '@/store/gameStore';
+import { useGameStore } from '@/store/gameStore';
 import { Play, Settings, RefreshCw, Upload, WifiOff, CheckCircle2, Clock, History, Coins, UserCog } from 'lucide-react';
 import { TouchButton } from '@/components/TouchButton';
 import { cn } from '@/lib/utils';
@@ -33,42 +33,58 @@ export function DashboardScreen() {
         {/* Main Content */}
         <div className="flex-1 p-8 flex flex-col gap-8">
 
-          {/* Machine grid — toggle aktiv/deaktiviert */}
-          <div className="flex-1 bg-card border-2 border-border rounded-xl p-8 flex flex-col">
-            <h2 className="text-xl font-bold mb-2 text-foreground/70 uppercase tracking-widest">Schanzen</h2>
-            <p className="text-sm text-muted-foreground mb-6">Tippen zum Aktivieren / Deaktivieren</p>
-
-            <div className="grid grid-cols-4 gap-6 flex-1">
-              {MASCHINEN_LIST.map((m) => {
-                const aktiv = store.maschinenAktiv[m];
-                const isDoublette = m === 'H';
-                return (
-                  <button
-                    key={m}
-                    onClick={() => store.toggleMaschineAktiv(m)}
-                    className={cn(
-                      "flex flex-col items-center justify-center rounded-xl border-4 transition-all active:scale-95",
-                      aktiv
-                        ? isDoublette
-                          ? 'border-amber-500/60 bg-amber-500/10 text-amber-400'
-                          : 'border-primary/60 bg-primary/10 text-primary'
-                        : 'border-border/40 bg-background/50 text-muted-foreground/40',
-                    )}
-                  >
-                    <span className="text-5xl font-bold mb-2">{m}</span>
-                    <span className="text-sm font-bold uppercase tracking-wider">
-                      {isDoublette ? 'Doublette' : 'Single'}
-                    </span>
-                    <span className={cn(
-                      "text-xs mt-1 font-bold uppercase tracking-widest",
-                      aktiv ? "text-green-400" : "text-muted-foreground/40"
-                    )}>
-                      {aktiv ? '● Aktiv' : '○ Aus'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+          {/* Last games */}
+          <div className="flex-1 bg-card border-2 border-border rounded-xl p-8 flex flex-col overflow-hidden">
+            <h2 className="text-xl font-bold mb-6 text-foreground/70 uppercase tracking-widest">Leschte Spiller</h2>
+            {store.gameHistory.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-muted-foreground/50 font-bold italic text-lg">
+                Nach keng Spiller gespillt
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4 flex-1 overflow-y-auto">
+                {store.gameHistory.slice(0, 4).map((game) => {
+                  const playerIds = [...new Set(game.teilnahmen.map(t => t.spielerId))];
+                  const maxPts = game.lauf * game.taubenProLauf;
+                  return (
+                    <div key={game.externalId} className="bg-background border-2 border-border rounded-xl p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-base font-mono text-muted-foreground">
+                            {new Date(game.finishedAt).toLocaleDateString('de-LU', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                            {' '}
+                            {new Date(game.finishedAt).toLocaleTimeString('de-LU', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <span className="text-xs font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-primary/10 text-primary border border-primary/30">
+                            {game.modus.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <span className="text-xs font-mono text-muted-foreground/60">
+                          {game.lauf}× {game.taubenProLauf} · max {maxPts} Pkt
+                        </span>
+                      </div>
+                      <div className="flex gap-3 flex-wrap">
+                        {playerIds.map(id => {
+                          const total = game.teilnahmen
+                            .filter(t => t.spielerId === id)
+                            .reduce((s, t) => s + t.punkte, 0);
+                          const pct = maxPts > 0 ? total / maxPts : 0;
+                          return (
+                            <div key={id} className="flex items-center gap-2 bg-card border border-border rounded-lg px-3 py-2">
+                              <span className="font-bold text-sm">{game.spielerNamen[id] ?? `#${id}`}</span>
+                              <span className={cn(
+                                "text-lg font-black tabular-nums",
+                                pct >= 0.9 ? "text-green-400" : pct >= 0.7 ? "text-primary" : "text-muted-foreground"
+                              )}>{total}</span>
+                              <span className="text-xs text-muted-foreground/50">/{maxPts}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Current Players */}

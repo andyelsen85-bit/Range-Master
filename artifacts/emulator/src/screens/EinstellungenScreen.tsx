@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useGameStore, Maschine, CustomSequenz } from '@/store/gameStore';
+import { useGameStore, Maschine, CustomSequenz, MASCHINEN_LIST } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import {
   ArrowLeft, Save, RefreshCw, CheckCircle2, AlertTriangle, GripVertical, Plus, X,
@@ -171,7 +171,7 @@ export function EinstellungenScreen() {
   const store = useGameStore();
   const [url, setUrl] = useState(store.apiUrl);
   const [key, setKey] = useState(store.apiKey);
-  const [activeTab, setActiveTab] = useState<'api' | 'custom' | 'system'>('api');
+  const [activeTab, setActiveTab] = useState<'api' | 'schanzen' | 'custom' | 'system'>('api');
 
   const save = () => {
     store.setApiSettings(url, key);
@@ -194,9 +194,10 @@ export function EinstellungenScreen() {
       {/* Tabs */}
       <div className="flex border-b-2 border-border bg-card/50 shrink-0">
         {([
-          { key: 'api',    label: 'Portal API' },
-          { key: 'custom', label: 'Custom Modi' },
-          { key: 'system', label: 'System' },
+          { key: 'api',      label: 'Portal API' },
+          { key: 'schanzen', label: 'Schanzen' },
+          { key: 'custom',   label: 'Custom Modi' },
+          { key: 'system',   label: 'System' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -229,7 +230,7 @@ export function EinstellungenScreen() {
                   type="text"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://rangemaster.hostzone.lu/api  oder  leer lassen"
+                  placeholder="https://rangemaster.hostzone.lu  (keng /api um Enn)"
                   className="w-full bg-background border-2 border-border rounded-lg h-14 px-4 text-base font-mono focus:border-primary focus:outline-none"
                 />
               </div>
@@ -278,6 +279,47 @@ export function EinstellungenScreen() {
                 Leschte Sync: {store.lastSync}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Schanzen Tab ── */}
+        {activeTab === 'schanzen' && (
+          <div className="max-w-2xl flex flex-col gap-5">
+            <div className="bg-card border-2 border-border rounded-xl p-6">
+              <h2 className="text-base font-bold uppercase tracking-widest mb-1">Schanzen</h2>
+              <p className="text-sm text-muted-foreground mb-6">Tippen zum Aktivieren / Deaktivieren</p>
+              <div className="grid grid-cols-4 gap-4">
+                {MASCHINEN_LIST.map((m) => {
+                  const aktiv = store.maschinenAktiv[m];
+                  const isDoublette = m === 'H';
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => store.toggleMaschineAktiv(m)}
+                      className={cn(
+                        "flex flex-col items-center justify-center h-28 rounded-xl border-4 transition-all active:scale-95",
+                        aktiv
+                          ? isDoublette
+                            ? 'border-amber-500/60 bg-amber-500/10 text-amber-400'
+                            : 'border-primary/60 bg-primary/10 text-primary'
+                          : 'border-border/40 bg-background/50 text-muted-foreground/40',
+                      )}
+                    >
+                      <span className="text-4xl font-bold mb-1">{m}</span>
+                      <span className="text-sm font-bold uppercase tracking-wider">
+                        {isDoublette ? 'Doublette' : 'Single'}
+                      </span>
+                      <span className={cn(
+                        "text-xs mt-0.5 font-bold uppercase tracking-widest",
+                        aktiv ? "text-green-400" : "text-muted-foreground/40"
+                      )}>
+                        {aktiv ? '● Aktiv' : '○ Aus'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
 
