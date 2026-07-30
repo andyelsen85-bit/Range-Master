@@ -1,184 +1,246 @@
 import React, { useState } from 'react';
-import { useGameStore } from '@/store/gameStore';
+import { useGameStore, getCurrentPosten } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import { SkipForward, RotateCcw, XOctagon, Zap, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+/** Returns players assigned to each of the 5 posts for the current taube */
+function buildPositionMap(
+  spieler: ReturnType<typeof useGameStore.getState>['spieler'],
+  taubeIndex: number,
+): Map<number, typeof spieler> {
+  const map = new Map<number, typeof spieler>();
+  for (let p = 1; p <= 5; p++) map.set(p, []);
+  for (const s of spieler) {
+    const pos = getCurrentPosten(s, taubeIndex, spieler.length);
+    map.get(pos)!.push(s);
+  }
+  return map;
+}
 
 export function SpielScreen() {
   const store = useGameStore();
   const aktiverSpieler = store.getAktivenSpieler();
   const eintrag = store.sequenz[store.taubeIndex];
-  const aktuelleMaschine = eintrag?.maschine ?? 'A';
-  const istDoublette = aktuelleMaschine === 'H';
+  const maschine = eintrag?.maschine ?? 'A';
+  const istDoublette = maschine === 'H';
   const doubletteNr = eintrag?.doubletteNr;
   const [confirmAbort, setConfirmAbort] = useState(false);
 
-  const taubenGesamt = store.sequenz.length;
+  const posMap = buildPositionMap(store.spieler, store.taubeIndex);
   const aktuellePosten = aktiverSpieler
-    ? ((aktiverSpieler.startPosten - 1 + store.taubeIndex) % store.spieler.length) + 1
+    ? getCurrentPosten(aktiverSpieler, store.taubeIndex, store.spieler.length)
     : 1;
 
   return (
-    <div className="flex h-full w-full bg-background flex-col">
-      <div className="flex flex-1 overflow-hidden">
+    <div className="flex h-full w-full bg-background">
 
-        {/* Sidebar */}
-        <div className="w-[340px] border-r-2 border-border bg-card p-6 flex flex-col gap-6">
+      {/* ── Left Sidebar ──────────────────────────────────────────────────── */}
+      <div className="w-[260px] border-r-2 border-border bg-card flex flex-col gap-0">
 
-          {/* Machine display */}
+        {/* Machine display */}
+        <div className={cn(
+          "border-b-2 border-border flex flex-col items-center justify-center py-6",
+          istDoublette ? "bg-amber-950/30" : "bg-primary/5",
+        )}>
+          {istDoublette && (
+            <div className="flex items-center gap-1 mb-1">
+              <Layers className="w-4 h-4 text-amber-400" />
+              <span className="text-sm font-bold text-amber-400 tracking-widest">
+                DOUBLETTE {doubletteNr}/2
+              </span>
+            </div>
+          )}
+          {!istDoublette && (
+            <div className="text-base font-bold text-primary/70 tracking-widest mb-1">SCHANZ</div>
+          )}
           <div className={cn(
-            "border-4 rounded-2xl p-6 flex flex-col items-center justify-center aspect-square shadow-[0_0_30px_rgba(232,103,10,0.1)]",
-            istDoublette
-              ? "border-amber-500 bg-amber-500/10 animate-pulse"
-              : "border-primary bg-primary/10 animate-pulse"
+            "font-black leading-none",
+            istDoublette ? "text-[96px] text-amber-400" : "text-[110px] text-primary",
           )}>
-            {istDoublette && (
-              <div className="flex items-center gap-2 mb-2">
-                <Layers className={cn("w-6 h-6", istDoublette ? "text-amber-400" : "text-primary")} />
-                <span className={cn("text-lg font-bold uppercase tracking-widest", "text-amber-400")}>
-                  Doublette {doubletteNr}/2
-                </span>
-              </div>
-            )}
-            {!istDoublette && (
-              <div className="text-2xl font-bold text-primary mb-2 uppercase tracking-widest">Schanz</div>
-            )}
-            <div className={cn(
-              "font-black leading-none",
-              istDoublette ? "text-[100px] text-amber-400" : "text-[120px] text-primary"
-            )}>{aktuelleMaschine}</div>
+            {maschine}
           </div>
+        </div>
 
-          {/* Round / pigeon counter */}
-          <div className="bg-background border-2 border-border rounded-xl p-4 text-center">
-            <div className="text-lg text-muted-foreground font-bold uppercase mb-1">
-              Lauf {store.lauf}/2
-            </div>
-            <div className="text-3xl font-bold font-mono">
-              Taube {store.taubeIndex + 1}/{taubenGesamt}
-            </div>
+        {/* Lauf / Taube counter */}
+        <div className="border-b-2 border-border p-4 text-center bg-background/40">
+          <div className="text-sm text-muted-foreground font-bold uppercase tracking-wider mb-1">
+            Lauf {store.lauf} / 2
           </div>
-
-          {/* Control buttons */}
-          <div className="grid grid-cols-2 gap-4">
-            <TouchButton className="h-20 flex-col gap-2" onClick={() => store.wiederholenTaube()}>
-              <RotateCcw className="w-6 h-6" />
-              <span className="text-sm">Widderhuelen</span>
-            </TouchButton>
-            <TouchButton className="h-20 flex-col gap-2" onClick={() => store.ueberspringenTaube()}>
-              <SkipForward className="w-6 h-6" />
-              <span className="text-sm">Iwwerspringen</span>
-            </TouchButton>
+          <div className="text-2xl font-bold font-mono">
+            Taube {store.taubeIndex + 1} / {store.sequenz.length}
           </div>
+          <div className="text-xs text-muted-foreground mt-1 font-mono">
+            Schütze {store.spielerIndex + 1} / {store.spieler.length}
+          </div>
+        </div>
 
-          {/* Abort */}
+        {/* Taube Werfen */}
+        <div className="border-b-2 border-border p-4">
+          <TouchButton
+            className="w-full h-16 gap-3 text-base"
+            variant="primary"
+            onClick={() => store.werfenTaube()}
+          >
+            <Zap className="w-6 h-6" />
+            <span className="font-bold tracking-widest">WERFEN</span>
+          </TouchButton>
+        </div>
+
+        {/* Control buttons */}
+        <div className="p-4 flex flex-col gap-3">
+          <TouchButton className="h-14 w-full gap-3" onClick={() => store.wiederholenTaube()}>
+            <RotateCcw className="w-5 h-5" />
+            <span className="font-bold">Widderhuelen</span>
+          </TouchButton>
+          <TouchButton className="h-14 w-full gap-3" onClick={() => store.ueberspringenTaube()}>
+            <SkipForward className="w-5 h-5" />
+            <span className="font-bold">Iwwerspringen</span>
+          </TouchButton>
+        </div>
+
+        {/* Abort */}
+        <div className="mt-auto p-4 border-t-2 border-border">
           {confirmAbort ? (
-            <div className="grid grid-cols-2 gap-4">
-              <TouchButton variant="destructive" className="h-20" onClick={() => { store.ofbriechenSpiel(); setConfirmAbort(false); }}>JA</TouchButton>
-              <TouchButton className="h-20" onClick={() => setConfirmAbort(false)}>NEIN</TouchButton>
+            <div className="grid grid-cols-2 gap-2">
+              <TouchButton variant="destructive" className="h-14 text-base font-bold"
+                onClick={() => { store.ofbriechenSpiel(); setConfirmAbort(false); }}>
+                JA
+              </TouchButton>
+              <TouchButton className="h-14 text-base font-bold"
+                onClick={() => setConfirmAbort(false)}>
+                NEIN
+              </TouchButton>
             </div>
           ) : (
             <TouchButton
               variant="outline"
-              className="h-20 text-destructive border-destructive gap-2"
+              className="h-14 w-full text-destructive border-destructive gap-2"
               onClick={() => setConfirmAbort(true)}
             >
-              <XOctagon className="w-6 h-6" />
+              <XOctagon className="w-5 h-5" />
               Ofbriechen
             </TouchButton>
           )}
-
         </div>
+      </div>
 
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col relative">
+      {/* ── Right Main ────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col">
 
-          <div className="flex-1 p-8 flex flex-col gap-8">
-            {/* Active Player Banner */}
-            <div className="bg-card border-2 border-primary/50 rounded-2xl p-8 flex items-center justify-between shadow-2xl">
-              <div className="flex flex-col">
-                <span className="text-2xl text-primary font-bold tracking-widest uppercase mb-2">Aktuellen Schütze</span>
-                <span className="text-6xl font-black truncate max-w-[600px]">{aktiverSpieler?.name ?? '—'}</span>
-              </div>
-              <div className="flex flex-col items-end">
-                <span className="text-2xl text-primary font-bold tracking-widest uppercase mb-2">Posten</span>
-                <span className="text-7xl font-mono font-black">{aktuellePosten}</span>
-              </div>
-            </div>
-
-            {/* Score Entry */}
-            <div className="grid grid-cols-3 gap-6 flex-1">
-              <TouchButton
-                variant="success"
-                className="flex-col gap-4 text-3xl shadow-[0_10px_0_rgb(22,163,74)] active:translate-y-2 active:shadow-[0_0px_0_rgb(22,163,74)] transition-all"
-                onClick={() => store.eintragenErgebnis(true, false)}
-              >
-                <div className="font-black text-6xl">2</div>
-                <div className="uppercase font-bold tracking-widest text-xl opacity-80">1. Schoss</div>
-              </TouchButton>
-
-              <TouchButton
-                variant="warning"
-                className="flex-col gap-4 text-3xl shadow-[0_10px_0_rgb(217,119,6)] active:translate-y-2 active:shadow-[0_0px_0_rgb(217,119,6)] transition-all"
-                onClick={() => store.eintragenErgebnis(false, true)}
-              >
-                <div className="font-black text-6xl">1</div>
-                <div className="uppercase font-bold tracking-widest text-xl opacity-80">2. Schoss</div>
-              </TouchButton>
-
-              <TouchButton
-                variant="destructive"
-                className="flex-col gap-4 text-3xl shadow-[0_10px_0_rgb(185,28,28)] active:translate-y-2 active:shadow-[0_0px_0_rgb(185,28,28)] transition-all"
-                onClick={() => store.eintragenErgebnis(false, false)}
-              >
-                <div className="font-black text-6xl">0</div>
-                <div className="uppercase font-bold tracking-widest text-xl opacity-80">Fehl</div>
-              </TouchButton>
-            </div>
+        {/* ── 5 Positions Grid ── */}
+        <div className="border-b-2 border-border bg-card/50 p-4">
+          <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3">
+            Posten — Schanz {maschine} · Lauf {store.lauf}
           </div>
+          <div className="grid grid-cols-5 gap-3">
+            {[1, 2, 3, 4, 5].map(pos => {
+              const playersHere = posMap.get(pos) ?? [];
+              const hasActivePlayer = playersHere.some(s => s.id === aktiverSpieler?.id);
+              const isNextPlayer = playersHere.some(s =>
+                s.id === store.spieler[Math.min(store.spielerIndex + 1, store.spieler.length - 1)]?.id
+              ) && !hasActivePlayer;
 
-          {/* Bottom scoreboard */}
-          <div className="h-32 border-t-2 border-border bg-card px-8 flex items-center gap-6 overflow-x-auto">
-            {store.spieler.map(s => {
-              const isActive = s.id === aktiverSpieler?.id;
               return (
                 <div
-                  key={s.id}
+                  key={pos}
                   className={cn(
-                    "flex-shrink-0 flex items-center gap-4 px-6 h-20 rounded-xl border-2 transition-colors",
-                    isActive ? "bg-primary/20 border-primary" : "bg-background border-border"
+                    "rounded-xl border-2 p-3 flex flex-col items-center gap-2 transition-all",
+                    hasActivePlayer
+                      ? "border-primary bg-primary/15 shadow-lg shadow-primary/10"
+                      : playersHere.length > 0
+                        ? "border-border/60 bg-background"
+                        : "border-border/20 bg-background/30",
                   )}
                 >
                   <div className={cn(
-                    "w-12 h-12 rounded-lg flex items-center justify-center font-black text-xl",
-                    isActive ? "bg-primary text-black" : "bg-border text-muted-foreground"
+                    "text-xs font-black uppercase tracking-widest",
+                    hasActivePlayer ? "text-primary" : "text-muted-foreground",
                   )}>
-                    P{((s.startPosten - 1 + store.taubeIndex) % store.spieler.length) + 1}
+                    Posten {pos}
                   </div>
-                  <div className="flex flex-col justify-center">
-                    <div className="font-bold text-lg max-w-[120px] truncate">{s.name}</div>
-                    <div className="font-mono text-xl font-bold text-primary">
-                      {s.punkte} <span className="text-sm text-muted-foreground">pts</span>
+
+                  {playersHere.length === 0 ? (
+                    <div className="text-muted-foreground/30 text-xl font-bold">—</div>
+                  ) : (
+                    <div className="w-full flex flex-col gap-1">
+                      {playersHere.map(s => {
+                        const isActive = s.id === aktiverSpieler?.id;
+                        return (
+                          <div key={s.id} className={cn(
+                            "rounded-lg px-2 py-1 flex items-center justify-between gap-2",
+                            isActive ? "bg-primary text-black" : "bg-border/30",
+                          )}>
+                            <span className="font-bold text-sm truncate max-w-[90px]">
+                              {s.name}
+                            </span>
+                            <span className={cn(
+                              "font-mono font-black text-sm shrink-0",
+                              isActive ? "text-black" : "text-primary",
+                            )}>
+                              {s.punkte}p
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
           </div>
-
-          {/* Taube Werfen button — simulates physical relay trigger */}
-          <div className="absolute right-8 bottom-40">
-            <TouchButton
-              size="xl"
-              className="rounded-full w-32 h-32 bg-primary/20 border-4 border-primary text-primary hover:bg-primary hover:text-black transition-all flex flex-col gap-2"
-              onClick={() => store.werfenTaube()}
-            >
-              <Zap className="w-12 h-12" />
-              <span className="text-xs uppercase font-bold tracking-widest">Werfen</span>
-            </TouchButton>
-          </div>
-
         </div>
+
+        {/* ── Active Shooter Banner ── */}
+        <div className="px-6 py-4 border-b-2 border-primary/30 bg-primary/5 flex items-center gap-6">
+          <div className="flex flex-col">
+            <span className="text-sm text-primary font-bold tracking-widest uppercase">Aktuellen Schütze</span>
+            <span className="text-4xl font-black truncate max-w-[480px]">
+              {aktiverSpieler?.name ?? '—'}
+            </span>
+          </div>
+          <div className="ml-auto flex flex-col items-end">
+            <span className="text-sm text-primary font-bold tracking-widest uppercase">Posten</span>
+            <span className="text-5xl font-mono font-black">{aktuellePosten}</span>
+          </div>
+          <div className="flex flex-col items-end border-l-2 border-border pl-6">
+            <span className="text-sm text-muted-foreground font-bold uppercase">Punkte</span>
+            <span className="text-5xl font-mono font-black text-primary">
+              {aktiverSpieler?.punkte ?? 0}
+            </span>
+          </div>
+        </div>
+
+        {/* ── Score Entry Buttons — flex so they stretch to full remaining height ── */}
+        <div className="flex-1 p-5 flex gap-5">
+          <TouchButton
+            variant="success"
+            className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(22,163,74)] active:translate-y-3 active:shadow-none transition-all"
+            onClick={() => store.eintragenErgebnis(true, false)}
+          >
+            <div className="font-black text-8xl">2</div>
+            <div className="uppercase font-bold tracking-widest text-xl opacity-90">1. Schoss</div>
+          </TouchButton>
+
+          <TouchButton
+            variant="warning"
+            className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(217,119,6)] active:translate-y-3 active:shadow-none transition-all"
+            onClick={() => store.eintragenErgebnis(false, true)}
+          >
+            <div className="font-black text-8xl">1</div>
+            <div className="uppercase font-bold tracking-widest text-xl opacity-90">2. Schoss</div>
+          </TouchButton>
+
+          <TouchButton
+            variant="destructive"
+            className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(185,28,28)] active:translate-y-3 active:shadow-none transition-all"
+            onClick={() => store.eintragenErgebnis(false, false)}
+          >
+            <div className="font-black text-8xl">0</div>
+            <div className="uppercase font-bold tracking-widest text-xl opacity-90">Fehl</div>
+          </TouchButton>
+        </div>
+
       </div>
     </div>
   );
