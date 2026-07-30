@@ -297,7 +297,7 @@ router.post("/smtp/test", async (req, res) => {
     await transport.sendMail({
       from: s.fromAddress,
       to: empfaenger,
-      subject: "TrapMaster SMTP Test",
+      subject: "Range-Master SMTP Test",
       text: "Dës Test-Email confirméiert datt d'SMTP-Astellunge fonctionéieren.",
     });
     return res.json({ success: true });
