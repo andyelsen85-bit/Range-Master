@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useLogin } from "@workspace/api-client-react";
@@ -12,6 +12,19 @@ export default function Login() {
   const [, setLocation] = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (sessionStorage.getItem('trapmaster-session-expired')) {
+      sessionStorage.removeItem('trapmaster-session-expired');
+      setTimeout(() => {
+        toast({
+          title: "Sëtzung ofgelaf",
+          description: "Är 30-Minutten Sëtzung ass ofgelaf. Loggt iech nees an.",
+          variant: "destructive",
+        });
+      }, 300);
+    }
+  }, []);
   
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

@@ -1,3 +1,4 @@
 - [Zod in monorepo routes](zod-monorepo-routes.md) — backend route files must list zod as a direct dep; workspace catalog zod is not auto-resolved by esbuild
 - [API client subpath exports](api-client-subpath.md) — custom-fetch.ts needs its own exports entry in lib/api-client-react/package.json to be importable as a subpath
 - [bcrypt seeding](bcrypt-seeding.md) — bcryptjs not importable in CodeExecution sandbox; use pgcrypto extension (crypt + gen_salt) for password hashing in SQL seeds
+- [API keys DB pattern](api-keys-db.md) — sync keys in api_keys table (not env var); requireApiKey is async DB lookup; 6 pre-seeded rows; run migrations from lib/db/ with node --input-type=module

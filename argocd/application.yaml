@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trapmaster
+  namespace: argocd
+  annotations:
+    # ArgoCD Image Updater — automatically update image tags when CI pushes new images
+    argocd-image-updater.argoproj.io/image-list: |
+      api-server=ghcr.io/OWNER/REPO/api-server,
+      portal=ghcr.io/OWNER/REPO/portal
+    argocd-image-updater.argoproj.io/api-server.update-strategy: digest
+    argocd-image-updater.argoproj.io/portal.update-strategy: digest
+    argocd-image-updater.argoproj.io/write-back-method: git
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/OWNER/REPO.git
+    targetRevision: main
+    path: k8s/overlays/production
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trapmaster
+
+  syncPolicy:
+    automated:
+      prune: true        # remove resources deleted from Git
+      selfHeal: true     # revert manual kubectl changes
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground

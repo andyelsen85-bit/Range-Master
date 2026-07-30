@@ -1,8 +1,8 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { db, spielerTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, spielerTable, apiKeysTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 
 const router = Router();
@@ -39,7 +39,7 @@ router.post("/login", async (req, res) => {
   const token = jwt.sign(
     { id: s.id, name: s.name, email: s.email, isAdmin: s.isAdmin },
     JWT_SECRET,
-    { expiresIn: "7d" },
+    { expiresIn: "30m" },
   );
   return res.json({
     token,
@@ -123,9 +123,17 @@ export function requireAdmin(req: any, res: any, next: any) {
   next();
 }
 
-export function requireApiKey(req: any, res: any, next: any) {
-  const key = process.env.SYNC_API_KEY;
-  if (!key || req.headers["x-api-key"] !== key) {
+export async function requireApiKey(req: any, res: any, next: any) {
+  const apiKey = req.headers["x-api-key"];
+  if (!apiKey || typeof apiKey !== "string") {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const rows = await db
+    .select({ id: apiKeysTable.id })
+    .from(apiKeysTable)
+    .where(and(eq(apiKeysTable.key, apiKey), eq(apiKeysTable.active, true)))
+    .limit(1);
+  if (!rows[0]) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();

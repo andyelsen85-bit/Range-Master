@@ -6,7 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Pencil, Trash2, KeyRound, Shield, CheckCircle2, XCircle } from "lucide-react";
+import { useLocation } from "wouter";
+import { Plus, Pencil, Trash2, KeyRound, Shield, CheckCircle2, XCircle, Eye } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ export default function Admin() {
   const qc = useQueryClient();
   const apiFetch = useAdminFetch();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
 
   const [addOpen, setAddOpen] = useState(false);
   const [editPlayer, setEditPlayer] = useState<AdminPlayer | null>(null);
@@ -163,6 +165,7 @@ export default function Admin() {
                     <TableCell className="text-right font-mono font-bold text-primary">{p.bestPunkte > 0 ? p.bestPunkte : <span className="text-muted-foreground/40">–</span>}</TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
+                        <IconBtn title="Profil gesinn" onClick={() => navigate(`/admin/spieler/${p.id}`)}><Eye size={14} /></IconBtn>
                         <IconBtn title="Änneren" onClick={() => openEdit(p)}><Pencil size={14} /></IconBtn>
                         <IconBtn title="Passwuert" onClick={() => { setPwdPlayer(p); setNewPwd(""); }}><KeyRound size={14} /></IconBtn>
                         <IconBtn title="Läschen" danger onClick={() => setDeletePlayer(p)}><Trash2 size={14} /></IconBtn>

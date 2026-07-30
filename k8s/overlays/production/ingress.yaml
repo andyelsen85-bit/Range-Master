@@ -1,0 +1,40 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Ingress — adapt to your ingress controller (nginx-ingress, Traefik, etc.)
+#
+# Route rules:
+#   /api/*  →  api-server:8080   (REST API)
+#   /*      →  portal:80         (static SPA)
+#
+# Your external reverse proxy (with HTTPS) should forward traffic to this
+# Ingress (or directly to the NodePort/LoadBalancer services if you prefer).
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trapmaster
+  annotations:
+    # nginx-ingress controller annotations — remove if using Traefik
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    # Let the external reverse proxy handle TLS; cluster traffic is plain HTTP
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  # ingressClassName: nginx   # uncomment and set to your ingress class
+  rules:
+    - host: trapmaster.example.com   # replace with your domain
+      http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: api-server
+                port:
+                  number: 8080
+          - path: /()(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: portal
+                port:
+                  number: 80

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable } from "@workspace/db";
+import { randomBytes } from "crypto";
+import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { authenticate, requireAdmin } from "./auth";
@@ -148,6 +149,53 @@ router.put("/spieler/:id/passwort", async (req, res) => {
     .where(eq(spielerTable.id, id))
     .returning({ id: spielerTable.id });
 
+  if (!updated) return res.status(404).json({ error: "Nicht gefunden" });
+  return res.json({ success: true });
+});
+
+// ─── API Key routes ───────────────────────────────────────────────────────────
+
+// GET /api/admin/api-keys — list keys (last 8 chars only)
+router.get("/api-keys", async (_req, res) => {
+  const rows = await db
+    .select()
+    .from(apiKeysTable)
+    .orderBy(apiKeysTable.id);
+  return res.json({
+    keys: rows.map((k) => ({
+      id: k.id,
+      name: k.name,
+      key: k.key.slice(-8),
+      type: k.type,
+      active: k.active,
+      createdAt: k.createdAt,
+    })),
+  });
+});
+
+// POST /api/admin/api-keys/:id/regenerate — generate new key, return full value ONCE
+router.post("/api-keys/:id/regenerate", async (req, res) => {
+  const id = Number(req.params.id);
+  const newKey = randomBytes(32).toString("hex");
+  const [updated] = await db
+    .update(apiKeysTable)
+    .set({ key: newKey })
+    .where(eq(apiKeysTable.id, id))
+    .returning({ id: apiKeysTable.id });
+  if (!updated) return res.status(404).json({ error: "Nicht gefunden" });
+  return res.json({ id, key: newKey });
+});
+
+// PATCH /api/admin/api-keys/:id — toggle active status
+router.patch("/api-keys/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const schema = z.object({ active: z.boolean() });
+  const { active } = schema.parse(req.body);
+  const [updated] = await db
+    .update(apiKeysTable)
+    .set({ active })
+    .where(eq(apiKeysTable.id, id))
+    .returning({ id: apiKeysTable.id });
   if (!updated) return res.status(404).json({ error: "Nicht gefunden" });
   return res.json({ success: true });
 });

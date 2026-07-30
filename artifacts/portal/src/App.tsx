@@ -4,6 +4,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react/custom-fetch';
+import { setOnUnauthorized } from '@workspace/api-client-react/custom-fetch';
 import { useAuthStore } from '@/store/use-auth-store';
 
 import Layout from '@/components/layout';
@@ -13,6 +14,8 @@ import Resultater from '@/pages/resultater';
 import Rangliste from '@/pages/rangliste';
 import Statistiken from '@/pages/statistiken';
 import Admin from '@/pages/admin';
+import AdminSpieler from '@/pages/admin-spieler';
+import AdminApiKeys from '@/pages/admin-api-keys';
 import Profil from '@/pages/profil';
 import NotFound from '@/pages/not-found';
 
@@ -20,6 +23,16 @@ const queryClient = new QueryClient();
 
 setBaseUrl(null);
 setAuthTokenGetter(() => useAuthStore.getState().token);
+
+// Auto-logout: any 401 from the API clears the session and redirects to /login
+setOnUnauthorized(() => {
+  if (useAuthStore.getState().isAuthenticated) {
+    useAuthStore.getState().logout();
+    sessionStorage.setItem('trapmaster-session-expired', '1');
+    const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
+    window.location.replace(`${base}/login`);
+  }
+});
 
 function PrivateRoute({ component: Component, ...rest }: any) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -56,6 +69,8 @@ function Router() {
             <Route path="/statistiken" component={() => <PrivateRoute component={Statistiken} />} />
             <Route path="/profil" component={() => <PrivateRoute component={Profil} />} />
             <Route path="/admin" component={() => <AdminRoute component={Admin} />} />
+            <Route path="/admin/spieler/:id" component={() => <AdminRoute component={AdminSpieler} />} />
+            <Route path="/admin/api-schluesselen" component={() => <AdminRoute component={AdminApiKeys} />} />
             <Route component={NotFound} />
           </Switch>
         </Layout>
