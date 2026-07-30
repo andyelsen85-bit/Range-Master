@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, Link } from "wouter";
 import {
-  useGetSpieler,
+  useGetSpieler, getGetSpielerQueryKey,
   useGetStatistik, useGetStatistikVerlauf,
   getGetStatistikQueryKey, getGetStatistikVerlaufQueryKey,
   useGetSpielerErgebnisse, getGetSpielerErgebnisseQueryKey,
@@ -27,7 +27,7 @@ export default function AdminSpieler() {
   const [tab, setTab] = useState<Tab>("dashboard");
 
   const { data: spielerResp } = useGetSpieler(spielerId, {
-    query: { enabled: !!spielerId },
+    query: { enabled: !!spielerId, queryKey: getGetSpielerQueryKey(spielerId) },
   });
   const spieler = (spielerResp as any)?.spieler ?? spielerResp;
 
@@ -221,7 +221,7 @@ function ResultaterTab({ spielerId }: { spielerId: number }) {
         const pct = maxPunkte > 0 ? Math.round((totalPunkte / maxPunkte) * 100) : 0;
 
         return (
-          <div key={spiel.id} className="bg-card border border-border/50 rounded-xl overflow-hidden">
+          <div key={group[0].spielId} className="bg-card border border-border/50 rounded-xl overflow-hidden">
             <div className="px-5 py-3 bg-secondary/20 border-b border-border/50 flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-3">
                 <span className="text-sm font-bold text-foreground">

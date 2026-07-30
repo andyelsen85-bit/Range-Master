@@ -197,7 +197,6 @@ export function ResultateScreen() {
             </TouchButton>
 
             <TouchButton
-              size="sm"
               variant="ghost"
               className="w-full text-muted-foreground"
               onClick={() => store.setScreen('geschichte')}

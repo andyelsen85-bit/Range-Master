@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trophy, Medal, Award } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export default function Rangliste() {
   const [modus, setModus] = useState<string>("ALL");
@@ -17,33 +18,48 @@ export default function Rangliste() {
     { query: { queryKey: getGetRanglisteQueryKey({ modus: apiModus, jahr: apiJahr }) } }
   );
 
+  // When "ALL" is selected, formats differ in max score — show the normalized % column prominently.
+  // When filtered to a single modus, all games share the same max, so raw durchschnitt is fine.
+  const showPercent = modus === "ALL";
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-border/50 pb-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Saison Ranglischt</h1>
           <p className="text-muted-foreground mt-2 text-sm font-medium">Vergläicht Är Leeschtung mat anere Memberen.</p>
+          {showPercent && (
+            <p className="text-muted-foreground mt-1 text-xs">
+              Sortéiert no normaliséiertem Duerchschnëtt (% vum max. méigleche Score) — erlaabt fairen Vergläich iwwer verschidde Formater.
+            </p>
+          )}
         </div>
-        
+
         <div className="flex items-center gap-3">
           <Select value={jahr} onValueChange={setJahr}>
             <SelectTrigger className="w-32 bg-card border-border/80 h-10 font-medium">
               <SelectValue placeholder="Joer" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="2026">2026</SelectItem>
               <SelectItem value="2025">2025</SelectItem>
               <SelectItem value="2024">2024</SelectItem>
             </SelectContent>
           </Select>
 
           <Select value={modus} onValueChange={setModus}>
-            <SelectTrigger className="w-40 bg-card border-border/80 h-10 font-medium">
+            <SelectTrigger className="w-48 bg-card border-border/80 h-10 font-medium">
               <SelectValue placeholder="Modus" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Modi</SelectItem>
               <SelectItem value="NORMAL">Normal</SelectItem>
               <SelectItem value="HARAKIRI">Harakiri</SelectItem>
+              <SelectItem value="HARAKIRI_DELAYED">Harakiri Delayed</SelectItem>
+              <SelectItem value="HARAKIRI_FULL">Harakiri Full</SelectItem>
+              <SelectItem value="CUSTOM_1">Custom 1</SelectItem>
+              <SelectItem value="CUSTOM_2">Custom 2</SelectItem>
+              <SelectItem value="CUSTOM_3">Custom 3</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -64,7 +80,14 @@ export default function Rangliste() {
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spiller</TableHead>
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Gesamt Punkten</TableHead>
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Bescht</TableHead>
-                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold text-primary">Ø Duerchschnëtt</TableHead>
+                  {showPercent ? (
+                    <TableHead className="text-right text-xs uppercase tracking-widest font-bold text-primary">
+                      Ø % Score
+                      <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0 font-normal border-primary/40 text-primary/80">normaliséiert</Badge>
+                    </TableHead>
+                  ) : (
+                    <TableHead className="text-right text-xs uppercase tracking-widest font-bold text-primary">Ø Duerchschnëtt</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -77,7 +100,15 @@ export default function Rangliste() {
                     <TableCell className="text-right font-mono font-medium text-muted-foreground">{row.anzahlSpiele}</TableCell>
                     <TableCell className="text-right font-mono font-medium text-muted-foreground">{row.gesamtPunkte}</TableCell>
                     <TableCell className="text-right font-mono font-bold text-foreground">{row.bestPunkte}</TableCell>
-                    <TableCell className="text-right font-mono font-black text-primary text-lg">{row.durchschnitt.toFixed(2)}</TableCell>
+                    {showPercent ? (
+                      <TableCell className="text-right font-mono font-black text-primary text-lg">
+                        {row.durchschnittProzent.toFixed(1)}%
+                      </TableCell>
+                    ) : (
+                      <TableCell className="text-right font-mono font-black text-primary text-lg">
+                        {row.durchschnitt.toFixed(1)}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

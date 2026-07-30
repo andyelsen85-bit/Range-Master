@@ -492,13 +492,19 @@ components:
           type: string
         gesamtPunkte:
           type: integer
-        anzahlLauefe:
+        anzahlSpiele:
           type: integer
         durchschnitt:
           type: number
+        durchschnittProzent:
+          type: number
+          description: >
+            Normalized average as a percentage of the maximum possible score
+            (gesamtPunkte / gesamtMaxPunkte × 100). Use this for cross-format
+            comparisons because different game formats have different max scores.
         bestPunkte:
           type: integer
-      required: [rang, spielerId, name, gesamtPunkte, anzahlLauefe, durchschnitt, bestPunkte]
+      required: [rang, spielerId, name, gesamtPunkte, anzahlSpiele, durchschnitt, durchschnittProzent, bestPunkte]
 
     SpielerStatistik:
       type: object

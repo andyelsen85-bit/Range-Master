@@ -49,11 +49,11 @@ function CustomSequenzEditor({
         <h3 className="font-bold text-base uppercase tracking-wider">{label}</h3>
         <div className="flex gap-2">
           {isDirty && (
-            <TouchButton size="sm" variant="primary" className="h-8 px-3 gap-1 text-xs" onClick={save}>
+            <TouchButton variant="primary" className="h-8 px-3 gap-1 text-xs" onClick={save}>
               <Save className="w-3 h-3" /> Späicheren
             </TouchButton>
           )}
-          <TouchButton size="sm" variant="ghost" className="h-8 px-2 text-destructive hover:bg-destructive/10"
+          <TouchButton variant="ghost" className="h-8 px-2 text-destructive hover:bg-destructive/10"
             onClick={clearAll} disabled={draft.length === 0} title="Alles läschen">
             <X className="w-4 h-4" />
           </TouchButton>
@@ -155,7 +155,7 @@ export function EinstellungenScreen() {
 
   const testSync = async () => {
     save();
-    await store.syncPortal();
+    await store.syncAllPending();
   };
 
   return (

@@ -88,7 +88,6 @@ export function SpillgeschichteScreen() {
       <header className="h-20 border-b-2 border-border flex items-center justify-between px-8 bg-card shrink-0">
         <div className="flex items-center gap-4">
           <TouchButton
-            size="sm"
             variant="ghost"
             className="gap-2"
             onClick={() => store.setScreen('dashboard')}

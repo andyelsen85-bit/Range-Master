@@ -87,6 +87,8 @@ export interface RanglisteEntry {
   gesamtPunkte: number;
   anzahlSpiele: number;
   durchschnitt: number;
+  /** Normalized average as percentage of max possible score. Use for cross-format comparisons. */
+  durchschnittProzent: number;
   bestPunkte: number;
 }
 

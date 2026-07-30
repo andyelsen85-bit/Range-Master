@@ -428,6 +428,8 @@ export const useGameStore = create<GameState>((set, get) => {
           : state.taubeIndex;
       const posten = getCurrentPosten(currentSpieler, effectiveTaubeIdx, state.spieler.length);
 
+      if (!eintrag) return state;
+
       const neuesErgebnis: Ergebnis = {
         spielerId: currentSpieler.id,
         lauf: state.lauf,
