@@ -1,8 +1,10 @@
 import { Router } from "express";
-import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable } from "@workspace/db";
+import bcrypt from "bcryptjs";
+import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
 import { requireApiKey } from "./auth";
 import { z } from "zod";
+import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmail } from "../lib/mailer";
 
 const router = Router();
 
@@ -52,7 +54,13 @@ router.get("/status", requireApiKey, async (_req, res) => {
 // GET /api/sync/spieler
 router.get("/spieler", requireApiKey, async (_req, res) => {
   const rows = await db
-    .select({ id: spielerTable.id, name: spielerTable.name, mitgliedNr: spielerTable.mitgliedNr })
+    .select({
+      id: spielerTable.id,
+      name: spielerTable.name,
+      mitgliedNr: spielerTable.mitgliedNr,
+      email: spielerTable.email,
+      portalAktiv: spielerTable.portalAktiv,
+    })
     .from(spielerTable)
     .orderBy(spielerTable.name);
   return res.json({ spieler: rows });
@@ -201,6 +209,153 @@ router.post("/kredite", requireApiKey, async (req, res) => {
   }
 
   return res.json({ synced, skipped: body.events.length - synced });
+});
+
+// ─── Player updates from the terminal ────────────────────────────────────────
+
+const SpielerUpdateSchema = z.object({
+  externalId: z.string().min(8),
+  spielerId: z.number().int().positive(),
+  typ: z.enum(["UPDATE", "PASSWORT_RESET"]),
+  // Only for typ=UPDATE:
+  name: z.string().min(1).optional(),
+  email: z.string().email().nullable().optional(),
+  portalAktiv: z.boolean().optional(),
+});
+
+type EmailJob = { to: string; subject: string; text: string };
+
+/** Try to send a queued email for one spieler_update row; updates emailStatus */
+async function trySendUpdateEmail(updateId: number, job: EmailJob): Promise<"SENT" | "FAILED"> {
+  try {
+    await sendMail(job.to, job.subject, job.text);
+    await db.update(spielerUpdatesTable)
+      .set({ emailStatus: "SENT", emailError: null })
+      .where(eq(spielerUpdatesTable.id, updateId));
+    return "SENT";
+  } catch (err) {
+    await db.update(spielerUpdatesTable)
+      .set({ emailStatus: "FAILED", emailError: err instanceof Error ? err.message : String(err) })
+      .where(eq(spielerUpdatesTable.id, updateId));
+    return "FAILED";
+  }
+}
+
+/** Build the email job for a pending update row (regenerates the password) */
+async function buildEmailJobForUpdate(
+  u: { id: number; spielerId: number; typ: "UPDATE" | "PASSWORT_RESET" },
+): Promise<EmailJob | null> {
+  const [s] = await db.select().from(spielerTable).where(eq(spielerTable.id, u.spielerId)).limit(1);
+  if (!s?.email) return null;
+  const smtp = await getSmtpSettings();
+  const portalUrl = smtp?.portalUrl ?? "";
+  const passwort = generatePassword();
+  const passwortHash = await bcrypt.hash(passwort, 10);
+  await db.update(spielerTable)
+    .set(u.typ === "UPDATE" ? { passwortHash, eingeladenAt: new Date() } : { passwortHash })
+    .where(eq(spielerTable.id, u.spielerId));
+  const mail = u.typ === "UPDATE"
+    ? invitationEmail(s.name, s.email, passwort, portalUrl)
+    : resetEmail(s.name, passwort, portalUrl);
+  return { to: s.email, ...mail };
+}
+
+// POST /api/sync/spieler-updates — idempotent push of player edits & password resets
+router.post("/spieler-updates", requireApiKey, async (req, res) => {
+  const body = z.object({ updates: z.array(SpielerUpdateSchema) }).parse(req.body);
+  const results: Array<{ externalId: string; status: "applied" | "skipped" | "error"; emailStatus: string; error?: string }> = [];
+
+  for (const u of body.updates) {
+    // Idempotency: skip already-processed change events
+    const [existing] = await db
+      .select({ id: spielerUpdatesTable.id, emailStatus: spielerUpdatesTable.emailStatus })
+      .from(spielerUpdatesTable)
+      .where(eq(spielerUpdatesTable.externalId, u.externalId))
+      .limit(1);
+    if (existing) {
+      results.push({ externalId: u.externalId, status: "skipped", emailStatus: existing.emailStatus });
+      continue;
+    }
+
+    const [spieler] = await db.select().from(spielerTable).where(eq(spielerTable.id, u.spielerId)).limit(1);
+    if (!spieler) {
+      results.push({ externalId: u.externalId, status: "error", emailStatus: "NONE", error: `Spiller ${u.spielerId} net fonnt` });
+      continue;
+    }
+
+    let needsEmail = false;
+
+    if (u.typ === "UPDATE") {
+      // Reject email collisions with other players explicitly
+      if (u.email) {
+        const [clash] = await db.select({ id: spielerTable.id }).from(spielerTable)
+          .where(sql`${spielerTable.email} = ${u.email} AND ${spielerTable.id} != ${u.spielerId}`).limit(1);
+        if (clash) {
+          results.push({ externalId: u.externalId, status: "error", emailStatus: "NONE", error: `Email ${u.email} gëtt schonn benotzt` });
+          continue;
+        }
+      }
+      const patch: Partial<typeof spielerTable.$inferInsert> = {};
+      if (u.name !== undefined) patch.name = u.name;
+      if (u.email !== undefined) patch.email = u.email;
+      if (u.portalAktiv !== undefined) patch.portalAktiv = u.portalAktiv;
+      const nowActivating = u.portalAktiv === true && !spieler.portalAktiv;
+      const effectiveEmail = u.email !== undefined ? u.email : spieler.email;
+      await db.update(spielerTable).set(patch).where(eq(spielerTable.id, u.spielerId));
+      // Invitation only on fresh activation with a known email address
+      needsEmail = nowActivating && !!effectiveEmail;
+    } else {
+      // PASSWORT_RESET always triggers a mail (if the player has an email)
+      needsEmail = !!spieler.email;
+      if (u.typ === "PASSWORT_RESET" && !spieler.email) {
+        // Reset without email: still set a new password is pointless — flag as error
+        results.push({ externalId: u.externalId, status: "error", emailStatus: "NONE", error: "Keng Email-Adress beim Spiller" });
+        continue;
+      }
+    }
+
+    const [row] = await db.insert(spielerUpdatesTable).values({
+      externalId: u.externalId,
+      spielerId: u.spielerId,
+      typ: u.typ,
+      emailStatus: needsEmail ? "PENDING" : "NONE",
+    }).returning({ id: spielerUpdatesTable.id });
+
+    let emailStatus: string = needsEmail ? "PENDING" : "NONE";
+    if (needsEmail) {
+      const job = await buildEmailJobForUpdate({ id: row.id, spielerId: u.spielerId, typ: u.typ });
+      if (job) emailStatus = await trySendUpdateEmail(row.id, job);
+    }
+
+    results.push({ externalId: u.externalId, status: "applied", emailStatus });
+  }
+
+  return res.json({ results });
+});
+
+// GET /api/sync/spieler-updates/status?ids=a,b,c — per-change status; retries failed emails
+router.get("/spieler-updates/status", requireApiKey, async (req, res) => {
+  const ids = String(req.query.ids ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 100);
+  if (!ids.length) return res.json({ updates: [] });
+
+  const rows = await db.select().from(spielerUpdatesTable).where(inArray(spielerUpdatesTable.externalId, ids));
+
+  // Retry emails that are still pending or previously failed
+  for (const r of rows) {
+    if (r.emailStatus === "PENDING" || r.emailStatus === "FAILED") {
+      const job = await buildEmailJobForUpdate({ id: r.id, spielerId: r.spielerId, typ: r.typ });
+      if (job) r.emailStatus = await trySendUpdateEmail(r.id, job);
+    }
+  }
+
+  return res.json({
+    updates: rows.map((r) => ({
+      externalId: r.externalId,
+      typ: r.typ,
+      emailStatus: r.emailStatus,
+      emailError: r.emailError,
+    })),
+  });
 });
 
 export default router;

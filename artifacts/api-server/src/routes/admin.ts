@@ -1,7 +1,8 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable } from "@workspace/db";
+import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, smtpSettingsTable } from "@workspace/db";
+import { buildTransport } from "../lib/mailer";
 import { eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { authenticate, requireAdmin } from "./auth";
@@ -226,6 +227,83 @@ router.patch("/api-keys/:id", async (req, res) => {
     .returning({ id: apiKeysTable.id });
   if (!updated) return res.status(404).json({ error: "Nicht gefunden" });
   return res.json({ success: true });
+});
+
+// ─── SMTP settings ────────────────────────────────────────────────────────────
+
+const SmtpSchema = z.object({
+  host: z.string(),
+  port: z.number().int().min(1).max(65535),
+  username: z.string(),
+  passwort: z.string().optional(), // omitted/empty = keep existing
+  fromAddress: z.string().email().or(z.literal("")),
+  verschluesselung: z.enum(["NONE", "STARTTLS", "SSL"]),
+  ignoreTlsErrors: z.boolean(),
+  portalUrl: z.string(),
+});
+
+async function loadSmtpRow() {
+  const rows = await db.select().from(smtpSettingsTable).limit(1);
+  return rows[0] ?? null;
+}
+
+// GET /api/admin/smtp — settings without password
+router.get("/smtp", async (_req, res) => {
+  const s = await loadSmtpRow();
+  return res.json({
+    host: s?.host ?? "",
+    port: s?.port ?? 587,
+    username: s?.username ?? "",
+    fromAddress: s?.fromAddress ?? "",
+    verschluesselung: s?.verschluesselung ?? "STARTTLS",
+    ignoreTlsErrors: s?.ignoreTlsErrors ?? false,
+    portalUrl: s?.portalUrl ?? "",
+    passwortGesat: !!s?.passwort,
+    konfiguréiert: !!(s?.host && s?.fromAddress),
+  });
+});
+
+// PUT /api/admin/smtp — save settings (password write-only)
+router.put("/smtp", async (req, res) => {
+  const body = SmtpSchema.parse(req.body);
+  const existing = await loadSmtpRow();
+  const values = {
+    host: body.host,
+    port: body.port,
+    username: body.username,
+    fromAddress: body.fromAddress,
+    verschluesselung: body.verschluesselung,
+    ignoreTlsErrors: body.ignoreTlsErrors,
+    portalUrl: body.portalUrl,
+    ...(body.passwort ? { passwort: body.passwort } : {}),
+  };
+  if (existing) {
+    await db.update(smtpSettingsTable).set(values).where(eq(smtpSettingsTable.id, existing.id));
+  } else {
+    await db.insert(smtpSettingsTable).values({ passwort: "", ...values });
+  }
+  return res.json({ success: true });
+});
+
+// POST /api/admin/smtp/test — send a test email with the stored settings
+router.post("/smtp/test", async (req, res) => {
+  const { empfaenger } = z.object({ empfaenger: z.string().email() }).parse(req.body);
+  const s = await loadSmtpRow();
+  if (!s || !s.host || !s.fromAddress) {
+    return res.status(400).json({ error: "SMTP net konfiguréiert (Host a Vun-Adress néideg)" });
+  }
+  try {
+    const transport = buildTransport(s);
+    await transport.sendMail({
+      from: s.fromAddress,
+      to: empfaenger,
+      subject: "TrapMaster SMTP Test",
+      text: "Dës Test-Email confirméiert datt d'SMTP-Astellunge fonctionéieren.",
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 export default router;

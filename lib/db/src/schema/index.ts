@@ -4,3 +4,5 @@ export * from "./teilnahmen";
 export * from "./ergebnisse";
 export * from "./api-keys";
 export * from "./kredite";
+export * from "./smtp-settings";
+export * from "./spieler-updates";

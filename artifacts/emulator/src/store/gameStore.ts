@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 export type Maschine = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
 export type Modus = 'NORMAL' | 'HARAKIRI' | 'HARAKIRI_DELAYED' | 'HARAKIRI_FULL' | 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3';
-export type Screen = 'dashboard' | 'start' | 'spiel' | 'einstellungen' | 'resultate' | 'geschichte' | 'kredite';
+export type Screen = 'dashboard' | 'start' | 'spiel' | 'einstellungen' | 'resultate' | 'geschichte' | 'kredite' | 'spillerverwaltung';
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
 export interface Spieler {
@@ -33,8 +33,27 @@ export interface PortalSpieler {
   id: number;
   name: string;
   mitgliedNr: string | null;
+  email?: string | null;
+  portalAktiv?: boolean;
   /** true for players created locally on the terminal, not yet pushed to the portal */
   lokal?: boolean;
+}
+
+/** Status of a queued player change: local → pushed → email delivered/failed */
+export type SpielerUpdateStatus = 'pending' | 'synced' | 'email_sent' | 'email_failed';
+
+/** A player edit or password reset queued for portal sync (idempotent via externalId) */
+export interface SpielerUpdate {
+  externalId: string;
+  spielerId: number;
+  spielerName: string;   // snapshot for display
+  typ: 'UPDATE' | 'PASSWORT_RESET';
+  name?: string;
+  email?: string | null;
+  portalAktiv?: boolean;
+  status: SpielerUpdateStatus;
+  fehler?: string;
+  queuedAt: string;
 }
 
 /** A locally created player waiting to be pushed to the portal (localId is negative) */
@@ -119,6 +138,7 @@ interface GameState extends Settings {
   // Offline queue
   pendingGames: PendingGame[];
   pendingSpieler: PendingSpieler[];
+  spielerUpdates: SpielerUpdate[];
 
   syncStatus: SyncStatus;
   lastSync: string | null;
@@ -169,6 +189,15 @@ interface GameState extends Settings {
   getKreditRest: (spielerId: number) => number;
   /** Pull today's credit state from the portal and merge with unsynced local events */
   ladeKredite: () => Promise<void>;
+
+  /** Queue a player edit (name/email/portal activation) for the next sync */
+  queueSpielerUpdate: (spielerId: number, changes: { name: string; email: string | null; portalAktiv: boolean }) => void;
+  /** Queue a password reset for the next sync (server emails a new password) */
+  queuePasswortReset: (spielerId: number) => void;
+  /** Poll the portal for email status of already-synced changes */
+  refreshSpielerUpdateStatus: () => Promise<void>;
+  /** Remove finished (email_sent) entries from the change list */
+  clearErledegtSpielerUpdates: () => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -289,6 +318,23 @@ const HISTORY_KEY = 'trapmaster-game-history';
 const PENDING_SPIELER_KEY = 'trapmaster-pending-spieler';
 const KREDITE_KEY = 'trapmaster-kredite';
 const PENDING_KREDITE_KEY = 'trapmaster-pending-kredite';
+const SPIELER_UPDATES_KEY = 'trapmaster-spieler-updates';
+
+function loadSpielerUpdates(): SpielerUpdate[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SPIELER_UPDATES_KEY) : null;
+    if (!raw) return [];
+    return JSON.parse(raw) as SpielerUpdate[];
+  } catch {
+    return [];
+  }
+}
+
+function saveSpielerUpdates(updates: SpielerUpdate[]) {
+  try {
+    localStorage.setItem(SPIELER_UPDATES_KEY, JSON.stringify(updates));
+  } catch {}
+}
 
 /** Local date (not UTC) — day credits expire on the local day boundary */
 export function todayStr(): string {
@@ -458,6 +504,7 @@ export const useGameStore = create<GameState>((set, get) => {
     // Offline queue — restored from localStorage on startup
     pendingGames: loadPendingGames(),
     pendingSpieler: loadPendingSpieler(),
+    spielerUpdates: loadSpielerUpdates(),
 
     // Local history
     gameHistory: loadGameHistory(),
@@ -877,6 +924,78 @@ export const useGameStore = create<GameState>((set, get) => {
       }
     },
 
+    queueSpielerUpdate: (spielerId, changes) => set((state) => {
+      const spieler = state.portalSpieler.find(p => p.id === spielerId);
+      const spielerName = changes.name || spieler?.name || `#${spielerId}`;
+      const update: SpielerUpdate = {
+        externalId: generateSpielId(),
+        spielerId,
+        spielerName,
+        typ: 'UPDATE',
+        name: changes.name,
+        email: changes.email,
+        portalAktiv: changes.portalAktiv,
+        status: 'pending',
+        queuedAt: new Date().toISOString(),
+      };
+      // Optimistically update local caches so the UI reflects the edit immediately
+      const portalSpieler = state.portalSpieler.map(p =>
+        p.id === spielerId ? { ...p, name: changes.name, email: changes.email, portalAktiv: changes.portalAktiv } : p
+      ).sort((a, b) => a.name.localeCompare(b.name));
+      const spielerUpdates = [update, ...state.spielerUpdates].slice(0, 50);
+      saveSpielerUpdates(spielerUpdates);
+      saveCachedSpieler(portalSpieler);
+      return { spielerUpdates, portalSpieler };
+    }),
+
+    queuePasswortReset: (spielerId) => set((state) => {
+      const spieler = state.portalSpieler.find(p => p.id === spielerId);
+      const update: SpielerUpdate = {
+        externalId: generateSpielId(),
+        spielerId,
+        spielerName: spieler?.name ?? `#${spielerId}`,
+        typ: 'PASSWORT_RESET',
+        status: 'pending',
+        queuedAt: new Date().toISOString(),
+      };
+      const spielerUpdates = [update, ...state.spielerUpdates].slice(0, 50);
+      saveSpielerUpdates(spielerUpdates);
+      return { spielerUpdates };
+    }),
+
+    refreshSpielerUpdateStatus: async () => {
+      const state = get();
+      if (!state.apiUrl || !state.apiKey) return;
+      // Only entries pushed but without final email verdict need polling
+      const offen = state.spielerUpdates.filter(u => u.status === 'synced' || u.status === 'email_failed');
+      if (!offen.length) return;
+      try {
+        const ids = offen.map(u => u.externalId).join(',');
+        const res = await fetch(`${state.apiUrl}/api/sync/spieler-updates/status?ids=${encodeURIComponent(ids)}`, {
+          headers: { 'x-api-key': state.apiKey },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) return;
+        const data = await res.json() as { updates: Array<{ externalId: string; emailStatus: string; emailError: string | null }> };
+        const byId = new Map(data.updates.map(u => [u.externalId, u]));
+        const spielerUpdates = get().spielerUpdates.map(u => {
+          const r = byId.get(u.externalId);
+          if (!r) return u;
+          if (r.emailStatus === 'SENT') return { ...u, status: 'email_sent' as const, fehler: undefined };
+          if (r.emailStatus === 'FAILED') return { ...u, status: 'email_failed' as const, fehler: r.emailError ?? 'Email-Feeler' };
+          return u;
+        });
+        saveSpielerUpdates(spielerUpdates);
+        set({ spielerUpdates });
+      } catch {}
+    },
+
+    clearErledegtSpielerUpdates: () => set((state) => {
+      const spielerUpdates = state.spielerUpdates.filter(u => u.status !== 'email_sent' && !(u.status === 'synced' && u.typ === 'UPDATE'));
+      saveSpielerUpdates(spielerUpdates);
+      return { spielerUpdates };
+    }),
+
     getAktivenSpieler: () => {
       const s = get();
       return s.spieler[s.spielerIndex];
@@ -938,7 +1057,9 @@ export const useGameStore = create<GameState>((set, get) => {
 
     syncAllPending: async () => {
       const state = get();
-      if (state.pendingGames.length === 0 && state.pendingSpieler.length === 0 && state.pendingKredite.length === 0) return;
+      const hasPendingUpdates = state.spielerUpdates.some(u => u.status === 'pending');
+      const hasOffeneEmails = state.spielerUpdates.some(u => u.status === 'synced' || u.status === 'email_failed');
+      if (state.pendingGames.length === 0 && state.pendingSpieler.length === 0 && state.pendingKredite.length === 0 && !hasPendingUpdates && !hasOffeneEmails) return;
       if (!state.apiUrl || !state.apiKey) {
         set({ syncStatus: 'error' });
         return;
@@ -985,6 +1106,7 @@ export const useGameStore = create<GameState>((set, get) => {
           }));
           const remappedSpieler = s2.spieler.map(s => ({ ...s, id: remap(s.id) }));
           const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
+          const remappedUpdates = s2.spielerUpdates.map(u => ({ ...u, spielerId: remap(u.spielerId) }));
           const remappedKredite = Object.fromEntries(
             Object.entries(s2.kredite).map(([id, stand]) => [remap(Number(id)), stand])
           ) as Record<number, KreditStand>;
@@ -1000,6 +1122,7 @@ export const useGameStore = create<GameState>((set, get) => {
           saveGameHistory(remappedHistory);
           savePendingKredite(remappedKreditEvents);
           saveKredite(s2.kreditDatum, remappedKredite);
+          saveSpielerUpdates(remappedUpdates);
           set({
             pendingGames: remappedPending,
             pendingSpieler: stillPending,
@@ -1008,7 +1131,48 @@ export const useGameStore = create<GameState>((set, get) => {
             gameHistory: remappedHistory,
             pendingKredite: remappedKreditEvents,
             kredite: remappedKredite,
+            spielerUpdates: remappedUpdates,
           });
+        }
+
+        // ── Step 1c: push pending player edits / password resets ─────────────
+        {
+          const pushable = get().spielerUpdates.filter(u => u.status === 'pending' && u.spielerId > 0);
+          if (pushable.length > 0) {
+            const resU = await fetch(`${state.apiUrl}/api/sync/spieler-updates`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': state.apiKey,
+              },
+              body: JSON.stringify({
+                updates: pushable.map(u => ({
+                  externalId: u.externalId,
+                  spielerId: u.spielerId,
+                  typ: u.typ,
+                  ...(u.typ === 'UPDATE' ? { name: u.name, email: u.email || null, portalAktiv: u.portalAktiv } : {}),
+                })),
+              }),
+              signal: AbortSignal.timeout(30000),
+            });
+            if (!resU.ok) throw new Error(`HTTP ${resU.status}`);
+            const dataU = await resU.json() as {
+              results: Array<{ externalId: string; status: string; emailStatus: string; error?: string }>;
+            };
+            const byId = new Map(dataU.results.map(r => [r.externalId, r]));
+            const spielerUpdates = get().spielerUpdates.map(u => {
+              const r = byId.get(u.externalId);
+              if (!r) return u;
+              if (r.status === 'error') return { ...u, status: 'email_failed' as const, fehler: r.error ?? 'Feeler' };
+              if (r.emailStatus === 'SENT') return { ...u, status: 'email_sent' as const, fehler: undefined };
+              if (r.emailStatus === 'FAILED' || r.emailStatus === 'PENDING') return { ...u, status: 'email_failed' as const, fehler: 'Email nach net verschéckt' };
+              return { ...u, status: 'synced' as const, fehler: undefined };
+            });
+            saveSpielerUpdates(spielerUpdates);
+            set({ spielerUpdates });
+          }
+          // Poll email status for anything still open (also retries failed sends server-side)
+          await get().refreshSpielerUpdateStatus();
         }
 
         // ── Step 1b: push pending credit events (only remapped/server IDs) ───
