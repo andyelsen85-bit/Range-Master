@@ -40,3 +40,30 @@
   body { @apply font-sans antialiased bg-background text-foreground; }
   html { scroll-behavior: smooth; }
 }
+
+@media print {
+  /* Hide interactive chrome */
+  aside,
+  #print-btn,
+  .print-hide { display: none !important; }
+
+  /* Full width content */
+  main {
+    margin-left: 0 !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+
+  /* Keep sections together where possible */
+  section { break-inside: avoid-page; }
+  figure  { break-inside: avoid; }
+
+  /* Lighten shadows/borders for print */
+  * { box-shadow: none !important; }
+
+  /* Ensure images print */
+  img { max-width: 100%; page-break-inside: avoid; }
+
+  /* Page margins */
+  @page { margin: 18mm 14mm; }
+}

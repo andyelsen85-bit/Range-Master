@@ -136,11 +136,27 @@ export default function App() {
 
         {/* Header */}
         <div className="mb-12">
-          <div className="inline-flex items-center gap-2 bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full mb-4 uppercase tracking-widest">
-            Benotzerhandbuch
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <div className="inline-flex items-center gap-2 bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full mb-4 uppercase tracking-widest">
+                Benotzerhandbuch
+              </div>
+              <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Range-Master</h1>
+              <p className="text-lg text-gray-500">F.S.H.C.L. Sektioun Wolz — Vollstänneg Benotzerguide</p>
+            </div>
+            <button
+              id="print-btn"
+              onClick={() => window.print()}
+              className="shrink-0 mt-1 inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                <path d="M6 9V2h12v7"/>
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                <rect x="6" y="14" width="12" height="8"/>
+              </svg>
+              Als PDF drécken
+            </button>
           </div>
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Range-Master</h1>
-          <p className="text-lg text-gray-500">F.S.H.C.L. Sektioun Wolz — Vollstänneg Benotzerguide</p>
         </div>
 
         {/* ─────── 1. IWWERBLICK ─────── */}
