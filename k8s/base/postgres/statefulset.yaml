@@ -10,13 +10,13 @@
 #     accessModes accordingly.
 #
 # First-time setup:
-#   After the pod reaches Running, run migrations once:
+#   Migrations run automatically via the run-migrations initContainer in the
+#   api-server Deployment before the api-server pod starts. No manual exec step
+#   is required on first deploy or after schema changes.
+#
+#   Smoke-test the DB directly if needed:
 #     kubectl exec -n rangemaster statefulset/postgres -- \
-#       psql -U trapmaster -d trapmaster -c "SELECT 1"   # smoke-test (DB user/name stay as trapmaster)
-#   Then apply the schema from the api-server pod:
-#     kubectl exec -n rangemaster deploy/api-server -- \
-#       node --input-type=module --eval \
-#       "import '/app/lib/db/migrate.mjs'"
+#       psql -U trapmaster -d trapmaster -c "SELECT 1"
 # ──────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: StatefulSet
