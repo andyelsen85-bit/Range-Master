@@ -5,6 +5,7 @@ namespace: rangemaster
 
 resources:
   - ../../base
+  - ingress.yaml
 
 # Image tag substitution — ArgoCD Image Updater rewrites these automatically
 # when a new image is pushed to the registry.
