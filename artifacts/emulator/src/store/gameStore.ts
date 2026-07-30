@@ -72,6 +72,7 @@ interface Settings {
   apiUrl: string;
   apiKey: string;
   customSequenzen: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3', CustomSequenz>;
+  customLaeufe: Record<'CUSTOM_1' | 'CUSTOM_2', 1 | 2>;
 }
 
 interface GameState extends Settings {
@@ -111,6 +112,7 @@ interface GameState extends Settings {
   setModus: (modus: Modus) => void;
   toggleMaschineAktiv: (m: Maschine) => void;
   setCustomSequenz: (modus: 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3', seq: CustomSequenz) => void;
+  setCustomLaeufe: (modus: 'CUSTOM_1' | 'CUSTOM_2', laeufe: 1 | 2) => void;
   startSpiel: () => void;
   eintragenErgebnis: (schuss1: boolean, schuss2: boolean) => void;
   wiederholenTaube: () => void;
@@ -137,6 +139,11 @@ const DEFAULT_CUSTOM: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3', CustomSequenz
   CUSTOM_1: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'],
   CUSTOM_2: ['A', 'C', 'E', 'G', 'B', 'D', 'F', 'H'],
   CUSTOM_3: ['H', 'G', 'F', 'E', 'D', 'C', 'B', 'A'],
+};
+
+const DEFAULT_CUSTOM_LAEUFE: Record<'CUSTOM_1' | 'CUSTOM_2', 1 | 2> = {
+  CUSTOM_1: 2,
+  CUSTOM_2: 2,
 };
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -311,6 +318,7 @@ export const useGameStore = create<GameState>((set, get) => {
   const apiUrl: string = saved.apiUrl ?? '';
   const apiKey: string = saved.apiKey ?? '';
   const customSequenzen = saved.customSequenzen ?? { ...DEFAULT_CUSTOM };
+  const customLaeufe = saved.customLaeufe ?? { ...DEFAULT_CUSTOM_LAEUFE };
 
   return {
     // Settings (persisted)
@@ -319,6 +327,7 @@ export const useGameStore = create<GameState>((set, get) => {
     apiUrl,
     apiKey,
     customSequenzen,
+    customLaeufe,
 
     // Volatile
     screen: 'dashboard',
@@ -352,6 +361,7 @@ export const useGameStore = create<GameState>((set, get) => {
         apiUrl: s.apiUrl,
         apiKey: s.apiKey,
         customSequenzen: s.customSequenzen,
+        customLaeufe: s.customLaeufe,
       });
     },
 
@@ -377,13 +387,13 @@ export const useGameStore = create<GameState>((set, get) => {
     setModus: (modus) => {
       set({ modus });
       const s = get();
-      saveToStorage({ modus, maschinenAktiv: s.maschinenAktiv, apiUrl: s.apiUrl, apiKey: s.apiKey, customSequenzen: s.customSequenzen });
+      saveToStorage({ modus, maschinenAktiv: s.maschinenAktiv, apiUrl: s.apiUrl, apiKey: s.apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe });
     },
 
     toggleMaschineAktiv: (m) => {
       set((state) => {
         const maschinenAktiv = { ...state.maschinenAktiv, [m]: !state.maschinenAktiv[m] };
-        saveToStorage({ modus: state.modus, maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen });
+        saveToStorage({ modus: state.modus, maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen, customLaeufe: state.customLaeufe });
         return { maschinenAktiv };
       });
     },
@@ -391,8 +401,16 @@ export const useGameStore = create<GameState>((set, get) => {
     setCustomSequenz: (modus, seq) => {
       set((state) => {
         const customSequenzen = { ...state.customSequenzen, [modus]: seq };
-        saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen });
+        saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen, customLaeufe: state.customLaeufe });
         return { customSequenzen };
+      });
+    },
+
+    setCustomLaeufe: (modus, laeufe) => {
+      set((state) => {
+        const customLaeufe = { ...state.customLaeufe, [modus]: laeufe };
+        saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen, customLaeufe });
+        return { customLaeufe };
       });
     },
 
@@ -472,13 +490,18 @@ export const useGameStore = create<GameState>((set, get) => {
 
       // Lauf complete
       const nextLauf = state.lauf + 1;
-      if (nextLauf > 2) {
+      const maxLaeufe: number =
+        (state.modus === 'CUSTOM_1' || state.modus === 'CUSTOM_2')
+          ? state.customLaeufe[state.modus]
+          : 2;
+      if (nextLauf > maxLaeufe) {
         // ── Game over: enqueue in offline pending list ──────────────────────
         const allErgebnisse = [...state.ergebnisse, neuesErgebnis];
 
         // Compute per-lauf points for each player (needed for spiel_teilnahmen rows)
+        const laufNummern = Array.from({ length: maxLaeufe }, (_, i) => i + 1);
         const teilnahmen = updatedSpieler.flatMap(s =>
-          ([1, 2] as const).map(l => ({
+          laufNummern.map(l => ({
             spielerId: s.id,
             startPosten: s.startPosten,
             punkte: allErgebnisse
@@ -492,7 +515,7 @@ export const useGameStore = create<GameState>((set, get) => {
           externalId: state.spielId!,
           datum: new Date().toISOString(),
           modus: state.modus,
-          lauf: 2,
+          lauf: maxLaeufe,
           taubenProLauf: state.sequenz.length,
           abgeschlossen: true,
           teilnahmen,
@@ -568,7 +591,11 @@ export const useGameStore = create<GameState>((set, get) => {
         return { spielerIndex: 0, taubeIndex: nextTaubeIndex };
       }
       const nextLauf = state.lauf + 1;
-      if (nextLauf > 2) {
+      const maxLaeufe: number =
+        (state.modus === 'CUSTOM_1' || state.modus === 'CUSTOM_2')
+          ? state.customLaeufe[state.modus]
+          : 2;
+      if (nextLauf > maxLaeufe) {
         // ueberspringen path: skip showing resultate, just go to dashboard
         return { screen: 'dashboard' as Screen, spielerIndex: 0, taubeIndex: 0, lauf: nextLauf };
       }
@@ -591,7 +618,7 @@ export const useGameStore = create<GameState>((set, get) => {
     setApiSettings: (apiUrl, apiKey) => {
       set({ apiUrl, apiKey });
       const s = get();
-      saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl, apiKey, customSequenzen: s.customSequenzen });
+      saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl, apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe });
     },
 
     getAktivenSpieler: () => {

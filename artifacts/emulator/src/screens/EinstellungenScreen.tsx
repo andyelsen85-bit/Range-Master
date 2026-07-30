@@ -14,11 +14,12 @@ function CustomSequenzEditor({
   modus,
   label,
 }: {
-  modus: 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3';
+  modus: 'CUSTOM_1' | 'CUSTOM_2';
   label: string;
 }) {
   const store = useGameStore();
   const seq = store.customSequenzen[modus];
+  const laeufe = store.customLaeufe[modus];
   const [draft, setDraft] = useState<Maschine[]>(seq);
 
   useEffect(() => { setDraft(store.customSequenzen[modus]); }, [modus]);
@@ -37,10 +38,10 @@ function CustomSequenzEditor({
 
   const isDirty = JSON.stringify(draft) !== JSON.stringify(seq);
 
-  // Live stats
+  // Live stats — reflect chosen Läufe count
   const taubenPerLauf = draft.reduce((sum, m) => sum + (m === 'H' ? 2 : 1), 0);
   const maxPunktePerLauf = taubenPerLauf * 2;
-  const maxPunkteSpill = maxPunktePerLauf * 2; // 2 Läufe
+  const maxPunkteSpill = maxPunktePerLauf * laeufe;
 
   return (
     <div className="bg-background border-2 border-border rounded-xl p-5 flex flex-col gap-4">
@@ -110,6 +111,29 @@ function CustomSequenzEditor({
               )}
             >
               {m}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Läufe toggle */}
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
+          Unzuel vun de Läuf
+        </div>
+        <div className="flex gap-2">
+          {([1, 2] as const).map((n) => (
+            <button
+              key={n}
+              onClick={() => store.setCustomLaeufe(modus, n)}
+              className={cn(
+                "flex-1 h-11 rounded-lg border-2 font-bold text-base transition-all",
+                laeufe === n
+                  ? "border-primary bg-primary/20 text-primary"
+                  : "border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-foreground",
+              )}
+            >
+              {n} {n === 1 ? 'Lauf' : 'Läuf'}
             </button>
           ))}
         </div>
