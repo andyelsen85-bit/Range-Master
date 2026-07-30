@@ -12,6 +12,7 @@ env:
   # Repository owner and name are derived automatically from github.repository
   IMAGE_API: ghcr.io/${{ github.repository }}/api-server
   IMAGE_PORTAL: ghcr.io/${{ github.repository }}/portal
+  IMAGE_EMULATOR: ghcr.io/${{ github.repository }}/emulator
 
 jobs:
   build-and-push:
@@ -58,6 +59,16 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=tag
 
+      - name: Compute image tags — emulator
+        id: meta-emulator
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_EMULATOR }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=tag
+
       # ── Build and push api-server ───────────────────────────────────────────
       - name: Build and push api-server image
         uses: docker/build-push-action@v6
@@ -83,3 +94,17 @@ jobs:
             BASE_PATH=/
           cache-from: type=gha,scope=portal
           cache-to: type=gha,mode=max,scope=portal
+
+      # ── Build and push emulator ─────────────────────────────────────────────
+      - name: Build and push emulator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.emulator
+          push: true
+          tags: ${{ steps.meta-emulator.outputs.tags }}
+          labels: ${{ steps.meta-emulator.outputs.labels }}
+          build-args: |
+            BASE_PATH=/emulator/
+          cache-from: type=gha,scope=emulator
+          cache-to: type=gha,mode=max,scope=emulator

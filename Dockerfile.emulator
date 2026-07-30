@@ -1,0 +1,47 @@
+# ── Stage 1: builder ──────────────────────────────────────────────────────────
+FROM node:22-slim AS builder
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+WORKDIR /repo
+
+# Copy workspace manifests first for layer-cache efficiency
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy all package.json files so pnpm can resolve the workspace graph
+COPY artifacts/emulator/package.json ./artifacts/emulator/
+COPY lib/ ./lib/
+
+# Install all workspace dependencies (frozen for reproducibility)
+RUN pnpm install --frozen-lockfile
+
+# Copy the full source
+COPY . .
+
+# Build the emulator static assets
+# BASE_PATH is baked into the bundle at build time via Vite so assets resolve
+# under the /emulator subpath.
+ARG BASE_PATH=/emulator/
+ENV BASE_PATH=${BASE_PATH}
+# PORT is required by vite.config.ts even during build; use a dummy value
+ENV PORT=3000
+ENV NODE_ENV=production
+
+RUN pnpm --filter @workspace/emulator run build
+
+# ── Stage 2: nginx static file server ─────────────────────────────────────────
+FROM nginx:alpine AS runner
+
+# Remove the default nginx config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Copy the SPA-friendly nginx config (shared with the portal image)
+COPY nginx.portal.conf /etc/nginx/conf.d/default.conf
+
+# Copy the built static files
+COPY --from=builder /repo/artifacts/emulator/dist/public /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -16,3 +16,6 @@ images:
   - name: ghcr.io/andyelsen85-bit/range-master/portal
     newName: ghcr.io/andyelsen85-bit/range-master/portal
     newTag: latest
+  - name: ghcr.io/andyelsen85-bit/range-master/emulator
+    newName: ghcr.io/andyelsen85-bit/range-master/emulator
+    newTag: latest

@@ -2,8 +2,9 @@
 # Ingress — adapt to your ingress controller (nginx-ingress, Traefik, etc.)
 #
 # Route rules:
-#   /api/*  →  api-server:8080   (REST API)
-#   /*      →  portal:80         (static SPA)
+#   /api/*       →  api-server:8080   (REST API)
+#   /emulator/*  →  emulator:80       (static SPA, built with /emulator/ base)
+#   /*           →  portal:80         (static SPA)
 #
 # Your external reverse proxy (with HTTPS) should forward traffic to this
 # Ingress (or directly to the NodePort/LoadBalancer services if you prefer).
@@ -31,6 +32,13 @@ spec:
                 name: api-server
                 port:
                   number: 8080
+          - path: /emulator(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: emulator
+                port:
+                  number: 80
           - path: /()(.*)
             pathType: ImplementationSpecific
             backend:

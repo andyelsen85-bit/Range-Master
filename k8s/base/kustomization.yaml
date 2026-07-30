@@ -12,3 +12,5 @@ resources:
   - api-server/service.yaml
   - portal/deployment.yaml
   - portal/service.yaml
+  - emulator/deployment.yaml
+  - emulator/service.yaml
