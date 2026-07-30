@@ -1,0 +1,786 @@
+{
+  "id": "df65218d-cbde-4482-9924-092201869d8f",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.spieler": {
+      "name": "spieler",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mitglied_nr": {
+          "name": "mitglied_nr",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portal_aktiv": {
+          "name": "portal_aktiv",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_admin": {
+          "name": "is_admin",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "passwort_hash": {
+          "name": "passwort_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "eingeladen_at": {
+          "name": "eingeladen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "spieler_email_unique": {
+          "name": "spieler_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        },
+        "spieler_mitglied_nr_unique": {
+          "name": "spieler_mitglied_nr_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "mitglied_nr"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.spiele": {
+      "name": "spiele",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "datum": {
+          "name": "datum",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modus": {
+          "name": "modus",
+          "type": "modus",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'NORMAL'"
+        },
+        "lauf": {
+          "name": "lauf",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tauben_pro_lauf": {
+          "name": "tauben_pro_lauf",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 9
+        },
+        "abgeschlossen": {
+          "name": "abgeschlossen",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "synced_at": {
+          "name": "synced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "spiele_external_id_unique": {
+          "name": "spiele_external_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "external_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.spiel_teilnahmen": {
+      "name": "spiel_teilnahmen",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "spiel_id": {
+          "name": "spiel_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spieler_id": {
+          "name": "spieler_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_posten": {
+          "name": "start_posten",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "punkte": {
+          "name": "punkte",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "lauf": {
+          "name": "lauf",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "spiel_teilnahmen_spiel_id_spiele_id_fk": {
+          "name": "spiel_teilnahmen_spiel_id_spiele_id_fk",
+          "tableFrom": "spiel_teilnahmen",
+          "tableTo": "spiele",
+          "columnsFrom": [
+            "spiel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "spiel_teilnahmen_spieler_id_spieler_id_fk": {
+          "name": "spiel_teilnahmen_spieler_id_spieler_id_fk",
+          "tableFrom": "spiel_teilnahmen",
+          "tableTo": "spieler",
+          "columnsFrom": [
+            "spieler_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "spiel_teilnahmen_spiel_id_spieler_id_lauf_unique": {
+          "name": "spiel_teilnahmen_spiel_id_spieler_id_lauf_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "spiel_id",
+            "spieler_id",
+            "lauf"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ergebnisse": {
+      "name": "ergebnisse",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "spiel_id": {
+          "name": "spiel_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spieler_id": {
+          "name": "spieler_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lauf": {
+          "name": "lauf",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "taube": {
+          "name": "taube",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "maschine": {
+          "name": "maschine",
+          "type": "maschine",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "posten": {
+          "name": "posten",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "schuss1": {
+          "name": "schuss1",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "schuss2": {
+          "name": "schuss2",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "punkte": {
+          "name": "punkte",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "wiederholt": {
+          "name": "wiederholt",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "ergebnisse_spiel_id_spiele_id_fk": {
+          "name": "ergebnisse_spiel_id_spiele_id_fk",
+          "tableFrom": "ergebnisse",
+          "tableTo": "spiele",
+          "columnsFrom": [
+            "spiel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "ergebnisse_spieler_id_spieler_id_fk": {
+          "name": "ergebnisse_spieler_id_spieler_id_fk",
+          "tableFrom": "ergebnisse",
+          "tableTo": "spieler",
+          "columnsFrom": [
+            "spieler_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.api_keys": {
+      "name": "api_keys",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "api_keys_key_unique": {
+          "name": "api_keys_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.kredit_events": {
+      "name": "kredit_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spieler_id": {
+          "name": "spieler_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "datum": {
+          "name": "datum",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "typ": {
+          "name": "typ",
+          "type": "kredit_typ",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "anzahl": {
+          "name": "anzahl",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "kredit_events_datum_idx": {
+          "name": "kredit_events_datum_idx",
+          "columns": [
+            {
+              "expression": "datum",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "kredit_events_spieler_id_spieler_id_fk": {
+          "name": "kredit_events_spieler_id_spieler_id_fk",
+          "tableFrom": "kredit_events",
+          "tableTo": "spieler",
+          "columnsFrom": [
+            "spieler_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "kredit_events_external_id_unique": {
+          "name": "kredit_events_external_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "external_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.smtp_settings": {
+      "name": "smtp_settings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "host": {
+          "name": "host",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "port": {
+          "name": "port",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 587
+        },
+        "username": {
+          "name": "username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "passwort": {
+          "name": "passwort",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "from_address": {
+          "name": "from_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "verschluesselung": {
+          "name": "verschluesselung",
+          "type": "smtp_verschluesselung",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'STARTTLS'"
+        },
+        "ignore_tls_errors": {
+          "name": "ignore_tls_errors",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "portal_url": {
+          "name": "portal_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.spieler_updates": {
+      "name": "spieler_updates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spieler_id": {
+          "name": "spieler_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "typ": {
+          "name": "typ",
+          "type": "spieler_update_typ",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_status": {
+          "name": "email_status",
+          "type": "email_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'NONE'"
+        },
+        "email_error": {
+          "name": "email_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "spieler_updates_spieler_idx": {
+          "name": "spieler_updates_spieler_idx",
+          "columns": [
+            {
+              "expression": "spieler_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "spieler_updates_spieler_id_spieler_id_fk": {
+          "name": "spieler_updates_spieler_id_spieler_id_fk",
+          "tableFrom": "spieler_updates",
+          "tableTo": "spieler",
+          "columnsFrom": [
+            "spieler_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "spieler_updates_external_id_unique": {
+          "name": "spieler_updates_external_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "external_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.maschine": {
+      "name": "maschine",
+      "schema": "public",
+      "values": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H"
+      ]
+    },
+    "public.modus": {
+      "name": "modus",
+      "schema": "public",
+      "values": [
+        "NORMAL",
+        "HARAKIRI",
+        "HARAKIRI_DELAYED",
+        "HARAKIRI_FULL",
+        "CUSTOM_1",
+        "CUSTOM_2",
+        "CUSTOM_3"
+      ]
+    },
+    "public.kredit_typ": {
+      "name": "kredit_typ",
+      "schema": "public",
+      "values": [
+        "GRANT",
+        "USE"
+      ]
+    },
+    "public.smtp_verschluesselung": {
+      "name": "smtp_verschluesselung",
+      "schema": "public",
+      "values": [
+        "NONE",
+        "STARTTLS",
+        "SSL"
+      ]
+    },
+    "public.email_status": {
+      "name": "email_status",
+      "schema": "public",
+      "values": [
+        "NONE",
+        "PENDING",
+        "SENT",
+        "FAILED"
+      ]
+    },
+    "public.spieler_update_typ": {
+      "name": "spieler_update_typ",
+      "schema": "public",
+      "values": [
+        "UPDATE",
+        "PASSWORT_RESET"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

@@ -19,7 +19,7 @@ RUN pnpm install --frozen-lockfile
 # Copy the full source
 COPY . .
 
-# Build the API server bundle
+# Build the API server bundle (produces dist/index.mjs + dist/migrate.mjs)
 RUN pnpm --filter @workspace/api-server run build
 
 # ── Stage 2: runner ───────────────────────────────────────────────────────────
@@ -30,8 +30,11 @@ ENV PORT=8080
 
 WORKDIR /app
 
-# Copy only the compiled bundle and any pino worker files it emits
+# Compiled bundle
 COPY --from=builder /repo/artifacts/api-server/dist ./dist
+
+# Drizzle SQL migration files (used by dist/migrate.mjs at runtime)
+COPY --from=builder /repo/lib/db/drizzle ./drizzle
 
 EXPOSE 8080
 

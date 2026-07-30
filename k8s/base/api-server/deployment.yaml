@@ -44,9 +44,7 @@ spec:
           imagePullPolicy: Always
           command:
             - node
-            - --input-type=module
-            - --eval
-            - "import '/app/lib/db/migrate.mjs'"
+            - /app/dist/migrate.mjs
           env:
             - name: DATABASE_URL
               valueFrom:
