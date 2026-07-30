@@ -108,3 +108,29 @@ jobs:
             BASE_PATH=/emulator/
           cache-from: type=gha,scope=emulator
           cache-to: type=gha,mode=max,scope=emulator
+
+      # ── Update image tags in GitLab manifests repo ──────────────────────────
+      # Requires two GitHub secrets:
+      #   GITLAB_TOKEN    — GitLab personal access token (read_repository + write_repository)
+      #   GITLAB_REPO_URL — full HTTPS URL, e.g. https://gitlab.com/youruser/rangemaster-k8s.git
+      - name: Push image tags to GitLab manifests
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GITLAB_REPO_URL: ${{ secrets.GITLAB_REPO_URL }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Inject token into URL for auth
+          AUTHED_URL="${GITLAB_REPO_URL/https:\/\//https://oauth2:${GITLAB_TOKEN}@}"
+          git clone --depth=1 "$AUTHED_URL" _manifests
+
+          cd _manifests
+
+          # Replace every newTag value (regardless of previous tag) with the new SHA
+          sed -i "s/newTag: .*/newTag: ${SHA}/g" k8s/overlays/production/kustomization.yaml
+
+          git config user.email "ci@rangemaster"
+          git config user.name "Range-Master CI"
+          git add k8s/overlays/production/kustomization.yaml
+          git diff --cached --quiet && echo "No tag change, skipping commit" && exit 0
+          git commit -m "ci: deploy ${SHA:0:7} [skip ci]"
+          git push
