@@ -4,11 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function Statistiken() {
+interface StatistikenProps {
+  spielerId?: number;
+}
+
+export default function Statistiken({ spielerId }: StatistikenProps = {}) {
   const user = useAuthStore((s) => s.user);
-  
-  const { data: stats, isLoading } = useGetStatistik(user?.id ?? 0, {
-    query: { enabled: !!user?.id, queryKey: getGetStatistikQueryKey(user?.id ?? 0) }
+  const effectiveId = spielerId ?? user?.id ?? 0;
+
+  const { data: stats, isLoading } = useGetStatistik(effectiveId, {
+    query: { enabled: !!effectiveId, queryKey: getGetStatistikQueryKey(effectiveId) }
   });
 
   const machineData = stats?.maschinen 

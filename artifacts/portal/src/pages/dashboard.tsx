@@ -5,15 +5,22 @@ import { Activity, Target, Trophy, Crosshair, AlertCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function Dashboard() {
+interface DashboardProps {
+  spielerId?: number;
+  playerName?: string;
+}
+
+export default function Dashboard({ spielerId, playerName }: DashboardProps = {}) {
   const user = useAuthStore((s) => s.user);
-  
-  const { data: stats, isLoading: statsLoading } = useGetStatistik(user?.id ?? 0, {
-    query: { enabled: !!user?.id, queryKey: getGetStatistikQueryKey(user?.id ?? 0) }
+  const effectiveId = spielerId ?? user?.id ?? 0;
+  const effectiveName = playerName ?? user?.name;
+
+  const { data: stats, isLoading: statsLoading } = useGetStatistik(effectiveId, {
+    query: { enabled: !!effectiveId, queryKey: getGetStatistikQueryKey(effectiveId) }
   });
 
-  const { data: verlaufData, isLoading: verlaufLoading } = useGetStatistikVerlauf(user?.id ?? 0, { limit: 10 }, {
-    query: { enabled: !!user?.id, queryKey: getGetStatistikVerlaufQueryKey(user?.id ?? 0, { limit: 10 }) }
+  const { data: verlaufData, isLoading: verlaufLoading } = useGetStatistikVerlauf(effectiveId, { limit: 10 }, {
+    query: { enabled: !!effectiveId, queryKey: getGetStatistikVerlaufQueryKey(effectiveId, { limit: 10 }) }
   });
 
   const machineData = stats?.maschinen 
@@ -32,7 +39,7 @@ export default function Dashboard() {
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border/50 pb-6">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight text-foreground">Moien, {user?.name}</h1>
+          <h1 className="text-4xl font-bold tracking-tight text-foreground">Moien, {effectiveName}</h1>
           <div className="flex items-center gap-3 mt-2">
             <span className="flex h-2 w-2 rounded-full bg-primary animate-pulse" />
             <p className="text-muted-foreground text-xs font-mono uppercase tracking-widest font-bold">

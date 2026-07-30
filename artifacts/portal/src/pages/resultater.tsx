@@ -4,11 +4,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { AlertCircle } from "lucide-react";
 
-export default function Resultater() {
+interface ResultaterProps {
+  spielerId?: number;
+}
+
+export default function Resultater({ spielerId }: ResultaterProps = {}) {
   const user = useAuthStore((s) => s.user);
-  
-  const { data, isLoading } = useGetSpielerErgebnisse(user?.id ?? 0, {
-    query: { enabled: !!user?.id, queryKey: getGetSpielerErgebnisseQueryKey(user?.id ?? 0) }
+  const effectiveId = spielerId ?? user?.id ?? 0;
+
+  const { data, isLoading } = useGetSpielerErgebnisse(effectiveId, {
+    query: { enabled: !!effectiveId, queryKey: getGetSpielerErgebnisseQueryKey(effectiveId) }
   });
 
   // Group by spielId only — both Läufe belong to one game card

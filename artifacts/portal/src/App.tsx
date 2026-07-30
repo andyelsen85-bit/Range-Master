@@ -14,8 +14,8 @@ import Resultater from '@/pages/resultater';
 import Rangliste from '@/pages/rangliste';
 import Statistiken from '@/pages/statistiken';
 import Admin from '@/pages/admin';
-import AdminSpieler from '@/pages/admin-spieler';
 import AdminApiKeys from '@/pages/admin-api-keys';
+import AdminSpielrProfil from '@/pages/admin-spieler-profil';
 import Profil from '@/pages/profil';
 import NotFound from '@/pages/not-found';
 
@@ -69,7 +69,7 @@ function Router() {
             <Route path="/statistiken" component={() => <PrivateRoute component={Statistiken} />} />
             <Route path="/profil" component={() => <PrivateRoute component={Profil} />} />
             <Route path="/admin" component={() => <AdminRoute component={Admin} />} />
-            <Route path="/admin/spieler/:id" component={() => <AdminRoute component={AdminSpieler} />} />
+            <Route path="/admin/spieler/:id" component={(props) => <AdminRoute component={AdminSpielrProfil} {...props} />} />
             <Route path="/admin/api-schluesselen" component={() => <AdminRoute component={AdminApiKeys} />} />
             <Route component={NotFound} />
           </Switch>
