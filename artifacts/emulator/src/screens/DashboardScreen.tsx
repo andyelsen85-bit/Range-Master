@@ -87,26 +87,6 @@ export function DashboardScreen() {
             )}
           </div>
 
-          {/* Current Players */}
-          <div className="bg-card border-2 border-border rounded-xl p-6">
-            <h2 className="text-lg font-bold mb-4 text-foreground/70 uppercase tracking-widest">
-              Schützen ({store.spieler.length})
-            </h2>
-            <div className="flex gap-4">
-              {store.spieler.map((s) => (
-                <div key={s.id} className="bg-background border-2 border-border rounded-lg p-4 flex-1 flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-lg">
-                    P{s.startPosten}
-                  </div>
-                  <div className="font-bold text-lg truncate">{s.name}</div>
-                </div>
-              ))}
-              {store.spieler.length === 0 && (
-                <div className="text-muted-foreground font-bold italic">Keng Schützen konfiguriert</div>
-              )}
-            </div>
-          </div>
-
         </div>
 
         {/* Sidebar */}
