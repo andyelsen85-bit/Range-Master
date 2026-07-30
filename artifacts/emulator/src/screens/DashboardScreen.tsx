@@ -44,7 +44,7 @@ export function DashboardScreen() {
               <div className="flex flex-col gap-4 flex-1 overflow-y-auto">
                 {store.gameHistory.slice(0, 4).map((game) => {
                   const playerIds = [...new Set(game.teilnahmen.map(t => t.spielerId))];
-                  const maxPts = game.lauf * game.taubenProLauf;
+                  const maxPts = game.lauf * game.taubenProLauf * 2;
                   return (
                     <div key={game.externalId} className="bg-background border-2 border-border rounded-xl p-5">
                       <div className="flex items-center justify-between mb-3">
