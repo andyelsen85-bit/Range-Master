@@ -419,8 +419,22 @@ function saveGameHistory(history: FinishedGame[]) {
 function loadSettings(): Partial<Settings> {
   try {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SETTINGS_KEY) : null;
-    if (!raw) return {};
-    return JSON.parse(raw) as Partial<Settings>;
+    const fromStorage: Partial<Settings> = raw ? (JSON.parse(raw) as Partial<Settings>) : {};
+
+    // URL params override localStorage — allows bookmarking a pre-configured emulator:
+    //   /emulator?apiKey=abc123&apiUrl=https://rangemaster.hostzone.lu/api
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const urlApiKey = params?.get('apiKey');
+    const urlApiUrl = params?.get('apiUrl');
+
+    if (urlApiKey || urlApiUrl) {
+      if (urlApiKey) fromStorage.apiKey = urlApiKey;
+      if (urlApiUrl) fromStorage.apiUrl = urlApiUrl;
+      // Persist so the next plain reload (without params) still works
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(fromStorage)); } catch {}
+    }
+
+    return fromStorage;
   } catch {
     return {};
   }
