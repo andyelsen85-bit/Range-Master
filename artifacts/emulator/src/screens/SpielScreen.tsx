@@ -213,32 +213,58 @@ export function SpielScreen() {
 
         {/* ── Score Entry Buttons — flex so they stretch to full remaining height ── */}
         <div className="flex-1 p-5 flex gap-5">
-          <TouchButton
-            variant="success"
-            className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(22,163,74)] active:translate-y-3 active:shadow-none transition-all"
-            onClick={() => store.eintragenErgebnis(true, false)}
-          >
-            <div className="font-black text-8xl">2</div>
-            <div className="uppercase font-bold tracking-widest text-xl opacity-90">1. Schoss</div>
-          </TouchButton>
+          {doubletteNr ? (
+            /* ── Doublette (H): hit = 2 pts, miss = 0 pts — no 2nd shot ── */
+            <>
+              <TouchButton
+                variant="success"
+                className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(22,163,74)] active:translate-y-3 active:shadow-none transition-all"
+                onClick={() => store.eintragenErgebnis(true, false)}
+              >
+                <div className="font-black text-8xl">2</div>
+                <div className="uppercase font-bold tracking-widest text-xl opacity-90">Getraff</div>
+              </TouchButton>
 
-          <TouchButton
-            variant="warning"
-            className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(217,119,6)] active:translate-y-3 active:shadow-none transition-all"
-            onClick={() => store.eintragenErgebnis(false, true)}
-          >
-            <div className="font-black text-8xl">1</div>
-            <div className="uppercase font-bold tracking-widest text-xl opacity-90">2. Schoss</div>
-          </TouchButton>
+              <TouchButton
+                variant="destructive"
+                className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(185,28,28)] active:translate-y-3 active:shadow-none transition-all"
+                onClick={() => store.eintragenErgebnis(false, false)}
+              >
+                <div className="font-black text-8xl">0</div>
+                <div className="uppercase font-bold tracking-widest text-xl opacity-90">Fehl</div>
+              </TouchButton>
+            </>
+          ) : (
+            /* ── Single clay: 1st shot = 2 pts, 2nd shot = 1 pt, miss = 0 ── */
+            <>
+              <TouchButton
+                variant="success"
+                className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(22,163,74)] active:translate-y-3 active:shadow-none transition-all"
+                onClick={() => store.eintragenErgebnis(true, false)}
+              >
+                <div className="font-black text-8xl">2</div>
+                <div className="uppercase font-bold tracking-widest text-xl opacity-90">1. Schoss</div>
+              </TouchButton>
 
-          <TouchButton
-            variant="destructive"
-            className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(185,28,28)] active:translate-y-3 active:shadow-none transition-all"
-            onClick={() => store.eintragenErgebnis(false, false)}
-          >
-            <div className="font-black text-8xl">0</div>
-            <div className="uppercase font-bold tracking-widest text-xl opacity-90">Fehl</div>
-          </TouchButton>
+              <TouchButton
+                variant="warning"
+                className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(217,119,6)] active:translate-y-3 active:shadow-none transition-all"
+                onClick={() => store.eintragenErgebnis(false, true)}
+              >
+                <div className="font-black text-8xl">1</div>
+                <div className="uppercase font-bold tracking-widest text-xl opacity-90">2. Schoss</div>
+              </TouchButton>
+
+              <TouchButton
+                variant="destructive"
+                className="flex-1 h-auto flex-col gap-3 shadow-[0_12px_0_rgb(185,28,28)] active:translate-y-3 active:shadow-none transition-all"
+                onClick={() => store.eintragenErgebnis(false, false)}
+              >
+                <div className="font-black text-8xl">0</div>
+                <div className="uppercase font-bold tracking-widest text-xl opacity-90">Fehl</div>
+              </TouchButton>
+            </>
+          )}
         </div>
 
       </div>
