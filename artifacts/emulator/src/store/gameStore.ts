@@ -89,6 +89,7 @@ interface GameState extends Settings {
   // Actions
   setScreen: (screen: Screen) => void;
   setSpieler: (spieler: Spieler[]) => void;
+  setSpielerAufPosten: (post: number, data: { id: number; name: string } | null) => void;
   updateSpielerName: (id: number, name: string) => void;
   setModus: (modus: Modus) => void;
   toggleMaschineAktiv: (m: Maschine) => void;
@@ -268,11 +269,7 @@ function saveCachedSpieler(spieler: PortalSpieler[]) {
 
 const saved = loadSettings();
 
-const INIT_SPIELER: Spieler[] = [
-  { id: 1, name: 'Schütze 1', punkte: 0, startPosten: 1 },
-  { id: 2, name: 'Schütze 2', punkte: 0, startPosten: 2 },
-  { id: 3, name: 'Schütze 3', punkte: 0, startPosten: 3 },
-];
+const INIT_SPIELER: Spieler[] = [];
 
 export const useGameStore = create<GameState>((set, get) => {
   const modus: Modus = saved.modus ?? 'NORMAL';
@@ -322,7 +319,18 @@ export const useGameStore = create<GameState>((set, get) => {
 
     setScreen: (screen) => set({ screen }),
 
-    setSpieler: (spieler) => set({ spieler: assignPostenToSpieler(spieler) }),
+    setSpieler: (spieler) => set({ spieler }),
+
+    setSpielerAufPosten: (post, data) => set((state) => {
+      // Remove any existing occupant at this post
+      let next = state.spieler.filter(s => s.startPosten !== post);
+      if (data !== null) {
+        // Also remove this player from any other post they were assigned to
+        next = next.filter(s => s.id !== data.id);
+        next = [...next, { id: data.id, name: data.name, punkte: 0, startPosten: post }];
+      }
+      return { spieler: next.sort((a, b) => a.startPosten - b.startPosten) };
+    }),
 
     updateSpielerName: (id, name) => set((state) => ({
       spieler: state.spieler.map(s => s.id === id ? { ...s, name } : s),
@@ -357,7 +365,10 @@ export const useGameStore = create<GameState>((set, get) => {
       spielerIndex: 0,
       ergebnisse: [],
       sequenz: generateSequenz(state.modus, state.maschinenAktiv, state.customSequenzen),
-      spieler: state.spieler.map(s => ({ ...s, punkte: 0 })),
+      // Ensure consistent game order by startPosten; reset points
+      spieler: [...state.spieler]
+        .sort((a, b) => a.startPosten - b.startPosten)
+        .map(s => ({ ...s, punkte: 0 })),
       spielId: generateSpielId(),
       syncStatus: 'idle',
     })),
