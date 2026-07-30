@@ -20,6 +20,7 @@ export const spieleTable = pgTable("spiele", {
   datum: timestamp("datum", { withTimezone: true }).notNull(),
   modus: modusEnum("modus").notNull().default("NORMAL"),
   lauf: integer("lauf").notNull(),
+  taubenProLauf: integer("tauben_pro_lauf").notNull().default(9),
   abgeschlossen: boolean("abgeschlossen").notNull().default(false),
   syncedAt: timestamp("synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

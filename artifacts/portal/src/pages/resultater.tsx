@@ -73,6 +73,10 @@ function ResultGroup({ ergebnisse }: { ergebnisse: ErgebnisWithSpiel[] }) {
   const lauf1Pts = lauf1.reduce((s, e) => s + e.punkte, 0);
   const lauf2Pts = lauf2.reduce((s, e) => s + e.punkte, 0);
 
+  // Dynamic max: each taube is worth max 2 pts
+  const maxPerLauf = Math.max(lauf1.length, lauf2.length, 1) * 2;
+  const maxTotal = (lauf1.length + lauf2.length) * 2;
+
   return (
     <div className="bg-card rounded-xl border border-border/50 overflow-hidden shadow-sm">
       {/* Game header */}
@@ -84,26 +88,28 @@ function ResultGroup({ ergebnisse }: { ergebnisse: ErgebnisWithSpiel[] }) {
               {first.spiel.modus}
             </Badge>
           </div>
-          <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest font-bold">2 Läufe • 18 Tauben / Lauf</p>
+          <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest font-bold">
+            2 Läufe • {Math.max(lauf1.length, lauf2.length)} Tauben / Lauf • max {maxTotal} Pkt
+          </p>
         </div>
         <div className="flex items-end gap-6">
           {/* Per-lauf subtotals */}
           <div className="flex gap-4 text-sm font-mono text-muted-foreground">
             <div className="text-center">
               <div className="text-[10px] uppercase tracking-widest mb-1 font-bold">Lauf 1</div>
-              <div className="font-black text-foreground">{lauf1Pts}<span className="text-muted-foreground font-bold">/18</span></div>
+              <div className="font-black text-foreground">{lauf1Pts}<span className="text-muted-foreground font-bold">/{maxPerLauf}</span></div>
             </div>
             <div className="text-muted-foreground/30 self-center text-lg">+</div>
             <div className="text-center">
               <div className="text-[10px] uppercase tracking-widest mb-1 font-bold">Lauf 2</div>
-              <div className="font-black text-foreground">{lauf2Pts}<span className="text-muted-foreground font-bold">/18</span></div>
+              <div className="font-black text-foreground">{lauf2Pts}<span className="text-muted-foreground font-bold">/{maxPerLauf}</span></div>
             </div>
           </div>
           {/* Total */}
           <div className="flex flex-col items-end">
             <div className="text-xs text-muted-foreground uppercase tracking-[0.2em] font-bold mb-1">Total</div>
             <div className="text-3xl font-black tracking-tight text-primary">
-              {totalPoints} <span className="text-muted-foreground text-xl font-bold">/ 36</span>
+              {totalPoints} <span className="text-muted-foreground text-xl font-bold">/ {maxTotal}</span>
             </div>
           </div>
         </div>

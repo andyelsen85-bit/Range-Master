@@ -35,6 +35,10 @@ export default function Dashboard({ spielerId, playerName }: DashboardProps = {}
     date: new Date(v.datum).toLocaleDateString('lb-LU', { day: '2-digit', month: '2-digit' })
   })) || [];
 
+  const trendYMax = trendData.length > 0
+    ? Math.max(...trendData.map(v => v.maxPunkte ?? 36))
+    : 36;
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border/50 pb-6">
@@ -56,9 +60,9 @@ export default function Dashboard({ spielerId, playerName }: DashboardProps = {}
       ) : stats ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard title="Saison Spiller" value={stats.gesamtSpiele} icon={<Activity className="text-chart-2" />} />
-          <StatCard title="Duerchschnëtt" value={stats.durchschnitt.toFixed(1)} icon={<Crosshair className="text-chart-3" />} suffix="/ 36" />
+          <StatCard title="Duerchschnëtt" value={stats.durchschnitt.toFixed(1)} icon={<Crosshair className="text-chart-3" />} />
           <StatCard title="Trefferquote" value={`${Math.round(stats.trefferquote)}%`} icon={<Target className="text-primary" />} />
-          <StatCard title="Bescht Resultat" value={stats.bestPunkte} icon={<Trophy className="text-chart-4" />} suffix="/ 36" />
+          <StatCard title="Bescht Resultat" value={stats.bestPunkte} icon={<Trophy className="text-chart-4" />} />
         </div>
       ) : (
         <div className="p-12 text-center bg-card rounded-xl border border-border/50">
@@ -107,7 +111,7 @@ export default function Dashboard({ spielerId, playerName }: DashboardProps = {}
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} fontFamily="var(--font-mono)" />
-                  <YAxis domain={[0, 36]} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} fontFamily="var(--font-mono)" />
+                  <YAxis domain={[0, trendYMax]} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} fontFamily="var(--font-mono)" />
                   <Tooltip 
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '8px', fontFamily: 'var(--font-sans)', fontWeight: 600 }}
                   />

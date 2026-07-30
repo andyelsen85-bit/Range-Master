@@ -130,9 +130,9 @@ function DashboardTab({ spielerId }: { spielerId: number }) {
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Saison Spiller" value={stats.gesamtSpiele} icon={<Activity className="text-chart-2" />} />
-        <StatCard title="Duerchschnëtt" value={stats.durchschnitt.toFixed(1)} icon={<Crosshair className="text-chart-3" />} suffix="/ 36" />
+        <StatCard title="Duerchschnëtt" value={stats.durchschnitt.toFixed(1)} icon={<Crosshair className="text-chart-3" />} />
         <StatCard title="Trefferquote" value={`${Math.round(stats.trefferquote)}%`} icon={<Target className="text-primary" />} />
-        <StatCard title="Bescht Resultat" value={stats.bestPunkte} icon={<Trophy className="text-chart-4" />} suffix="/ 36" />
+        <StatCard title="Bescht Resultat" value={stats.bestPunkte} icon={<Trophy className="text-chart-4" />} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -170,7 +170,7 @@ function DashboardTab({ spielerId }: { spielerId: number }) {
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={11} fontWeight={700} />
-                  <YAxis domain={[0, 36]} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                  <YAxis domain={[0, trendData.length > 0 ? Math.max(...trendData.map(v => v.maxPunkte ?? 36)) : 36]} stroke="hsl(var(--muted-foreground))" fontSize={11} />
                   <Tooltip formatter={(v) => [`${v} Punkte`, "Resultat"]} contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: "8px", fontWeight: 600 }} />
                   <Area type="monotone" dataKey="punkte" stroke="hsl(var(--primary))" strokeWidth={3} fill="url(#adminTrend)" dot={{ fill: "hsl(var(--primary))", r: 4 }} />
                 </AreaChart>
@@ -217,8 +217,8 @@ function ResultaterTab({ spielerId }: { spielerId: number }) {
         const lauf1 = group.filter((e) => e.lauf === 1);
         const lauf2 = group.filter((e) => e.lauf === 2);
         const totalPunkte = group.reduce((s, e) => s + e.punkte, 0);
-        const maxPunkte = group.reduce((s, e) => s + (e.maschine === "H" ? 2 : 2), 0);
-        const pct = Math.round((totalPunkte / 36) * 100);
+        const maxPunkte = group.length * 2; // each taube = max 2 pts
+        const pct = maxPunkte > 0 ? Math.round((totalPunkte / maxPunkte) * 100) : 0;
 
         return (
           <div key={spiel.id} className="bg-card border border-border/50 rounded-xl overflow-hidden">
@@ -234,7 +234,7 @@ function ResultaterTab({ spielerId }: { spielerId: number }) {
                   "text-lg font-black font-mono tracking-tight",
                   pct >= 80 ? "text-green-400" : pct >= 60 ? "text-primary" : "text-muted-foreground"
                 )}>
-                  {totalPunkte} <span className="text-muted-foreground/50 text-sm font-bold">/ 36</span>
+                  {totalPunkte} <span className="text-muted-foreground/50 text-sm font-bold">/ {maxPunkte}</span>
                 </div>
               </div>
             </div>

@@ -167,6 +167,8 @@ export interface SyncSpiel {
      * @maximum 2
      */
   lauf: number;
+  /** Number of clay targets per Lauf (default 9; custom games may differ) */
+  taubenProLauf?: number;
   abgeschlossen: boolean;
   teilnahmen: SyncTeilnahme[];
   ergebnisse: SyncErgebnis[];
@@ -197,6 +199,7 @@ export type GetStatistikVerlauf200VerlaufItem = {
   datum: string;
   punkte: number;
   modus: Modus;
+  maxPunkte: number;
 };
 
 export type GetStatistikVerlauf200 = {

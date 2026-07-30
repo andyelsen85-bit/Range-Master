@@ -44,6 +44,7 @@ export interface PendingGame {
   datum: string;
   modus: Modus;
   lauf: number;
+  taubenProLauf: number;
   abgeschlossen: boolean;
   teilnahmen: Array<{
     spielerId: number;
@@ -52,6 +53,11 @@ export interface PendingGame {
     lauf: number;
   }>;
   ergebnisse: Ergebnis[];
+}
+
+/** Compute tauben per Lauf from a sequence (H = 2 tauben) */
+export function taubenFromSequenz(seq: SequenzEintrag[]): number {
+  return seq.length; // H already expanded to 2 entries in generateSequenz
 }
 
 interface Settings {
@@ -150,9 +156,9 @@ function generateSequenz(
   } else if (modus === 'HARAKIRI_FULL') {
     order = shuffleArray([...single, ...(hAktiv ? (['H'] as Maschine[]) : [])]);
   } else {
-    // CUSTOM modes
+    // CUSTOM modes: use the sequence exactly as defined — ignore maschinenAktiv
     const key = modus as 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3';
-    order = customSequenzen[key].filter(m => maschinenAktiv[m]);
+    order = customSequenzen[key];
   }
 
   // Expand: A–G = 1 entry each; H = 2 entries (Doublette, relay fires once)
@@ -453,6 +459,7 @@ export const useGameStore = create<GameState>((set, get) => {
           datum: new Date().toISOString(),
           modus: state.modus,
           lauf: 2,
+          taubenProLauf: state.sequenz.length,
           abgeschlossen: true,
           teilnahmen,
           ergebnisse: allErgebnisse,

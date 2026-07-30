@@ -12,12 +12,12 @@ const modusValues = ["NORMAL", "HARAKIRI", "HARAKIRI_DELAYED", "HARAKIRI_FULL", 
 const ErgebnisSchema = z.object({
   spielerId: z.number().int(),
   lauf: z.number().int().min(1).max(2),
-  taube: z.number().int().min(1).max(9),
+  taube: z.number().int().min(1),          // no upper limit — custom games can have many tauben
   maschine: z.enum(maschineValues),
   posten: z.number().int().min(1).max(6),
   schuss1: z.boolean(),
   schuss2: z.boolean(),
-  punkte: z.number().int().min(0).max(4),
+  punkte: z.number().int().min(0).max(4),  // per-taube max is always 2 (or 4 for H? no — still 2 per clay)
   wiederholt: z.boolean().default(false),
 });
 
@@ -26,12 +26,13 @@ const SpielSchema = z.object({
   datum: z.string().datetime(),
   modus: z.enum(modusValues),
   lauf: z.number().int().min(1).max(2),
+  taubenProLauf: z.number().int().min(1).default(9),
   abgeschlossen: z.boolean(),
   teilnahmen: z.array(
     z.object({
       spielerId: z.number().int(),
       startPosten: z.number().int().min(1).max(6),
-      punkte: z.number().int().min(0).max(36),
+      punkte: z.number().int().min(0),     // no upper cap — depends on custom sequence length
       lauf: z.number().int().min(1).max(2),
     })
   ),
@@ -98,6 +99,7 @@ router.post("/spiele", requireApiKey, async (req, res) => {
         datum: new Date(s.datum),
         modus: s.modus,
         lauf: s.lauf,
+        taubenProLauf: s.taubenProLauf,
         abgeschlossen: s.abgeschlossen,
         syncedAt: new Date(),
       })

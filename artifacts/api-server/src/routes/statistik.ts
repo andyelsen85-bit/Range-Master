@@ -79,11 +79,19 @@ router.get("/:spielerId/verlauf", authenticate, async (req, res) => {
       punkte: sql<number>`cast(sum(${spielTeilnahmenTable.punkte}) as int)`,
       datum: spieleTable.datum,
       modus: spieleTable.modus,
+      taubenProLauf: spieleTable.taubenProLauf,
+      lauf: spieleTable.lauf,
     })
     .from(spielTeilnahmenTable)
     .innerJoin(spieleTable, eq(spielTeilnahmenTable.spielId, spieleTable.id))
     .where(eq(spielTeilnahmenTable.spielerId, spielerId))
-    .groupBy(spielTeilnahmenTable.spielId, spieleTable.datum, spieleTable.modus)
+    .groupBy(
+      spielTeilnahmenTable.spielId,
+      spieleTable.datum,
+      spieleTable.modus,
+      spieleTable.taubenProLauf,
+      spieleTable.lauf,
+    )
     .orderBy(desc(spieleTable.datum))
     .limit(limit);
 
@@ -91,6 +99,7 @@ router.get("/:spielerId/verlauf", authenticate, async (req, res) => {
     datum: r.datum.toISOString().slice(0, 10),
     punkte: r.punkte,
     modus: r.modus,
+    maxPunkte: r.taubenProLauf * 2 * r.lauf,
   }));
 
   return res.json({ verlauf });

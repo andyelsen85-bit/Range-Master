@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 
 const ALL_MASCHINEN: Maschine[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
+const MAX_CUSTOM_MASCHINEN = 20;
+
 function CustomSequenzEditor({
   modus,
   label,
@@ -22,20 +24,27 @@ function CustomSequenzEditor({
   useEffect(() => { setDraft(store.customSequenzen[modus]); }, [modus]);
 
   const addMaschine = (m: Maschine) => {
-    if (draft.length >= 9) return;
+    if (draft.length >= MAX_CUSTOM_MASCHINEN) return;
     setDraft([...draft, m]);
   };
 
-  const removeLast = () => setDraft(draft.slice(0, -1));
+  // Remove the entry at a specific index (click-to-remove)
+  const removeAt = (idx: number) => setDraft(draft.filter((_, i) => i !== idx));
 
-  const save = () => {
-    store.setCustomSequenz(modus, draft);
-  };
+  const clearAll = () => setDraft([]);
+
+  const save = () => store.setCustomSequenz(modus, draft);
 
   const isDirty = JSON.stringify(draft) !== JSON.stringify(seq);
 
+  // Live stats
+  const taubenPerLauf = draft.reduce((sum, m) => sum + (m === 'H' ? 2 : 1), 0);
+  const maxPunktePerLauf = taubenPerLauf * 2;
+  const maxPunkteSpill = maxPunktePerLauf * 2; // 2 Läufe
+
   return (
     <div className="bg-background border-2 border-border rounded-xl p-5 flex flex-col gap-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-base uppercase tracking-wider">{label}</h3>
         <div className="flex gap-2">
@@ -44,56 +53,91 @@ function CustomSequenzEditor({
               <Save className="w-3 h-3" /> Späicheren
             </TouchButton>
           )}
-          <TouchButton size="sm" variant="ghost" className="h-8 px-2" onClick={removeLast} disabled={draft.length === 0}>
+          <TouchButton size="sm" variant="ghost" className="h-8 px-2 text-destructive hover:bg-destructive/10"
+            onClick={clearAll} disabled={draft.length === 0} title="Alles läschen">
             <X className="w-4 h-4" />
           </TouchButton>
         </div>
       </div>
 
-      {/* Current sequence */}
-      <div className="flex gap-2 flex-wrap min-h-[48px] bg-black/20 rounded-lg p-2">
-        {draft.map((m, i) => (
-          <div
-            key={i}
-            className={cn(
-              "w-10 h-10 rounded-lg border-2 flex items-center justify-center font-black text-lg",
-              m === 'H'
-                ? "border-amber-500/60 bg-amber-500/15 text-amber-400"
-                : "border-primary/60 bg-primary/15 text-primary",
-            )}
-          >
-            {m}
-          </div>
-        ))}
-        {draft.length === 0 && (
-          <span className="text-muted-foreground/50 text-sm italic self-center px-2">
-            Keng Schanzen — dréckt hei drënner
-          </span>
-        )}
+      {/* Current sequence — click a badge to remove it */}
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
+          Sequenz <span className="text-muted-foreground/50 normal-case font-normal">(tippen op eng Schanz fir ze läschen)</span>
+        </div>
+        <div className="flex gap-2 flex-wrap min-h-[52px] bg-black/20 rounded-lg p-2">
+          {draft.map((m, i) => (
+            <button
+              key={i}
+              onClick={() => removeAt(i)}
+              title="Läschen"
+              className={cn(
+                "w-10 h-10 rounded-lg border-2 flex items-center justify-center font-black text-lg",
+                "transition-all active:scale-90 hover:opacity-60 hover:border-destructive/60 hover:bg-destructive/10",
+                m === 'H'
+                  ? "border-amber-500/60 bg-amber-500/15 text-amber-400"
+                  : "border-primary/60 bg-primary/15 text-primary",
+              )}
+            >
+              {m}
+            </button>
+          ))}
+          {draft.length === 0 && (
+            <span className="text-muted-foreground/50 text-sm italic self-center px-2">
+              Keng Schanzen — dréckt hei drënner fir hinzezefügen
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Machine picker */}
-      <div className="grid grid-cols-8 gap-1">
-        {ALL_MASCHINEN.map(m => (
-          <button
-            key={m}
-            onClick={() => addMaschine(m)}
-            disabled={draft.length >= 9}
-            className={cn(
-              "h-10 rounded-lg border-2 font-black text-base transition-all active:scale-95",
-              m === 'H'
-                ? "border-amber-500/50 bg-amber-500/10 text-amber-400 hover:bg-amber-500/30"
-                : "border-primary/40 bg-primary/10 text-primary hover:bg-primary/30",
-              draft.length >= 9 && "opacity-30 cursor-not-allowed",
-            )}
-          >
-            {m}
-          </button>
-        ))}
+      {/* Machine picker — tap to add */}
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
+          Schanz dobäisetzen
+        </div>
+        <div className="grid grid-cols-8 gap-1">
+          {ALL_MASCHINEN.map(m => (
+            <button
+              key={m}
+              onClick={() => addMaschine(m)}
+              disabled={draft.length >= MAX_CUSTOM_MASCHINEN}
+              className={cn(
+                "h-11 rounded-lg border-2 font-black text-base transition-all active:scale-95",
+                m === 'H'
+                  ? "border-amber-500/50 bg-amber-500/10 text-amber-400 hover:bg-amber-500/30"
+                  : "border-primary/40 bg-primary/10 text-primary hover:bg-primary/30",
+                draft.length >= MAX_CUSTOM_MASCHINEN && "opacity-30 cursor-not-allowed",
+              )}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Live stats */}
+      {draft.length > 0 ? (
+        <div className="grid grid-cols-3 gap-2 mt-1">
+          {[
+            { label: 'Tauben / Lauf', value: taubenPerLauf },
+            { label: 'Max Pkt / Lauf', value: maxPunktePerLauf },
+            { label: 'Max Pkt / Spill', value: maxPunkteSpill },
+          ].map(({ label: l, value: v }) => (
+            <div key={l} className="bg-primary/5 border border-primary/20 rounded-lg p-2 text-center">
+              <div className="text-xl font-black text-primary">{v}</div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mt-0.5">{l}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground/60 italic text-center py-1">
+          Fügt Schanzen dobäi fir d'Statistik ze gesinn
+        </div>
+      )}
 
       <div className="text-xs text-muted-foreground">
-        {draft.length} / 9 Schanzen · H = Doublette (2 Tauben)
+        {draft.length} / {MAX_CUSTOM_MASCHINEN} Schanzen · H = Doublette (2 Tauben, 4 Pkt max) ·
+        <span className="text-primary/70 font-medium"> Schanzen-Aktiv-Filter gëtt ignoréiert</span>
       </div>
     </div>
   );
