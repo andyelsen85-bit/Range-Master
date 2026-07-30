@@ -30,7 +30,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <Target size={22} strokeWidth={2.5} />
           </div>
           <div>
-            <h1 className="font-bold text-lg leading-none tracking-tight text-foreground uppercase">TrapMaster</h1>
+            <h1 className="font-bold text-lg leading-none tracking-tight text-foreground uppercase">Range-Master</h1>
             <p className="text-[10px] text-primary mt-0.5 uppercase tracking-widest font-mono font-bold">Wolz Sektioun</p>
           </div>
         </div>

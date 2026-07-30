@@ -44,26 +44,26 @@ export function generatePassword(): string {
 
 export function invitationEmail(name: string, email: string, passwort: string, portalUrl: string) {
   return {
-    subject: "Wëllkomm am TrapMaster Portal",
+    subject: "Wëllkomm am Range-Master Portal",
     text:
       `Moien ${name},\n\n` +
-      `Däin Zougang zum TrapMaster Portal ass aktivéiert.\n\n` +
+      `Däin Zougang zum Range-Master Portal ass aktivéiert.\n\n` +
       `Portal: ${portalUrl || "(URL vum Admin ufroen)"}\n` +
       `Email: ${email}\n` +
       `Passwuert: ${passwort}\n\n` +
       `Änner w.e.g. däi Passwuert no der éischter Umeldung (Profil → Passwuert).\n\n` +
-      `Vill Erfolleg!\nTrapMaster`,
+      `Vill Erfolleg!\nRange-Master`,
   };
 }
 
 export function resetEmail(name: string, passwort: string, portalUrl: string) {
   return {
-    subject: "TrapMaster Portal — Neit Passwuert",
+    subject: "Range-Master Portal — Neit Passwuert",
     text:
       `Moien ${name},\n\n` +
       `Däi Passwuert gouf zréckgesat.\n\n` +
       `Neit Passwuert: ${passwort}\n` +
       (portalUrl ? `Portal: ${portalUrl}\n` : "") +
-      `\nÄnner w.e.g. däi Passwuert no der Umeldung (Profil → Passwuert).\n\nTrapMaster`,
+      `\nÄnner w.e.g. däi Passwuert no der Umeldung (Profil → Passwuert).\n\nRange-Master`,
   };
 }

@@ -10,8 +10,8 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>((set) => {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('trapmaster-token') : null;
-  const userString = typeof localStorage !== 'undefined' ? localStorage.getItem('trapmaster-user') : null;
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('rangemaster-token') : null;
+  const userString = typeof localStorage !== 'undefined' ? localStorage.getItem('rangemaster-user') : null;
   let user = null;
   if (userString) {
     try {
@@ -24,13 +24,13 @@ export const useAuthStore = create<AuthState>((set) => {
     user,
     isAuthenticated: !!token,
     setAuth: (user, token) => {
-      localStorage.setItem('trapmaster-token', token);
-      localStorage.setItem('trapmaster-user', JSON.stringify(user));
+      localStorage.setItem('rangemaster-token', token);
+      localStorage.setItem('rangemaster-user', JSON.stringify(user));
       set({ user, token, isAuthenticated: true });
     },
     logout: () => {
-      localStorage.removeItem('trapmaster-token');
-      localStorage.removeItem('trapmaster-user');
+      localStorage.removeItem('rangemaster-token');
+      localStorage.removeItem('rangemaster-user');
       set({ user: null, token: null, isAuthenticated: false });
     }
   };

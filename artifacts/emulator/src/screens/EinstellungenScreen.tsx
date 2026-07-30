@@ -229,7 +229,7 @@ export function EinstellungenScreen() {
                   type="text"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://api.trapmaster.lu  oder  leer lassen"
+                  placeholder="https://rangemaster.hostzone.lu/api  oder  leer lassen"
                   className="w-full bg-background border-2 border-border rounded-lg h-14 px-4 text-base font-mono focus:border-primary focus:outline-none"
                 />
               </div>

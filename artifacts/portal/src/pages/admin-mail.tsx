@@ -122,12 +122,12 @@ export default function AdminMail() {
 
         <div className="space-y-1.5">
           <Label>Vun-Adress (From)</Label>
-          <input className={inputCls} type="email" value={form.fromAddress} onChange={(e) => set("fromAddress", e.target.value)} placeholder="noreply@trapmaster.lu" />
+          <input className={inputCls} type="email" value={form.fromAddress} onChange={(e) => set("fromAddress", e.target.value)} placeholder="noreply@rangemaster.hostzone.lu" />
         </div>
 
         <div className="space-y-1.5">
           <Label>Portal URL (fir an d'Emailen)</Label>
-          <input className={inputCls} value={form.portalUrl} onChange={(e) => set("portalUrl", e.target.value)} placeholder="https://portal.trapmaster.lu" />
+          <input className={inputCls} value={form.portalUrl} onChange={(e) => set("portalUrl", e.target.value)} placeholder="https://rangemaster.hostzone.lu" />
         </div>
 
         <div className="space-y-1.5">

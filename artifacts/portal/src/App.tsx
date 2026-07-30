@@ -30,7 +30,7 @@ setAuthTokenGetter(() => useAuthStore.getState().token);
 setOnUnauthorized(() => {
   if (useAuthStore.getState().isAuthenticated) {
     useAuthStore.getState().logout();
-    sessionStorage.setItem('trapmaster-session-expired', '1');
+    sessionStorage.setItem('rangemaster-session-expired', '1');
     const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
     window.location.replace(`${base}/login`);
   }

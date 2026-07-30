@@ -14,8 +14,8 @@ export default function Login() {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (sessionStorage.getItem('trapmaster-session-expired')) {
-      sessionStorage.removeItem('trapmaster-session-expired');
+    if (sessionStorage.getItem('rangemaster-session-expired')) {
+      sessionStorage.removeItem('rangemaster-session-expired');
       setTimeout(() => {
         toast({
           title: "Sëtzung ofgelaf",
@@ -38,7 +38,7 @@ export default function Login() {
       {
         onSuccess: (res) => {
           setAuth(res.spieler, res.token);
-          toast({ title: "Umellen erfollegräich", description: "Wëllkomm zréck am TrapMaster!" });
+          toast({ title: "Umellen erfollegräich", description: "Wëllkomm zréck am Range-Master!" });
           setLocation("/");
         },
         onError: () => {
@@ -62,7 +62,7 @@ export default function Login() {
           <div className="w-20 h-20 rounded-full bg-primary flex items-center justify-center text-primary-foreground mb-6 shadow-xl shadow-primary/20 ring-4 ring-primary/20">
             <Target size={40} strokeWidth={2} />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight uppercase text-foreground mb-1">TrapMaster</h1>
+          <h1 className="text-3xl font-bold tracking-tight uppercase text-foreground mb-1">Range-Master</h1>
           <div className="h-0.5 w-12 bg-primary my-2 rounded-full" />
           <p className="text-xs text-muted-foreground uppercase tracking-[0.2em] font-bold">F.S.H.C.L. Sektioun Wolz</p>
         </div>

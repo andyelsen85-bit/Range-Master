@@ -311,14 +311,14 @@ function assignPostenToSpieler(spieler: Spieler[]): Spieler[] {
 
 // ─── localStorage persistence ─────────────────────────────────────────────────
 
-const SETTINGS_KEY = 'trapmaster-emulator-settings';
-const PENDING_KEY = 'trapmaster-pending-games';
-const CACHED_SPIELER_KEY = 'trapmaster-cached-spieler';
-const HISTORY_KEY = 'trapmaster-game-history';
-const PENDING_SPIELER_KEY = 'trapmaster-pending-spieler';
-const KREDITE_KEY = 'trapmaster-kredite';
-const PENDING_KREDITE_KEY = 'trapmaster-pending-kredite';
-const SPIELER_UPDATES_KEY = 'trapmaster-spieler-updates';
+const SETTINGS_KEY = 'rangemaster-emulator-settings';
+const PENDING_KEY = 'rangemaster-pending-games';
+const CACHED_SPIELER_KEY = 'rangemaster-cached-spieler';
+const HISTORY_KEY = 'rangemaster-game-history';
+const PENDING_SPIELER_KEY = 'rangemaster-pending-spieler';
+const KREDITE_KEY = 'rangemaster-kredite';
+const PENDING_KREDITE_KEY = 'rangemaster-pending-kredite';
+const SPIELER_UPDATES_KEY = 'rangemaster-spieler-updates';
 
 function loadSpielerUpdates(): SpielerUpdate[] {
   try {
