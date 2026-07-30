@@ -52,6 +52,7 @@ export interface SpielerProfile {
   email?: string | null;
   mitgliedNr?: string | null;
   portalAktiv: boolean;
+  isAdmin: boolean;
   createdAt: string;
 }
 
@@ -84,7 +85,7 @@ export interface RanglisteEntry {
   spielerId: number;
   name: string;
   gesamtPunkte: number;
-  anzahlLauefe: number;
+  anzahlSpiele: number;
   durchschnitt: number;
   bestPunkte: number;
 }
@@ -97,7 +98,7 @@ export type SpielerStatistikMaschinen = {[key: string]: {
 
 export interface SpielerStatistik {
   spielerId: number;
-  gesamtLauefe: number;
+  gesamtSpiele: number;
   durchschnitt: number;
   bestPunkte: number;
   trefferquote: number;

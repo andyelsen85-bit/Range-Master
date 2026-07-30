@@ -12,26 +12,34 @@ import Dashboard from '@/pages/dashboard';
 import Resultater from '@/pages/resultater';
 import Rangliste from '@/pages/rangliste';
 import Statistiken from '@/pages/statistiken';
+import Admin from '@/pages/admin';
+import Profil from '@/pages/profil';
 import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
 
-// Setup fetch interceptors
 setBaseUrl(null);
 setAuthTokenGetter(() => useAuthStore.getState().token);
 
 function PrivateRoute({ component: Component, ...rest }: any) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [, setLocation] = useLocation();
-
   useEffect(() => {
-    if (!isAuthenticated) {
-      setLocation('/login');
-    }
+    if (!isAuthenticated) setLocation('/login');
   }, [isAuthenticated, setLocation]);
-
   if (!isAuthenticated) return null;
+  return <Component {...rest} />;
+}
 
+function AdminRoute({ component: Component, ...rest }: any) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    if (!isAuthenticated) setLocation('/login');
+    else if (!user?.isAdmin) setLocation('/');
+  }, [isAuthenticated, user, setLocation]);
+  if (!isAuthenticated || !user?.isAdmin) return null;
   return <Component {...rest} />;
 }
 
@@ -46,6 +54,8 @@ function Router() {
             <Route path="/resultater" component={() => <PrivateRoute component={Resultater} />} />
             <Route path="/rangliste" component={() => <PrivateRoute component={Rangliste} />} />
             <Route path="/statistiken" component={() => <PrivateRoute component={Statistiken} />} />
+            <Route path="/profil" component={() => <PrivateRoute component={Profil} />} />
+            <Route path="/admin" component={() => <AdminRoute component={Admin} />} />
             <Route component={NotFound} />
           </Switch>
         </Layout>
@@ -55,11 +65,9 @@ function Router() {
 }
 
 function App() {
-  // Force dark theme as the primary design language
   useEffect(() => {
     document.documentElement.classList.add('dark');
   }, []);
-
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>

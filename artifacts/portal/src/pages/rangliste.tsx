@@ -61,7 +61,7 @@ export default function Rangliste() {
                 <TableRow className="border-border/50 hover:bg-transparent">
                   <TableHead className="w-20 text-center font-mono text-xs uppercase tracking-widest font-bold">Rang</TableHead>
                   <TableHead className="text-xs uppercase tracking-widest font-bold">Spiller</TableHead>
-                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Ronden</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spiller</TableHead>
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Gesamt Punkten</TableHead>
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Bescht</TableHead>
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold text-primary">Ø Duerchschnëtt</TableHead>
@@ -74,7 +74,7 @@ export default function Rangliste() {
                       <RankIcon rank={row.rang} />
                     </TableCell>
                     <TableCell className="font-bold text-foreground text-base tracking-tight">{row.name}</TableCell>
-                    <TableCell className="text-right font-mono font-medium text-muted-foreground">{row.anzahlLauefe}</TableCell>
+                    <TableCell className="text-right font-mono font-medium text-muted-foreground">{row.anzahlSpiele}</TableCell>
                     <TableCell className="text-right font-mono font-medium text-muted-foreground">{row.gesamtPunkte}</TableCell>
                     <TableCell className="text-right font-mono font-bold text-foreground">{row.bestPunkte}</TableCell>
                     <TableCell className="text-right font-mono font-black text-primary text-lg">{row.durchschnitt.toFixed(2)}</TableCell>

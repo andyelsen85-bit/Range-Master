@@ -5,6 +5,7 @@ import spielerRouter from "./spieler";
 import ranglisteRouter from "./rangliste";
 import statistikRouter from "./statistik";
 import syncRouter from "./sync";
+import adminRouter from "./admin";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use("/spieler", spielerRouter);
 router.use("/rangliste", ranglisteRouter);
 router.use("/statistik", statistikRouter);
 router.use("/sync", syncRouter);
+router.use("/admin", adminRouter);
 
 export default router;
