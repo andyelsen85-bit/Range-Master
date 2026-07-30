@@ -21,7 +21,7 @@ async function nextMitgliedNr(): Promise<string> {
 }
 
 const maschineValues = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
-const modusValues = ["NORMAL", "HARAKIRI", "HARAKIRI_DELAYED", "HARAKIRI_FULL", "CUSTOM_1", "CUSTOM_2", "CUSTOM_3"] as const;
+const modusValues = ["NORMAL", "HARAKIRI", "CUSTOM_1", "CUSTOM_2", "CUSTOM_3", "CUSTOM_4"] as const;
 
 const ErgebnisSchema = z.object({
   spielerId: z.number().int(),
