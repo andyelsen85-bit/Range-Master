@@ -1,13 +1,29 @@
 # TrapMaster — Kubernetes Deployment Guide
 
-## Architecture
+This guide walks an operator through deploying the TrapMaster API server and portal to a Kubernetes cluster using ArgoCD for GitOps continuous delivery.
+
+---
+
+## Architecture overview
 
 ```
-Internet → Reverse Proxy (HTTPS) → K8s Ingress → portal (nginx:80) 
-                                               → api-server (node:8080) → PostgreSQL
+GitHub Actions (CI)
+  └─ builds Docker images on push to main / version tags
+  └─ pushes to ghcr.io/OWNER/REPO/{api-server,portal}:<sha>
+
+ArgoCD (GitOps)
+  └─ watches k8s/overlays/production/ in this repo
+  └─ syncs Deployments / Services / ConfigMaps automatically
+  └─ ArgoCD Image Updater bumps image tags when new images arrive
+
+Cluster layout (namespace: trapmaster)
+  ├─ Deployment: api-server   (1 replica, port 8080)
+  ├─ Service:    api-server   (ClusterIP :8080)
+  ├─ Deployment: portal       (2 replicas, nginx port 80)
+  └─ Service:    portal       (ClusterIP :80)
 ```
 
-GitHub Actions builds Docker images on every push to `main` and pushes them to GitHub Container Registry (`ghcr.io`). ArgoCD watches the Git repo and syncs the cluster automatically.
+TLS is terminated by an external reverse proxy (Ingress / load balancer) in front of the cluster. The containers only speak HTTP.
 
 ---
 
@@ -15,119 +31,150 @@ GitHub Actions builds Docker images on every push to `main` and pushes them to G
 
 | Tool | Version |
 |------|---------|
-| kubectl | 1.28+ |
-| ArgoCD | 2.9+ |
-| ArgoCD Image Updater | 0.12+ (optional, for auto tag updates) |
-| PostgreSQL | 15+ (external or operator-managed) |
+| `kubectl` | ≥ 1.28 |
+| `kustomize` | ≥ 5.0 (or `kubectl kustomize`) |
+| ArgoCD | ≥ 2.9 |
+| ArgoCD Image Updater | ≥ 0.14 (optional — for automatic tag bumps) |
+
+You also need:
+- A GitHub repository forked/cloned from this project
+- Admin access to a Kubernetes cluster
+- A PostgreSQL database reachable from the cluster (connection string ready)
 
 ---
 
-## Step 1 — Fork / push the repo to GitHub
+## Step 1 — Replace placeholder values
+
+Search for `OWNER/REPO` across the k8s and argocd directories and replace with your actual GitHub `<owner>/<repo>`:
 
 ```bash
-git remote add origin https://github.com/OWNER/REPO.git
-git push -u origin main
+# Preview all occurrences
+grep -r "OWNER/REPO" k8s/ argocd/
+
+# Replace (macOS / BSD sed needs '' after -i)
+find k8s/ argocd/ -type f | xargs sed -i 's|OWNER/REPO|your-org/your-repo|g'
 ```
 
-Replace every `OWNER/REPO` placeholder in the files below:
-- `k8s/base/api-server/deployment.yaml`
-- `k8s/base/portal/deployment.yaml`
-- `k8s/overlays/production/kustomization.yaml`
-- `argocd/application.yaml`
+Commit and push the changes.
 
 ---
 
-## Step 2 — Configure GitHub Actions
+## Step 2 — Configure GitHub Actions secrets
 
-GitHub Actions uses `GITHUB_TOKEN` (automatically available) to push images to `ghcr.io`. No extra secrets are needed for the registry.
+GitHub Actions uses `GITHUB_TOKEN` (automatically available) to push images to `ghcr.io`. No additional secrets are needed for image publishing.
 
-If you want the API server to embed environment variables at **build time** (e.g. a public API base URL), add them as GitHub Actions secrets and reference them in the workflow's `build-args`.
+If your build needs additional environment variables (e.g. `VITE_API_URL` baked into the portal bundle), add them as **Actions repository secrets** and pass them as `build-args` in `.github/workflows/build-and-push.yml`.
 
 ---
 
-## Step 3 — Create the Kubernetes Secret
+## Step 3 — One-time cluster bootstrap
+
+### 3a. Create the namespace
+
+ArgoCD will create the namespace automatically on first sync (via `CreateNamespace=true`), but you can also do it manually:
 
 ```bash
-kubectl create namespace trapmaster
+kubectl apply -f k8s/base/namespace.yaml
+```
 
-kubectl create secret generic trapmaster-secrets \
+### 3b. Create the API server Secret
+
+The Secret is **not** managed by Kustomize or ArgoCD — you create it once and the cluster owns it. See `k8s/overlays/production/secrets.example.yaml` for the required keys.
+
+```bash
+kubectl create secret generic api-server-secrets \
   --namespace trapmaster \
-  --from-literal=database-url='postgres://user:pass@your-pg-host:5432/trapmaster' \
-  --from-literal=jwt-secret="$(openssl rand -hex 32)" \
-  --from-literal=session-secret="$(openssl rand -hex 32)"
+  --from-literal=DATABASE_URL='postgres://user:pass@host:5432/dbname?sslmode=require' \
+  --from-literal=JWT_SECRET='<random-256-bit-secret>' \
+  --from-literal=SESSION_SECRET='<random-256-bit-secret>'
+```
+
+Generate secure random secrets:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ---
 
-## Step 4 — Run the database migration
-
-The first time you deploy, apply the schema to your PostgreSQL instance:
+## Step 4 — Install ArgoCD (if not already running)
 
 ```bash
-# From your local machine with DATABASE_URL set
-pnpm --filter @workspace/db run migrate
-```
-
-Or execute the SQL from `lib/db/migrations/` directly against your production database.
-
----
-
-## Step 5 — Update the Ingress host
-
-Edit `k8s/overlays/production/ingress.yaml` and replace `trapmaster.example.com` with your actual domain. Point your reverse proxy to the cluster's ingress IP / NodePort.
-
----
-
-## Step 6 — Install ArgoCD Application
-
-```bash
-# Install ArgoCD if not already present
+kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+```
 
-# Create the Application
+Wait for all pods to be ready:
+
+```bash
+kubectl wait --for=condition=available deployment --all -n argocd --timeout=120s
+```
+
+---
+
+## Step 5 — Register the ArgoCD Application
+
+```bash
 kubectl apply -f argocd/application.yaml
 ```
 
-ArgoCD will now:
-1. Clone the repo
-2. Apply `k8s/overlays/production/` via Kustomize
-3. Keep the cluster in sync with Git
-
----
-
-## CI/CD Flow (after initial setup)
-
-```
-git push main
-  → GitHub Actions builds api-server + portal images
-  → Images pushed to ghcr.io/OWNER/REPO/{api-server,portal}:sha-<hash>
-  → ArgoCD Image Updater detects new digest
-  → ArgoCD updates the deployment and rolls out new pods
-```
-
-No manual `kubectl` commands needed after initial setup.
-
----
-
-## Image tags
-
-| Tag | When | Use |
-|-----|------|-----|
-| `sha-<short>` | Every push | Debugging, rollback |
-| `sha-<full>` | Every push | ArgoCD Image Updater pinning |
-| `latest` | Push to `main` | Convenience |
-| `v1.2.3` | Git tag `v1.2.3` | Production releases |
-
----
-
-## Rollback
+ArgoCD will immediately begin syncing `k8s/overlays/production/` from the `main` branch. Watch progress:
 
 ```bash
-# List recent ReplicaSets
-kubectl rollout history deployment/api-server -n trapmaster
+# CLI
+argocd app get trapmaster
+argocd app sync trapmaster   # force sync if needed
 
-# Roll back one version
-kubectl rollout undo deployment/api-server -n trapmaster
+# Or open the ArgoCD web UI and find the "trapmaster" application
 ```
 
-Or revert the Git commit and let ArgoCD self-heal.
+---
+
+## Step 6 — Verify the deployment
+
+```bash
+kubectl get pods -n trapmaster
+kubectl logs -n trapmaster deployment/api-server
+kubectl logs -n trapmaster deployment/portal
+
+# Quick smoke test (from inside the cluster or via port-forward)
+kubectl port-forward -n trapmaster svc/api-server 8080:8080
+curl http://localhost:8080/api/health
+```
+
+---
+
+## Continuous delivery flow
+
+Once everything is running:
+
+1. Push code to `main` → GitHub Actions builds and pushes new images tagged with the commit SHA and `latest`.
+2. ArgoCD (or ArgoCD Image Updater) detects the new `latest` tag → updates the image in the Deployment → pods roll over automatically.
+3. To pin a specific version, push a Git tag (`git tag v1.2.3 && git push --tags`) → the workflow also tags the image as `v1.2.3`.
+
+---
+
+## Updating the production overlay to a specific tag
+
+Edit `k8s/overlays/production/kustomization.yaml` and change `newTag`:
+
+```yaml
+images:
+  - name: ghcr.io/your-org/your-repo/api-server
+    newName: ghcr.io/your-org/your-repo/api-server
+    newTag: "abc1234def5678..."   # full SHA or version tag
+```
+
+Commit and push — ArgoCD syncs the change automatically.
+
+---
+
+## Troubleshooting
+
+| Symptom | Check |
+|---------|-------|
+| Pod `CrashLoopBackOff` | `kubectl logs -n trapmaster <pod>` — likely a missing env var or unreachable database |
+| `ImagePullBackOff` | Ensure the image was pushed and `ghcr.io` is accessible; for private repos add an `imagePullSecret` |
+| API returns 500 | Check `DATABASE_URL` in the Secret is correct and the DB is reachable from the cluster |
+| Portal shows blank page | Ensure `BASE_PATH` was set correctly at build time in the Dockerfile `ARG` |
+| ArgoCD out of sync | Run `argocd app sync trapmaster` or click Sync in the UI |

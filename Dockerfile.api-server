@@ -1,28 +1,38 @@
-# ── Stage 1: Build ───────────────────────────────────────────────────────────
+# ── Stage 1: builder ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
-WORKDIR /workspace
 
+# Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Copy only what's needed for the monorepo install
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY lib/db/                  lib/db/
-COPY lib/api-client-react/    lib/api-client-react/
-COPY artifacts/api-server/    artifacts/api-server/
+WORKDIR /repo
 
+# Copy workspace manifests first for layer-cache efficiency
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy all package.json files so pnpm can resolve the workspace graph
+COPY artifacts/api-server/package.json ./artifacts/api-server/
+COPY lib/ ./lib/
+
+# Install all workspace dependencies (frozen for reproducibility)
 RUN pnpm install --frozen-lockfile
 
+# Copy the full source
+COPY . .
+
+# Build the API server bundle
 RUN pnpm --filter @workspace/api-server run build
 
-# ── Stage 2: Runtime ─────────────────────────────────────────────────────────
+# ── Stage 2: runner ───────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
-WORKDIR /app
-
-# esbuild bundles everything — only the single output file is needed
-COPY --from=builder /workspace/artifacts/api-server/dist/index.mjs ./dist/index.mjs
 
 ENV NODE_ENV=production
 ENV PORT=8080
+
+WORKDIR /app
+
+# Copy only the compiled bundle and any pino worker files it emits
+COPY --from=builder /repo/artifacts/api-server/dist ./dist
+
 EXPOSE 8080
 
-CMD ["node", "--enable-source-maps", "./dist/index.mjs"]
+CMD ["node", "dist/index.mjs"]

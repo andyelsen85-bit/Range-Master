@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: api-server
+  namespace: trapmaster
   labels:
     app: api-server
 spec:
@@ -16,37 +17,41 @@ spec:
     spec:
       containers:
         - name: api-server
-          image: ghcr.io/OWNER/REPO/api-server:latest   # replaced by production overlay
+          image: ghcr.io/OWNER/REPO/api-server:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 8080
-              name: http
+            - name: http
+              containerPort: 8080
+              protocol: TCP
           env:
             - name: PORT
               value: "8080"
             - name: NODE_ENV
-              value: production
+              valueFrom:
+                configMapKeyRef:
+                  name: api-server-config
+                  key: NODE_ENV
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: trapmaster-secrets
-                  key: database-url
+                  name: api-server-secrets
+                  key: DATABASE_URL
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: trapmaster-secrets
-                  key: jwt-secret
+                  name: api-server-secrets
+                  key: JWT_SECRET
             - name: SESSION_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: trapmaster-secrets
-                  key: session-secret
+                  name: api-server-secrets
+                  key: SESSION_SECRET
           livenessProbe:
             httpGet:
               path: /api/health
               port: http
             initialDelaySeconds: 10
-            periodSeconds: 30
+            periodSeconds: 15
             failureThreshold: 3
           readinessProbe:
             httpGet:
@@ -54,10 +59,12 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            failureThreshold: 3
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: 100m
+              memory: 128Mi
             limits:
-              cpu: "500m"
-              memory: "512Mi"
+              cpu: 500m
+              memory: 512Mi
+      restartPolicy: Always

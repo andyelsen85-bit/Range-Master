@@ -2,6 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: portal
+  namespace: trapmaster
   labels:
     app: portal
 spec:
@@ -9,6 +10,7 @@ spec:
   selector:
     app: portal
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: http
-      name: http
+      protocol: TCP

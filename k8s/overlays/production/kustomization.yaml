@@ -5,13 +5,13 @@ namespace: trapmaster
 
 resources:
   - ../../base
-  - ingress.yaml
 
-# ArgoCD Image Updater reads these annotations and updates the image tags
-# automatically when new images are pushed to ghcr.io.
-# See: https://argocd-image-updater.readthedocs.io/
+# Image tag substitution — ArgoCD Image Updater rewrites these automatically
+# when a new image is pushed to the registry.
 images:
   - name: ghcr.io/OWNER/REPO/api-server
+    newName: ghcr.io/OWNER/REPO/api-server
     newTag: latest
   - name: ghcr.io/OWNER/REPO/portal
+    newName: ghcr.io/OWNER/REPO/portal
     newTag: latest

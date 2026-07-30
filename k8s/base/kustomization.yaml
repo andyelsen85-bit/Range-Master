@@ -5,6 +5,7 @@ namespace: trapmaster
 
 resources:
   - namespace.yaml
+  - api-server/configmap.yaml
   - api-server/deployment.yaml
   - api-server/service.yaml
   - portal/deployment.yaml
