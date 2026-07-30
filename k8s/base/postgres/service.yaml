@@ -1,0 +1,18 @@
+# Headless service required by StatefulSet + a ClusterIP alias for easy DNS.
+# Other pods reach Postgres at:  postgres.rangemaster.svc.cluster.local:5432
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: rangemaster
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

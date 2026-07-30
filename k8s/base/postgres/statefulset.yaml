@@ -1,0 +1,101 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# PostgreSQL StatefulSet — backed by Longhorn persistent storage
+#
+# Longhorn notes:
+#   • storageClassName: longhorn  (Longhorn's default StorageClass name)
+#   • numberOfReplicas annotation controls how many Longhorn replicas store the
+#     data across nodes. Set to 1 for a single-node cluster, 2-3 for HA.
+#   • accessModes: ReadWriteOnce  (Longhorn default; one pod mounts the volume)
+#   • To use ReadWriteMany, enable Longhorn's NFS/RWX provisioner and change
+#     accessModes accordingly.
+#
+# First-time setup:
+#   After the pod reaches Running, run migrations once:
+#     kubectl exec -n rangemaster statefulset/postgres -- \
+#       psql -U trapmaster -d trapmaster -c "SELECT 1"   # smoke-test (DB user/name stay as trapmaster)
+#   Then apply the schema from the api-server pod:
+#     kubectl exec -n rangemaster deploy/api-server -- \
+#       node --input-type=module --eval \
+#       "import '/app/lib/db/migrate.mjs'"
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: rangemaster
+  labels:
+    app: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            # Store data on the Longhorn-backed volume
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, $(POSTGRES_USER), -d, $(POSTGRES_DB)]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, $(POSTGRES_USER), -d, $(POSTGRES_DB)]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        annotations:
+          # Longhorn: number of data replicas across nodes (1 = no redundancy)
+          # Increase to 2 or 3 if you have enough nodes.
+          volume.longhorn.io/numberOfReplicas: "2"
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 5Gi

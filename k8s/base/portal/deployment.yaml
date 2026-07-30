@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: portal
-  namespace: trapmaster
+  namespace: rangemaster
   labels:
     app: portal
 spec:

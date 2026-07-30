@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: api-server
-  namespace: trapmaster
+  namespace: rangemaster
   labels:
     app: api-server
 spec:
@@ -15,6 +15,28 @@ spec:
       labels:
         app: api-server
     spec:
+      # Wait for Postgres to accept connections before starting the api-server.
+      # This avoids crash-loops when the StatefulSet pod is still initialising.
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Postgres…"
+              until pg_isready -h postgres.rangemaster.svc.cluster.local -p 5432; do
+                sleep 2
+              done
+              echo "Postgres is ready."
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       containers:
         - name: api-server
           image: ghcr.io/OWNER/REPO/api-server:latest

@@ -11,7 +11,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: trapmaster
+  name: rangemaster
   annotations:
     # nginx-ingress controller annotations — remove if using Traefik
     nginx.ingress.kubernetes.io/rewrite-target: /$2
