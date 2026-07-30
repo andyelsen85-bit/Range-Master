@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { requireApiKey } from "./auth";
 import { z } from "zod";
 
@@ -59,20 +59,50 @@ router.get("/spieler", requireApiKey, async (_req, res) => {
 });
 
 // POST /api/sync/spieler
+// Accepts players created locally on the terminal. Local IDs are negative;
+// the response includes a mapping localId → server id so the terminal can
+// de-duplicate. Matching is done case-insensitively by name.
 router.post("/spieler", requireApiKey, async (req, res) => {
   const body = z.object({
-    spieler: z.array(z.object({ id: z.number(), name: z.string(), mitgliedNr: z.string().nullable().optional() })),
+    spieler: z.array(z.object({ id: z.number(), name: z.string().min(1), mitgliedNr: z.string().nullable().optional() })),
   }).parse(req.body);
 
   let synced = 0;
+  const mappings: Array<{ localId: number; id: number; name: string; status: "created" | "matched" | "existing" }> = [];
+
   for (const s of body.spieler) {
-    const existing = await db.select({ id: spielerTable.id }).from(spielerTable).where(eq(spielerTable.id, s.id)).limit(1);
-    if (!existing[0]) {
-      await db.insert(spielerTable).values({ name: s.name, mitgliedNr: s.mitgliedNr ?? null });
-      synced++;
+    const name = s.name.trim();
+
+    // Server-assigned (positive) IDs: verify existence, nothing to create
+    if (s.id > 0) {
+      const existing = await db.select({ id: spielerTable.id }).from(spielerTable).where(eq(spielerTable.id, s.id)).limit(1);
+      if (existing[0]) {
+        mappings.push({ localId: s.id, id: existing[0].id, name, status: "existing" });
+        continue;
+      }
     }
+
+    // De-duplicate by name (case-insensitive) before inserting
+    const byName = await db
+      .select({ id: spielerTable.id, name: spielerTable.name })
+      .from(spielerTable)
+      .where(sql`lower(${spielerTable.name}) = lower(${name})`)
+      .limit(1);
+
+    if (byName[0]) {
+      mappings.push({ localId: s.id, id: byName[0].id, name: byName[0].name, status: "matched" });
+      continue;
+    }
+
+    const [inserted] = await db
+      .insert(spielerTable)
+      .values({ name, mitgliedNr: s.mitgliedNr ?? null })
+      .returning({ id: spielerTable.id });
+    synced++;
+    mappings.push({ localId: s.id, id: inserted.id, name, status: "created" });
   }
-  return res.json({ synced });
+
+  return res.json({ synced, mappings });
 });
 
 // POST /api/sync/spiele

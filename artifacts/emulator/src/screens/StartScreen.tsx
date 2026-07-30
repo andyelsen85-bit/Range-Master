@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { useGameStore, PortalSpieler } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
-import {
-  ArrowLeft, Play, UserPlus, Trash2, Download, Loader2,
-  AlertCircle, X, Check, KeyboardIcon,
-} from 'lucide-react';
+import { PlayerSearch } from '@/components/PlayerSearch';
+import { ArrowLeft, Play, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const MODI = [
@@ -18,50 +16,30 @@ const MODI = [
 
 const POSTS = [1, 2, 3, 4, 5] as const;
 
-type PickerTab = 'portal' | 'manual';
-
 export function StartScreen() {
   const store = useGameStore();
 
   // Which post slot is open for assignment (null = none)
   const [activePost, setActivePost] = useState<number | null>(null);
-  const [pickerTab, setPickerTab] = useState<PickerTab>('portal');
-  const [manualName, setManualName] = useState('');
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
   const playerAtPost = (post: number) =>
     store.spieler.find(s => s.startPosten === post) ?? null;
 
-  const isAssigned = (id: number) => store.spieler.some(s => s.id === id);
-
-  const openPicker = (post: number) => {
-    setActivePost(post);
-    setPickerTab('portal');
-    setManualName('');
-  };
+  const openPicker = (post: number) => setActivePost(post);
 
   const closePicker = () => setActivePost(null);
 
-  const assignFromPortal = (ps: PortalSpieler) => {
+  const assignSpieler = (ps: PortalSpieler) => {
     if (activePost === null) return;
     store.setSpielerAufPosten(activePost, { id: ps.id, name: ps.name });
-    closePicker();
-  };
-
-  const assignManual = () => {
-    if (activePost === null || !manualName.trim()) return;
-    store.setSpielerAufPosten(activePost, { id: Date.now(), name: manualName.trim() });
     closePicker();
   };
 
   const clearPost = (post: number) => {
     store.setSpielerAufPosten(post, null);
     if (activePost === post) closePicker();
-  };
-
-  const handleLaden = async () => {
-    await store.ladeSpielerVomPortal();
   };
 
   const assignedCount = store.spieler.length;
@@ -176,124 +154,11 @@ export function StartScreen() {
 
                   {/* Inline picker — expands under the active post */}
                   {isActive && (
-                    <div className="border-2 border-primary/40 border-t-0 rounded-b-xl bg-card/80 overflow-hidden">
-
-                      {/* Picker tabs */}
-                      <div className="flex border-b border-border/60">
-                        <button
-                          onClick={() => setPickerTab('portal')}
-                          className={cn(
-                            "flex-1 h-10 flex items-center justify-center gap-2 text-sm font-bold transition-colors",
-                            pickerTab === 'portal'
-                              ? "bg-primary/10 text-primary border-b-2 border-primary"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          Portal
-                        </button>
-                        <button
-                          onClick={() => setPickerTab('manual')}
-                          className={cn(
-                            "flex-1 h-10 flex items-center justify-center gap-2 text-sm font-bold transition-colors",
-                            pickerTab === 'manual'
-                              ? "bg-primary/10 text-primary border-b-2 border-primary"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          <KeyboardIcon className="w-3.5 h-3.5" />
-                          Manuell
-                        </button>
-                      </div>
-
-                      {/* Portal tab content */}
-                      {pickerTab === 'portal' && (
-                        <div className="p-3 flex flex-col gap-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-muted-foreground">
-                              {store.spielerAusCache
-                                ? '📦 Offline-Cache'
-                                : store.portalSpieler.length > 0
-                                  ? `${store.portalSpieler.length} Spillesch`
-                                  : 'Spillesch aus Portal lueden'}
-                            </span>
-                            <TouchButton
-                              variant="outline"
-                              className="h-7 px-3 gap-1 text-xs"
-                              onClick={handleLaden}
-                              disabled={store.portalLaden}
-                            >
-                              {store.portalLaden
-                                ? <Loader2 className="w-3 h-3 animate-spin" />
-                                : <Download className="w-3 h-3" />}
-                              Laden
-                            </TouchButton>
-                          </div>
-
-                          {store.portalFehler && (
-                            <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-                              <AlertCircle className="w-3 h-3 shrink-0" />
-                              {store.portalFehler}
-                            </div>
-                          )}
-
-                          {store.portalSpieler.length > 0 ? (
-                            <div className="flex flex-col gap-1 max-h-44 overflow-y-auto pr-1">
-                              {store.portalSpieler.map(ps => {
-                                const already = isAssigned(ps.id);
-                                return (
-                                  <button
-                                    key={ps.id}
-                                    onClick={() => !already && assignFromPortal(ps)}
-                                    disabled={already}
-                                    className={cn(
-                                      "flex items-center gap-3 px-3 py-2 rounded-lg border text-left transition-all",
-                                      already
-                                        ? "border-green-500/30 bg-green-500/5 text-green-500/60 cursor-default"
-                                        : "border-border hover:border-primary/60 hover:bg-primary/10 cursor-pointer active:scale-[0.98]",
-                                    )}
-                                  >
-                                    {already
-                                      ? <Check className="w-4 h-4 text-green-500/60 shrink-0" />
-                                      : <UserPlus className="w-4 h-4 text-muted-foreground shrink-0" />}
-                                    <span className="font-bold text-sm flex-1">{ps.name}</span>
-                                    {ps.mitgliedNr && (
-                                      <span className="text-xs text-muted-foreground font-mono">{ps.mitgliedNr}</span>
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : !store.portalLaden && !store.portalFehler && (
-                            <div className="text-xs text-muted-foreground italic text-center py-3">
-                              Dréckt "Laden" fir Spillesch aus dem Portal ze lueden
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Manual tab content */}
-                      {pickerTab === 'manual' && (
-                        <div className="p-3 flex gap-2">
-                          <input
-                            autoFocus
-                            type="text"
-                            value={manualName}
-                            onChange={e => setManualName(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && assignManual()}
-                            placeholder="Numm aginn…"
-                            className="flex-1 bg-background border-2 border-border rounded-lg h-10 px-3 text-sm font-bold focus:border-primary focus:outline-none"
-                          />
-                          <TouchButton
-                            variant="primary"
-                            className="h-10 w-10 p-0 shrink-0"
-                            onClick={assignManual}
-                            disabled={!manualName.trim()}
-                          >
-                            <Check className="w-4 h-4" />
-                          </TouchButton>
-                        </div>
-                      )}
+                    <div className="border-2 border-primary/40 border-t-0 rounded-b-xl bg-card/80 overflow-hidden p-3">
+                      <PlayerSearch
+                        onSelect={assignSpieler}
+                        disabledIds={store.spieler.map(s => s.id)}
+                      />
                     </div>
                   )}
                 </div>

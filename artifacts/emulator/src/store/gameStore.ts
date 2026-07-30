@@ -33,6 +33,14 @@ export interface PortalSpieler {
   id: number;
   name: string;
   mitgliedNr: string | null;
+  /** true for players created locally on the terminal, not yet pushed to the portal */
+  lokal?: boolean;
+}
+
+/** A locally created player waiting to be pushed to the portal (localId is negative) */
+export interface PendingSpieler {
+  localId: number;
+  name: string;
 }
 
 // Custom mode machine sequences
@@ -95,6 +103,7 @@ interface GameState extends Settings {
 
   // Offline queue
   pendingGames: PendingGame[];
+  pendingSpieler: PendingSpieler[];
 
   syncStatus: SyncStatus;
   lastSync: string | null;
@@ -120,6 +129,8 @@ interface GameState extends Settings {
   ofbriechenSpiel: () => void;
   werfenTaube: () => void;
   setApiSettings: (url: string, key: string) => void;
+  /** Create a new local player (negative id) and queue them for portal upload on next sync */
+  addLocalSpieler: (name: string) => PortalSpieler;
   syncAllPending: () => Promise<void>;
   ladeSpielerVomPortal: () => Promise<void>;
   getAktivenSpieler: () => Spieler | undefined;
@@ -241,6 +252,23 @@ const SETTINGS_KEY = 'trapmaster-emulator-settings';
 const PENDING_KEY = 'trapmaster-pending-games';
 const CACHED_SPIELER_KEY = 'trapmaster-cached-spieler';
 const HISTORY_KEY = 'trapmaster-game-history';
+const PENDING_SPIELER_KEY = 'trapmaster-pending-spieler';
+
+function loadPendingSpieler(): PendingSpieler[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PENDING_SPIELER_KEY) : null;
+    if (!raw) return [];
+    return JSON.parse(raw) as PendingSpieler[];
+  } catch {
+    return [];
+  }
+}
+
+function savePendingSpieler(spieler: PendingSpieler[]) {
+  try {
+    localStorage.setItem(PENDING_SPIELER_KEY, JSON.stringify(spieler));
+  } catch {}
+}
 
 function loadGameHistory(): FinishedGame[] {
   try {
@@ -345,6 +373,7 @@ export const useGameStore = create<GameState>((set, get) => {
 
     // Offline queue — restored from localStorage on startup
     pendingGames: loadPendingGames(),
+    pendingSpieler: loadPendingSpieler(),
 
     // Local history
     gameHistory: loadGameHistory(),
@@ -621,6 +650,25 @@ export const useGameStore = create<GameState>((set, get) => {
       saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl, apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe });
     },
 
+    addLocalSpieler: (name) => {
+      const trimmed = name.trim();
+      const state = get();
+      // Reuse an existing player with the same name (case-insensitive)
+      const existing = state.portalSpieler.find(
+        p => p.name.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (existing) return existing;
+
+      const localId = -Date.now();
+      const neu: PortalSpieler = { id: localId, name: trimmed, mitgliedNr: null, lokal: true };
+      const pendingSpieler = [...state.pendingSpieler, { localId, name: trimmed }];
+      const portalSpieler = [...state.portalSpieler, neu].sort((a, b) => a.name.localeCompare(b.name));
+      savePendingSpieler(pendingSpieler);
+      saveCachedSpieler(portalSpieler);
+      set({ pendingSpieler, portalSpieler });
+      return neu;
+    },
+
     getAktivenSpieler: () => {
       const s = get();
       return s.spieler[s.spielerIndex];
@@ -651,8 +699,16 @@ export const useGameStore = create<GameState>((set, get) => {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json() as { spieler: PortalSpieler[] };
-        saveCachedSpieler(data.spieler);
-        set({ portalSpieler: data.spieler, portalLaden: false, spielerAusCache: false });
+        // Keep locally created (not yet synced) players in the list
+        const pending = get().pendingSpieler;
+        const merged = [
+          ...data.spieler,
+          ...pending
+            .filter(p => !data.spieler.some(s => s.name.toLowerCase() === p.name.toLowerCase()))
+            .map(p => ({ id: p.localId, name: p.name, mitgliedNr: null, lokal: true as const })),
+        ].sort((a, b) => a.name.localeCompare(b.name));
+        saveCachedSpieler(merged);
+        set({ portalSpieler: merged, portalLaden: false, spielerAusCache: false });
       } catch {
         // Network failed — fall back to cache
         const cached = loadCachedSpieler();
@@ -674,7 +730,7 @@ export const useGameStore = create<GameState>((set, get) => {
 
     syncAllPending: async () => {
       const state = get();
-      if (state.pendingGames.length === 0) return;
+      if (state.pendingGames.length === 0 && state.pendingSpieler.length === 0) return;
       if (!state.apiUrl || !state.apiKey) {
         set({ syncStatus: 'error' });
         return;
@@ -682,13 +738,81 @@ export const useGameStore = create<GameState>((set, get) => {
       set({ syncStatus: 'syncing' });
 
       try {
+        // ── Step 1: push locally created players first, get server IDs ──────
+        if (state.pendingSpieler.length > 0) {
+          const resSp = await fetch(`${state.apiUrl}/api/sync/spieler`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': state.apiKey,
+            },
+            body: JSON.stringify({
+              spieler: state.pendingSpieler.map(p => ({ id: p.localId, name: p.name })),
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!resSp.ok) throw new Error(`HTTP ${resSp.status}`);
+          const spData = await resSp.json() as {
+            mappings?: Array<{ localId: number; id: number; name: string }>;
+          };
+
+          const idMap = new Map<number, number>();
+          for (const m of spData.mappings ?? []) idMap.set(m.localId, m.id);
+
+          // Remap local IDs → server IDs everywhere they are referenced
+          const remap = (id: number) => idMap.get(id) ?? id;
+          const s2 = get();
+          const remappedPending = s2.pendingGames.map(g => ({
+            ...g,
+            teilnahmen: g.teilnahmen.map(t => ({ ...t, spielerId: remap(t.spielerId) })),
+            ergebnisse: g.ergebnisse.map(e => ({ ...e, spielerId: remap(e.spielerId) })),
+          }));
+          const remappedHistory = s2.gameHistory.map(g => ({
+            ...g,
+            teilnahmen: g.teilnahmen.map(t => ({ ...t, spielerId: remap(t.spielerId) })),
+            ergebnisse: g.ergebnisse.map(e => ({ ...e, spielerId: remap(e.spielerId) })),
+            spielerNamen: Object.fromEntries(
+              Object.entries(g.spielerNamen).map(([id, name]) => [remap(Number(id)), name])
+            ),
+          }));
+          const remappedSpieler = s2.spieler.map(s => ({ ...s, id: remap(s.id) }));
+          const remappedPortal = s2.portalSpieler.map(p =>
+            idMap.has(p.id) ? { ...p, id: idMap.get(p.id)!, lokal: undefined } : p
+          );
+          // Only clear players the server acknowledged
+          const stillPending = s2.pendingSpieler.filter(p => !idMap.has(p.localId));
+
+          savePendingGames(remappedPending);
+          savePendingSpieler(stillPending);
+          saveCachedSpieler(remappedPortal);
+          saveGameHistory(remappedHistory);
+          set({
+            pendingGames: remappedPending,
+            pendingSpieler: stillPending,
+            spieler: remappedSpieler,
+            portalSpieler: remappedPortal,
+            gameHistory: remappedHistory,
+          });
+        }
+
+        // ── Step 2: push pending games ───────────────────────────────────────
+        if (get().pendingGames.length === 0) {
+          set({
+            syncStatus: 'success',
+            lastSync: new Date().toLocaleTimeString('de-LU', {
+              hour: '2-digit', minute: '2-digit', second: '2-digit',
+            }),
+          });
+          return;
+        }
+
         const res = await fetch(`${state.apiUrl}/api/sync/spiele`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-api-key': state.apiKey,
           },
-          body: JSON.stringify({ spiele: state.pendingGames }),
+          body: JSON.stringify({ spiele: get().pendingGames }),
           signal: AbortSignal.timeout(30000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

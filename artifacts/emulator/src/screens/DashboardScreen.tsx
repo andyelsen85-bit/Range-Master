@@ -13,7 +13,7 @@ export function DashboardScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  const pendingCount = store.pendingGames.length;
+  const pendingCount = store.pendingGames.length + store.pendingSpieler.length;
   const isSyncing = store.syncStatus === 'syncing';
 
   return (
@@ -139,7 +139,8 @@ export function DashboardScreen() {
                   ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
                   : "bg-background text-muted-foreground/40 border border-border"
               )}>
-                {pendingCount} {pendingCount === 1 ? 'Spill' : 'Spiller'}
+                {store.pendingGames.length} {store.pendingGames.length === 1 ? 'Spill' : 'Spiller'}
+                {store.pendingSpieler.length > 0 && ` · ${store.pendingSpieler.length} Nei`}
               </span>
             </div>
 
