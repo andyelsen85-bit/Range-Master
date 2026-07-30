@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/handbook/"
+title = "Range-Master Handbuch"
+version = "1.0.0"
+id = "artifacts/handbook"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/handbook/" ]
+localPort = 18846
+
+[services.development]
+run = "pnpm --filter @workspace/handbook run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/handbook", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/handbook/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18846"
+BASE_PATH = "/handbook/"
