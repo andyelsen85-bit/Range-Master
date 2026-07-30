@@ -76,7 +76,7 @@ export default function Admin() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin-spieler"] });
 
   const createMut = useMutation({
-    mutationFn: (body: PlayerForm) => apiFetch("/api/admin/spieler", { method: "POST", body: JSON.stringify(body) }),
+    mutationFn: ({ mitgliedNr: _nr, ...body }: PlayerForm) => apiFetch("/api/admin/spieler", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => { invalidate(); setAddOpen(false); setAddForm(emptyForm); toast({ title: "Spiller erstallt" }); },
     onError: (e: Error) => toast({ title: "Feeler", description: e.message, variant: "destructive" }),
   });
@@ -186,7 +186,7 @@ export default function Admin() {
             <DialogTitle>Neit Spiller erstellen</DialogTitle>
             <DialogDescription>Fëllt d'Felder aus. Passwuert ass nëmme néideg fir Portal-Zougang.</DialogDescription>
           </DialogHeader>
-          <PlayerFormFields form={addForm} onChange={setAddForm} showPassword />
+          <PlayerFormFields form={addForm} onChange={setAddForm} showPassword isEdit={false} />
           <DialogFooter>
             <button onClick={() => setAddOpen(false)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Ofbriechen</button>
             <button
@@ -207,7 +207,7 @@ export default function Admin() {
             <DialogTitle>Spiller änneren</DialogTitle>
             <DialogDescription>{editPlayer?.name}</DialogDescription>
           </DialogHeader>
-          <PlayerFormFields form={editForm} onChange={setEditForm} showPassword={false} />
+          <PlayerFormFields form={editForm} onChange={setEditForm} showPassword={false} isEdit />
           <DialogFooter>
             <button onClick={() => setEditPlayer(null)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Ofbriechen</button>
             <button
@@ -278,11 +278,12 @@ export default function Admin() {
 // ─── Shared form component ────────────────────────────────────────────────────
 
 function PlayerFormFields({
-  form, onChange, showPassword,
+  form, onChange, showPassword, isEdit = false,
 }: {
   form: any;
   onChange: (f: any) => void;
   showPassword: boolean;
+  isEdit?: boolean;
 }) {
   const set = (k: string, v: any) => onChange((f: any) => ({ ...f, [k]: v }));
   return (
@@ -297,11 +298,18 @@ function PlayerFormFields({
           className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
           placeholder="max@beispill.lu" />
       </FormField>
-      <FormField label="Mitglied Nr" id="nr">
-        <input id="nr" value={form.mitgliedNr} onChange={(e) => set("mitgliedNr", e.target.value)}
-          className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
-          placeholder="WLZ001" />
-      </FormField>
+      {isEdit ? (
+        <FormField label="Mitglied Nr" id="nr">
+          <div className="w-full bg-secondary/30 border border-border/40 rounded-lg px-4 py-2.5 text-sm font-mono font-medium text-muted-foreground select-all">
+            {form.mitgliedNr || "–"}
+          </div>
+        </FormField>
+      ) : (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/20 border border-border/30 rounded-lg px-3 py-2">
+          <span className="font-mono font-bold text-primary">WLZ###</span>
+          <span>Mitglied Nr gëtt automatesch zougewisen</span>
+        </div>
+      )}
       {showPassword && (
         <FormField label="Passwuert (fir Portal-Zougang)" id="pwd">
           <input id="pwd" type="password" autoComplete="new-password" value={form.passwort} onChange={(e) => set("passwort", e.target.value)}

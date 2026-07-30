@@ -59,17 +59,26 @@ router.get("/spieler", async (_req, res) => {
   });
 });
 
-// POST /api/admin/spieler — create player
+// POST /api/admin/spieler — create player (mitgliedNr auto-generated)
 router.post("/spieler", async (req, res) => {
   const schema = z.object({
     name: z.string().min(1),
     email: z.string().email().optional().or(z.literal("")).transform((v) => v || null),
-    mitgliedNr: z.string().optional().transform((v) => v || null),
     portalAktiv: z.boolean().default(false),
     isAdmin: z.boolean().default(false),
     passwort: z.string().min(6).optional(),
   });
   const body = schema.parse(req.body);
+
+  // Auto-generate next WLZ number using typed select
+  const [maxRow] = await db
+    .select({
+      maxNr: sql<number | null>`MAX(CAST(SUBSTRING(${spielerTable.mitgliedNr} FROM 4) AS INTEGER))`,
+    })
+    .from(spielerTable)
+    .where(sql`${spielerTable.mitgliedNr} ~ '^WLZ[0-9]+$'`);
+  const next = (maxRow?.maxNr ?? 0) + 1;
+  const mitgliedNr = `WLZ${String(next).padStart(3, "0")}`;
 
   let passwortHash: string | null = null;
   if (body.passwort) {
@@ -81,7 +90,7 @@ router.post("/spieler", async (req, res) => {
     .values({
       name: body.name,
       email: body.email ?? null,
-      mitgliedNr: body.mitgliedNr ?? null,
+      mitgliedNr,
       portalAktiv: body.passwort ? true : body.portalAktiv,
       isAdmin: body.isAdmin,
       passwortHash,
