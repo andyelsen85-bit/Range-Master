@@ -215,37 +215,6 @@ export function StartScreen() {
             </div>
           </div>
 
-          {/* Machine toggles */}
-          <div className="bg-card border-2 border-border rounded-xl p-3">
-            <h2 className="text-sm font-bold uppercase tracking-widest text-foreground/80 mb-2">
-              Schanzen
-            </h2>
-            <div className="grid grid-cols-4 gap-2">
-              {(['A','B','C','D','E','F','G','H'] as const).map(m => {
-                const aktiv = store.maschinenAktiv[m];
-                return (
-                  <button
-                    key={m}
-                    onClick={() => store.toggleMaschineAktiv(m)}
-                    className={cn(
-                      "h-12 rounded-xl border-2 flex flex-col items-center justify-center transition-all active:scale-95",
-                      aktiv
-                        ? m === 'H'
-                          ? "border-amber-500/60 bg-amber-500/15 text-amber-400"
-                          : "border-primary/60 bg-primary/15 text-primary"
-                        : "border-border/30 bg-background/40 text-muted-foreground/40",
-                    )}
-                  >
-                    <span className="text-xl font-black">{m}</span>
-                    <span className="text-[9px] font-bold uppercase tracking-widest">
-                      {m === 'H' ? 'Doubl.' : aktiv ? '●' : '○'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           {/* Game summary */}
           <div className="bg-card/50 border-2 border-border rounded-xl p-3">
             <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">
