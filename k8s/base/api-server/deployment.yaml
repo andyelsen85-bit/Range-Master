@@ -93,14 +93,14 @@ spec:
                   key: SESSION_SECRET
           livenessProbe:
             httpGet:
-              path: /api/health
+              path: /api/healthz
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /api/healthz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
