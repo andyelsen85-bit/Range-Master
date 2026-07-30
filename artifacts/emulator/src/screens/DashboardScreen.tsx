@@ -1,6 +1,6 @@
 import React from 'react';
 import { useGameStore, MASCHINEN_LIST } from '@/store/gameStore';
-import { Play, Settings, RefreshCw, CircleDot, Wifi, WifiOff } from 'lucide-react';
+import { Play, Settings, RefreshCw, Upload, WifiOff, CheckCircle2, Clock } from 'lucide-react';
 import { TouchButton } from '@/components/TouchButton';
 import { cn } from '@/lib/utils';
 
@@ -12,6 +12,9 @@ export function DashboardScreen() {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const pendingCount = store.pendingGames.length;
+  const isSyncing = store.syncStatus === 'syncing';
 
   return (
     <div className="flex h-full w-full bg-background flex-col">
@@ -71,7 +74,7 @@ export function DashboardScreen() {
               Schützen ({store.spieler.length})
             </h2>
             <div className="flex gap-4">
-              {store.spieler.map((s, i) => (
+              {store.spieler.map((s) => (
                 <div key={s.id} className="bg-background border-2 border-border rounded-lg p-4 flex-1 flex items-center gap-4">
                   <div className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-lg">
                     P{s.startPosten}
@@ -108,30 +111,79 @@ export function DashboardScreen() {
             <span>Astellungen</span>
           </TouchButton>
 
-          {/* Sync status */}
-          <div
-            className="mt-auto border-2 border-border rounded-xl p-6 flex flex-col items-center gap-3 cursor-pointer hover:border-primary/40 transition-colors"
-            onClick={() => store.syncPortal()}
-          >
-            {store.syncStatus === 'syncing' ? (
-              <RefreshCw className="w-10 h-10 text-yellow-500 animate-spin" />
-            ) : store.syncStatus === 'success' ? (
-              <Wifi className="w-10 h-10 text-green-500" />
-            ) : store.syncStatus === 'error' ? (
-              <WifiOff className="w-10 h-10 text-red-500" />
-            ) : (
-              <CircleDot className="w-10 h-10 text-muted-foreground" />
-            )}
-            <div className="text-center">
-              <div className="font-bold text-base">
-                {store.syncStatus === 'success' ? 'Portal verbonnen' :
-                 store.syncStatus === 'error' ? 'Sync Feeler' :
-                 store.syncStatus === 'syncing' ? 'Syncing...' :
-                 'Net verbonnen'}
+          {/* Offline Queue / Sync Panel */}
+          <div className="mt-auto border-2 border-border rounded-xl overflow-hidden">
+            {/* Header row with pending count badge */}
+            <div className="bg-secondary/30 border-b-2 border-border px-5 py-3 flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+                Offline Queue
+              </span>
+              <span className={cn(
+                "px-3 py-1 rounded-lg text-base font-black tabular-nums transition-colors",
+                pendingCount > 0
+                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
+                  : "bg-background text-muted-foreground/40 border border-border"
+              )}>
+                {pendingCount} {pendingCount === 1 ? 'Spill' : 'Spiller'}
+              </span>
+            </div>
+
+            <div className="p-5 flex flex-col gap-4">
+              {/* Sync button */}
+              <button
+                onClick={() => store.syncAllPending()}
+                disabled={pendingCount === 0 || isSyncing}
+                className={cn(
+                  "w-full h-16 rounded-xl border-2 font-bold text-base flex items-center justify-center gap-3 transition-all active:scale-95",
+                  pendingCount > 0 && !isSyncing
+                    ? "border-primary/60 bg-primary/10 text-primary hover:bg-primary/20"
+                    : "border-border/40 bg-background/50 text-muted-foreground/40 cursor-not-allowed"
+                )}
+              >
+                {isSyncing ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    Syncing…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5" />
+                    Alles syncen
+                  </>
+                )}
+              </button>
+
+              {/* Status line */}
+              <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+                {store.syncStatus === 'success' ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+                    <span className="text-green-400">Synced {store.lastSync}</span>
+                  </>
+                ) : store.syncStatus === 'error' ? (
+                  <>
+                    <WifiOff className="w-4 h-4 text-red-500 shrink-0" />
+                    <span className="text-red-400">Sync fehlgeschloen</span>
+                  </>
+                ) : store.lastSync ? (
+                  <>
+                    <Clock className="w-4 h-4 shrink-0" />
+                    <span>Läschte Sync: {store.lastSync}</span>
+                  </>
+                ) : (
+                  <>
+                    <Clock className="w-4 h-4 shrink-0 opacity-40" />
+                    <span className="opacity-40">Nach net verbonnen</span>
+                  </>
+                )}
               </div>
-              <div className="text-xs text-muted-foreground mt-1 font-mono">
-                {store.lastSync ? `Läschte Sync: ${store.lastSync}` : 'Tippen fir ze syncen'}
-              </div>
+
+              {/* Cache hint when player list was loaded from cache */}
+              {store.spielerAusCache && (
+                <div className="text-xs text-amber-400/80 font-medium text-center bg-amber-500/10 rounded-lg px-3 py-2">
+                  Spillerlëscht aus lokalem Cache
+                </div>
+              )}
             </div>
           </div>
         </div>

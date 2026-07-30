@@ -17,7 +17,7 @@ export default function Statistiken() {
         short: key,
         versuche: val.versuche,
         treffer: val.treffer,
-        quote: Math.round(val.quote * 100)
+        quote: Math.round(val.quote)
       }))
     : [];
 

@@ -38,6 +38,22 @@ export interface PortalSpieler {
 // Custom mode machine sequences
 export type CustomSequenz = Maschine[];
 
+/** A completed game queued for later sync */
+export interface PendingGame {
+  externalId: string;
+  datum: string;
+  modus: Modus;
+  lauf: number;
+  abgeschlossen: boolean;
+  teilnahmen: Array<{
+    spielerId: number;
+    startPosten: number;
+    punkte: number;
+    lauf: number;
+  }>;
+  ergebnisse: Ergebnis[];
+}
+
 interface Settings {
   modus: Modus;
   maschinenAktiv: Record<Maschine, boolean>;
@@ -62,6 +78,10 @@ interface GameState extends Settings {
   portalSpieler: PortalSpieler[];
   portalLaden: boolean;
   portalFehler: string | null;
+  spielerAusCache: boolean;  // true when player list was loaded from offline cache
+
+  // Offline queue
+  pendingGames: PendingGame[];
 
   syncStatus: SyncStatus;
   lastSync: string | null;
@@ -80,7 +100,7 @@ interface GameState extends Settings {
   ofbriechenSpiel: () => void;
   werfenTaube: () => void;
   setApiSettings: (url: string, key: string) => void;
-  syncPortal: () => Promise<void>;
+  syncAllPending: () => Promise<void>;
   ladeSpielerVomPortal: () => Promise<void>;
   getAktivenSpieler: () => Spieler | undefined;
   saveSettings: () => void;
@@ -193,6 +213,8 @@ function assignPostenToSpieler(spieler: Spieler[]): Spieler[] {
 // ─── localStorage persistence ─────────────────────────────────────────────────
 
 const SETTINGS_KEY = 'trapmaster-emulator-settings';
+const PENDING_KEY = 'trapmaster-pending-games';
+const CACHED_SPIELER_KEY = 'trapmaster-cached-spieler';
 
 function loadSettings(): Partial<Settings> {
   try {
@@ -207,6 +229,38 @@ function loadSettings(): Partial<Settings> {
 function saveToStorage(settings: Settings) {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {}
+}
+
+function loadPendingGames(): PendingGame[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PENDING_KEY) : null;
+    if (!raw) return [];
+    return JSON.parse(raw) as PendingGame[];
+  } catch {
+    return [];
+  }
+}
+
+function savePendingGames(games: PendingGame[]) {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(games));
+  } catch {}
+}
+
+function loadCachedSpieler(): PortalSpieler[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CACHED_SPIELER_KEY) : null;
+    if (!raw) return [];
+    return JSON.parse(raw) as PortalSpieler[];
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedSpieler(spieler: PortalSpieler[]) {
+  try {
+    localStorage.setItem(CACHED_SPIELER_KEY, JSON.stringify(spieler));
   } catch {}
 }
 
@@ -247,6 +301,11 @@ export const useGameStore = create<GameState>((set, get) => {
     portalSpieler: [],
     portalLaden: false,
     portalFehler: null,
+    spielerAusCache: false,
+
+    // Offline queue — restored from localStorage on startup
+    pendingGames: loadPendingGames(),
+
     syncStatus: 'idle',
     lastSync: null,
 
@@ -363,14 +422,43 @@ export const useGameStore = create<GameState>((set, get) => {
       // Lauf complete
       const nextLauf = state.lauf + 1;
       if (nextLauf > 2) {
-        // Game over
+        // ── Game over: enqueue in offline pending list ──────────────────────
+        const allErgebnisse = [...state.ergebnisse, neuesErgebnis];
+
+        // Compute per-lauf points for each player (needed for spiel_teilnahmen rows)
+        const teilnahmen = updatedSpieler.flatMap(s =>
+          ([1, 2] as const).map(l => ({
+            spielerId: s.id,
+            startPosten: s.startPosten,
+            punkte: allErgebnisse
+              .filter(e => e.spielerId === s.id && e.lauf === l)
+              .reduce((sum, e) => sum + e.punkte, 0),
+            lauf: l,
+          }))
+        );
+
+        const newPendingGame: PendingGame = {
+          externalId: state.spielId!,
+          datum: new Date().toISOString(),
+          modus: state.modus,
+          lauf: 2,
+          abgeschlossen: true,
+          teilnahmen,
+          ergebnisse: allErgebnisse,
+        };
+
+        const newPendingGames = [...state.pendingGames, newPendingGame];
+        savePendingGames(newPendingGames);
+
         return {
-          ergebnisse: [...state.ergebnisse, neuesErgebnis],
+          ergebnisse: allErgebnisse,
           spielerIndex: 0,
           taubeIndex: 0,
           lauf: nextLauf,
           screen: 'dashboard' as Screen,
           spieler: updatedSpieler,
+          pendingGames: newPendingGames,
+          syncStatus: 'idle',
         };
       }
 
@@ -447,66 +535,84 @@ export const useGameStore = create<GameState>((set, get) => {
 
     ladeSpielerVomPortal: async () => {
       const state = get();
-      if (!state.apiUrl && !state.apiKey) {
-        set({ portalFehler: 'API URL / Key net konfiguriert (Astellungen)', portalLaden: false });
+      set({ portalLaden: true, portalFehler: null, spielerAusCache: false });
+
+      if (!state.apiUrl || !state.apiKey) {
+        // No network config — try cache immediately
+        const cached = loadCachedSpieler();
+        if (cached.length) {
+          set({ portalSpieler: cached, portalLaden: false, spielerAusCache: true });
+        } else {
+          set({
+            portalFehler: 'API URL / Key net konfiguriert (Astellungen)',
+            portalLaden: false,
+          });
+        }
         return;
       }
-      set({ portalLaden: true, portalFehler: null });
+
       try {
-        const baseUrl = state.apiUrl || '';
-        const res = await fetch(`${baseUrl}/api/sync/spieler`, {
+        const res = await fetch(`${state.apiUrl}/api/sync/spieler`, {
           headers: { 'x-api-key': state.apiKey },
+          signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json() as { spieler: PortalSpieler[] };
-        set({ portalSpieler: data.spieler, portalLaden: false });
-      } catch (e: unknown) {
-        set({
-          portalFehler: e instanceof Error ? e.message : 'Onbekannte Feeler',
-          portalLaden: false,
-        });
+        saveCachedSpieler(data.spieler);
+        set({ portalSpieler: data.spieler, portalLaden: false, spielerAusCache: false });
+      } catch {
+        // Network failed — fall back to cache
+        const cached = loadCachedSpieler();
+        if (cached.length) {
+          set({
+            portalSpieler: cached,
+            portalFehler: `Offline – ${cached.length} Spillesch aus Cache gelued`,
+            portalLaden: false,
+            spielerAusCache: true,
+          });
+        } else {
+          set({
+            portalFehler: 'Verbindung fehlgeschloen. Kee Cache disponibel.',
+            portalLaden: false,
+          });
+        }
       }
     },
 
-    syncPortal: async () => {
+    syncAllPending: async () => {
       const state = get();
-      if (!state.spielId || state.ergebnisse.length === 0) return;
+      if (state.pendingGames.length === 0) return;
+      if (!state.apiUrl || !state.apiKey) {
+        set({ syncStatus: 'error' });
+        return;
+      }
       set({ syncStatus: 'syncing' });
 
-      const teilnahmen = state.spieler.map(s => ({
-        spielerId: s.id,
-        startPosten: s.startPosten,
-        punkte: s.punkte,
-        lauf: state.lauf,
-      }));
-
-      const payload = {
-        spiele: [{
-          externalId: state.spielId,
-          datum: new Date().toISOString(),
-          modus: state.modus,
-          lauf: state.lauf,
-          abgeschlossen: false,
-          teilnahmen,
-          ergebnisse: state.ergebnisse,
-        }],
-      };
-
       try {
-        const baseUrl = state.apiUrl || '';
-        const res = await fetch(`${baseUrl}/api/sync/spiele`, {
+        const res = await fetch(`${state.apiUrl}/api/sync/spiele`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-api-key': state.apiKey,
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ spiele: state.pendingGames }),
+          signal: AbortSignal.timeout(30000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json() as { results: Array<{ status: string }> };
+        const synced = data.results?.filter(r => r.status === 'created').length ?? 0;
+        const skipped = data.results?.filter(r => r.status === 'skipped').length ?? 0;
+
+        savePendingGames([]);
         set({
+          pendingGames: [],
           syncStatus: 'success',
-          lastSync: new Date().toLocaleTimeString('de-LU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          lastSync: new Date().toLocaleTimeString('de-LU', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+          }),
         });
+        console.log(`Sync: ${synced} created, ${skipped} skipped`);
       } catch {
         set({ syncStatus: 'error' });
       }

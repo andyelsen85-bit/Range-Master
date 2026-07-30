@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, ergebnisseTable, spielTeilnahmenTable, spieleTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { authenticate } from "./auth";
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -22,7 +22,7 @@ router.get("/:spielerId", authenticate, async (req, res) => {
   if (!ergebnisse.length) {
     return res.json({
       spielerId,
-      gesamtLauefe: 0,
+      gesamtSpiele: 0,
       durchschnitt: 0,
       bestPunkte: 0,
       trefferquote: 0,
@@ -43,20 +43,25 @@ router.get("/:spielerId", authenticate, async (req, res) => {
     maschinen[m].quote = Math.round((maschinen[m].treffer / maschinen[m].versuche) * 1000) / 10;
   }
 
+  // Group teilnahmen by spiel → sum both Läufe per game → per-game totals
   const teilnahmen = await db
-    .select({ punkte: spielTeilnahmenTable.punkte })
+    .select({ spielId: spielTeilnahmenTable.spielId, punkte: spielTeilnahmenTable.punkte })
     .from(spielTeilnahmenTable)
     .where(eq(spielTeilnahmenTable.spielerId, spielerId));
 
-  const punkte = teilnahmen.map((t) => t.punkte);
+  const gameMap = new Map<number, number>();
+  for (const t of teilnahmen) {
+    gameMap.set(t.spielId, (gameMap.get(t.spielId) ?? 0) + t.punkte);
+  }
+  const gamePunkte = Array.from(gameMap.values());
 
   return res.json({
     spielerId,
-    gesamtLauefe: punkte.length,
-    durchschnitt: punkte.length
-      ? Math.round((punkte.reduce((a, b) => a + b, 0) / punkte.length) * 10) / 10
+    gesamtSpiele: gamePunkte.length,
+    durchschnitt: gamePunkte.length
+      ? Math.round((gamePunkte.reduce((a, b) => a + b, 0) / gamePunkte.length) * 10) / 10
       : 0,
-    bestPunkte: punkte.length ? Math.max(...punkte) : 0,
+    bestPunkte: gamePunkte.length ? Math.max(...gamePunkte) : 0,
     trefferquote,
     maschinen,
   });
@@ -67,15 +72,18 @@ router.get("/:spielerId/verlauf", authenticate, async (req, res) => {
   const spielerId = Number(req.params.spielerId);
   const limit = Number(req.query.limit ?? 20);
 
+  // Sum both Läufe per game → one entry per game
   const rows = await db
     .select({
-      punkte: spielTeilnahmenTable.punkte,
+      spielId: spielTeilnahmenTable.spielId,
+      punkte: sql<number>`cast(sum(${spielTeilnahmenTable.punkte}) as int)`,
       datum: spieleTable.datum,
       modus: spieleTable.modus,
     })
     .from(spielTeilnahmenTable)
     .innerJoin(spieleTable, eq(spielTeilnahmenTable.spielId, spieleTable.id))
     .where(eq(spielTeilnahmenTable.spielerId, spielerId))
+    .groupBy(spielTeilnahmenTable.spielId, spieleTable.datum, spieleTable.modus)
     .orderBy(desc(spieleTable.datum))
     .limit(limit);
 
