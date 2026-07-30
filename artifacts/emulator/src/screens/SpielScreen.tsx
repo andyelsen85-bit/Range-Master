@@ -27,9 +27,11 @@ export function SpielScreen() {
   const doubletteNr = eintrag?.doubletteNr;
   const [confirmAbort, setConfirmAbort] = useState(false);
 
-  const posMap = buildPositionMap(store.spieler, store.taubeIndex);
+  // H2 is shot from the same post as H1 — use taubeIndex-1 for post rotation
+  const effectiveTaubeIdx = doubletteNr === 2 ? store.taubeIndex - 1 : store.taubeIndex;
+  const posMap = buildPositionMap(store.spieler, effectiveTaubeIdx);
   const aktuellePosten = aktiverSpieler
-    ? getCurrentPosten(aktiverSpieler, store.taubeIndex, store.spieler.length)
+    ? getCurrentPosten(aktiverSpieler, effectiveTaubeIdx, store.spieler.length)
     : 1;
 
   return (

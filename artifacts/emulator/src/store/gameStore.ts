@@ -287,7 +287,9 @@ export const useGameStore = create<GameState>((set, get) => {
       if (!currentSpieler) return state;
 
       const eintrag = state.sequenz[state.taubeIndex];
-      const posten = getCurrentPosten(currentSpieler, state.taubeIndex, state.spieler.length);
+      // H2 fires from the same post as H1 — don't advance post for the second Doublette entry
+      const effectiveTaubeIdx = eintrag?.doubletteNr === 2 ? state.taubeIndex - 1 : state.taubeIndex;
+      const posten = getCurrentPosten(currentSpieler, effectiveTaubeIdx, state.spieler.length);
 
       const neuesErgebnis: Ergebnis = {
         spielerId: currentSpieler.id,
