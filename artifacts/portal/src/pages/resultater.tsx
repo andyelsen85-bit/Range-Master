@@ -11,12 +11,12 @@ export default function Resultater() {
     query: { enabled: !!user?.id, queryKey: getGetSpielerErgebnisseQueryKey(user?.id ?? 0) }
   });
 
-  const grouped: Record<string, ErgebnisWithSpiel[]> = {};
+  // Group by spielId only — both Läufe belong to one game card
+  const grouped: Record<number, ErgebnisWithSpiel[]> = {};
   if (data?.ergebnisse) {
     data.ergebnisse.forEach(e => {
-      const key = `${e.spielId}-${e.lauf}`;
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(e);
+      if (!grouped[e.spielId]) grouped[e.spielId] = [];
+      grouped[e.spielId].push(e);
     });
   }
 
@@ -59,12 +59,18 @@ function ResultGroup({ ergebnisse }: { ergebnisse: ErgebnisWithSpiel[] }) {
   const date = new Date(first.spiel.datum).toLocaleString('lb-LU', { 
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute:'2-digit' 
   });
-  
+
   const totalPoints = ergebnisse.reduce((sum, e) => sum + e.punkte, 0);
-  const sortedErgebnisse = [...ergebnisse].sort((a, b) => a.taube - b.taube);
+
+  // Split into Lauf 1 and Lauf 2, sorted by taube within each
+  const lauf1 = ergebnisse.filter(e => e.lauf === 1).sort((a, b) => a.taube - b.taube);
+  const lauf2 = ergebnisse.filter(e => e.lauf === 2).sort((a, b) => a.taube - b.taube);
+  const lauf1Pts = lauf1.reduce((s, e) => s + e.punkte, 0);
+  const lauf2Pts = lauf2.reduce((s, e) => s + e.punkte, 0);
 
   return (
     <div className="bg-card rounded-xl border border-border/50 overflow-hidden shadow-sm">
+      {/* Game header */}
       <div className="p-5 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/50 bg-secondary/10">
         <div>
           <div className="flex flex-wrap items-center gap-3 mb-2">
@@ -72,27 +78,61 @@ function ResultGroup({ ergebnisse }: { ergebnisse: ErgebnisWithSpiel[] }) {
             <Badge variant="outline" className="font-mono text-xs tracking-wider bg-background text-primary border-primary/30 uppercase font-bold">
               {first.spiel.modus}
             </Badge>
-            <Badge variant="secondary" className="font-mono text-xs tracking-wider uppercase font-bold">
-              LAUF {first.lauf}
-            </Badge>
           </div>
-          <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest font-bold">18 Tauben • Posten 1-5</p>
+          <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest font-bold">2 Läufe • 18 Tauben / Lauf</p>
         </div>
-        <div className="flex flex-col md:items-end">
-          <div className="text-xs text-muted-foreground uppercase tracking-[0.2em] font-bold mb-1">Punkten</div>
-          <div className="text-3xl font-black tracking-tight text-primary">
-            {totalPoints} <span className="text-muted-foreground text-xl font-bold">/ 18</span>
+        <div className="flex items-end gap-6">
+          {/* Per-lauf subtotals */}
+          <div className="flex gap-4 text-sm font-mono text-muted-foreground">
+            <div className="text-center">
+              <div className="text-[10px] uppercase tracking-widest mb-1 font-bold">Lauf 1</div>
+              <div className="font-black text-foreground">{lauf1Pts}<span className="text-muted-foreground font-bold">/18</span></div>
+            </div>
+            <div className="text-muted-foreground/30 self-center text-lg">+</div>
+            <div className="text-center">
+              <div className="text-[10px] uppercase tracking-widest mb-1 font-bold">Lauf 2</div>
+              <div className="font-black text-foreground">{lauf2Pts}<span className="text-muted-foreground font-bold">/18</span></div>
+            </div>
+          </div>
+          {/* Total */}
+          <div className="flex flex-col items-end">
+            <div className="text-xs text-muted-foreground uppercase tracking-[0.2em] font-bold mb-1">Total</div>
+            <div className="text-3xl font-black tracking-tight text-primary">
+              {totalPoints} <span className="text-muted-foreground text-xl font-bold">/ 36</span>
+            </div>
           </div>
         </div>
       </div>
-      
-      <div className="p-5 md:p-6 overflow-x-auto">
-        <div className="flex gap-3 min-w-max pb-2">
-          {sortedErgebnisse.map((e) => (
-            <ShotBadge key={e.id} ergebnis={e} />
-          ))}
+
+      {/* Lauf 1 row */}
+      {lauf1.length > 0 && (
+        <div className="border-b border-border/30">
+          <div className="px-5 pt-4 pb-1 flex items-center gap-3">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Lauf 1</span>
+            <span className="text-xs font-mono font-bold text-primary">{lauf1Pts} Pkt</span>
+          </div>
+          <div className="px-5 pb-4 overflow-x-auto">
+            <div className="flex gap-3 min-w-max">
+              {lauf1.map((e) => <ShotBadge key={e.id} ergebnis={e} />)}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Lauf 2 row */}
+      {lauf2.length > 0 && (
+        <div>
+          <div className="px-5 pt-4 pb-1 flex items-center gap-3">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Lauf 2</span>
+            <span className="text-xs font-mono font-bold text-primary">{lauf2Pts} Pkt</span>
+          </div>
+          <div className="px-5 pb-4 overflow-x-auto">
+            <div className="flex gap-3 min-w-max">
+              {lauf2.map((e) => <ShotBadge key={e.id} ergebnis={e} />)}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
