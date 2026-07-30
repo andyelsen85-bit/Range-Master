@@ -1,23 +1,19 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# Ingress — adapt to your ingress controller (nginx-ingress, Traefik, etc.)
+# Two Ingress resources are required because nginx-ingress applies
+# rewrite-target per-resource, not per-path.
 #
-# Route rules:
-#   /api/*       →  api-server:8080   (REST API)
-#   /emulator/*  →  emulator:80       (static SPA, built with /emulator/ base)
-#   /*           →  portal:80         (static SPA)
-#
-# Your external reverse proxy (with HTTPS) should forward traffic to this
-# Ingress (or directly to the NodePort/LoadBalancer services if you prefer).
+#  rangemaster-api      /api/*       →  api-server:8080  (NO rewrite — the
+#                                       Express app is mounted at /api)
+#  rangemaster-frontend /emulator/*  →  emulator:80      (strips /emulator prefix)
+#                       /*           →  portal:80         (no strip; BASE_PATH=/)
 # ──────────────────────────────────────────────────────────────────────────────
+
+# ── 1. API backend — prefix match, no path rewrite ────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: rangemaster
+  name: rangemaster-api
   annotations:
-    # nginx-ingress controller annotations — remove if using Traefik
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/use-regex: "true"
-    # Let the external reverse proxy handle TLS; cluster traffic is plain HTTP
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: nginx
@@ -25,13 +21,30 @@ spec:
     - host: rangemaster.hostzone.lu
       http:
         paths:
-          - path: /api(/|$)(.*)
-            pathType: ImplementationSpecific
+          - path: /api
+            pathType: Prefix
             backend:
               service:
                 name: api-server
                 port:
                   number: 8080
+---
+# ── 2. SPA frontends — regex paths with prefix-stripping rewrite ──────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rangemaster-frontend
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rangemaster.hostzone.lu
+      http:
+        paths:
+          # /emulator/* → emulator nginx (built with base /emulator/, rewrite strips it)
           - path: /emulator(/|$)(.*)
             pathType: ImplementationSpecific
             backend:
@@ -39,6 +52,7 @@ spec:
                 name: emulator
                 port:
                   number: 80
+          # /* → portal nginx (built with BASE_PATH=/, no effective strip needed)
           - path: /()(.*)
             pathType: ImplementationSpecific
             backend:
