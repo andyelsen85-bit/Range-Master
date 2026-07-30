@@ -4,6 +4,8 @@ import { DashboardScreen } from '@/screens/DashboardScreen';
 import { StartScreen } from '@/screens/StartScreen';  
 import { SpielScreen } from '@/screens/SpielScreen';
 import { EinstellungenScreen } from '@/screens/EinstellungenScreen';
+import { ResultateScreen } from '@/screens/ResultateScreen';
+import { SpillgeschichteScreen } from '@/screens/SpillgeschichteScreen';
 import { SimControls } from '@/components/SimControls';
 
 export default function App() {
@@ -33,6 +35,8 @@ export default function App() {
         {screen === 'start' && <StartScreen />}
         {screen === 'spiel' && <SpielScreen />}
         {screen === 'einstellungen' && <EinstellungenScreen />}
+        {screen === 'resultate' && <ResultateScreen />}
+        {screen === 'geschichte' && <SpillgeschichteScreen />}
         
         {/* Emulator overlay controls */}
         <SimControls />

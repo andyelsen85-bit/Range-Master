@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 export type Maschine = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
 export type Modus = 'NORMAL' | 'HARAKIRI' | 'HARAKIRI_DELAYED' | 'HARAKIRI_FULL' | 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3';
-export type Screen = 'dashboard' | 'start' | 'spiel' | 'einstellungen';
+export type Screen = 'dashboard' | 'start' | 'spiel' | 'einstellungen' | 'resultate' | 'geschichte';
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
 export interface Spieler {
@@ -37,6 +37,12 @@ export interface PortalSpieler {
 
 // Custom mode machine sequences
 export type CustomSequenz = Maschine[];
+
+/** A finished game kept in local history (last 50) */
+export interface FinishedGame extends PendingGame {
+  finishedAt: string; // ISO timestamp of completion
+  spielerNamen: Record<number, string>; // name snapshot so history works after renames
+}
 
 /** A completed game queued for later sync */
 export interface PendingGame {
@@ -92,8 +98,13 @@ interface GameState extends Settings {
   syncStatus: SyncStatus;
   lastSync: string | null;
 
+  // Local game history (last 50, persisted)
+  gameHistory: FinishedGame[];
+  lastFinishedGame: FinishedGame | null;
+
   // Actions
   setScreen: (screen: Screen) => void;
+  dismissResultate: () => void;
   setSpieler: (spieler: Spieler[]) => void;
   setSpielerAufPosten: (post: number, data: { id: number; name: string } | null) => void;
   updateSpielerName: (id: number, name: string) => void;
@@ -222,6 +233,23 @@ function assignPostenToSpieler(spieler: Spieler[]): Spieler[] {
 const SETTINGS_KEY = 'trapmaster-emulator-settings';
 const PENDING_KEY = 'trapmaster-pending-games';
 const CACHED_SPIELER_KEY = 'trapmaster-cached-spieler';
+const HISTORY_KEY = 'trapmaster-game-history';
+
+function loadGameHistory(): FinishedGame[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(HISTORY_KEY) : null;
+    if (!raw) return [];
+    return JSON.parse(raw) as FinishedGame[];
+  } catch {
+    return [];
+  }
+}
+
+function saveGameHistory(history: FinishedGame[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch {}
+}
 
 function loadSettings(): Partial<Settings> {
   try {
@@ -308,6 +336,10 @@ export const useGameStore = create<GameState>((set, get) => {
 
     // Offline queue — restored from localStorage on startup
     pendingGames: loadPendingGames(),
+
+    // Local history
+    gameHistory: loadGameHistory(),
+    lastFinishedGame: null,
 
     syncStatus: 'idle',
     lastSync: null,
@@ -468,15 +500,26 @@ export const useGameStore = create<GameState>((set, get) => {
         const newPendingGames = [...state.pendingGames, newPendingGame];
         savePendingGames(newPendingGames);
 
+        // Build and persist local history entry
+        const finishedGame: FinishedGame = {
+          ...newPendingGame,
+          finishedAt: new Date().toISOString(),
+          spielerNamen: Object.fromEntries(updatedSpieler.map(s => [s.id, s.name])),
+        };
+        const newHistory = [finishedGame, ...state.gameHistory].slice(0, 50);
+        saveGameHistory(newHistory);
+
         return {
           ergebnisse: allErgebnisse,
           spielerIndex: 0,
           taubeIndex: 0,
           lauf: nextLauf,
-          screen: 'dashboard' as Screen,
+          screen: 'resultate' as Screen,
           spieler: updatedSpieler,
           pendingGames: newPendingGames,
           syncStatus: 'idle',
+          gameHistory: newHistory,
+          lastFinishedGame: finishedGame,
         };
       }
 
@@ -524,6 +567,7 @@ export const useGameStore = create<GameState>((set, get) => {
       }
       const nextLauf = state.lauf + 1;
       if (nextLauf > 2) {
+        // ueberspringen path: skip showing resultate, just go to dashboard
         return { screen: 'dashboard' as Screen, spielerIndex: 0, taubeIndex: 0, lauf: nextLauf };
       }
       return {
@@ -533,6 +577,8 @@ export const useGameStore = create<GameState>((set, get) => {
         sequenz: generateSequenz(state.modus, state.maschinenAktiv, state.customSequenzen),
       };
     }),
+
+    dismissResultate: () => set({ screen: 'dashboard', lastFinishedGame: null }),
 
     ofbriechenSpiel: () => set({ screen: 'dashboard' }),
 

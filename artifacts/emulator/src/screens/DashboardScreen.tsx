@@ -1,6 +1,6 @@
 import React from 'react';
 import { useGameStore, MASCHINEN_LIST } from '@/store/gameStore';
-import { Play, Settings, RefreshCw, Upload, WifiOff, CheckCircle2, Clock } from 'lucide-react';
+import { Play, Settings, RefreshCw, Upload, WifiOff, CheckCircle2, Clock, History } from 'lucide-react';
 import { TouchButton } from '@/components/TouchButton';
 import { cn } from '@/lib/utils';
 
@@ -109,6 +109,21 @@ export function DashboardScreen() {
           >
             <Settings className="w-8 h-8" />
             <span>Astellungen</span>
+          </TouchButton>
+
+          <TouchButton
+            size="lg"
+            variant="ghost"
+            className="w-full flex-col gap-2 h-24 relative"
+            onClick={() => store.setScreen('geschichte')}
+          >
+            <History className="w-7 h-7" />
+            <span className="text-sm">Spillgeschicht</span>
+            {store.gameHistory.length > 0 && (
+              <span className="absolute top-2 right-3 text-xs font-black text-muted-foreground/60 font-mono">
+                {store.gameHistory.length}
+              </span>
+            )}
           </TouchButton>
 
           {/* Offline Queue / Sync Panel */}
