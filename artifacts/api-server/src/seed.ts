@@ -7,7 +7,8 @@
  *   kubectl logs -n rangemaster <api-server-pod> -c run-seed
  */
 import bcrypt from "bcryptjs";
-import { db, pool, spielerTable } from "@workspace/db";
+import { randomBytes } from "crypto";
+import { db, pool, spielerTable, apiKeysTable } from "@workspace/db";
 import { eq, count } from "drizzle-orm";
 
 function randomPassword(length = 16): string {
@@ -56,6 +57,33 @@ async function seed() {
   console.log("╠══════════════════════════════════════════════════╣");
   console.log("║  Change the password after first login!          ║");
   console.log("╚══════════════════════════════════════════════════╝");
+
+  // ── Seed API keys ──────────────────────────────────────────────────────────
+  const [{ value: keyCount }] = await db
+    .select({ value: count() })
+    .from(apiKeysTable);
+
+  if (Number(keyCount) === 0) {
+    const defaultKeys = [
+      { name: "Emulator",    type: "EMULATOR" as const },
+      { name: "Terminal 1",  type: "TERMINAL" as const },
+      { name: "Terminal 2",  type: "TERMINAL" as const },
+      { name: "Terminal 3",  type: "TERMINAL" as const },
+      { name: "Terminal 4",  type: "TERMINAL" as const },
+      { name: "Terminal 5",  type: "TERMINAL" as const },
+    ];
+    for (const k of defaultKeys) {
+      await db.insert(apiKeysTable).values({
+        name: k.name,
+        key: randomBytes(32).toString("hex"),
+        type: k.type,
+        active: true,
+      });
+    }
+    console.log("[seed] Created 6 API keys (1 Emulator + 5 Terminal). Regenerate each from the portal to reveal the full key.");
+  } else {
+    console.log("[seed] API keys already exist — skipping.");
+  }
 
   await pool.end();
 }
