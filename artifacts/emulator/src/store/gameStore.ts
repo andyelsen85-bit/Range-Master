@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 export type Maschine = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
 export type Modus = 'NORMAL' | 'HARAKIRI' | 'HARAKIRI_DELAYED' | 'HARAKIRI_FULL' | 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3';
-export type Screen = 'dashboard' | 'start' | 'spiel' | 'einstellungen' | 'resultate' | 'geschichte';
+export type Screen = 'dashboard' | 'start' | 'spiel' | 'einstellungen' | 'resultate' | 'geschichte' | 'kredite';
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
 export interface Spieler {
@@ -45,6 +45,21 @@ export interface PendingSpieler {
 
 // Custom mode machine sequences
 export type CustomSequenz = Maschine[];
+
+/** Per-player credit tally for the current day */
+export interface KreditStand {
+  gewaehrt: number;
+  verbraucht: number;
+}
+
+/** A credit grant/consumption event queued for portal sync (idempotent via externalId) */
+export interface KreditEvent {
+  externalId: string;
+  spielerId: number;
+  datum: string; // YYYY-MM-DD
+  typ: 'GRANT' | 'USE';
+  anzahl: number;
+}
 
 /** A finished game kept in local history (last 50) */
 export interface FinishedGame extends PendingGame {
@@ -112,6 +127,12 @@ interface GameState extends Settings {
   gameHistory: FinishedGame[];
   lastFinishedGame: FinishedGame | null;
 
+  // Day credits (valid only for kreditDatum = today; no carryover)
+  kreditDatum: string;
+  kredite: Record<number, KreditStand>;
+  pendingKredite: KreditEvent[];
+  krediteLaden: boolean;
+
   // Actions
   setScreen: (screen: Screen) => void;
   dismissResultate: () => void;
@@ -135,6 +156,19 @@ interface GameState extends Settings {
   ladeSpielerVomPortal: () => Promise<void>;
   getAktivenSpieler: () => Spieler | undefined;
   saveSettings: () => void;
+
+  /** Add a player to today's list with 0 credits (no event queued until credits are actually granted) */
+  registerSpielerFuerTag: (spielerId: number) => void;
+  /** Grant N day credits to a player (queued for portal sync) */
+  addKredite: (spielerId: number, anzahl: number) => void;
+  /** Manually refund/deduct N credits (player paid out early) */
+  removeKredit: (spielerId: number, anzahl: number) => void;
+  /** Remove a player's entire entry from today's credit list (mistake correction) */
+  deleteKreditEntry: (spielerId: number) => void;
+  /** Remaining credits for a player today (0 if none) */
+  getKreditRest: (spielerId: number) => number;
+  /** Pull today's credit state from the portal and merge with unsynced local events */
+  ladeKredite: () => Promise<void>;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -253,6 +287,56 @@ const PENDING_KEY = 'trapmaster-pending-games';
 const CACHED_SPIELER_KEY = 'trapmaster-cached-spieler';
 const HISTORY_KEY = 'trapmaster-game-history';
 const PENDING_SPIELER_KEY = 'trapmaster-pending-spieler';
+const KREDITE_KEY = 'trapmaster-kredite';
+const PENDING_KREDITE_KEY = 'trapmaster-pending-kredite';
+
+/** Local date (not UTC) — day credits expire on the local day boundary */
+export function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function loadKredite(): { kreditDatum: string; kredite: Record<number, KreditStand> } {
+  const today = todayStr();
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(KREDITE_KEY) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { datum: string; kredite: Record<number, KreditStand> };
+      // Credits are day-scoped: discard anything not from today (no carryover)
+      if (parsed.datum === today) return { kreditDatum: today, kredite: parsed.kredite ?? {} };
+    }
+  } catch {}
+  return { kreditDatum: today, kredite: {} };
+}
+
+function saveKredite(datum: string, kredite: Record<number, KreditStand>) {
+  try {
+    localStorage.setItem(KREDITE_KEY, JSON.stringify({ datum, kredite }));
+  } catch {}
+}
+
+function loadPendingKredite(): KreditEvent[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PENDING_KREDITE_KEY) : null;
+    if (!raw) return [];
+    return JSON.parse(raw) as KreditEvent[];
+  } catch {
+    return [];
+  }
+}
+
+function savePendingKredite(events: KreditEvent[]) {
+  try {
+    localStorage.setItem(PENDING_KREDITE_KEY, JSON.stringify(events));
+  } catch {}
+}
+
+/** If the stored credit day is stale, roll over to an empty tally for today */
+function rolledKredite(state: { kreditDatum: string; kredite: Record<number, KreditStand> }) {
+  const today = todayStr();
+  if (state.kreditDatum === today) return { kreditDatum: state.kreditDatum, kredite: state.kredite };
+  return { kreditDatum: today, kredite: {} as Record<number, KreditStand> };
+}
 
 function loadPendingSpieler(): PendingSpieler[] {
   try {
@@ -379,6 +463,11 @@ export const useGameStore = create<GameState>((set, get) => {
     gameHistory: loadGameHistory(),
     lastFinishedGame: null,
 
+    // Day credits — restored from localStorage (auto-expired if from another day)
+    ...loadKredite(),
+    pendingKredite: loadPendingKredite(),
+    krediteLaden: false,
+
     syncStatus: 'idle',
     lastSync: null,
 
@@ -443,20 +532,44 @@ export const useGameStore = create<GameState>((set, get) => {
       });
     },
 
-    startSpiel: () => set((state) => ({
-      screen: 'spiel',
-      lauf: 1,
-      taubeIndex: 0,
-      spielerIndex: 0,
-      ergebnisse: [],
-      sequenz: generateSequenz(state.modus, state.maschinenAktiv, state.customSequenzen),
-      // Ensure consistent game order by startPosten; reset points
-      spieler: [...state.spieler]
-        .sort((a, b) => a.startPosten - b.startPosten)
-        .map(s => ({ ...s, punkte: 0 })),
-      spielId: generateSpielId(),
-      syncStatus: 'idle',
-    })),
+    startSpiel: () => set((state) => {
+      // ── Deduct one day credit per participating player ────────────────────
+      const { kreditDatum, kredite } = rolledKredite(state);
+      const nextKredite = { ...kredite };
+      const newEvents: KreditEvent[] = [];
+      for (const s of state.spieler) {
+        const stand = nextKredite[s.id] ?? { gewaehrt: 0, verbraucht: 0 };
+        nextKredite[s.id] = { ...stand, verbraucht: stand.verbraucht + 1 };
+        newEvents.push({
+          externalId: generateSpielId(),
+          spielerId: s.id,
+          datum: kreditDatum,
+          typ: 'USE',
+          anzahl: 1,
+        });
+      }
+      const pendingKredite = [...state.pendingKredite, ...newEvents];
+      saveKredite(kreditDatum, nextKredite);
+      savePendingKredite(pendingKredite);
+
+      return {
+        screen: 'spiel' as Screen,
+        lauf: 1,
+        taubeIndex: 0,
+        spielerIndex: 0,
+        ergebnisse: [],
+        sequenz: generateSequenz(state.modus, state.maschinenAktiv, state.customSequenzen),
+        // Ensure consistent game order by startPosten; reset points
+        spieler: [...state.spieler]
+          .sort((a, b) => a.startPosten - b.startPosten)
+          .map(s => ({ ...s, punkte: 0 })),
+        spielId: generateSpielId(),
+        syncStatus: 'idle' as SyncStatus,
+        kreditDatum,
+        kredite: nextKredite,
+        pendingKredite,
+      };
+    }),
 
     eintragenErgebnis: (schuss1, schuss2) => set((state) => {
       const pts = schuss1 ? 2 : schuss2 ? 1 : 0;
@@ -669,6 +782,101 @@ export const useGameStore = create<GameState>((set, get) => {
       return neu;
     },
 
+    registerSpielerFuerTag: (spielerId) => set((state) => {
+      const { kreditDatum, kredite } = rolledKredite(state);
+      if (kredite[spielerId]) return state; // already listed today
+      const nextKredite = { ...kredite, [spielerId]: { gewaehrt: 0, verbraucht: 0 } };
+      saveKredite(kreditDatum, nextKredite);
+      return { kreditDatum, kredite: nextKredite };
+    }),
+
+    addKredite: (spielerId, anzahl) => set((state) => {
+      if (anzahl <= 0) return state;
+      const { kreditDatum, kredite } = rolledKredite(state);
+      const stand = kredite[spielerId] ?? { gewaehrt: 0, verbraucht: 0 };
+      const nextKredite = { ...kredite, [spielerId]: { ...stand, gewaehrt: stand.gewaehrt + anzahl } };
+      const pendingKredite: KreditEvent[] = [
+        ...state.pendingKredite,
+        { externalId: generateSpielId(), spielerId, datum: kreditDatum, typ: 'GRANT' as const, anzahl },
+      ];
+      saveKredite(kreditDatum, nextKredite);
+      savePendingKredite(pendingKredite);
+      return { kreditDatum, kredite: nextKredite, pendingKredite };
+    }),
+
+    removeKredit: (spielerId, anzahl) => set((state) => {
+      if (anzahl <= 0) return state;
+      const { kreditDatum, kredite } = rolledKredite(state);
+      const stand = kredite[spielerId] ?? { gewaehrt: 0, verbraucht: 0 };
+      // Refund reduces bezuelt (gewaehrt); cannot go below gespillt (verbraucht)
+      const effective = Math.min(anzahl, Math.max(0, stand.gewaehrt - stand.verbraucht));
+      if (effective === 0) return state;
+      const nextKredite = { ...kredite, [spielerId]: { ...stand, gewaehrt: stand.gewaehrt - effective } };
+      const pendingKredite: KreditEvent[] = [
+        ...state.pendingKredite,
+        { externalId: generateSpielId(), spielerId, datum: kreditDatum, typ: 'GRANT' as const, anzahl: -effective },
+      ];
+      saveKredite(kreditDatum, nextKredite);
+      savePendingKredite(pendingKredite);
+      return { kreditDatum, kredite: nextKredite, pendingKredite };
+    }),
+
+    deleteKreditEntry: (spielerId) => set((state) => {
+      const { kreditDatum, kredite } = rolledKredite(state);
+      const stand = kredite[spielerId];
+      if (!stand) return state;
+      const rest = Math.max(0, stand.gewaehrt - stand.verbraucht);
+      // Build compensating events to zero out the server state
+      const newEvents: KreditEvent[] = [];
+      if (rest > 0) {
+        // Cancel remaining paid credits
+        newEvents.push({ externalId: generateSpielId(), spielerId, datum: kreditDatum, typ: 'GRANT', anzahl: -rest });
+      }
+      const nextKredite = { ...kredite };
+      delete nextKredite[spielerId];
+      const pendingKredite = [...state.pendingKredite, ...newEvents];
+      saveKredite(kreditDatum, nextKredite);
+      savePendingKredite(pendingKredite);
+      return { kreditDatum, kredite: nextKredite, pendingKredite };
+    }),
+
+    getKreditRest: (spielerId) => {
+      const state = get();
+      if (state.kreditDatum !== todayStr()) return 0; // stale day — everything expired
+      const stand = state.kredite[spielerId];
+      return stand ? Math.max(0, stand.gewaehrt - stand.verbraucht) : 0;
+    },
+
+    ladeKredite: async () => {
+      const state = get();
+      if (!state.apiUrl || !state.apiKey) return;
+      set({ krediteLaden: true });
+      try {
+        const today = todayStr();
+        const res = await fetch(`${state.apiUrl}/api/sync/kredite?datum=${today}`, {
+          headers: { 'x-api-key': state.apiKey },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json() as { kredite: Array<{ spielerId: number; gewaehrt: number; verbraucht: number }> };
+
+        // Server state + any local events not yet pushed = current local truth
+        const merged: Record<number, KreditStand> = {};
+        for (const k of data.kredite) merged[k.spielerId] = { gewaehrt: k.gewaehrt, verbraucht: k.verbraucht };
+        for (const e of get().pendingKredite) {
+          if (e.datum !== today) continue;
+          const stand = merged[e.spielerId] ?? { gewaehrt: 0, verbraucht: 0 };
+          merged[e.spielerId] = e.typ === 'GRANT'
+            ? { ...stand, gewaehrt: stand.gewaehrt + e.anzahl }
+            : { ...stand, verbraucht: stand.verbraucht + e.anzahl };
+        }
+        saveKredite(today, merged);
+        set({ kreditDatum: today, kredite: merged, krediteLaden: false });
+      } catch {
+        set({ krediteLaden: false });
+      }
+    },
+
     getAktivenSpieler: () => {
       const s = get();
       return s.spieler[s.spielerIndex];
@@ -730,7 +938,7 @@ export const useGameStore = create<GameState>((set, get) => {
 
     syncAllPending: async () => {
       const state = get();
-      if (state.pendingGames.length === 0 && state.pendingSpieler.length === 0) return;
+      if (state.pendingGames.length === 0 && state.pendingSpieler.length === 0 && state.pendingKredite.length === 0) return;
       if (!state.apiUrl || !state.apiKey) {
         set({ syncStatus: 'error' });
         return;
@@ -776,6 +984,10 @@ export const useGameStore = create<GameState>((set, get) => {
             ),
           }));
           const remappedSpieler = s2.spieler.map(s => ({ ...s, id: remap(s.id) }));
+          const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
+          const remappedKredite = Object.fromEntries(
+            Object.entries(s2.kredite).map(([id, stand]) => [remap(Number(id)), stand])
+          ) as Record<number, KreditStand>;
           const remappedPortal = s2.portalSpieler.map(p =>
             idMap.has(p.id) ? { ...p, id: idMap.get(p.id)!, lokal: undefined } : p
           );
@@ -786,13 +998,41 @@ export const useGameStore = create<GameState>((set, get) => {
           savePendingSpieler(stillPending);
           saveCachedSpieler(remappedPortal);
           saveGameHistory(remappedHistory);
+          savePendingKredite(remappedKreditEvents);
+          saveKredite(s2.kreditDatum, remappedKredite);
           set({
             pendingGames: remappedPending,
             pendingSpieler: stillPending,
             spieler: remappedSpieler,
             portalSpieler: remappedPortal,
             gameHistory: remappedHistory,
+            pendingKredite: remappedKreditEvents,
+            kredite: remappedKredite,
           });
+        }
+
+        // ── Step 1b: push pending credit events (only remapped/server IDs) ───
+        {
+          const allEvents = get().pendingKredite;
+          const pushable = allEvents.filter(e => e.spielerId > 0);
+          if (pushable.length > 0) {
+            const resK = await fetch(`${state.apiUrl}/api/sync/kredite`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': state.apiKey,
+              },
+              body: JSON.stringify({ events: pushable }),
+              signal: AbortSignal.timeout(15000),
+            });
+            if (!resK.ok) throw new Error(`HTTP ${resK.status}`);
+            // Keep only events that could not be pushed (still-local player IDs)
+            const stillPendingKredite = get().pendingKredite.filter(e => e.spielerId <= 0);
+            savePendingKredite(stillPendingKredite);
+            set({ pendingKredite: stillPendingKredite });
+            // Reconcile today's state from the server
+            await get().ladeKredite();
+          }
         }
 
         // ── Step 2: push pending games ───────────────────────────────────────

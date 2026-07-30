@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuthStore } from "@/store/use-auth-store";
-import { LogOut, LayoutDashboard, List, Trophy, BarChart3, Target, Shield, User, KeyRound } from "lucide-react";
+import { LogOut, LayoutDashboard, List, Trophy, BarChart3, Target, Shield, User, KeyRound, Coins } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -16,6 +16,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { href: "/statistiken", label: "Statistiken", icon: BarChart3 },
     ...(user?.isAdmin ? [
       { href: "/admin", label: "Spillerverwaltung", icon: Shield },
+      { href: "/admin/kreditter", label: "Dageskreditter", icon: Coins },
       { href: "/admin/api-schluesselen", label: "API Schlësselen", icon: KeyRound },
     ] : []),
   ];

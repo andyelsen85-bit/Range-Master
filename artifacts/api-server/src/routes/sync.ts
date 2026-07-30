@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable } from "@workspace/db";
+import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
 import { requireApiKey } from "./auth";
 import { z } from "zod";
@@ -150,6 +150,57 @@ router.post("/spiele", requireApiKey, async (req, res) => {
   }
 
   return res.json({ results });
+});
+
+// ─── Day credits ──────────────────────────────────────────────────────────────
+
+const KreditEventSchema = z.object({
+  externalId: z.string().min(8),
+  spielerId: z.number().int().positive(),
+  datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  typ: z.enum(["GRANT", "USE"]),
+  anzahl: z.number().int().min(-100).max(100).refine(n => n !== 0, "anzahl darf net 0 sinn"),
+});
+
+// GET /api/sync/kredite?datum=YYYY-MM-DD — aggregated per-player credits for one day
+router.get("/kredite", requireApiKey, async (req, res) => {
+  const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
+  const rows = await db
+    .select({
+      spielerId: kreditEventsTable.spielerId,
+      gewaehrt: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'GRANT' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
+      verbraucht: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'USE' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
+    })
+    .from(kreditEventsTable)
+    .where(eq(kreditEventsTable.datum, datum))
+    .groupBy(kreditEventsTable.spielerId);
+  return res.json({ datum, kredite: rows });
+});
+
+// POST /api/sync/kredite — idempotent push of grant/use events from the terminal
+router.post("/kredite", requireApiKey, async (req, res) => {
+  const body = z.object({ events: z.array(KreditEventSchema) }).parse(req.body);
+
+  let synced = 0;
+  if (body.events.length) {
+    // Reject events for unknown players explicitly (avoid FK 500s)
+    const ids = [...new Set(body.events.map((e) => e.spielerId))];
+    const known = await db.select({ id: spielerTable.id }).from(spielerTable).where(inArray(spielerTable.id, ids));
+    const knownIds = new Set(known.map((k) => k.id));
+    const unknown = ids.filter((id) => !knownIds.has(id));
+    if (unknown.length) {
+      return res.status(400).json({ error: `Onbekannte Spiller-IDs: ${unknown.join(", ")}` });
+    }
+
+    const inserted = await db
+      .insert(kreditEventsTable)
+      .values(body.events)
+      .onConflictDoNothing({ target: kreditEventsTable.externalId })
+      .returning({ id: kreditEventsTable.id });
+    synced = inserted.length;
+  }
+
+  return res.json({ synced, skipped: body.events.length - synced });
 });
 
 export default router;

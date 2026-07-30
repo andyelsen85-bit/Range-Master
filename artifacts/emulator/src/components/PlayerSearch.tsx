@@ -8,6 +8,10 @@ interface PlayerSearchProps {
   onSelect: (spieler: PortalSpieler) => void;
   /** IDs that are already taken (shown but not selectable) */
   disabledIds?: number[];
+  /** When set, only these IDs are offered and creating new players is disabled */
+  allowedIds?: number[];
+  /** Shown when allowedIds filters out everything */
+  emptyAllowedHint?: string;
   placeholder?: string;
   /** Auto-focus the input when mounted (default true) */
   autoFocus?: boolean;
@@ -24,6 +28,8 @@ interface PlayerSearchProps {
 export function PlayerSearch({
   onSelect,
   disabledIds = [],
+  allowedIds,
+  emptyAllowedHint,
   placeholder = 'Numm sichen oder aginn…',
   autoFocus = true,
   className,
@@ -51,21 +57,27 @@ export function PlayerSearch({
 
   const q = query.trim().toLowerCase();
 
+  const pool = useMemo(() => {
+    if (!allowedIds) return store.portalSpieler;
+    const allowed = new Set(allowedIds);
+    return store.portalSpieler.filter(p => allowed.has(p.id));
+  }, [store.portalSpieler, allowedIds]);
+
   const matches = useMemo(() => {
-    if (!q) return store.portalSpieler;
+    if (!q) return pool;
     // Prefix matches first, then substring matches
     const prefix: PortalSpieler[] = [];
     const substr: PortalSpieler[] = [];
-    for (const p of store.portalSpieler) {
+    for (const p of pool) {
       const name = p.name.toLowerCase();
       if (name.startsWith(q)) prefix.push(p);
       else if (name.includes(q)) substr.push(p);
     }
     return [...prefix, ...substr];
-  }, [q, store.portalSpieler]);
+  }, [q, pool]);
 
   const exactMatch = matches.some(p => p.name.toLowerCase() === q);
-  const canCreate = q.length > 0 && !exactMatch;
+  const canCreate = !allowedIds && q.length > 0 && !exactMatch;
 
   // Options: matches + optional "create new" row at the end
   const optionCount = matches.length + (canCreate ? 1 : 0);
@@ -144,9 +156,9 @@ export function PlayerSearch({
           {store.portalLaden
             ? 'Lueden…'
             : store.spielerAusCache
-              ? `📦 Offline-Cache · ${store.portalSpieler.length} Spillesch`
-              : store.portalSpieler.length > 0
-                ? `${matches.length}/${store.portalSpieler.length} Spillesch`
+              ? `📦 Offline-Cache · ${pool.length} Spillesch`
+              : pool.length > 0
+                ? `${matches.length}/${pool.length} Spillesch`
                 : 'Keng Spillesch'}
         </span>
         <button
@@ -232,7 +244,9 @@ export function PlayerSearch({
         </div>
       ) : !store.portalLaden && (
         <div className="text-xs text-muted-foreground italic text-center py-3">
-          {q ? 'Kee Spiller fonnt' : 'Keng Spillesch am Cache — dréckt "Laden"'}
+          {allowedIds && pool.length === 0
+            ? (emptyAllowedHint ?? 'Keng Spillesch disponibel')
+            : q ? 'Kee Spiller fonnt' : 'Keng Spillesch am Cache — dréckt "Laden"'}
         </div>
       )}
     </div>

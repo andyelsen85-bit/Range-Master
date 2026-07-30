@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable } from "@workspace/db";
+import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { authenticate, requireAdmin } from "./auth";
@@ -160,6 +160,25 @@ router.put("/spieler/:id/passwort", async (req, res) => {
 
   if (!updated) return res.status(404).json({ error: "Nicht gefunden" });
   return res.json({ success: true });
+});
+
+// GET /api/admin/kredite?datum=YYYY-MM-DD — read-only day-credit overview
+router.get("/kredite", async (req, res) => {
+  const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
+  const rows = await db
+    .select({
+      spielerId: kreditEventsTable.spielerId,
+      name: spielerTable.name,
+      mitgliedNr: spielerTable.mitgliedNr,
+      gewaehrt: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'GRANT' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
+      verbraucht: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'USE' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
+    })
+    .from(kreditEventsTable)
+    .innerJoin(spielerTable, eq(kreditEventsTable.spielerId, spielerTable.id))
+    .where(eq(kreditEventsTable.datum, datum))
+    .groupBy(kreditEventsTable.spielerId, spielerTable.name, spielerTable.mitgliedNr)
+    .orderBy(spielerTable.name);
+  return res.json({ datum, kredite: rows });
 });
 
 // ─── API Key routes ───────────────────────────────────────────────────────────

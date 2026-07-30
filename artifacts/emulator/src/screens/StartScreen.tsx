@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useGameStore, PortalSpieler } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import { PlayerSearch } from '@/components/PlayerSearch';
-import { ArrowLeft, Play, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Coins, Play, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const MODI = [
@@ -44,6 +44,18 @@ export function StartScreen() {
 
   const assignedCount = store.spieler.length;
 
+  // ── Day-credit gating ───────────────────────────────────────────────────────
+  // Only players with remaining credits today may be placed on a post.
+  const mitKreditIds = store.portalSpieler
+    .filter(p => store.getKreditRest(p.id) > 0)
+    .map(p => p.id);
+  // Assigned players stay visible in the picker (rendered as taken)
+  const allowedIds = [...new Set([...mitKreditIds, ...store.spieler.map(s => s.id)])];
+
+  // Guard: a player could lose their last credit after being assigned
+  const ohneKredit = store.spieler.filter(s => store.getKreditRest(s.id) < 1);
+  const startBlocked = assignedCount === 0 || ohneKredit.length > 0;
+
   return (
     <div className="flex h-full w-full bg-background flex-col">
       {/* ── Header ───────────────────────────────────────────────────────── */}
@@ -58,7 +70,7 @@ export function StartScreen() {
             variant="primary"
             className="gap-3 h-12 px-6 text-base shadow-xl"
             onClick={() => store.startSpiel()}
-            disabled={assignedCount === 0}
+            disabled={startBlocked}
           >
             <Play className="w-5 h-5" />
             STARTEN
@@ -81,6 +93,19 @@ export function StartScreen() {
             <p className="text-xs text-muted-foreground mt-0.5">
               Tippen op <span className="text-primary font-bold">+</span> fir e Schützen ze wielen
             </p>
+            <p className="text-xs text-amber-400/90 mt-1 flex items-center gap-1.5">
+              <Coins className="w-3.5 h-3.5 shrink-0" />
+              Nëmme Spiller mat Dageskreditter · 1 Kredit pro Spill
+            </p>
+            {ohneKredit.length > 0 && (
+              <div className="mt-2 text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                Keng Kreditter méi: {ohneKredit.map(s => s.name).join(', ')} — op
+                <button
+                  className="underline ml-1 text-primary"
+                  onClick={() => store.setScreen('kredite')}
+                >Spiller vum Dag</button> ophuelen
+              </div>
+            )}
           </div>
 
           {/* 5 post slot cards */}
@@ -158,6 +183,8 @@ export function StartScreen() {
                       <PlayerSearch
                         onSelect={assignSpieler}
                         disabledIds={store.spieler.map(s => s.id)}
+                        allowedIds={allowedIds}
+                        emptyAllowedHint='Kee Spiller mat Kreditter fir haut — als éischt op "Spiller vum Dag" Kreditter dobäisetzen'
                       />
                     </div>
                   )}

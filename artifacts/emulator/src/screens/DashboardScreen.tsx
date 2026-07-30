@@ -1,6 +1,6 @@
 import React from 'react';
 import { useGameStore, MASCHINEN_LIST } from '@/store/gameStore';
-import { Play, Settings, RefreshCw, Upload, WifiOff, CheckCircle2, Clock, History } from 'lucide-react';
+import { Play, Settings, RefreshCw, Upload, WifiOff, CheckCircle2, Clock, History, Coins } from 'lucide-react';
 import { TouchButton } from '@/components/TouchButton';
 import { cn } from '@/lib/utils';
 
@@ -13,7 +13,9 @@ export function DashboardScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  const pendingCount = store.pendingGames.length + store.pendingSpieler.length;
+  const pendingCount = store.pendingGames.length + store.pendingSpieler.length + store.pendingKredite.length;
+  const spillerMatKredit = Object.values(store.kredite)
+    .filter(k => k.gewaehrt - k.verbraucht > 0).length;
   const isSyncing = store.syncStatus === 'syncing';
 
   return (
@@ -104,7 +106,21 @@ export function DashboardScreen() {
 
           <TouchButton
             size="lg"
-            className="w-full flex-col gap-2 h-32"
+            className="w-full flex-col gap-2 h-28 relative"
+            onClick={() => store.setScreen('kredite')}
+          >
+            <Coins className="w-8 h-8" />
+            <span>Spiller vum Dag</span>
+            {spillerMatKredit > 0 && (
+              <span className="absolute top-2 right-3 text-xs font-black text-primary bg-primary/15 border border-primary/40 rounded-lg px-2 py-0.5">
+                {spillerMatKredit}
+              </span>
+            )}
+          </TouchButton>
+
+          <TouchButton
+            size="lg"
+            className="w-full flex-col gap-2 h-28"
             onClick={() => store.setScreen('einstellungen')}
           >
             <Settings className="w-8 h-8" />
