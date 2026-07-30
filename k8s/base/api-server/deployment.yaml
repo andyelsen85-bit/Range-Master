@@ -58,6 +58,27 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+        - name: run-seed
+          image: ghcr.io/andyelsen85-bit/range-master/api-server:latest
+          imagePullPolicy: Always
+          command:
+            - node
+            - /app/dist/seed.mjs
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: api-server-secrets
+                  key: DATABASE_URL
+            # Optional: set ADMIN_EMAIL to customise the initial admin address
+            # Optional: set ADMIN_INITIAL_PASSWORD to use a fixed password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
       containers:
         - name: api-server
           image: ghcr.io/andyelsen85-bit/range-master/api-server:latest
