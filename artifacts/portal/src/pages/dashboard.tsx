@@ -19,7 +19,7 @@ export default function Dashboard() {
   const machineData = stats?.maschinen 
     ? Object.entries(stats.maschinen).map(([key, val]) => ({
         name: key,
-        quote: Math.round(val.quote * 100)
+        quote: Math.round(val.quote)
       }))
     : [];
 
@@ -48,10 +48,10 @@ export default function Dashboard() {
         </div>
       ) : stats ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Saison Ronden" value={stats.gesamtLauefe} icon={<Activity className="text-chart-2" />} />
-          <StatCard title="Duerchschnëtt" value={stats.durchschnitt.toFixed(1)} icon={<Crosshair className="text-chart-3" />} suffix="/ 18" />
-          <StatCard title="Trefferquote" value={`${Math.round(stats.trefferquote * 100)}%`} icon={<Target className="text-primary" />} />
-          <StatCard title="Bescht Resultat" value={stats.bestPunkte} icon={<Trophy className="text-chart-4" />} suffix="/ 18" />
+          <StatCard title="Saison Spiller" value={stats.gesamtSpiele} icon={<Activity className="text-chart-2" />} />
+          <StatCard title="Duerchschnëtt" value={stats.durchschnitt.toFixed(1)} icon={<Crosshair className="text-chart-3" />} suffix="/ 36" />
+          <StatCard title="Trefferquote" value={`${Math.round(stats.trefferquote)}%`} icon={<Target className="text-primary" />} />
+          <StatCard title="Bescht Resultat" value={stats.bestPunkte} icon={<Trophy className="text-chart-4" />} suffix="/ 36" />
         </div>
       ) : (
         <div className="p-12 text-center bg-card rounded-xl border border-border/50">
@@ -100,7 +100,7 @@ export default function Dashboard() {
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} fontFamily="var(--font-mono)" />
-                  <YAxis domain={[0, 18]} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} fontFamily="var(--font-mono)" />
+                  <YAxis domain={[0, 36]} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} fontFamily="var(--font-mono)" />
                   <Tooltip 
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '8px', fontFamily: 'var(--font-sans)', fontWeight: 600 }}
                   />
