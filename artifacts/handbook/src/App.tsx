@@ -519,14 +519,17 @@ export default function App() {
             ['Ranglëscht', 'Gesamt-Ranglëscht oder filtert no Modus oder Joer'],
             ['Spillgeschicht', 'All eegen Spiller mat Detailer'],
           ]} />
+          <Screenshot src={img('portal-statistiken.jpg')} caption="Meng Statistiken — Trefferquote pro Schanz a Punkten Trend" />
+          <Screenshot src={img('portal-rangliste.jpg')} caption="Saison Ranglëscht — vergläicht all Member no normaliséiertem Duerchschnëtt" />
 
           <h3 className="font-semibold text-gray-800 mb-3 mt-4">Fir Admins</h3>
           <Table rows={[
             ['Spillerverwaltung', 'Nei Member uleeën, Kontoen aktivéieren/deaktiivéieren, Passwierter resetzen'],
-            ['Spillverwaltung', 'All Spiller gesinn, Detailer kontrolléieren'],
-            ['Astellungen', 'SMTP-Konfiguratioun fir E-Mail-Versand, API-Keys verwalt'],
-            ['SMTP Test', "Test-E-Mail schécken fir d'E-Mail-Konfiguratioun ze kontrolléieren"],
+            ['Dageskreditter', 'Kredittvergab iwwerblécken a manuell justéieren'],
+            ['API Schlësselen', 'Terminal-API-Keys generéieren a verwalt'],
+            ['Mail Server', "SMTP-Konfiguratioun fir E-Mail-Versand testen"],
           ]} />
+          <Screenshot src={img('portal-admin-spieler.jpg')} caption="Admin — Spillerverwaltung: Member erstellen, ännen, Passwuert setzen" />
 
           <InfoBox>
             <strong>Admin-Passwuert:</strong> Den Admin-Account gëtt bei der éischter Installatioun duerch de Seed-Skript ugeluecht. Falls verluer: En neie Seed muss am Server ausgeféiert ginn.
@@ -536,6 +539,7 @@ export default function App() {
           <p className="text-sm text-gray-600 mb-3">
             Jiddereen Terminal brauch säin eegenen API-Key fir sech um Portal z'authentifizéieren. Keys ginn am Admin-Beräich verwalt. All Key ufänkt mat <code className="bg-gray-100 rounded px-1">tm_</code> a muss am Terminal ënner <em>Astellungen → Portal API</em> aginn ginn.
           </p>
+          <Screenshot src={img('portal-admin-settings.jpg')} caption="Admin — API Schlësselen: Terminale authentifizéieren sech mat eegene Keys" />
 
           <h3 className="font-semibold text-gray-800 mb-3 mt-5">Ranglëscht a Statistiken</h3>
           <p className="text-sm text-gray-600 mb-3">
