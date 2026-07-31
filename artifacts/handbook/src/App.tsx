@@ -420,6 +420,62 @@ export default function App() {
             https://rangemaster.hostzone.lu/emulator/?apiUrl=https://rangemaster.hostzone.lu&apiKey=tm_...
           </code>
           <p className="text-sm text-gray-600">URL a Key ginn automatesch gespaichert wann den Terminal opmaacht.</p>
+
+          <div className="mt-8 border-t border-dashed border-gray-200 pt-8">
+            <div className="inline-flex items-center gap-2 bg-gray-100 text-gray-500 text-xs font-bold px-3 py-1 rounded-full mb-5 uppercase tracking-widest">
+              Nëmme um physesche Terminal (net am Emulator)
+            </div>
+
+            <h3 className="font-semibold text-gray-800 mb-3 mt-1">Tab: WiFi Astellungen</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Den physesche Terminal (ESP32) verbënnt sech mat engem WiFi-Netzwierk fir d'Synchronisatioun mam Portal. D'WiFi-Astellungen ginn ënner <em>Astellungen → WiFi</em> konfiguréiert.
+            </p>
+            <Step n={1} title="Tillgänglech Netzwierker sichen">
+              Op "Sichen" klicken — den Terminal scannt no verfügbare WiFi-Netzwierker a weist eng Lëscht mat SSID an Signalstäerkt.
+            </Step>
+            <Step n={2} title="Netzwierk auswielen">
+              Op den Numm vum Netzwierk klicken fir et auszewielen.
+            </Step>
+            <Step n={3} title="Passwuert aginn">
+              D'WiFi-Passwuert mat der agebauter Tastatur oder engem Bluetooth-Keyboard aginn (kuckt hei drënner).
+            </Step>
+            <Step n={4} title="Verbindung testen">
+              Op "Verbinden" klicken — de Status wiesselt op <strong>Verbonnen ✓</strong> wann d'Verbindung klappt. Nodeems WiFi funktionéiert, kann de Sync mam Portal getest ginn.
+            </Step>
+            <Table rows={[
+              ['Verbonnen', 'Terminal ass am Netzwierk — Sync méiglech'],
+              ['Feeler / Timeout', 'SSID oder Passwuert kontrolléieren, Signalstäerkt iwwerpréiwen'],
+              ['Keng IP', 'DHCP op dem Router kontrolléieren'],
+            ]} />
+            <TipBox>
+              WiFi-Astellunge bleiwen gespäichert och wann den Terminal aus- an ageschalt gëtt. Bei Netzwierkswissel muss nëmme Schrëtt 1–4 widderhuelt ginn.
+            </TipBox>
+
+            <h3 className="font-semibold text-gray-800 mb-3 mt-7">Tab: Bluetooth Tastatur</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Fir laang Textagab (Spillernimm, E-Mailadressen, Passwierter) kann eng Bluetooth-Tastatur mat dem Terminal gekoppelt ginn. D'Kopplung gëtt ënner <em>Astellungen → Bluetooth</em> gemaach.
+            </p>
+            <Step n={1} title="Tastatur a Pairing-Modus setzen">
+              Op der Bluetooth-Tastatur de Pairing-Knapp drécken bis d'LED blinkt (kuckt d'Bedienungsanleitung vun der Tastatur).
+            </Step>
+            <Step n={2} title="Scannéieren op dem Terminal">
+              Op "Bluetooth Scannéieren" klicken — den Terminal sicht no Bluetooth-Geräter an der Näi (ca. 10 Sekonne).
+            </Step>
+            <Step n={3} title="Tastatur wielen a koppelen">
+              D'Tastatur erschéngt an der Lëscht — drop klicken fir ze koppelen. Bei manchen Tastature muss e PIN (oft <code className="bg-gray-100 rounded px-1">0000</code>) bestätegt ginn.
+            </Step>
+            <Step n={4} title="Verbindung testen">
+              An engem Texteingabe-Feld tipptestéieren — Buchstawen solle sofort erschéngen. D'Tastatur bleift automatesch gekoppelt fir déi nächst Sessioune.
+            </Step>
+            <Table rows={[
+              ['Gekoppelt', 'Tastatur erschéngt an der Kopplung-Lëscht — automatesch verbonnen beim nächste Astellen'],
+              ['Net fonnt', 'Tastatur méi no bréngen, erëm a Pairing-Modus setzen, a widderhuelen'],
+              ['Verbindung ofgebrach', 'Tastatur aus- an aeschalten fir se erëm ze verbinden'],
+            ]} />
+            <InfoBox>
+              <strong>Empfehlung:</strong> Eng kompakt Bluetooth-Tastatur (z.B. Logitech K380 oder ähnlech) ass ideal fir den Schéissstand. Si bleiwe gekoppelt och wann se ausgeschalt ginn, a verbinde sech automatesch wann den Terminal nees opsteet.
+            </InfoBox>
+          </div>
         </Section>
 
         {/* ─────── 9. SPILLGESCHICHT ─────── */}
