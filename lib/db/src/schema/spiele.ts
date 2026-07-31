@@ -5,11 +5,10 @@ import { z } from "zod/v4";
 export const modusEnum = pgEnum("modus", [
   "NORMAL",
   "HARAKIRI",
-  "HARAKIRI_DELAYED",
-  "HARAKIRI_FULL",
   "CUSTOM_1",
   "CUSTOM_2",
   "CUSTOM_3",
+  "CUSTOM_4",
 ]);
 
 export const maschineEnum = pgEnum("maschine", ["A", "B", "C", "D", "E", "F", "G", "H"]);
