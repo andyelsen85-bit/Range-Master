@@ -5,6 +5,8 @@ import {
   ArrowLeft, Save, RefreshCw, CheckCircle2, AlertTriangle, GripVertical, Plus, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { WifiScreen } from '@/screens/WifiScreen';
+import { BluetoothScreen } from '@/screens/BluetoothScreen';
 
 const ALL_MASCHINEN: Maschine[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
@@ -171,7 +173,7 @@ export function EinstellungenScreen() {
   const store = useGameStore();
   const [url, setUrl] = useState(store.apiUrl);
   const [key, setKey] = useState(store.apiKey);
-  const [activeTab, setActiveTab] = useState<'api' | 'schanzen' | 'custom' | 'system'>('api');
+  const [activeTab, setActiveTab] = useState<'api' | 'schanzen' | 'custom' | 'wifi' | 'bluetooth' | 'system'>('api');
 
   const save = () => {
     store.setApiSettings(url, key);
@@ -194,10 +196,12 @@ export function EinstellungenScreen() {
       {/* Tabs */}
       <div className="flex border-b-2 border-border bg-card/50 shrink-0">
         {([
-          { key: 'api',      label: 'Portal API' },
-          { key: 'schanzen', label: 'Schanzen' },
-          { key: 'custom',   label: 'Custom Modi' },
-          { key: 'system',   label: 'System' },
+          { key: 'api',       label: 'Portal API' },
+          { key: 'schanzen',  label: 'Schanzen' },
+          { key: 'custom',    label: 'Custom Modi' },
+          { key: 'wifi',      label: 'WiFi' },
+          { key: 'bluetooth', label: 'Bluetooth' },
+          { key: 'system',    label: 'System' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -336,6 +340,12 @@ export function EinstellungenScreen() {
             <CustomSequenzEditor modus="CUSTOM_4" label="Custom 4" />
           </div>
         )}
+
+        {/* ── WiFi Tab ── */}
+        {activeTab === 'wifi' && <WifiScreen />}
+
+        {/* ── Bluetooth Tab ── */}
+        {activeTab === 'bluetooth' && <BluetoothScreen />}
 
         {/* ── System Tab ── */}
         {activeTab === 'system' && (
