@@ -5,23 +5,21 @@ import { Trophy, ChevronLeft, ChevronDown, ChevronUp, Calendar, Users, Target } 
 import { cn } from '@/lib/utils';
 
 const MODUS_LABEL: Record<Modus, string> = {
-  NORMAL: 'Normal',
+  NORMAL:   'Normal',
   HARAKIRI: 'Harakiri',
-  HARAKIRI_DELAYED: 'H. Delayed',
-  HARAKIRI_FULL: 'H. Full',
   CUSTOM_1: 'Custom 1',
   CUSTOM_2: 'Custom 2',
   CUSTOM_3: 'Custom 3',
+  CUSTOM_4: 'Custom 4',
 };
 
 const MODUS_COLOR: Record<Modus, string> = {
-  NORMAL: 'bg-primary/15 text-primary border-primary/40',
+  NORMAL:   'bg-primary/15 text-primary border-primary/40',
   HARAKIRI: 'bg-red-500/15 text-red-400 border-red-500/40',
-  HARAKIRI_DELAYED: 'bg-red-500/15 text-red-400 border-red-500/40',
-  HARAKIRI_FULL: 'bg-red-500/20 text-red-300 border-red-500/50',
   CUSTOM_1: 'bg-purple-500/15 text-purple-400 border-purple-500/40',
   CUSTOM_2: 'bg-purple-500/15 text-purple-400 border-purple-500/40',
   CUSTOM_3: 'bg-purple-500/15 text-purple-400 border-purple-500/40',
+  CUSTOM_4: 'bg-purple-500/15 text-purple-400 border-purple-500/40',
 };
 
 function GameDetailPanel({ game }: { game: FinishedGame }) {

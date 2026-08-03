@@ -491,7 +491,7 @@ export default function App() {
             ['Schützen + Punkte', 'All Schütz mat senge Gesamtpunkte fir de Spill'],
           ]} />
           <TipBox>
-            Falls e Spill net am Portal erschéngt, kann et nach eng Kéier vum Dashboard synct ginn. De Spill bleift an der Geschicht bis d'Grenz vun 50 Spiller erreecht ass.
+            Falls e Spill net am Portal erschéngt, kann et nach eng Kéier vum Dashboard synchroniséiert ginn. De Spill bleift an der Geschicht bis d'Grenz vun 50 Spiller erreecht ass.
           </TipBox>
         </Section>
 

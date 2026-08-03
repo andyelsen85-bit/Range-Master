@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable } from "@workspace/db";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql, desc, isNotNull } from "drizzle-orm";
 import { requireApiKey } from "./auth";
 import { z } from "zod";
 import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmail } from "../lib/mailer";
@@ -124,6 +124,65 @@ router.post("/spieler", requireApiKey, async (req, res) => {
   }
 
   return res.json({ synced, mappings });
+});
+
+// GET /api/sync/spiele?limit=N — pull recent games to terminal (newest first)
+router.get("/spiele", requireApiKey, async (req, res) => {
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+
+  const recentSpiele = await db
+    .select({
+      id: spieleTable.id,
+      externalId: spieleTable.externalId,
+      datum: spieleTable.datum,
+      modus: spieleTable.modus,
+      lauf: spieleTable.lauf,
+      taubenProLauf: spieleTable.taubenProLauf,
+      abgeschlossen: spieleTable.abgeschlossen,
+    })
+    .from(spieleTable)
+    .where(isNotNull(spieleTable.externalId))
+    .orderBy(desc(spieleTable.datum))
+    .limit(limit);
+
+  if (recentSpiele.length === 0) return res.json({ spiele: [] });
+
+  const spielIds = recentSpiele.map(s => s.id);
+
+  const teilnahmenRows = await db
+    .select()
+    .from(spielTeilnahmenTable)
+    .where(inArray(spielTeilnahmenTable.spielId, spielIds));
+
+  const spielerIds = [...new Set(teilnahmenRows.map(t => t.spielerId))];
+  const spielerRows = spielerIds.length > 0
+    ? await db.select({ id: spielerTable.id, name: spielerTable.name }).from(spielerTable).where(inArray(spielerTable.id, spielerIds))
+    : [];
+  const spielerMap = new Map(spielerRows.map(s => [s.id, s.name]));
+
+  const teilnahmenBySpiel = new Map<number, typeof teilnahmenRows>();
+  for (const t of teilnahmenRows) {
+    if (!teilnahmenBySpiel.has(t.spielId)) teilnahmenBySpiel.set(t.spielId, []);
+    teilnahmenBySpiel.get(t.spielId)!.push(t);
+  }
+
+  const spiele = recentSpiele.map(s => {
+    const teilnahmen = teilnahmenBySpiel.get(s.id) ?? [];
+    const spielerNamen: Record<number, string> = {};
+    for (const t of teilnahmen) spielerNamen[t.spielerId] = spielerMap.get(t.spielerId) ?? `Spiller ${t.spielerId}`;
+    return {
+      externalId: s.externalId!,
+      datum: s.datum.toISOString(),
+      modus: s.modus,
+      lauf: s.lauf,
+      taubenProLauf: s.taubenProLauf,
+      abgeschlossen: s.abgeschlossen,
+      teilnahmen: teilnahmen.map(t => ({ spielerId: t.spielerId, startPosten: t.startPosten, punkte: t.punkte, lauf: t.lauf })),
+      spielerNamen,
+    };
+  });
+
+  return res.json({ spiele });
 });
 
 // POST /api/sync/spiele

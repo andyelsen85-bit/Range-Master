@@ -1070,9 +1070,6 @@ export const useGameStore = create<GameState>((set, get) => {
 
     syncAllPending: async () => {
       const state = get();
-      const hasPendingUpdates = state.spielerUpdates.some(u => u.status === 'pending');
-      const hasOffeneEmails = state.spielerUpdates.some(u => u.status === 'synced' || u.status === 'email_failed');
-      if (state.pendingGames.length === 0 && state.pendingSpieler.length === 0 && state.pendingKredite.length === 0 && !hasPendingUpdates && !hasOffeneEmails) return;
       if (!state.apiUrl || !state.apiKey) {
         set({ syncStatus: 'error' });
         return;
@@ -1213,40 +1210,81 @@ export const useGameStore = create<GameState>((set, get) => {
         }
 
         // ── Step 2: push pending games ───────────────────────────────────────
-        if (get().pendingGames.length === 0) {
-          set({
-            syncStatus: 'success',
-            lastSync: new Date().toLocaleTimeString('de-LU', {
-              hour: '2-digit', minute: '2-digit', second: '2-digit',
-            }),
+        if (get().pendingGames.length > 0) {
+          const res = await fetch(`${state.apiUrl}/api/sync/spiele`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': state.apiKey,
+            },
+            body: JSON.stringify({ spiele: get().pendingGames }),
+            signal: AbortSignal.timeout(30000),
           });
-          return;
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+          const data = await res.json() as { results: Array<{ status: string }> };
+          const synced = data.results?.filter(r => r.status === 'created').length ?? 0;
+          const skipped = data.results?.filter(r => r.status === 'skipped').length ?? 0;
+
+          savePendingGames([]);
+          set({ pendingGames: [] });
+          console.log(`Sync: ${synced} created, ${skipped} skipped`);
         }
 
-        const res = await fetch(`${state.apiUrl}/api/sync/spiele`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': state.apiKey,
-          },
-          body: JSON.stringify({ spiele: get().pendingGames }),
-          signal: AbortSignal.timeout(30000),
+      // ── Step 3: pull recent games from server → merge into local history ──
+      try {
+        const pullRes = await fetch(`${get().apiUrl}/api/sync/spiele?limit=100`, {
+          headers: { 'x-api-key': get().apiKey },
+          signal: AbortSignal.timeout(15000),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (pullRes.ok) {
+          const pullData = await pullRes.json() as {
+            spiele: Array<{
+              externalId: string;
+              datum: string;
+              modus: Modus;
+              lauf: number;
+              taubenProLauf: number;
+              abgeschlossen: boolean;
+              teilnahmen: Array<{ spielerId: number; startPosten: number; punkte: number; lauf: number }>;
+              spielerNamen: Record<number, string>;
+            }>;
+          };
+          const existingIds = new Set(get().gameHistory.map(g => g.externalId));
+          const newGames: FinishedGame[] = (pullData.spiele ?? [])
+            .filter(g => !existingIds.has(g.externalId))
+            .map(g => ({
+              externalId: g.externalId,
+              datum: g.datum,
+              modus: g.modus,
+              lauf: g.lauf,
+              taubenProLauf: g.taubenProLauf,
+              abgeschlossen: g.abgeschlossen,
+              teilnahmen: g.teilnahmen,
+              ergebnisse: [],
+              finishedAt: g.datum,
+              spielerNamen: Object.fromEntries(
+                Object.entries(g.spielerNamen).map(([k, v]) => [Number(k), v])
+              ),
+            }));
+          if (newGames.length > 0) {
+            const merged = [...newGames, ...get().gameHistory]
+              .sort((a, b) => new Date(b.finishedAt).getTime() - new Date(a.finishedAt).getTime())
+              .slice(0, 50);
+            saveGameHistory(merged);
+            set({ gameHistory: merged });
+          }
+        }
+      } catch {
+        // pull failure is non-fatal — push already succeeded
+      }
 
-        const data = await res.json() as { results: Array<{ status: string }> };
-        const synced = data.results?.filter(r => r.status === 'created').length ?? 0;
-        const skipped = data.results?.filter(r => r.status === 'skipped').length ?? 0;
-
-        savePendingGames([]);
-        set({
-          pendingGames: [],
-          syncStatus: 'success',
-          lastSync: new Date().toLocaleTimeString('de-LU', {
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-          }),
-        });
-        console.log(`Sync: ${synced} created, ${skipped} skipped`);
+      set({
+        syncStatus: 'success',
+        lastSync: new Date().toLocaleTimeString('de-LU', {
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        }),
+      });
       } catch {
         set({ syncStatus: 'error' });
       }

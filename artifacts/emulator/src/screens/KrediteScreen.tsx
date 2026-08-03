@@ -57,7 +57,7 @@ export function KrediteScreen() {
         <div className="ml-auto flex items-center gap-3">
           {store.pendingKredite.length > 0 && (
             <span className="text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-1.5">
-              {store.pendingKredite.length} net gesynct
+              {store.pendingKredite.length} net synchroniséiert
             </span>
           )}
           <TouchButton
@@ -128,7 +128,7 @@ export function KrediteScreen() {
                   e.rest > 0 ? 'bg-primary/20 text-primary' : 'bg-muted/30 text-muted-foreground/60',
                 )}>
                   <span className="text-2xl font-black leading-none">{e.rest}</span>
-                  <span className="text-[9px] font-bold uppercase tracking-widest">Reto</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest">Rescht</span>
                 </div>
 
                 {/* Name + stats */}

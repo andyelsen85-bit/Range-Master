@@ -18,6 +18,7 @@ export function DashboardScreen() {
   const spillerMatKredit = Object.values(store.kredite)
     .filter(k => k.gewaehrt - k.verbraucht > 0).length;
   const isSyncing = store.syncStatus === 'syncing';
+  const hasApiConfig = !!store.apiUrl && !!store.apiKey;
 
   return (
     <div className="flex h-full w-full bg-background flex-col">
@@ -176,10 +177,10 @@ export function DashboardScreen() {
               {/* Sync button */}
               <button
                 onClick={() => store.syncAllPending()}
-                disabled={pendingCount === 0 || isSyncing}
+                disabled={!hasApiConfig || isSyncing}
                 className={cn(
                   "w-full h-16 rounded-xl border-2 font-bold text-base flex items-center justify-center gap-3 transition-all active:scale-95",
-                  pendingCount > 0 && !isSyncing
+                  hasApiConfig && !isSyncing
                     ? "border-primary/60 bg-primary/10 text-primary hover:bg-primary/20"
                     : "border-border/40 bg-background/50 text-muted-foreground/40 cursor-not-allowed"
                 )}

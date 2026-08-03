@@ -163,6 +163,63 @@ router.put("/spieler/:id/passwort", async (req, res) => {
   return res.json({ success: true });
 });
 
+// GET /api/admin/kredite/joer?year=YYYY — annual credit summary
+router.get("/kredite/joer", async (req, res) => {
+  const year = z.coerce.number().int().min(2020).max(2100).catch(new Date().getFullYear()).parse(req.query.year);
+  const [totals] = (await db.execute(sql`
+    SELECT
+      COALESCE(SUM(CASE WHEN typ = 'GRANT' THEN anzahl ELSE 0 END), 0)::int  AS total_gewaehrt,
+      COALESCE(SUM(CASE WHEN typ = 'USE'   THEN anzahl ELSE 0 END), 0)::int  AS total_verbraucht,
+      COUNT(DISTINCT datum)::int                                               AS anzahl_dagen,
+      COUNT(DISTINCT spieler_id)::int                                          AS anzahl_spiller
+    FROM kredit_events
+    WHERE EXTRACT(YEAR FROM datum::timestamp) = ${year}
+  `)).rows as any[];
+  const byMonth = (await db.execute(sql`
+    SELECT
+      EXTRACT(MONTH FROM datum::timestamp)::int                                AS monat,
+      COALESCE(SUM(CASE WHEN typ = 'GRANT' THEN anzahl ELSE 0 END), 0)::int  AS gewaehrt,
+      COALESCE(SUM(CASE WHEN typ = 'USE'   THEN anzahl ELSE 0 END), 0)::int  AS verbraucht,
+      COUNT(DISTINCT datum)::int                                               AS dagen
+    FROM kredit_events
+    WHERE EXTRACT(YEAR FROM datum::timestamp) = ${year}
+    GROUP BY monat ORDER BY monat
+  `)).rows as any[];
+  return res.json({
+    year,
+    totalGewaehrt: Number(totals?.total_gewaehrt ?? 0),
+    totalVerbraucht: Number(totals?.total_verbraucht ?? 0),
+    anzahlDagen: Number(totals?.anzahl_dagen ?? 0),
+    anzahlSpiller: Number(totals?.anzahl_spiller ?? 0),
+    byMonth: byMonth.map(r => ({
+      monat: Number(r.monat),
+      gewaehrt: Number(r.gewaehrt),
+      verbraucht: Number(r.verbraucht),
+      dagen: Number(r.dagen),
+    })),
+  });
+});
+
+// GET /api/admin/kredite/tauben?year=YYYY — clay counts per machine based on ergebnisse
+router.get("/kredite/tauben", async (req, res) => {
+  const year = z.coerce.number().int().min(2020).max(2100).catch(new Date().getFullYear()).parse(req.query.year);
+  const rows = (await db.execute(sql`
+    SELECT e.maschine, COUNT(*)::int AS anzahl
+    FROM ergebnisse e
+    JOIN spiele s ON e.spiel_id = s.id
+    WHERE EXTRACT(YEAR FROM s.datum) = ${year}
+    GROUP BY e.maschine
+    ORDER BY e.maschine
+  `)).rows as any[];
+  const byMaschine: Record<string, number> = {};
+  let total = 0;
+  for (const r of rows) {
+    byMaschine[r.maschine] = Number(r.anzahl);
+    total += Number(r.anzahl);
+  }
+  return res.json({ year, byMaschine, total });
+});
+
 // GET /api/admin/kredite?datum=YYYY-MM-DD — read-only day-credit overview
 router.get("/kredite", async (req, res) => {
   const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
