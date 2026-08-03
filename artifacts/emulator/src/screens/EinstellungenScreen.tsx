@@ -87,7 +87,7 @@ function CustomSequenzEditor({
           ))}
           {draft.length === 0 && (
             <span className="text-muted-foreground/50 text-sm italic self-center px-2">
-              Keng Schanzen — dréckt hei drënner fir hinzezefügen
+              Keng Schanzen — dréckt hei drënner fir dobäisetzen
             </span>
           )}
         </div>

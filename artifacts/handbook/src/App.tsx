@@ -197,7 +197,7 @@ export default function App() {
             Iwwerpréif ob all Schützen e Portal-Kont hunn. Wann net, kënne se um Terminal als lokal Spiller dobäigesat ginn.
           </Step>
           <Step n={2} title="Terminal astellen">
-            Terminal aschalten a kontrolléieren datt den Écran de Dashboard weist. Den API-URL a Key muss ënner <em>Astellungen → Portal API</em> korrekt aginn sinn.
+            Terminal aschalten a kontrolléieren datt den Ecran de Dashboard weist. Den API-URL a Key muss ënner <em>Astellungen → Portal API</em> korrekt aginn sinn.
           </Step>
           <Step n={3} title="Spillerlëscht lueden">
             Op "Spiller vum Dag" klicken, dann op "Laden" — Terminal luet d'Spillerlëscht vum Portal.
@@ -358,7 +358,7 @@ export default function App() {
 
         {/* ─────── 7. SPILLERVERWALTUNG ─────── */}
         <Section id="spillerverwaltung" title="⑦ Terminal – Spillerverwaltung">
-          <Screenshot src={img('spillerverwaltung-screen.jpg')} caption="Spillerverwaltung — Ännerungen a Passwuertsreset" />
+          <Screenshot src={img('spillerverwaltung-screen.jpg')} caption="Spillerverwaltung — Ännerungen a Passwuertreset" />
           <p className="text-gray-600 mb-5 leading-relaxed">
             Hei kënnt dir Spillernimm, E-Mail-Adressen, a Portal-Zougang änneren — direkt vum Terminal aus.
           </p>
@@ -379,7 +379,7 @@ export default function App() {
           <Table rows={[
             ['Pending', 'Ännerung nach net synchroniséiert'],
             ['Synced', 'Ännerung am Portal ukomm'],
-            ['Email sent', 'Passwuertreset-E-Mail erfolgräich geschéckt'],
+            ['Email sent', 'Passwuertreset-E-Mail erfollegräich geschéckt'],
             ['Email failed', 'E-Mail net ukomm — SMTP kontrolléieren'],
           ]} />
           <TipBox>
@@ -403,7 +403,7 @@ export default function App() {
           <p className="text-sm text-gray-600 mb-5">Nodeems Späicheren op "Verbindung testen" klicken fir ze kontrolléieren datt d'Verbindung funktionéiert.</p>
 
           <h3 className="font-semibold text-gray-800 mb-3 mt-4">Tab: Schanzen</h3>
-          <p className="text-sm text-gray-600 mb-3">Weist all 8 Schanzen (A–H). Op eng Schanz klicken fir se ze aktivéieren oder deaktiivéieren. Schanz H ass d'Doublette (2 Tauben). Dës Astellung gëllt fir Normal- a Harakiri-Modus.</p>
+          <p className="text-sm text-gray-600 mb-3">Weist all 8 Schanzen (A–H). Op eng Schanz klicken fir se ze aktivéieren oder deaktivéieren. Schanz H ass d'Doublette (2 Tauben). Dës Astellung gëllt fir Normal- a Harakiri-Modus.</p>
 
           <h3 className="font-semibold text-gray-800 mb-3 mt-4">Tab: Custom Modi</h3>
           <p className="text-sm text-gray-600 mb-3">Fir Custom 1–4 kann eng eegen Schanzsequenz definéiert ginn. Op Buschtawen klicken fir se der Sequenz derbäizefügen — op e Badge an der Sequenz klicken fir en erauszehuelen. Unzuel vun de Läufe (1 oder 2) och wielbar.</p>
@@ -524,7 +524,7 @@ export default function App() {
 
           <h3 className="font-semibold text-gray-800 mb-3 mt-4">Fir Admins</h3>
           <Table rows={[
-            ['Spillerverwaltung', 'Nei Member uleeën, Kontoen aktivéieren/deaktiivéieren, Passwierter resetzen'],
+            ['Spillerverwaltung', 'Nei Member uleeën, Kontoen aktivéieren/deaktivéieren, Passwierter resetzen'],
             ['Dageskreditter', 'Kredittvergab iwwerblécken a manuell justéieren'],
             ['API Schlësselen', 'Terminal-API-Keys generéieren a verwalt'],
             ['Mail Server', "SMTP-Konfiguratioun fir E-Mail-Versand testen"],
