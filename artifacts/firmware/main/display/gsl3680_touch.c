@@ -10,6 +10,7 @@
 #include "lvgl.h"
 #include "app_config.h"
 #include "gsl3680_touch.h"
+#include "gsl3680_firmware.h"
 
 static const char *TAG = "gsl3680";
 
@@ -19,28 +20,80 @@ static const char *TAG = "gsl3680";
 #define GSL3680_MAX_POINTS   5
 
 // ── Firmware blob helpers ────────────────────────────────────
-// The GSL3680 needs a firmware upload on power-on.
-// A minimal stub that writes the "start" command is used here.
-// Production builds should include the full 0x6500-byte blob.
+// Low-level I²C write: [reg, b0, b1, b2, b3]
+static inline void gsl_i2c_write(uint8_t reg, uint8_t b0, uint8_t b1,
+                                  uint8_t b2, uint8_t b3, uint8_t len)
+{
+    uint8_t buf[5] = {reg, b0, b1, b2, b3};
+    i2c_master_write_to_device(TOUCH_I2C_PORT, TOUCH_I2C_ADDR,
+                               buf, 1 + len, pdMS_TO_TICKS(50));
+}
+
+// Clear IC registers before firmware load (puts MCU in known state)
+static void gsl3680_clear_reg(void)
+{
+    gsl_i2c_write(0xE0, 0x88, 0, 0, 0, 1);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gsl_i2c_write(0x88, 0x01, 0, 0, 0, 1);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    gsl_i2c_write(0xE4, 0x04, 0, 0, 0, 1);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    gsl_i2c_write(0xE0, 0x00, 0, 0, 0, 1);
+    vTaskDelay(pdMS_TO_TICKS(20));
+}
+
+// Reset IC over I²C (GPIO reset is handled in gsl3680_touch_init)
+static void gsl3680_reset_chip(void)
+{
+    gsl_i2c_write(0xE0, 0x88, 0, 0, 0, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gsl_i2c_write(0xE4, 0x04, 0, 0, 0, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gsl_i2c_write(0xBC, 0x00, 0x00, 0x00, 0x00, 4);
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+// Send the startup command that tells the IC to begin running firmware
+static void gsl3680_startup_chip(void)
+{
+    gsl_i2c_write(0xE0, 0x00, 0, 0, 0, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+// Upload the full DPRAM firmware blob from gsl3680_firmware.h.
+// Each entry with addr == 0xf0 selects a DPRAM page (write 1 byte).
+// Every other entry writes 4 bytes (little-endian uint32) into that page.
 static void gsl3680_load_firmware(void)
 {
-    // 1. Reset
-    uint8_t buf[4] = {0x88};
-    i2c_master_write_to_device(TOUCH_I2C_PORT, TOUCH_I2C_ADDR,
-                               buf, 1, pdMS_TO_TICKS(100));
-    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_LOGI(TAG, "Loading GSL3680 firmware (%u entries)...",
+             (unsigned)(sizeof(GSLX680_FW) / sizeof(GSLX680_FW[0])));
 
-    // 2. Clear register
-    uint8_t clear[2] = {0xE0, 0x00};
-    i2c_master_write_to_device(TOUCH_I2C_PORT, TOUCH_I2C_ADDR,
-                               clear, 2, pdMS_TO_TICKS(100));
-    vTaskDelay(pdMS_TO_TICKS(5));
+    // Step 1: clear registers and do an I²C-level reset
+    gsl3680_clear_reg();
+    gsl3680_reset_chip();
 
-    // 3. Start
-    uint8_t start[2] = {0xE4, 0x04};
-    i2c_master_write_to_device(TOUCH_I2C_PORT, TOUCH_I2C_ADDR,
-                               start, 2, pdMS_TO_TICKS(100));
-    vTaskDelay(pdMS_TO_TICKS(5));
+    // Step 2: stream every entry in the firmware table
+    uint32_t n = sizeof(GSLX680_FW) / sizeof(GSLX680_FW[0]);
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t  addr = GSLX680_FW[i].addr;
+        uint32_t val  = GSLX680_FW[i].val;
+        uint8_t  b0   = (uint8_t)( val        & 0xFF);
+        uint8_t  b1   = (uint8_t)((val >>  8) & 0xFF);
+        uint8_t  b2   = (uint8_t)((val >> 16) & 0xFF);
+        uint8_t  b3   = (uint8_t)((val >> 24) & 0xFF);
+
+        if (addr == 0xF0) {
+            // Page-select: only the low byte is written
+            gsl_i2c_write(addr, b0, 0, 0, 0, 1);
+        } else {
+            gsl_i2c_write(addr, b0, b1, b2, b3, 4);
+        }
+    }
+
+    // Step 3: start the chip
+    gsl3680_startup_chip();
+
+    ESP_LOGI(TAG, "GSL3680 firmware upload complete");
 }
 
 // ── LVGL input read callback ─────────────────────────────────
