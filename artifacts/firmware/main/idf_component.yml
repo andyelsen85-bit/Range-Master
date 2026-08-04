@@ -1,0 +1,14 @@
+## IDF Component Manager manifest
+dependencies:
+  idf: ">=5.4.0"
+
+  ## LVGL v9 via espressif managed components
+  esp_lvgl_port:
+    version: ">=2.3.0"
+    rules:
+      - if: "target == esp32p4"
+
+  lvgl/lvgl:
+    version: ">=9.1.0"
+    rules:
+      - if: "target == esp32p4"

@@ -1,0 +1,271 @@
+// ============================================================
+// WiFi screen — scan, connect, show IP
+// Mirrors WifiScreen.tsx
+// ============================================================
+#include <stdio.h>
+#include <string.h>
+#include "lvgl.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "ui_manager.h"
+#include "game_store.h"
+#include "coprocessor.h"
+#include "screen_wifi.h"
+
+static lv_obj_t *s_scr;
+static lv_obj_t *s_lbl_status;
+static lv_obj_t *s_list_networks;
+static lv_obj_t *s_ta_ssid;
+static lv_obj_t *s_ta_pass;
+static lv_obj_t *s_lbl_ip;
+static lv_obj_t *s_btn_connect;
+
+// ── Scan networks ─────────────────────────────────────────────
+static void scan_cb(lv_event_t *e)
+{
+    lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " Scannt...");
+    lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
+    lv_list_clean(s_list_networks);
+
+    // Run scan in background task
+    xTaskCreate([](void *arg) {
+        char names[20][33];
+        int count = 0;
+        cop_wifi_scan(names, 20, &count);
+        // LVGL update must happen in LVGL context; use lv_async_call
+        // Here we store results in a static buffer and use a timer
+        static char s_net_names[20][33];
+        static int s_net_count = 0;
+        memcpy(s_net_names, names, sizeof(s_net_names));
+        s_net_count = count;
+
+        lv_async_call([](void *arg2) {
+            extern char s_net_names[20][33];
+            extern int s_net_count;
+            lv_list_clean(s_list_networks);
+            for (int i = 0; i < s_net_count; i++) {
+                lv_obj_t *btn = lv_list_add_btn(s_list_networks,
+                                                LV_SYMBOL_WIFI, s_net_names[i]);
+                lv_obj_set_style_text_font(btn, &lv_font_montserrat_14, 0);
+                lv_obj_set_style_text_color(btn, lv_color_hex(CLR_TEXT), 0);
+                lv_obj_add_event_cb(btn, [](lv_event_t *ev) {
+                    lv_obj_t *b = lv_event_get_target_obj(ev);
+                    const char *net = lv_list_get_btn_text(s_list_networks, b);
+                    if (s_ta_ssid) lv_textarea_set_text(s_ta_ssid, net);
+                }, LV_EVENT_CLICKED, NULL);
+            }
+            if (s_net_count == 0) {
+                lv_list_add_text(s_list_networks, "Keng Netzwierker fonnt");
+            }
+            lv_label_set_text(s_lbl_status, "Scan fäerdeg");
+            lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
+        }, NULL);
+
+        vTaskDelete(NULL);
+    }, "wifi_scan", 8192, NULL, 5, NULL);
+}
+
+// ── Connect ───────────────────────────────────────────────────
+static void connect_cb(lv_event_t *e)
+{
+    const char *ssid = lv_textarea_get_text(s_ta_ssid);
+    const char *pass = lv_textarea_get_text(s_ta_pass);
+    if (!ssid || strlen(ssid) == 0) {
+        lv_label_set_text(s_lbl_status, "SSID ass eidel");
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+        return;
+    }
+
+    // Save to store
+    snprintf(g_store.wifiSsid, MAX_SSID_LEN, "%s", ssid);
+    snprintf(g_store.wifiPass, MAX_PASS_LEN, "%s", pass);
+    game_store_save();
+
+    lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " Verbanne...");
+    lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
+
+    // Connect in background
+    xTaskCreate([](void *arg) {
+        esp_err_t err = cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
+        lv_async_call([](void *arg2) {
+            bool ok = cop_wifi_is_connected();
+            g_store.wifiConnected = ok;
+            if (ok) {
+                char ip[16];
+                cop_wifi_get_ip(ip, sizeof(ip));
+                snprintf(g_store.wifiIp, sizeof(g_store.wifiIp), "%s", ip);
+                char buf[48];
+                snprintf(buf, sizeof(buf), "Verbonnen! IP: %s", ip);
+                lv_label_set_text(s_lbl_status, buf);
+                lv_obj_set_style_text_color(s_lbl_status,
+                    lv_color_hex(CLR_SUCCESS), 0);
+                lv_label_set_text(s_lbl_ip, buf);
+            } else {
+                lv_label_set_text(s_lbl_status, LV_SYMBOL_WARNING " Verbindung fehlgeschloen");
+                lv_obj_set_style_text_color(s_lbl_status,
+                    lv_color_hex(CLR_DANGER), 0);
+            }
+        }, NULL);
+        vTaskDelete(NULL);
+    }, "wifi_conn", 8192, NULL, 5, NULL);
+}
+
+lv_obj_t *screen_wifi_create(void)
+{
+    s_scr = lv_obj_create(NULL);
+    lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
+    lv_obj_clear_flag(s_scr, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Header
+    lv_obj_t *hdr = lv_obj_create(s_scr);
+    lv_obj_set_size(hdr, DISPLAY_LOGICAL_W, 70);
+    lv_obj_align(hdr, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(hdr, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_side(hdr, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(hdr, 2, 0);
+    lv_obj_set_style_border_color(hdr, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_hor(hdr, 20, 0);
+
+    lv_obj_t *title = lv_label_create(hdr);
+    lv_label_set_text(title, LV_SYMBOL_WIFI "  WIFI ASTELLUNGEN");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
+
+    lv_obj_t *back = lv_btn_create(hdr);
+    lv_obj_add_style(back, &g_style_btn_secondary, 0);
+    lv_obj_add_event_cb(back, [](lv_event_t *e) {
+        ui_manager_show(SCREEN_EINSTELLUNGEN);
+    }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bl2 = lv_label_create(back);
+    lv_label_set_text(bl2, LV_SYMBOL_LEFT "  Zréck");
+    lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(bl2);
+
+    // Content with flex row
+    lv_obj_t *content = lv_obj_create(s_scr);
+    lv_obj_set_size(content, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H - 70);
+    lv_obj_align(content, LV_ALIGN_TOP_LEFT, 0, 70);
+    lv_obj_set_style_bg_color(content, lv_color_hex(CLR_BG), 0);
+    lv_obj_set_style_bg_opa(content, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(content, 0, 0);
+    lv_obj_set_style_pad_all(content, 16, 0);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(content, 16, 0);
+
+    // Left: network list + scan
+    lv_obj_t *left = lv_obj_create(content);
+    lv_obj_set_size(left, 440, LV_PCT(100));
+    lv_obj_set_style_bg_opa(left, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(left, 0, 0);
+    lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(left, 10, 0);
+
+    lv_obj_t *net_hdr = lv_label_create(left);
+    lv_label_set_text(net_hdr, "Verfügbar Netzwierker");
+    lv_obj_set_style_text_font(net_hdr, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(net_hdr, lv_color_hex(CLR_TEXT), 0);
+
+    lv_obj_t *scan_btn = lv_btn_create(left);
+    lv_obj_add_style(scan_btn, &g_style_btn_secondary, 0);
+    lv_obj_set_size(scan_btn, LV_PCT(100), 44);
+    lv_obj_add_event_cb(scan_btn, scan_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *sl2 = lv_label_create(scan_btn);
+    lv_label_set_text(sl2, LV_SYMBOL_REFRESH "  Scan");
+    lv_obj_set_style_text_color(sl2, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(sl2);
+
+    s_list_networks = lv_list_create(left);
+    lv_obj_set_size(s_list_networks, LV_PCT(100), LV_PCT(80));
+    lv_obj_set_style_bg_color(s_list_networks, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_bg_opa(s_list_networks, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(s_list_networks, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_border_width(s_list_networks, 1, 0);
+    lv_obj_set_style_radius(s_list_networks, 8, 0);
+    lv_obj_set_style_text_font(s_list_networks, &lv_font_montserrat_14, 0);
+    lv_list_add_text(s_list_networks, "Scan drécken fir Netzwierker ze sichen");
+
+    // Right: SSID/pass/connect
+    lv_obj_t *right = lv_obj_create(content);
+    lv_obj_set_flex_grow(right, 1);
+    lv_obj_set_height(right, LV_PCT(100));
+    lv_obj_set_style_bg_opa(right, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(right, 0, 0);
+    lv_obj_set_flex_flow(right, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(right, 12, 0);
+
+    lv_obj_t *ssid_lbl = lv_label_create(right);
+    lv_label_set_text(ssid_lbl, "SSID");
+    lv_obj_set_style_text_font(ssid_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ssid_lbl, lv_color_hex(CLR_TEXT), 0);
+
+    s_ta_ssid = lv_textarea_create(right);
+    lv_obj_set_size(s_ta_ssid, LV_PCT(100), 50);
+    lv_textarea_set_text(s_ta_ssid, g_store.wifiSsid);
+    lv_textarea_set_one_line(s_ta_ssid, true);
+    lv_obj_set_style_text_font(s_ta_ssid, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_bg_color(s_ta_ssid, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_text_color(s_ta_ssid, lv_color_hex(CLR_TEXT), 0);
+
+    lv_obj_t *pass_lbl = lv_label_create(right);
+    lv_label_set_text(pass_lbl, "Passwuert");
+    lv_obj_set_style_text_font(pass_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(pass_lbl, lv_color_hex(CLR_TEXT), 0);
+
+    s_ta_pass = lv_textarea_create(right);
+    lv_obj_set_size(s_ta_pass, LV_PCT(100), 50);
+    lv_textarea_set_text(s_ta_pass, g_store.wifiPass);
+    lv_textarea_set_one_line(s_ta_pass, true);
+    lv_textarea_set_password_mode(s_ta_pass, true);
+    lv_obj_set_style_text_font(s_ta_pass, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_bg_color(s_ta_pass, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_text_color(s_ta_pass, lv_color_hex(CLR_TEXT), 0);
+
+    s_btn_connect = lv_btn_create(right);
+    lv_obj_add_style(s_btn_connect, &g_style_btn_primary, 0);
+    lv_obj_set_size(s_btn_connect, LV_PCT(100), 56);
+    lv_obj_add_event_cb(s_btn_connect, connect_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cl = lv_label_create(s_btn_connect);
+    lv_label_set_text(cl, LV_SYMBOL_WIFI "  Verbanne");
+    lv_obj_set_style_text_font(cl, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(cl, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(cl);
+
+    s_lbl_status = lv_label_create(right);
+    lv_label_set_text(s_lbl_status, "");
+    lv_obj_set_style_text_font(s_lbl_status, &lv_font_montserrat_14, 0);
+
+    s_lbl_ip = lv_label_create(right);
+    if (g_store.wifiConnected) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "IP: %s", g_store.wifiIp);
+        lv_label_set_text(s_lbl_ip, buf);
+        lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_SUCCESS), 0);
+    } else {
+        lv_label_set_text(s_lbl_ip, "Net verbonnen");
+        lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_MUTED), 0);
+    }
+    lv_obj_set_style_text_font(s_lbl_ip, &lv_font_montserrat_14, 0);
+
+    return s_scr;
+}
+
+void screen_wifi_refresh(void)
+{
+    if (!s_ta_ssid) return;
+    lv_textarea_set_text(s_ta_ssid, g_store.wifiSsid);
+    lv_textarea_set_text(s_ta_pass, g_store.wifiPass);
+    if (g_store.wifiConnected) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "IP: %s", g_store.wifiIp);
+        lv_label_set_text(s_lbl_ip, buf);
+        lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_SUCCESS), 0);
+    } else {
+        lv_label_set_text(s_lbl_ip, "Net verbonnen");
+        lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_MUTED), 0);
+    }
+}
