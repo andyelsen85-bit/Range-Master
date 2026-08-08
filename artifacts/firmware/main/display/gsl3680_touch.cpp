@@ -161,22 +161,25 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
 
     // ── Coordinate transform ─────────────────────────────────────
-    // Calibrated linear map from measured raw range → LVGL logical space.
-    // 4-corner measurements (no rotation, no mirror — axes align directly):
-    //   raw(55,30)   → top-left      raw(1631,25)  → top-right
-    //   raw(42,878)  → bottom-left   raw(1640,877) → bottom-right
-    // Raw sensor range: X ∈ [42..1640], Y ∈ [25..878]
-    // Linear scale stretches the measured range to fill the full logical display
-    // so that every pixel is reachable (simple pass-through leaves ~40 px dead
-    // at each edge because the sensor never reaches 0 or 1280/800).
+    // Display renders correct but touch was off by 90° — axes must be swapped.
+    // The flush_cb rotates pixels 90° CCW (logical→physical), so the touch
+    // sensor's axes are also rotated relative to LVGL logical space:
+    //   raw_y maps to logical X,  raw_x (inverted) maps to logical Y
+    //
+    // Calibrated raw ranges from 4-corner measurements:
+    //   raw_x ∈ [42..1640],  raw_y ∈ [25..878]
+    //
+    // Formula: swap + invert X (direction A — try this first):
+    //   lx = scale(raw_y,  Y-range → [0..LOGICAL_W-1])
+    //   ly = scale(raw_x_inverted, X-range → [0..LOGICAL_H-1])
 #define TOUCH_RAW_X_MIN  42
 #define TOUCH_RAW_X_MAX  1640
 #define TOUCH_RAW_Y_MIN  25
 #define TOUCH_RAW_Y_MAX  878
-    int32_t lx = (int32_t)((raw_x - TOUCH_RAW_X_MIN) *
-                 (DISPLAY_LOGICAL_W - 1) / (TOUCH_RAW_X_MAX - TOUCH_RAW_X_MIN));
-    int32_t ly = (int32_t)((raw_y - TOUCH_RAW_Y_MIN) *
-                 (DISPLAY_LOGICAL_H - 1) / (TOUCH_RAW_Y_MAX - TOUCH_RAW_Y_MIN));
+    int32_t lx = (int32_t)((raw_y - TOUCH_RAW_Y_MIN) *
+                 (DISPLAY_LOGICAL_W - 1) / (TOUCH_RAW_Y_MAX - TOUCH_RAW_Y_MIN));
+    int32_t ly = (int32_t)((TOUCH_RAW_X_MAX - raw_x) *
+                 (DISPLAY_LOGICAL_H - 1) / (TOUCH_RAW_X_MAX - TOUCH_RAW_X_MIN));
 
     // Clamp to logical display
     if (lx < 0) lx = 0;
