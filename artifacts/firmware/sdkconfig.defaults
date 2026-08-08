@@ -13,11 +13,11 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 
 # ── PSRAM ─────────────────────────────────────────────────────────────────
+# ESP32-P4 uses hex PSRAM (X16 mode, AP Memory) — NOT octal.
+# CONFIG_SPIRAM_MODE_OCT must NOT be set; it targets a different controller
+# and is silently ignored on P4, leaving PSRAM at the 20 MHz default.
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
-# ESP32-P4 hex-PSRAM speed (overrides the generic SPIRAM_SPEED choice above)
-CONFIG_SPIRAM_SPEED=80
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 
 # ── MIPI DSI ──────────────────────────────────────────────────────────────
