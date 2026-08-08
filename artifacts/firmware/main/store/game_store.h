@@ -7,9 +7,9 @@
 
 #define MAX_SPIELER         6
 #define MAX_SEQUENZ         50
-#define MAX_HISTORY         50
+#define MAX_HISTORY         20   // in-RAM cache; older games live on FAT flash
 #define MAX_PORTAL_SPIELER  200
-#define MAX_PENDING_GAMES   100
+#define MAX_PENDING_GAMES   30   // unsynced queue; portal sync flushes this
 #define MAX_ERGEBNISSE      200
 #define MAX_NAME_LEN        64
 #define MAX_URL_LEN         128
@@ -177,7 +177,7 @@ typedef struct {
 } GameStore;
 
 // ── Global store instance ────────────────────────────────────
-extern EXT_RAM_BSS_ATTR GameStore g_store;
+extern GameStore g_store;
 
 // ── Lifecycle ────────────────────────────────────────────────
 void game_store_init(void);
