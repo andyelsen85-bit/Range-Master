@@ -57,7 +57,7 @@ static void lvgl_tick_cb(void *arg)
 }
 
 // ── app_main ─────────────────────────────────────────────────
-void app_main(void)
+extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "TrapMaster firmware " APP_VERSION " starting...");
 
