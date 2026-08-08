@@ -18,6 +18,11 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 # to and is silently ignored, leaving PSRAM stuck at the 20 MHz default.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
+# Only two speeds exist for ESP32-P4 hex PSRAM in IDF 5.3.5: 20M (default) and 200M.
+# 200M requires IDF_EXPERIMENTAL_FEATURES. The AP Memory chip is rated for 200M;
+# "experimental" means Espressif hadn't finished full validation — hardware is capable.
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_SPIRAM_SPEED_200M=y
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 
 # ── MIPI DSI ──────────────────────────────────────────────────────────────
