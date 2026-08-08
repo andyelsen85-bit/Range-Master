@@ -165,7 +165,7 @@ lv_display_t *jd9365_panel_init(void)
     // Assignment style avoids C++ designated-initializer ordering and nesting errors
     esp_lcd_dpi_panel_config_t dpi_cfg = {};
     dpi_cfg.dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
-    dpi_cfg.dpi_clock_freq_mhz = 70;
+    dpi_cfg.dpi_clock_freq_mhz = 60;
     dpi_cfg.virtual_channel    = 0;
     dpi_cfg.pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565;
     dpi_cfg.num_fbs            = 2;

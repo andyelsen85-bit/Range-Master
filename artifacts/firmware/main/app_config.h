@@ -15,7 +15,7 @@
 #define DISPLAY_LOGICAL_H       800
 
 #define MIPI_DSI_LANE_NUM       2
-#define MIPI_DSI_LANE_BIT_RATE  500  // Mbps per lane
+#define MIPI_DSI_LANE_BIT_RATE  1000  // Mbps per lane — Guition JC8012P4A1C requires 1000, not 500
 
 // ── Touch (GSL3680 / I²C) ───────────────────────────────────
 #define TOUCH_I2C_PORT          I2C_NUM_0
