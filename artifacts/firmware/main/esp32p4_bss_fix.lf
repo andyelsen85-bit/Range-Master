@@ -1,25 +1,11 @@
-# ──────────────────────────────────────────────────────────────────────────────
-# Linker fragment: ESP32-P4 / IDF 5.3.x BSS section placement fix
-#
-# On ESP32-P4 with PSRAM, IDF unconditionally adds --enable-non-contiguous-
-# regions to the link command.  Under that flag the linker discards any section
-# not explicitly mentioned in the generated sections.ld.  IDF 5.3.x is missing
-# wildcard placement for .sbss.* and .bss.* subsections (fixed in IDF 5.4.x).
-# This fragment maps those subsections into dram0_bss so they are not discarded.
-# ──────────────────────────────────────────────────────────────────────────────
-
-[sections:p4_sbss_wildcards]
-entries:
-    .sbss.*+
-
 [sections:p4_bss_wildcards]
 entries:
-    .bss.*+
+    .sbss.*
+    .bss.*
 
 [scheme:p4_bss_to_dram]
 entries:
-    p4_sbss_wildcards -> dram0_bss
-    p4_bss_wildcards  -> dram0_bss
+    p4_bss_wildcards -> dram0_bss
 
 [mapping:p4_bss_fix]
 archive: *
