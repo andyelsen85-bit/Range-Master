@@ -54,3 +54,21 @@ All values taken verbatim from the **official Guition demo zip**:
 - Removing it causes a rotated / corrupted display; adding it back restores correct output
 
 **msync rule:** always `esp_cache_msync(s_rot_buf, s_rot_buf_bytes, ...)` — the full rotation buffer, never a dirty-rect sub-slice. Sub-slices are not guaranteed 64-byte aligned and cause DMA corruption (stripes).
+
+---
+
+## Touch driver — output physical coords, LVGL rotates automatically
+
+**Confirmed from `lv_indev.c:743`:** LVGL calls `lv_display_rotate_point()` on every touch point automatically. The driver must output **physical panel coordinates (800×1280, portrait, unrotated)** — not logical (1280×800). Any manual rotation in the driver stacks on top of LVGL's automatic one = double rotation bug.
+
+**Sensor axis swap (hardware wiring):** raw_x span ~1625 ≈ V_RES 1280 → maps to `phys_y`; raw_y span ~864 ≈ H_RES 800 → maps to `phys_x`. This is a physical wiring characteristic, not a software rotation.
+
+**Calibrated ranges:** raw_x ∈ [22..1647], raw_y ∈ [19..883]
+
+**Formula:**
+```cpp
+phys_x = scale(raw_y, [19..883]  → [0..799])   // raw_y → physical X
+phys_y = scale(raw_x, [22..1647] → [0..1279])  // raw_x → physical Y
+```
+
+**Why all prior calibration attempts "almost worked":** earlier attempts were manually rotating into logical space AND LVGL was rotating again — fighting its own transform. Once display s_rot_buf was confirmed required, this became diagnosable.
