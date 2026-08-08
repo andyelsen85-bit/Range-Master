@@ -13,3 +13,7 @@ Always build the TrapMaster firmware with **IDF 5.3.x** (specifically 5.3.2). Do
 - **IDF 5.3.x**: ECO2 was the ONLY available ESP32-P4 silicon when 5.3 was developed. All DSI PHY code was written and tested against ECO2. This is the correct version.
 
 **How to apply:** Pin the firmware build to IDF 5.3.x. The Windows installer creates a separate `ESP-IDF 5.3 CMD` shortcut that coexists with other versions. Also revert any dma2d/lane_rate diagnostic changes before the final build.
+
+## Additional required sdkconfig setting
+
+`CONFIG_PM_ENABLE=y` must be set in `sdkconfig.defaults`. Without it, `esp_perip_clk_init()` is a no-op stub on ESP32-P4/IDF 5.3.x (warning: "has not been implemented yet"). The stub means the MIPI DSI D-PHY PLL reference clock gate (`MIPI_DSI_DPHY_PLL_REFCLK_EN` in `HP_SYS_CLKRST.PERI_CLK_CTRL03`) is never opened, so `esp_lcd_new_dsi_bus()` hangs forever waiting for PLL lock. Enabling PM triggers the full clock-init path. Also set `CONFIG_FREERTOS_USE_TICKLESS_IDLE=0` to prevent the scheduler from sleeping under the always-running LVGL display task.
