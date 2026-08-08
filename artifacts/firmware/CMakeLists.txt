@@ -10,22 +10,21 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 project(trapmaster_firmware)
 
-# ── IDF 5.3.x / ESP32-P4 linker fix ──────────────────────────────────────
-# On ESP32-P4 + PSRAM, IDF unconditionally injects --enable-non-contiguous-
-# regions via esp_psram's INTERFACE_LINK_OPTIONS.  The IDF 5.3.x linker
-# script is missing .sbss.* / .bss.* wildcard placement rules, so the linker
-# silently discards those sections and the link fails with 70 KB of errors.
-# This is fixed in IDF 5.4.x; the workaround here is to remove the flag.
-# Our PSRAM usage is heap-only (frame buffers via heap_caps_malloc), so
-# we do not need XIP-from-PSRAM and the flag is safe to drop.
-cmake_policy(SET CMP0079 NEW)
-foreach(_tgt esp_psram esp_system esp_mm)
-    if(TARGET ${_tgt})
-        get_target_property(_opts ${_tgt} INTERFACE_LINK_OPTIONS)
-        if(_opts)
-            list(REMOVE_ITEM _opts "-Wl,--enable-non-contiguous-regions")
-            set_target_properties(${_tgt} PROPERTIES
-                INTERFACE_LINK_OPTIONS "${_opts}")
-        endif()
-    endif()
-endforeach()
+# ── IDF 5.3.x / ESP32-P4 linker-script patch ─────────────────────────────
+# IDF unconditionally passes --enable-non-contiguous-regions for ESP32-P4+PSRAM.
+# The IDF 5.3.x sections.ld.in is missing *(.sbss.*) / *(.bss.*) placement
+# (fixed in IDF 5.4.x).  We patch the GENERATED sections.ld right before the
+# link step so those wildcard subsections land in dram0_0_seg instead of being
+# silently discarded.
+idf_build_get_property(python PYTHON)
+set(_sections_ld
+    "${CMAKE_BINARY_DIR}/esp-idf/esp_system/ld/sections.ld")
+set(_patch_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/patch_sections_ld.py")
+
+add_custom_command(
+    TARGET ${CMAKE_PROJECT_NAME}.elf PRE_LINK
+    COMMAND ${python} ${_patch_script} ${_sections_ld}
+    COMMENT "Patching sections.ld: add .sbss.*/.bss.* placement (IDF 5.3.x fix)"
+    VERBATIM
+)
