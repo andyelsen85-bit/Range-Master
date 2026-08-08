@@ -1,6 +1,10 @@
 # ── Target ────────────────────────────────────────────────────────────────
 CONFIG_IDF_TARGET="esp32p4"
 
+# ── Flash (JC8012P4A1C has 16 MB flash) ───────────────────────────────────
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
 # ── PSRAM ─────────────────────────────────────────────────────────────────
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
