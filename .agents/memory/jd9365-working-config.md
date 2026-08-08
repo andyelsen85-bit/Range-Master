@@ -42,3 +42,15 @@ All values taken verbatim from the **official Guition demo zip**:
 - `esp_mm` must be in `PRIV_REQUIRES` (needed by `esp_cache.h` / `esp_cache_msync()`)
 
 **Why:** The HBP of 120 (vs correct 20) was the primary failure — it made every horizontal line 480 ns too long, preventing DPI sync lock. The wrong init sequence (different panel variant, 4-lane register) compounded it.
+
+---
+
+## flush_cb — manual transpose is required (confirmed Aug 2026)
+
+`lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90)` + `LV_DISPLAY_RENDER_MODE_PARTIAL`:
+- LVGL adjusts **clip-area coordinates** so widgets render into physically-oriented positions
+- LVGL does **NOT** reorder pixel data inside `px_map` — the buffer arrives at flush_cb in **logical row-major order**
+- The manual 90° CCW pixel transpose loop in `lvgl_flush_cb` is therefore **required** and must not be removed
+- Removing it causes a rotated / corrupted display; adding it back restores correct output
+
+**msync rule:** always `esp_cache_msync(s_rot_buf, s_rot_buf_bytes, ...)` — the full rotation buffer, never a dirty-rect sub-slice. Sub-slices are not guaranteed 64-byte aligned and cause DMA corruption (stripes).
