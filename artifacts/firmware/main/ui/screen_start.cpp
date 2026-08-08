@@ -142,7 +142,8 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_text_font(players_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(players_hdr, lv_color_hex(CLR_TEXT), 0);
 
-    char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32];
+    // static: ~13 KB — too large for the LVGL task stack as a local variable.
+    static char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32];
     build_player_opts(opts, sizeof(opts));
 
     for (int i = 0; i < MAX_SPIELER; i++) {
@@ -263,7 +264,7 @@ void screen_start_refresh(void)
 {
     // Rebuild dropdown options when portal players change
     if (!s_player_dropdowns[0]) return;
-    char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32];
+    static char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32];
     build_player_opts(opts, sizeof(opts));
     for (int i = 0; i < MAX_SPIELER; i++) {
         if (s_player_dropdowns[i])

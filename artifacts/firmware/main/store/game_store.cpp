@@ -368,14 +368,18 @@ void store_load_portal_spieler(void)
 {
     // Spawns a FreeRTOS task so it doesn't block the LVGL loop
     xTaskCreate([](void *arg) {
+        // Heap-allocate: 200×~104 B = ~20 KB would blow this task's 8 KB stack.
         int count = 0;
-        PortalSpieler buf[MAX_PORTAL_SPIELER];
-        if (http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) == ESP_OK) {
-            memcpy(g_store.portalSpieler, buf,
-                   count * sizeof(PortalSpieler));
-            g_store.portalSpielerCount = count;
-            game_store_save();
-            ESP_LOGI(TAG, "Loaded %d portal players", count);
+        PortalSpieler *buf = (PortalSpieler *)malloc(MAX_PORTAL_SPIELER * sizeof(PortalSpieler));
+        if (buf) {
+            if (http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) == ESP_OK) {
+                memcpy(g_store.portalSpieler, buf,
+                       count * sizeof(PortalSpieler));
+                g_store.portalSpielerCount = count;
+                game_store_save();
+                ESP_LOGI(TAG, "Loaded %d portal players", count);
+            }
+            free(buf);
         }
         vTaskDelete(NULL);
     }, "load_spieler", 8192, NULL, 5, NULL);

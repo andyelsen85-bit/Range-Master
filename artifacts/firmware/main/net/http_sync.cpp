@@ -269,14 +269,17 @@ esp_err_t http_sync_all(void)
     err = http_fetch_spielhistorie();
     if (err != ESP_OK) return err;
 
-    // Refresh player list
+    // Refresh player list — heap-allocated: 200×~104 B = ~20 KB would overflow
+    // the 12 KB sync_task stack if declared as a local array.
     int count = 0;
-    PortalSpieler buf[MAX_PORTAL_SPIELER];
+    PortalSpieler *buf = (PortalSpieler *)malloc(MAX_PORTAL_SPIELER * sizeof(PortalSpieler));
+    if (!buf) { ESP_LOGE(TAG, "OOM for portal spieler buf"); return ESP_ERR_NO_MEM; }
     err = http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count);
     if (err == ESP_OK) {
         memcpy(g_store.portalSpieler, buf, count * sizeof(PortalSpieler));
         g_store.portalSpielerCount = count;
     }
+    free(buf);
 
     ESP_LOGI(TAG, "Sync complete");
     return ESP_OK;

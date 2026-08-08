@@ -203,7 +203,9 @@ void screen_kredite_refresh(void)
     if (!s_player_list) return;
 
     // Rebuild dropdown
-    char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 4] = "—";
+    // static: ~13 KB — too large for the LVGL task stack as a local variable.
+    static char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 4];
+    opts[0] = '\0'; strncat(opts, "—", sizeof(opts) - 1);
     for (int i = 0; i < g_store.portalSpielerCount; i++) {
         strncat(opts, "\n", sizeof(opts) - strlen(opts) - 1);
         strncat(opts, g_store.portalSpieler[i].name,
