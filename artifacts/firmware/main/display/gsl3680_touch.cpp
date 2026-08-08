@@ -161,45 +161,47 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
 
     // ── Coordinate transform ─────────────────────────────────────
-    // raw_x tracks horizontal position directly, raw_y tracks vertical —
-    // no axis swap needed. Confirmed by 4 labeled taps captured after the
-    // display rotation fix: raw_x swings ~1600 units left↔right while raw_y
-    // barely moves (~20 units), and vice versa top↔bottom.
+    // LVGL calls lv_display_rotate_point() automatically (lv_indev.c:743)
+    // on every point before dispatching events.  The driver must therefore
+    // output PHYSICAL panel coordinates (800×1280, portrait, unrotated) —
+    // NOT logical (1280×800) coordinates.  Any manual rotation here stacks
+    // on top of LVGL's automatic one and produces a double-rotation bug.
     //
-    // Earlier "swap felt like it worked" was the swap accidentally compensating
-    // for the display's own rotation bug (removed s_rot_buf); once the display
-    // was fixed, the swap became a wrong correction on top of a correct display.
+    // Sensor axes are swapped relative to the physical panel (hardware/wiring):
+    //   raw_x span ~1625 ≈ DISPLAY_V_RES 1280  → maps to physical Y
+    //   raw_y span ~864  ≈ DISPLAY_H_RES  800  → maps to physical X
     //
-    // Calibrated from real edge taps (post display-fix):
+    // Calibrated ranges from edge taps (post display-fix):
     //   raw_x ∈ [22..1647],  raw_y ∈ [19..883]
 #define TOUCH_RAW_X_MIN  22
 #define TOUCH_RAW_X_MAX  1647
 #define TOUCH_RAW_Y_MIN  19
 #define TOUCH_RAW_Y_MAX  883
-    int32_t lx = (int32_t)((raw_x - TOUCH_RAW_X_MIN) *
-                 (DISPLAY_LOGICAL_W - 1) / (TOUCH_RAW_X_MAX - TOUCH_RAW_X_MIN));
-    int32_t ly = (int32_t)((raw_y - TOUCH_RAW_Y_MIN) *
-                 (DISPLAY_LOGICAL_H - 1) / (TOUCH_RAW_Y_MAX - TOUCH_RAW_Y_MIN));
+    int32_t phys_x = (int32_t)((raw_y - TOUCH_RAW_Y_MIN) *
+                     (DISPLAY_H_RES - 1) / (TOUCH_RAW_Y_MAX - TOUCH_RAW_Y_MIN));
+    int32_t phys_y = (int32_t)((raw_x - TOUCH_RAW_X_MIN) *
+                     (DISPLAY_V_RES - 1) / (TOUCH_RAW_X_MAX - TOUCH_RAW_X_MIN));
 
-    // Clamp to logical display
-    if (lx < 0) lx = 0;
-    if (lx >= DISPLAY_LOGICAL_W)  lx = DISPLAY_LOGICAL_W  - 1;
-    if (ly < 0) ly = 0;
-    if (ly >= DISPLAY_LOGICAL_H) ly = DISPLAY_LOGICAL_H - 1;
+    // Clamp to physical panel dimensions
+    if (phys_x < 0) phys_x = 0;
+    if (phys_x >= DISPLAY_H_RES) phys_x = DISPLAY_H_RES - 1;
+    if (phys_y < 0) phys_y = 0;
+    if (phys_y >= DISPLAY_V_RES) phys_y = DISPLAY_V_RES - 1;
 
-    // Log every touch — raw AND final logical coords for calibration
+    // Log every touch for calibration verification
     static uint32_t s_touch = 0;
     ++s_touch;
     if (s_touch <= 50 || s_touch % 50 == 0) {
-        ESP_LOGI(TAG, "TOUCH #%lu  raw(%u,%u) -> lv(%ld,%ld)  cnt=%u",
+        ESP_LOGI(TAG, "TOUCH #%lu  raw(%u,%u) -> phys(%ld,%ld)  cnt=%u",
                  (unsigned long)s_touch,
                  (unsigned)raw_x, (unsigned)raw_y,
-                 (long)lx, (long)ly,
+                 (long)phys_x, (long)phys_y,
                  (unsigned)count);
     }
 
-    data->point.x = lx;
-    data->point.y = ly;
+    // LVGL rotates this physical point to logical space automatically.
+    data->point.x = phys_x;
+    data->point.y = phys_y;
     data->state   = LV_INDEV_STATE_PRESSED;
 }
 
