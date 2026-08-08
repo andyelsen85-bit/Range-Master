@@ -73,6 +73,15 @@ static void backlight_init(void)
 // means LVGL's own engine already delivers px_map and area in physical panel
 // coordinates (800×1280 portrait) — no manual rotation step needed here.
 // A second rotation would stack on top of LVGL's and produce a 180° transform.
+//
+// esp_cache_msync alignment rule:
+//   buf1/buf2 are 64-byte aligned and buf_bytes is a multiple of 64.
+//   A dirty-rect sub-region (w*h*2 bytes at px_map) is NOT guaranteed to be
+//   64-byte aligned in either address or size, causing msync to silently fail
+//   or fault on partial redraws.  Always msync the full owning buffer instead.
+static void *s_buf1     = nullptr;
+static void *s_buf2     = nullptr;
+static size_t s_buf_bytes = 0;
 
 static void lvgl_flush_cb(lv_display_t *disp,
                            const lv_area_t *area,
@@ -92,13 +101,13 @@ static void lvgl_flush_cb(lv_display_t *disp,
         s_flush_count++;
     }
 
-    // Write-back px_map from CPU cache to physical PSRAM so DMA2D sees
-    // fresh pixels.  buf1/buf2 are 64-byte aligned and their size is a
-    // multiple of 64 — msync will succeed on any sub-region.
-    int32_t w = area->x2 - area->x1 + 1;
-    int32_t h = area->y2 - area->y1 + 1;
-    esp_cache_msync(px_map, (size_t)w * h * sizeof(lv_color16_t),
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    // Write-back the FULL owning buffer — not just the dirty rect.
+    // px_map == s_buf1 or s_buf2; both are 64-byte aligned at a size that is
+    // a multiple of 64.  A dirty-rect slice (w*h*2 bytes) is NOT guaranteed
+    // to meet those constraints, which causes msync to silently corrupt or
+    // fault on small/odd redraws (the "stripes" regression).
+    void *full_buf = (px_map == (uint8_t *)s_buf1) ? s_buf1 : s_buf2;
+    esp_cache_msync(full_buf, s_buf_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
     // Pass LVGL's already-rotated tile straight to the panel.
     esp_lcd_panel_draw_bitmap(panel,
@@ -151,18 +160,20 @@ static void lvgl_task(void *arg)
 
     // heap_caps_malloc does NOT guarantee 64-byte cache-line alignment;
     // esp_cache_msync requires it.  Use heap_caps_aligned_alloc instead.
-    void *buf1 = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
-    void *buf2 = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
+    // Publish to file-scope statics so flush_cb can msync the full buffer.
+    s_buf1      = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
+    s_buf2      = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
+    s_buf_bytes = buf_bytes;
 
-    if (!buf1 || !buf2) {
+    if (!s_buf1 || !s_buf2) {
         ESP_LOGE(TAG, "LVGL buffer alloc failed (need 2×%u bytes in PSRAM)",
                  (unsigned)buf_bytes);
         vTaskDelete(NULL);
     }
     ESP_LOGI(TAG, "LVGL buffers: buf1=%p  buf2=%p  (%u B each, 64-byte aligned)",
-             buf1, buf2, (unsigned)buf_bytes);
+             s_buf1, s_buf2, (unsigned)buf_bytes);
 
-    lv_display_set_buffers(disp, buf1, buf2, buf_bytes,
+    lv_display_set_buffers(disp, s_buf1, s_buf2, buf_bytes,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
     lv_display_set_user_data(disp, s_panel);
