@@ -11,6 +11,7 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
+#include "esp_private/esp_ldo.h"  // LDO power rail for MIPI DSI D-PHY
 
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
@@ -142,6 +143,21 @@ lv_display_t *jd9365_panel_init(void)
 {
     ESP_LOGI(TAG, "Initialising JD9365 MIPI-DSI panel %dx%d",
              DISPLAY_H_RES, DISPLAY_V_RES);
+
+    // ── Power up the MIPI DSI D-PHY via internal LDO (chan 3, 2500 mV)
+    // The ESP32-P4 D-PHY sits behind a dedicated 2.5V internal LDO that is
+    // OFF by default. Without this call the PLL has no power and
+    // esp_lcd_new_dsi_bus() spins forever waiting for PLL lock.
+    // Every reference implementation for this panel (CelliesProjects, profi-max,
+    // Espressif esp_lcd_jd9365, Waveshare) does this immediately before the bus
+    // init. LDO handle kept alive for the lifetime of the driver — never release.
+    ESP_LOGI(TAG, "Step 0: power up MIPI DSI D-PHY LDO (chan=3, 2500 mV)");
+    esp_ldo_channel_handle_t ldo_mipi_phy = NULL;
+    esp_ldo_channel_config_t ldo_cfg = {};
+    ldo_cfg.chan_id    = 3;
+    ldo_cfg.voltage_mv = 2500;
+    ESP_ERROR_CHECK(esp_ldo_acquire_channel(&ldo_cfg, &ldo_mipi_phy));
+    ESP_LOGI(TAG, "Step 0 OK — D-PHY 2.5V rail on");
 
     // ── MIPI DSI bus
     ESP_LOGI(TAG, "Step 1: esp_lcd_new_dsi_bus (lanes=%d, rate=%d Mbps)",
