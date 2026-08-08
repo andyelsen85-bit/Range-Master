@@ -177,9 +177,9 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 #define TOUCH_RAW_X_MAX  1647
 #define TOUCH_RAW_Y_MIN  19
 #define TOUCH_RAW_Y_MAX  883
-    int32_t phys_x = (int32_t)((TOUCH_RAW_Y_MAX - raw_y) *
+    int32_t phys_x = (int32_t)((raw_y - TOUCH_RAW_Y_MIN) *
                      (DISPLAY_H_RES - 1) / (TOUCH_RAW_Y_MAX - TOUCH_RAW_Y_MIN));
-    int32_t phys_y = (int32_t)((raw_x - TOUCH_RAW_X_MIN) *
+    int32_t phys_y = (int32_t)((TOUCH_RAW_X_MAX - raw_x) *
                      (DISPLAY_V_RES - 1) / (TOUCH_RAW_X_MAX - TOUCH_RAW_X_MIN));
 
     // Clamp to physical panel dimensions
