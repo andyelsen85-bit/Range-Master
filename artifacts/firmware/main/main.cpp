@@ -79,6 +79,9 @@ extern "C" void app_main(void)
     // ── LoRa UART stub (phase 2 placeholder)
     lora_stub_init();
 
+    // ── LVGL core init (must precede any lv_* call)
+    lv_init();
+
     // ── Display (JD9365 MIPI-DSI)
     lv_display_t *disp = jd9365_panel_init();
     if (!disp) {
