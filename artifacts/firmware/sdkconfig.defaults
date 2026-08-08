@@ -67,6 +67,24 @@ CONFIG_PARTITION_TABLE_OFFSET=0x8000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 
+# ── Unused wireless stacks — disable to recover ~80 KB of DRAM BSS ───────
+# Bluetooth and OpenThread are not used in this project. Leaving them at
+# IDF defaults bloats BSS so far that --enable-non-contiguous-regions
+# discards sections that cannot fit in internal DRAM.
+CONFIG_BT_ENABLED=n
+CONFIG_OPENTHREAD_ENABLED=n
+CONFIG_IEEE802154_ENABLED=n
+
+# ── lwip / mbedtls DRAM reduction ─────────────────────────────────────────
+# IPv6 neighbor-discovery tables (nd6.c) are a major cause of sram_low
+# overflow under --enable-non-contiguous-regions on IDF 5.3.x / ESP32-P4.
+# This terminal only needs IPv4.
+CONFIG_LWIP_IPV6=n
+CONFIG_LWIP_MAX_SOCKETS=4
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16
+CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=4096
+CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN=y
+
 # ── LVGL Montserrat fonts (all sizes used by the UI screens) ──
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_14=y
