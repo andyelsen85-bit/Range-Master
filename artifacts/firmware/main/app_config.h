@@ -8,6 +8,7 @@
 // ── Display (MIPI DSI / JD9365) ─────────────────────────────
 #define DISPLAY_H_RES           800
 #define DISPLAY_V_RES           1280
+#define LCD_RST_PIN             GPIO_NUM_27   // JD9365 hardware reset (active-low)
 // Physical panel is portrait-native (800×1280); we rotate to landscape.
 #define DISPLAY_ROTATION        LV_DISPLAY_ROTATION_90
 // Logical resolution after rotation

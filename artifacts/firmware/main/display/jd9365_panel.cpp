@@ -202,8 +202,19 @@ lv_display_t *jd9365_panel_init(void)
     ESP_ERROR_CHECK(esp_lcd_new_panel_dpi(dsi_bus, &dpi_cfg, &panel_handle));
     ESP_LOGI(TAG, "Step 3 OK");
 
-    ESP_LOGI(TAG, "Step 4: esp_lcd_panel_reset");
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
+    // ── Hardware reset JD9365 via GPIO (DPI panel handle does not support esp_lcd_panel_reset)
+    ESP_LOGI(TAG, "Step 4: hardware reset JD9365 via GPIO%d", (int)LCD_RST_PIN);
+    gpio_config_t rst_cfg = {};
+    rst_cfg.pin_bit_mask = (1ULL << LCD_RST_PIN);
+    rst_cfg.mode         = GPIO_MODE_OUTPUT;
+    rst_cfg.pull_up_en   = GPIO_PULLUP_DISABLE;
+    rst_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    rst_cfg.intr_type    = GPIO_INTR_DISABLE;
+    ESP_ERROR_CHECK(gpio_config(&rst_cfg));
+    gpio_set_level(LCD_RST_PIN, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(LCD_RST_PIN, 1);
+    vTaskDelay(pdMS_TO_TICKS(120));
     ESP_LOGI(TAG, "Step 4 OK");
 
     // ── Send JD9365 init commands over DBI
