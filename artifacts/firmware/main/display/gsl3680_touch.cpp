@@ -161,25 +161,25 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
 
     // ── Coordinate transform ─────────────────────────────────────
-    // Display renders correct but touch was off by 90° — axes must be swapped.
-    // The flush_cb rotates pixels 90° CCW (logical→physical), so the touch
-    // sensor's axes are also rotated relative to LVGL logical space:
-    //   raw_y maps to logical X,  raw_x (inverted) maps to logical Y
+    // raw_x tracks horizontal position directly, raw_y tracks vertical —
+    // no axis swap needed. Confirmed by 4 labeled taps captured after the
+    // display rotation fix: raw_x swings ~1600 units left↔right while raw_y
+    // barely moves (~20 units), and vice versa top↔bottom.
     //
-    // Calibrated raw ranges from 4-corner measurements:
-    //   raw_x ∈ [42..1640],  raw_y ∈ [25..878]
+    // Earlier "swap felt like it worked" was the swap accidentally compensating
+    // for the display's own rotation bug (removed s_rot_buf); once the display
+    // was fixed, the swap became a wrong correction on top of a correct display.
     //
-    // Formula: swap + invert X (direction A — try this first):
-    //   lx = scale(raw_y,  Y-range → [0..LOGICAL_W-1])
-    //   ly = scale(raw_x_inverted, X-range → [0..LOGICAL_H-1])
-#define TOUCH_RAW_X_MIN  42
-#define TOUCH_RAW_X_MAX  1640
-#define TOUCH_RAW_Y_MIN  25
-#define TOUCH_RAW_Y_MAX  878
-    int32_t lx = (int32_t)((raw_y - TOUCH_RAW_Y_MIN) *
-                 (DISPLAY_LOGICAL_W - 1) / (TOUCH_RAW_Y_MAX - TOUCH_RAW_Y_MIN));
-    int32_t ly = (int32_t)((TOUCH_RAW_X_MAX - raw_x) *
-                 (DISPLAY_LOGICAL_H - 1) / (TOUCH_RAW_X_MAX - TOUCH_RAW_X_MIN));
+    // Calibrated from real edge taps (post display-fix):
+    //   raw_x ∈ [22..1647],  raw_y ∈ [19..883]
+#define TOUCH_RAW_X_MIN  22
+#define TOUCH_RAW_X_MAX  1647
+#define TOUCH_RAW_Y_MIN  19
+#define TOUCH_RAW_Y_MAX  883
+    int32_t lx = (int32_t)((raw_x - TOUCH_RAW_X_MIN) *
+                 (DISPLAY_LOGICAL_W - 1) / (TOUCH_RAW_X_MAX - TOUCH_RAW_X_MIN));
+    int32_t ly = (int32_t)((raw_y - TOUCH_RAW_Y_MIN) *
+                 (DISPLAY_LOGICAL_H - 1) / (TOUCH_RAW_Y_MAX - TOUCH_RAW_Y_MIN));
 
     // Clamp to logical display
     if (lx < 0) lx = 0;
