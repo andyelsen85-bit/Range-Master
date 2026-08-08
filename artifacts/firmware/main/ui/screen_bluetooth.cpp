@@ -193,7 +193,7 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_set_style_border_color(s_list_log, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_border_width(s_list_log, 1, 0);
     lv_obj_set_style_radius(s_list_log, 8, 0);
-    lv_obj_set_style_text_font(s_list_log, &lv_font_montserrat_13, 0);
+    lv_obj_set_style_text_font(s_list_log, &lv_font_montserrat_14, 0);
     lv_list_add_text(s_list_log, "Keng Evenementer");
 
     return s_scr;
