@@ -22,6 +22,7 @@
 #include "driver/ledc.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
+#include "esp_cache.h"           // esp_cache_msync — write-back CPU cache before DMA reads
 #include "esp_lcd_panel_ops.h"   // esp_lcd_panel_draw_bitmap
 
 #include "lvgl.h"
@@ -68,17 +69,39 @@ static void backlight_init(void)
 }
 
 // ── LVGL flush callback ───────────────────────────────────────
-// Called by LVGL when a frame is rendered.  With full-screen
-// double-buffer render mode, LVGL alternates between buf1/buf2
-// so the DMA2D copy from the *other* buffer is long finished
-// before we touch it again — calling flush_ready() immediately
-// is safe (matches the official Guition Arduino demo pattern).
 static void lvgl_flush_cb(lv_display_t *disp,
                            const lv_area_t *area,
                            uint8_t *px_map)
 {
     esp_lcd_panel_handle_t panel =
         (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
+
+    // ── Diagnostics (first 8 calls per boot) ──────────────────
+    static int s_flush_count = 0;
+    if (s_flush_count < 8) {
+        uint16_t px0 = ((uint16_t *)px_map)[0];
+        uint8_t r = (px0 >> 11) & 0x1F;
+        uint8_t g = (px0 >> 5)  & 0x3F;
+        uint8_t b =  px0        & 0x1F;
+        int32_t log_w = lv_display_get_horizontal_resolution(disp);
+        int32_t log_h = lv_display_get_vertical_resolution(disp);
+        ESP_LOGI("flush", "#%d  area=(%d,%d)-(%d,%d)  px0=0x%04x (R%d G%d B%d)  logical=%dx%d",
+                 s_flush_count,
+                 area->x1, area->y1, area->x2, area->y2,
+                 px0, r, g, b, log_w, log_h);
+        s_flush_count++;
+    }
+    // ──────────────────────────────────────────────────────────
+
+    // Write-back CPU cache to physical PSRAM before DMA2D reads it.
+    // LVGL fills px_map via the CPU cache; DMA2D bypasses the cache and
+    // reads physical PSRAM directly.  Without msync, DMA2D sees stale
+    // data → garbled / striped output.
+    int32_t w = area->x2 - area->x1 + 1;
+    int32_t h = area->y2 - area->y1 + 1;
+    esp_cache_msync(px_map,
+                    (size_t)w * h * sizeof(lv_color16_t),
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
     esp_lcd_panel_draw_bitmap(panel,
         area->x1, area->y1,
