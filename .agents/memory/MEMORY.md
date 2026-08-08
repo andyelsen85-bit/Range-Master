@@ -1,4 +1,5 @@
 - [Zod in monorepo routes](zod-monorepo-routes.md) — backend route files must list zod as a direct dep; workspace catalog zod is not auto-resolved by esbuild
+- [ESP32-P4 hex PSRAM speed](psram-hex-speed.md) — IDF 5.3.5 only has 20M/200M; 200M needs IDF_EXPERIMENTAL_FEATURES; SPIRAM_SPEED_80M silently ignored
 - [API client subpath exports](api-client-subpath.md) — custom-fetch.ts needs its own exports entry in lib/api-client-react/package.json to be importable as a subpath
 - [bcrypt seeding](bcrypt-seeding.md) — bcryptjs not importable in CodeExecution sandbox; use pgcrypto extension (crypt + gen_salt) for password hashing in SQL seeds
 - [drizzle push blocked](drizzle-push-blocked.md) — `db push` hangs on a TTY prompt from api_keys drift; apply new tables with idempotent SQL from lib/db, then `tsc -b lib/db`
