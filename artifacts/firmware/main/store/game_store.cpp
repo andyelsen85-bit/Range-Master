@@ -22,7 +22,7 @@ static const char *TAG = "game_store";
 // Forward declaration (defined later in this file)
 static void _store_finish_game(void);
 
-GameStore g_store;
+EXT_RAM_BSS_ATTR GameStore g_store;
 
 // ── NVS helpers ──────────────────────────────────────────────
 static nvs_handle_t s_nvs;

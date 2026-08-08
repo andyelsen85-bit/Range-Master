@@ -177,7 +177,7 @@ typedef struct {
 } GameStore;
 
 // ── Global store instance ────────────────────────────────────
-extern GameStore g_store;
+extern EXT_RAM_BSS_ATTR GameStore g_store;
 
 // ── Lifecycle ────────────────────────────────────────────────
 void game_store_init(void);
