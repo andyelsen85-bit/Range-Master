@@ -1,34 +1,32 @@
 // ============================================================
 // TrapMaster Firmware — app_main
+// PHASE 1 RAW FRAMEBUFFER TEST (no LVGL)
 // Board: Guition JC8012P4A1C-I-W-Y
+//
+// After display init, fills both DPI frame buffers with cycling
+// solid colours (red → green → blue → white → black, 2 s each).
+// A solid colour on screen proves the DSI pipeline is alive.
 // ============================================================
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "driver/ledc.h"
-#include "driver/gpio.h"
 #include "esp_heap_caps.h"
+#include "esp_lcd_mipi_dsi.h"  // esp_lcd_dpi_panel_get_frame_buffer
 
 #include "app_config.h"
 #include "jd9365_panel.h"
-#include "gsl3680_touch.h"
-#include "game_store.h"
 #include "coprocessor.h"
 #include "lora_stub.h"
-#include "ui_manager.h"
-
-#include "lvgl.h"
-#include "esp_lvgl_port.h"
 
 static const char *TAG = "main";
 
-// ── Backlight ────────────────────────────────────────────────
+// ── Backlight ─────────────────────────────────────────────────
 static void backlight_init(void)
 {
-    // Assignment style avoids C++ designated-initializer field-order errors
     ledc_timer_config_t timer = {};
     timer.speed_mode      = LEDC_LOW_SPEED_MODE;
     timer.duty_resolution = LEDC_TIMER_10_BIT;
@@ -49,21 +47,43 @@ static void backlight_init(void)
     ESP_LOGI(TAG, "Backlight on");
 }
 
-// ── LVGL tick timer ──────────────────────────────────────────
-static void lvgl_tick_cb(void *arg)
+// ── Fill both DPI frame buffers with a solid RGB565 colour ───
+// Writing both FBs avoids a flash of old content during the
+// buffer swap that the DPI driver performs on each vsync.
+static void fill_framebuffers(esp_lcd_panel_handle_t panel,
+                              uint16_t rgb565)
 {
-    (void)arg;
-    lv_tick_inc(LVGL_TICK_PERIOD_MS);
+    void *fb0 = NULL, *fb1 = NULL;
+    // Retrieve both frame buffer pointers managed by the DPI driver.
+    esp_err_t err = esp_lcd_dpi_panel_get_frame_buffer(panel, 2, &fb0, &fb1);
+    if (err != ESP_OK || !fb0 || !fb1) {
+        ESP_LOGE(TAG, "get_frame_buffer failed (%s)", esp_err_to_name(err));
+        return;
+    }
+
+    const size_t total_pixels = DISPLAY_H_RES * DISPLAY_V_RES;
+
+    // Write 2 pixels per 32-bit store for speed (PSRAM prefers wider bursts).
+    uint32_t word = ((uint32_t)rgb565 << 16) | rgb565;
+    uint32_t *p0  = (uint32_t *)fb0;
+    uint32_t *p1  = (uint32_t *)fb1;
+    for (size_t i = 0; i < total_pixels / 2; i++) {
+        p0[i] = word;
+        p1[i] = word;
+    }
+    // Odd pixel (1280×800 = 1,024,000 pixels — even, so loop covers all)
 }
 
-// ── app_main ─────────────────────────────────────────────────
+// ── app_main ──────────────────────────────────────────────────
 extern "C" void app_main(void)
 {
-    ESP_LOGI(TAG, "TrapMaster firmware " APP_VERSION " starting...");
+    ESP_LOGI(TAG, "TrapMaster firmware " APP_VERSION
+             " — PHASE 1 RAW FRAMEBUFFER TEST");
 
     // ── NVS
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
+        ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_LOGW(TAG, "NVS partition truncated, erasing...");
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
@@ -76,45 +96,36 @@ extern "C" void app_main(void)
     // ── Co-processor (ESP32-C6) UART bridge
     coprocessor_init();
 
-    // ── LoRa UART stub (phase 2 placeholder)
+    // ── LoRa stub (phase 2 placeholder)
     lora_stub_init();
 
-    // ── LVGL core init (must precede any lv_* call)
-    lv_init();
-
-    // ── Display (JD9365 MIPI-DSI)
-    lv_display_t *disp = jd9365_panel_init();
-    if (!disp) {
+    // ── Display — hardware init only, no LVGL
+    esp_lcd_panel_handle_t panel = jd9365_panel_init();
+    if (!panel) {
         ESP_LOGE(TAG, "Display init failed — halting");
         for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    // ── Touch (GSL3680 I²C)
-    gsl3680_touch_init(disp);
+    ESP_LOGI(TAG, "Display init OK — starting raw framebuffer colour cycle");
+    ESP_LOGI(TAG, "Expected: screen changes colour every 2 s");
+    ESP_LOGI(TAG, "  RED → GREEN → BLUE → WHITE → BLACK → repeat");
 
-    // ── LVGL tick via hardware timer
-    esp_timer_create_args_t tick_args = {};
-    tick_args.callback              = lvgl_tick_cb;
-    tick_args.dispatch_method       = ESP_TIMER_TASK;
-    tick_args.name                  = "lvgl_tick";
-    tick_args.skip_unhandled_events = true;
-    esp_timer_handle_t tick_timer;
-    ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer,
-                                             LVGL_TICK_PERIOD_MS * 1000));
+    // RGB565 colour table
+    static const struct { uint16_t colour; const char *name; } COLOURS[] = {
+        { 0xF800, "RED"   },
+        { 0x07E0, "GREEN" },
+        { 0x001F, "BLUE"  },
+        { 0xFFFF, "WHITE" },
+        { 0x0000, "BLACK" },
+    };
+    const int NUM_COLOURS = sizeof(COLOURS) / sizeof(COLOURS[0]);
 
-    // ── Game store (loads NVS state)
-    game_store_init();
-
-    // ── Build all LVGL screens
-    ui_manager_init();
-
-    ESP_LOGI(TAG, "Init complete — entering LVGL task loop");
-
-    // ── Main LVGL handler loop (runs on this task)
-    while (true) {
-        uint32_t delay_ms = lv_timer_handler();
-        if (delay_ms > LVGL_TASK_MAX_DELAY_MS) delay_ms = LVGL_TASK_MAX_DELAY_MS;
-        vTaskDelay(pdMS_TO_TICKS(delay_ms > 0 ? delay_ms : 1));
+    int idx = 0;
+    for (;;) {
+        ESP_LOGI(TAG, "Filling framebuffer: %s (0x%04X)",
+                 COLOURS[idx].name, COLOURS[idx].colour);
+        fill_framebuffers(panel, COLOURS[idx].colour);
+        idx = (idx + 1) % NUM_COLOURS;
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
