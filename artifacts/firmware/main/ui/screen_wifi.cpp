@@ -20,6 +20,12 @@ static lv_obj_t *s_ta_pass;
 static lv_obj_t *s_lbl_ip;
 static lv_obj_t *s_btn_connect;
 
+// File-scope scan result buffer — shared between the scan task and the
+// lv_async_call lambda that renders the list (static locals inside lambdas
+// have no external linkage so extern references to them fail to link).
+static char s_scan_names[20][33];
+static int  s_scan_count = 0;
+
 // ── Scan networks ─────────────────────────────────────────────
 static void scan_cb(lv_event_t *e)
 {
@@ -34,19 +40,14 @@ static void scan_cb(lv_event_t *e)
         cop_wifi_scan(names, 20, &count);
         // LVGL update must happen in LVGL context; use lv_async_call
         // Here we store results in a static buffer and use a timer
-        static char s_net_names[20][33];
-        static int s_net_count = 0;
-        memcpy(s_net_names, names, sizeof(s_net_names));
-        s_net_count = count;
-        (void)s_net_count; // read via extern in lv_async_call lambda below
+        memcpy(s_scan_names, names, sizeof(s_scan_names));
+        s_scan_count = count;
 
         lv_async_call([](void *arg2) {
-            extern char s_net_names[20][33];
-            extern int s_net_count;
             lv_obj_clean(s_list_networks);
-            for (int i = 0; i < s_net_count; i++) {
+            for (int i = 0; i < s_scan_count; i++) {
                 lv_obj_t *btn = lv_list_add_btn(s_list_networks,
-                                                LV_SYMBOL_WIFI, s_net_names[i]);
+                                                LV_SYMBOL_WIFI, s_scan_names[i]);
                 lv_obj_set_style_text_font(btn, &lv_font_montserrat_14, 0);
                 lv_obj_set_style_text_color(btn, lv_color_hex(CLR_TEXT), 0);
                 lv_obj_add_event_cb(btn, [](lv_event_t *ev) {
@@ -55,7 +56,7 @@ static void scan_cb(lv_event_t *e)
                     if (s_ta_ssid) lv_textarea_set_text(s_ta_ssid, net);
                 }, LV_EVENT_CLICKED, NULL);
             }
-            if (s_net_count == 0) {
+            if (s_scan_count == 0) {
                 lv_list_add_text(s_list_networks, "Keng Netzwierker fonnt");
             }
             lv_label_set_text(s_lbl_status, "Scan fäerdeg");
