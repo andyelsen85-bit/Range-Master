@@ -72,3 +72,11 @@ CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_36=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
 
+# ── Unused wireless stacks — disable to recover ~80 KB of DRAM BSS ───────
+# Bluetooth and OpenThread are not used in this project.  Leaving them at
+# IDF defaults bloats BSS so far that --enable-non-contiguous-regions
+# silently discards sections that cannot fit in internal DRAM.
+CONFIG_BT_ENABLED=n
+CONFIG_OPENTHREAD_ENABLED=n
+CONFIG_IEEE802154_ENABLED=n
+
