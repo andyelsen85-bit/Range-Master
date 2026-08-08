@@ -2,8 +2,10 @@
 CONFIG_IDF_TARGET="esp32p4"
 
 # ── Chip revision — Guition JC8012P4A1C uses ESP32-P4 rev v1.3 (ECO2) ───
-# Use IDF 5.4.x — IDF 5.5+ targets ECO3 (v3.1+) and is incompatible with
-# this chip. CONFIG_ESP32P4_REV_MIN_FULL=100 kept as a safety net.
+# REQUIRED: use IDF 5.3.x ONLY.
+#   IDF 5.4.2+: hangs in esp_lcd_new_dsi_bus() on ECO2 D-PHY (IDF issue #17778)
+#   IDF 5.5.x+: refuses ECO2 entirely (requires v3.1+)
+# CONFIG_ESP32P4_REV_MIN_FULL=100 tells the bootloader to accept v1.0+ chips.
 CONFIG_ESP32P4_REV_MIN_FULL=100
 
 # ── Flash (JC8012P4A1C has 16 MB flash) ───────────────────────────────────

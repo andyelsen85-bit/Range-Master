@@ -1,7 +1,7 @@
 # TrapMaster Terminal — Installatiounsguide
 
 **Hardware:** Guition JC8012P4A1C-I-W-Y (ESP32-P4 + ESP32-C6, 10.1″ 1280×800)  
-**Software:** ESP-IDF 5.4.x + LVGL v9
+**Software:** ESP-IDF 5.3.x + LVGL v9
 
 ---
 
@@ -51,10 +51,12 @@ D'Guition-Board benotzt en **CP2102N** USB-Chip.
 
 #### Windows (einfachst Wee — Offline Installer)
 
+> ⚠️ **Wichteg:** Nëmmen **IDF 5.3.x** benotzen. IDF 5.4.x hänkt am MIPI-DSI-Init (bekannte Bug fir ECO2-Chips). IDF 5.5.x/6.x refuséiert ECO2 ganz.
+
 1. Öffne: https://dl.espressif.com/dl/esp-idf/
-2. Lued déi **neist** `ESP-IDF Tools Installer for Windows` erof (≥ 5.4.x)
+2. Lued `ESP-IDF v5.3.x Windows Installer` erof (Sektioun **Previous Releases** falls néideg)
 3. Installer starten → all Standardoptioune bäibehalen → **Finish**
-4. Um Desktop erschéngt `ESP-IDF 5.4 CMD` — benotze **dësen** fir all weider Commanden
+4. Um Desktop erschéngt `ESP-IDF 5.3 CMD` — benotze **dësen** fir all weider Commanden
 
 #### Mac / Linux
 
