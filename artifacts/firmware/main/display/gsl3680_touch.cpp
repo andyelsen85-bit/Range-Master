@@ -160,27 +160,34 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     uint16_t raw_x = ((tp[3] & 0x0F) << 8) | tp[2];
     uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
 
-    // Log every actual touch event (first 30, then every 50th)
-    static uint32_t s_touch = 0;
-    ++s_touch;
-    if (s_touch <= 30 || s_touch % 50 == 0) {
-        ESP_LOGI(TAG, "TOUCH #%lu  tp=[%02x %02x %02x %02x]  "
-                      "raw(%u,%u)  cnt=%u",
-                 (unsigned long)s_touch,
-                 tp[0], tp[1], tp[2], tp[3],
-                 (unsigned)raw_x, (unsigned)raw_y,
-                 (unsigned)count);
-    }
-
-    // Use raw values directly as landscape logical coordinates
-    int32_t lx = (int32_t)raw_x;
-    int32_t ly = (int32_t)raw_y;
+    // ── Coordinate transform ─────────────────────────────────────
+    // We need to map (raw_x, raw_y) → LVGL logical (lx, ly).
+    // The panel coordinate origin and axis directions are still being
+    // calibrated from physical tap measurements.
+    //
+    // Current best guess (to be updated from corner-tap log data):
+    //   lx = DISPLAY_LOGICAL_W  - 1 - raw_x   (X mirrored)
+    //   ly = DISPLAY_LOGICAL_H - 1 - raw_y   (Y mirrored)
+    // Scale factors TBD once we have 4-corner raw values.
+    int32_t lx = (int32_t)(DISPLAY_LOGICAL_W  - 1) - (int32_t)raw_x;
+    int32_t ly = (int32_t)(DISPLAY_LOGICAL_H - 1) - (int32_t)raw_y;
 
     // Clamp to logical display
     if (lx < 0) lx = 0;
-    if (lx >= DISPLAY_LOGICAL_W) lx = DISPLAY_LOGICAL_W - 1;
+    if (lx >= DISPLAY_LOGICAL_W)  lx = DISPLAY_LOGICAL_W  - 1;
     if (ly < 0) ly = 0;
     if (ly >= DISPLAY_LOGICAL_H) ly = DISPLAY_LOGICAL_H - 1;
+
+    // Log every touch — raw AND final logical coords for calibration
+    static uint32_t s_touch = 0;
+    ++s_touch;
+    if (s_touch <= 50 || s_touch % 50 == 0) {
+        ESP_LOGI(TAG, "TOUCH #%lu  raw(%u,%u) -> lv(%ld,%ld)  cnt=%u",
+                 (unsigned long)s_touch,
+                 (unsigned)raw_x, (unsigned)raw_y,
+                 (long)lx, (long)ly,
+                 (unsigned)count);
+    }
 
     data->point.x = lx;
     data->point.y = ly;
