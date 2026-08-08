@@ -144,6 +144,8 @@ lv_display_t *jd9365_panel_init(void)
              DISPLAY_H_RES, DISPLAY_V_RES);
 
     // ── MIPI DSI bus
+    ESP_LOGI(TAG, "Step 1: esp_lcd_new_dsi_bus (lanes=%d, rate=%d Mbps)",
+             MIPI_DSI_LANE_NUM, MIPI_DSI_LANE_BIT_RATE);
     esp_lcd_dsi_bus_handle_t dsi_bus;
     esp_lcd_dsi_bus_config_t bus_cfg = {};
     bus_cfg.bus_id             = 0;
@@ -151,25 +153,28 @@ lv_display_t *jd9365_panel_init(void)
     bus_cfg.phy_clk_src        = MIPI_DSI_PHY_CLK_SRC_DEFAULT;
     bus_cfg.lane_bit_rate_mbps = MIPI_DSI_LANE_BIT_RATE;
     ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_cfg, &dsi_bus));
+    ESP_LOGI(TAG, "Step 1 OK");
 
     // ── DBI (command) IO handle
+    ESP_LOGI(TAG, "Step 2: esp_lcd_new_panel_io_dbi");
     esp_lcd_panel_io_handle_t io_handle;
     esp_lcd_dbi_io_config_t dbi_cfg = {};
     dbi_cfg.virtual_channel = 0;
     dbi_cfg.lcd_cmd_bits    = 8;
     dbi_cfg.lcd_param_bits  = 8;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(dsi_bus, &dbi_cfg, &io_handle));
+    ESP_LOGI(TAG, "Step 2 OK");
 
     // ── Panel driver (generic MIPI)
+    ESP_LOGI(TAG, "Step 3: esp_lcd_new_panel_dpi (clk=60MHz, fbs=2, dma2d=off)");
     esp_lcd_panel_handle_t panel_handle;
-    // Assignment style avoids C++ designated-initializer ordering and nesting errors
     esp_lcd_dpi_panel_config_t dpi_cfg = {};
     dpi_cfg.dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
     dpi_cfg.dpi_clock_freq_mhz = 60;
     dpi_cfg.virtual_channel    = 0;
     dpi_cfg.pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565;
     dpi_cfg.num_fbs            = 2;
-    dpi_cfg.flags.use_dma2d    = true;
+    dpi_cfg.flags.use_dma2d    = false;   // disable DMA2D — diagnose hang
     dpi_cfg.video_timing.h_size            = DISPLAY_H_RES;
     dpi_cfg.video_timing.v_size            = DISPLAY_V_RES;
     dpi_cfg.video_timing.hsync_back_porch  = 120;
@@ -178,12 +183,15 @@ lv_display_t *jd9365_panel_init(void)
     dpi_cfg.video_timing.vsync_back_porch  = 12;
     dpi_cfg.video_timing.vsync_pulse_width = 4;
     dpi_cfg.video_timing.vsync_front_porch = 16;
-
-    // IDF 5.5: esp_lcd_new_panel_dpi takes 3 args (no separate panel_dev_cfg)
     ESP_ERROR_CHECK(esp_lcd_new_panel_dpi(dsi_bus, &dpi_cfg, &panel_handle));
+    ESP_LOGI(TAG, "Step 3 OK");
+
+    ESP_LOGI(TAG, "Step 4: esp_lcd_panel_reset");
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
+    ESP_LOGI(TAG, "Step 4 OK");
 
     // ── Send JD9365 init commands over DBI
+    ESP_LOGI(TAG, "Step 5: sending %d JD9365 init commands", (int)JD9365_INIT_LEN);
     for (int i = 0; i < (int)JD9365_INIT_LEN; i++) {
         const jd9365_cmd_t *c = &JD9365_INIT[i];
         if (c->data_len > 0) {
@@ -193,8 +201,11 @@ lv_display_t *jd9365_panel_init(void)
         }
         if (c->delay_ms) vTaskDelay(pdMS_TO_TICKS(c->delay_ms));
     }
+    ESP_LOGI(TAG, "Step 5 OK");
 
+    ESP_LOGI(TAG, "Step 6: esp_lcd_panel_init");
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
+    ESP_LOGI(TAG, "Step 6 OK");
     ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, false, false));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
     ESP_LOGI(TAG, "JD9365 panel on");
