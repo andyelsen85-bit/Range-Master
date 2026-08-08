@@ -183,16 +183,11 @@ lv_display_t *jd9365_panel_init(void)
             .vsync_pulse_width = 4,
             .vsync_front_porch = 16,
         },
-        .flags.use_dma2d = true,
     };
+    dpi_cfg.flags.use_dma2d = true;  // set after init to avoid C++ nested-designator error
 
-    esp_lcd_panel_dev_config_t panel_dev_cfg = {
-        .bits_per_pixel = 16,
-        .rgb_ele_order  = LCD_RGB_ELEMENT_ORDER_RGB,
-        .reset_gpio_num = GPIO_NUM_NC,
-    };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_dpi(dsi_bus, &dpi_cfg, &panel_dev_cfg,
-                                          &panel_handle));
+    // IDF 5.5: esp_lcd_new_panel_dpi takes 3 args (no separate panel_dev_cfg)
+    ESP_ERROR_CHECK(esp_lcd_new_panel_dpi(dsi_bus, &dpi_cfg, &panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
 
     // ── Send JD9365 init commands over DBI

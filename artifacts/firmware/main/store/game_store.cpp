@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -17,6 +18,9 @@
 #include "app_config.h"
 
 static const char *TAG = "game_store";
+
+// Forward declaration (defined later in this file)
+static void _store_finish_game(void);
 
 GameStore g_store;
 
@@ -74,7 +78,7 @@ static int generate_sequenz(SequenzEintrag *out, Modus modus,
 
     if (modus == MODUS_NORMAL) {
         // A-G (filtered by aktiv) + H (Doublette = 2 entries)
-        for (Maschine m = MASCHINE_A; m <= MASCHINE_G; m++) {
+        for (Maschine m = MASCHINE_A; m <= MASCHINE_G; m = (Maschine)((int)m + 1)) {
             if (aktiv[m]) {
                 out[idx++] = (SequenzEintrag){m, false};
             }
@@ -86,7 +90,7 @@ static int generate_sequenz(SequenzEintrag *out, Modus modus,
     } else if (modus == MODUS_HARAKIRI) {
         // Shuffle A-G then add H
         Maschine pool[7]; int pcnt = 0;
-        for (Maschine m = MASCHINE_A; m <= MASCHINE_G; m++) {
+        for (Maschine m = MASCHINE_A; m <= MASCHINE_G; m = (Maschine)((int)m + 1)) {
             if (aktiv[m]) pool[pcnt++] = m;
         }
         shuffle(pool, pcnt);
@@ -270,7 +274,7 @@ void store_eintragen(int punkte)
 }
 
 // ── _store_finish_game ───────────────────────────────────────
-void _store_finish_game(void)
+static void _store_finish_game(void)
 {
     GameStore *s = &g_store;
 

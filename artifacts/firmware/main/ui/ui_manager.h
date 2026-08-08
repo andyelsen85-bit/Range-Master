@@ -3,6 +3,7 @@
 // UI manager — screen router for LVGL
 // ============================================================
 #include "game_store.h"
+#include "app_config.h"    // DISPLAY_LOGICAL_W/H, CLUB_NAME, APP_VERSION, etc.
 
 /** Create all LVGL screens and show the dashboard. */
 void ui_manager_init(void);

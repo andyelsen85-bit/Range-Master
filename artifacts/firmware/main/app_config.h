@@ -3,6 +3,7 @@
 // TrapMaster Firmware — Hardware configuration
 // Board: Guition JC8012P4A1C-I-W-Y  (ESP32-P4 + ESP32-C6)
 // ============================================================
+#include "driver/gpio.h"   // GPIO_NUM_x constants needed by pin macros
 
 // ── Display (MIPI DSI / JD9365) ─────────────────────────────
 #define DISPLAY_H_RES           800

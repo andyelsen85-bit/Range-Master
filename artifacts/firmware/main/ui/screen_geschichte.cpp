@@ -16,7 +16,7 @@ static lv_obj_t *s_lbl_empty;
 // ── Build one history row ─────────────────────────────────────
 static void build_history_rows(void)
 {
-    lv_list_clean(s_list);
+    lv_obj_clean(s_list);
     lv_obj_add_flag(s_lbl_empty, LV_OBJ_FLAG_HIDDEN);
 
     if (g_store.historyCount == 0) {

@@ -28,24 +28,23 @@ static const char *TAG = "main";
 // ── Backlight ────────────────────────────────────────────────
 static void backlight_init(void)
 {
-    ledc_timer_config_t timer = {
-        .speed_mode       = LEDC_LOW_SPEED_MODE,
-        .timer_num        = LCD_BL_LEDC_TIMER,
-        .duty_resolution  = LEDC_TIMER_10_BIT,
-        .freq_hz          = 5000,
-        .clk_cfg          = LEDC_AUTO_CLK,
-    };
+    // Assignment style avoids C++ designated-initializer field-order errors
+    ledc_timer_config_t timer = {};
+    timer.speed_mode      = LEDC_LOW_SPEED_MODE;
+    timer.duty_resolution = LEDC_TIMER_10_BIT;
+    timer.freq_hz         = 5000;
+    timer.timer_num       = LCD_BL_LEDC_TIMER;
+    timer.clk_cfg         = LEDC_AUTO_CLK;
     ESP_ERROR_CHECK(ledc_timer_config(&timer));
 
-    ledc_channel_config_t ch = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel    = LCD_BL_LEDC_CHANNEL,
-        .timer_sel  = LCD_BL_LEDC_TIMER,
-        .intr_type  = LEDC_INTR_DISABLE,
-        .gpio_num   = LCD_BL_PIN,
-        .duty       = LCD_BL_DUTY_MAX,
-        .hpoint     = 0,
-    };
+    ledc_channel_config_t ch = {};
+    ch.gpio_num   = LCD_BL_PIN;
+    ch.speed_mode = LEDC_LOW_SPEED_MODE;
+    ch.channel    = LCD_BL_LEDC_CHANNEL;
+    ch.intr_type  = LEDC_INTR_DISABLE;
+    ch.timer_sel  = LCD_BL_LEDC_TIMER;
+    ch.duty       = LCD_BL_DUTY_MAX;
+    ch.hpoint     = 0;
     ESP_ERROR_CHECK(ledc_channel_config(&ch));
     ESP_LOGI(TAG, "Backlight on");
 }
@@ -91,12 +90,11 @@ void app_main(void)
     gsl3680_touch_init(disp);
 
     // ── LVGL tick via hardware timer
-    const esp_timer_create_args_t tick_args = {
-        .callback        = lvgl_tick_cb,
-        .name            = "lvgl_tick",
-        .dispatch_method = ESP_TIMER_TASK,
-        .skip_unhandled_events = true,
-    };
+    esp_timer_create_args_t tick_args = {};
+    tick_args.callback              = lvgl_tick_cb;
+    tick_args.dispatch_method       = ESP_TIMER_TASK;
+    tick_args.name                  = "lvgl_tick";
+    tick_args.skip_unhandled_events = true;
     esp_timer_handle_t tick_timer;
     ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer,

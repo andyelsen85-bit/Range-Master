@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "cJSON.h"
 
 #include "http_sync.h"
@@ -156,7 +157,7 @@ esp_err_t http_push_pending_games(void)
 {
     if (g_store.pendingGamesCount == 0) return ESP_OK;
 
-    char *resp = malloc(HTTP_BUF_SIZE);
+    char *resp = (char *)malloc(HTTP_BUF_SIZE);
     if (!resp) return ESP_ERR_NO_MEM;
 
     esp_err_t overall = ESP_OK;
@@ -194,7 +195,7 @@ esp_err_t http_push_pending_games(void)
 esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
 {
     *count = 0;
-    char *resp = malloc(HTTP_BUF_SIZE);
+    char *resp = (char *)malloc(HTTP_BUF_SIZE);
     if (!resp) return ESP_ERR_NO_MEM;
 
     esp_err_t err = http_get_json("/api/portal/spieler-vum-dag", resp, HTTP_BUF_SIZE);
@@ -233,7 +234,7 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
 // ── http_fetch_spielhistorie ───────────────────────────────────
 esp_err_t http_fetch_spielhistorie(void)
 {
-    char *resp = malloc(HTTP_BUF_SIZE);
+    char *resp = (char *)malloc(HTTP_BUF_SIZE);
     if (!resp) return ESP_ERR_NO_MEM;
 
     char path[80];

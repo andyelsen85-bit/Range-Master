@@ -95,7 +95,7 @@ lv_obj_t *screen_dashboard_create(void)
     sidebar_btn(sidebar, LV_SYMBOL_CHARGE " KREDITTER",      SCREEN_KREDITE);
     sidebar_btn(sidebar, LV_SYMBOL_LIST "  SPILLERLËSCHT",   SCREEN_SPILLER);
     sidebar_btn(sidebar, LV_SYMBOL_SETTINGS " ASTELLUNGEN",  SCREEN_EINSTELLUNGEN);
-    sidebar_btn(sidebar, LV_SYMBOL_HISTORY " SPILLGESCHICHT",SCREEN_GESCHICHTE);
+    sidebar_btn(sidebar, LV_SYMBOL_LIST "  SPILLGESCHICHT", SCREEN_GESCHICHTE);
 
     // ── Main content area
     lv_obj_t *content = lv_obj_create(s_scr);
@@ -200,7 +200,7 @@ void screen_dashboard_refresh(void)
     lv_label_set_text(s_lbl_wifi, buf);
 
     // History list (last 5)
-    lv_list_clean(s_history_list);
+    lv_obj_clean(s_history_list);
     int start = g_store.historyCount - 5;
     if (start < 0) start = 0;
     for (int i = g_store.historyCount - 1; i >= start; i--) {

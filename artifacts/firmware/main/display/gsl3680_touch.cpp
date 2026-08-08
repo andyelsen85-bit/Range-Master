@@ -171,15 +171,14 @@ void gsl3680_touch_init(lv_display_t *disp)
     gpio_set_level(TOUCH_RESET_PIN, 1);
     vTaskDelay(pdMS_TO_TICKS(20));
 
-    // I²C master init
-    i2c_config_t i2c_cfg = {
-        .mode             = I2C_MODE_MASTER,
-        .sda_io_num       = TOUCH_I2C_SDA,
-        .scl_io_num       = TOUCH_I2C_SCL,
-        .sda_pullup_en    = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en    = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = TOUCH_I2C_FREQ,
-    };
+    // I²C master init — use assignment style to avoid C++ nested-designator error
+    i2c_config_t i2c_cfg = {};
+    i2c_cfg.mode           = I2C_MODE_MASTER;
+    i2c_cfg.sda_io_num     = TOUCH_I2C_SDA;
+    i2c_cfg.scl_io_num     = TOUCH_I2C_SCL;
+    i2c_cfg.sda_pullup_en  = GPIO_PULLUP_ENABLE;
+    i2c_cfg.scl_pullup_en  = GPIO_PULLUP_ENABLE;
+    i2c_cfg.master.clk_speed = TOUCH_I2C_FREQ;
     ESP_ERROR_CHECK(i2c_param_config(TOUCH_I2C_PORT, &i2c_cfg));
     ESP_ERROR_CHECK(i2c_driver_install(TOUCH_I2C_PORT, I2C_MODE_MASTER,
                                        0, 0, 0));
