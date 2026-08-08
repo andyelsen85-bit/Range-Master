@@ -99,10 +99,13 @@ CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN=y
 # array fills all contiguous internal SRAM and causes the
 # --enable-non-contiguous-regions linker error on ESP32-P4 / IDF 5.3.x.
 #
-# CONFIG_LV_MEM_CUSTOM=y tells LVGL to call malloc()/free()/realloc()
-# directly (via LV_MEM_CUSTOM_ALLOC/FREE/REALLOC macros) so work_mem_int
-# is never compiled. At runtime malloc() uses PSRAM via CAPS_ALLOC fallback.
-CONFIG_LV_MEM_CUSTOM=y
+# CONFIG_LV_USE_CLIB_MALLOC=y selects the "Standard C functions malloc/realloc/free"
+# choice (Kconfig line 51-52 in managed_components/lvgl__lvgl/Kconfig).
+# LV_MEM_SIZE_KILOBYTES only applies when LV_USE_BUILTIN_MALLOC is selected
+# (Kconfig line 98: depends on LV_USE_BUILTIN_MALLOC), so switching to CLIB
+# drops work_mem_int from BSS entirely. At runtime lv_malloc() calls the
+# system malloc() which draws from PSRAM via SPIRAM_USE_MALLOC above.
+CONFIG_LV_USE_CLIB_MALLOC=y
 
 # ── LVGL Montserrat fonts (all sizes used by the UI screens) ──
 CONFIG_LV_FONT_MONTSERRAT_12=y
