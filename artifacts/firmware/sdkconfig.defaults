@@ -85,6 +85,17 @@ CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16
 CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=4096
 CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN=y
 
+# ── LVGL memory: use system malloc instead of a static internal pool ──────
+# lv_mem_core_builtin.c declares `static uint8_t work_mem_int[LV_MEM_SIZE]`
+# in BSS — 64 KB by default (CONFIG_LV_MEM_SIZE_KILOBYTES=64). That single
+# array fills all contiguous internal SRAM and causes the
+# --enable-non-contiguous-regions linker error on ESP32-P4 / IDF 5.3.x.
+#
+# CONFIG_LV_MEM_CUSTOM=y tells LVGL to call malloc()/free()/realloc()
+# directly (via LV_MEM_CUSTOM_ALLOC/FREE/REALLOC macros) so work_mem_int
+# is never compiled. At runtime malloc() uses PSRAM via CAPS_ALLOC fallback.
+CONFIG_LV_MEM_CUSTOM=y
+
 # ── LVGL Montserrat fonts (all sizes used by the UI screens) ──
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_14=y
