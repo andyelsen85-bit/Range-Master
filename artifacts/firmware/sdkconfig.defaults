@@ -16,6 +16,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
+# ESP32-P4 hex-PSRAM speed (overrides the generic SPIRAM_SPEED choice above)
+CONFIG_SPIRAM_SPEED=80
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 
 # ── MIPI DSI ──────────────────────────────────────────────────────────────
