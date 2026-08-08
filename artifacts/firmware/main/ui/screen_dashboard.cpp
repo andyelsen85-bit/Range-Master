@@ -205,7 +205,7 @@ void screen_dashboard_refresh(void)
     if (start < 0) start = 0;
     for (int i = g_store.historyCount - 1; i >= start; i--) {
         const FinishedGame *fg = &g_store.history[i];
-        char item[80];
+        char item[160];
         snprintf(item, sizeof(item), "%s  ·  %s  ·  %s",
                  fg->finishedAt,
                  modus_label(fg->base.modus),

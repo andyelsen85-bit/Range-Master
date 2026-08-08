@@ -296,7 +296,8 @@ static void _store_finish_game(void)
     // Snapshot player names
     for (int i = 0; i < s->spielerCount; i++) {
         fg.spielerIds[i] = s->spieler[i].id;
-        snprintf(fg.spielerNamen[i], MAX_NAME_LEN, "%s", s->spieler[i].name);
+        strncpy(fg.spielerNamen[i], s->spieler[i].name, MAX_NAME_LEN - 1);
+        fg.spielerNamen[i][MAX_NAME_LEN - 1] = '\0';
         fg.base.teilnahmen[i] = (typeof(fg.base.teilnahmen[0])){
             .spielerId   = s->spieler[i].id,
             .startPosten = s->spieler[i].startPosten,

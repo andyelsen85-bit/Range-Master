@@ -31,6 +31,7 @@ idf_component_register(
         lvgl
         driver
         esp_http_client
+        mbedtls
         nvs_flash
         json
         esp_timer

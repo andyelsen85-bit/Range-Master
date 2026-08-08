@@ -91,7 +91,7 @@ static void build_list(void)
 
         if (strlen(ps->mitgliedNr) > 0) {
             lv_obj_t *nr_lbl = lv_label_create(info);
-            char nr_buf[32];
+            char nr_buf[40];
             snprintf(nr_buf, sizeof(nr_buf), "Nr: %s", ps->mitgliedNr);
             lv_label_set_text(nr_lbl, nr_buf);
             lv_obj_set_style_text_font(nr_lbl, &lv_font_montserrat_12, 0);

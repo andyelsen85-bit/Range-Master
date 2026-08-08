@@ -167,24 +167,22 @@ lv_display_t *jd9365_panel_init(void)
 
     // ── Panel driver (generic MIPI)
     esp_lcd_panel_handle_t panel_handle;
-    esp_lcd_dpi_panel_config_t dpi_cfg = {
-        .dpi_clk_src          = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
-        .dpi_clock_freq_mhz   = 70,
-        .virtual_channel      = 0,
-        .pixel_format         = LCD_COLOR_PIXEL_FORMAT_RGB565,
-        .num_fbs              = 2,
-        .video_timing = {
-            .h_size            = DISPLAY_H_RES,
-            .v_size            = DISPLAY_V_RES,
-            .hsync_back_porch  = 120,
-            .hsync_pulse_width = 20,
-            .hsync_front_porch = 40,
-            .vsync_back_porch  = 12,
-            .vsync_pulse_width = 4,
-            .vsync_front_porch = 16,
-        },
-    };
-    dpi_cfg.flags.use_dma2d = true;  // set after init to avoid C++ nested-designator error
+    // Assignment style avoids C++ designated-initializer ordering and nesting errors
+    esp_lcd_dpi_panel_config_t dpi_cfg = {};
+    dpi_cfg.dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
+    dpi_cfg.dpi_clock_freq_mhz = 70;
+    dpi_cfg.virtual_channel    = 0;
+    dpi_cfg.pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565;
+    dpi_cfg.num_fbs            = 2;
+    dpi_cfg.flags.use_dma2d    = true;
+    dpi_cfg.video_timing.h_size            = DISPLAY_H_RES;
+    dpi_cfg.video_timing.v_size            = DISPLAY_V_RES;
+    dpi_cfg.video_timing.hsync_back_porch  = 120;
+    dpi_cfg.video_timing.hsync_pulse_width = 20;
+    dpi_cfg.video_timing.hsync_front_porch = 40;
+    dpi_cfg.video_timing.vsync_back_porch  = 12;
+    dpi_cfg.video_timing.vsync_pulse_width = 4;
+    dpi_cfg.video_timing.vsync_front_porch = 16;
 
     // IDF 5.5: esp_lcd_new_panel_dpi takes 3 args (no separate panel_dev_cfg)
     ESP_ERROR_CHECK(esp_lcd_new_panel_dpi(dsi_bus, &dpi_cfg, &panel_handle));

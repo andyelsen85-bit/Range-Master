@@ -105,7 +105,7 @@ lv_obj_t *screen_spiel_create(void)
 
     s_lbl_maschine = lv_label_create(left);
     lv_label_set_text(s_lbl_maschine, "A");
-    lv_obj_set_style_text_font(s_lbl_maschine, &lv_font_montserrat_72, 0);
+    lv_obj_set_style_text_font(s_lbl_maschine, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
 
     // Score buttons: 2, 1, 0
