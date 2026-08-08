@@ -11,7 +11,7 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
-#include "esp_private/esp_ldo.h"  // LDO power rail for MIPI DSI D-PHY
+#include "esp_ldo.h"  // LDO power rail for MIPI DSI D-PHY (esp_hw_support/ldo/include)
 
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
