@@ -111,10 +111,21 @@ static void lvgl_task(void *arg)
     lv_display_t *disp = lv_display_create(DISPLAY_H_RES, DISPLAY_V_RES);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
 
-    // Full-screen double-buffer in PSRAM.
-    // At 800×1280×2 bytes = 2 048 000 bytes (~2 MB) each.
-    // With 32 MB hex PSRAM at 200 MHz there is plenty of headroom.
-    size_t buf_bytes = (size_t)DISPLAY_H_RES * DISPLAY_V_RES * sizeof(lv_color16_t);
+    // LVGL 9 requires set_rotation() BEFORE set_buffers() so the render
+    // engine knows the physical layout when it initialises its internal state.
+    lv_display_set_rotation(disp, DISPLAY_ROTATION);
+
+    // Partial render mode — the proven pattern for MIPI DSI panels in IDF.
+    // RENDER_MODE_FULL with SW rotation does NOT transpose the pixel data
+    // before the flush callback; it relies on hardware rotation support which
+    // the JD9365 DPI path doesn't expose.  With PARTIAL mode LVGL correctly
+    // rotates each dirty tile before calling flush, so draw_bitmap receives
+    // already-rotated data in physical (800×1280) coordinates.
+    //
+    // Two buffers of 1/10 screen area (~200 KB each) allow LVGL to prepare
+    // the next tile in buf2 while DMA2D is still copying buf1 to the panel FB.
+    size_t buf_bytes = (size_t)DISPLAY_H_RES * (DISPLAY_V_RES / 10)
+                       * sizeof(lv_color16_t);   // 800×128×2 = 204 800 B
     void *buf1 = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM);
     void *buf2 = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM);
     if (!buf1 || !buf2) {
@@ -122,17 +133,15 @@ static void lvgl_task(void *arg)
                  (unsigned)buf_bytes);
         vTaskDelete(NULL);
     }
-    ESP_LOGI(TAG, "LVGL buffers: buf1=%p  buf2=%p  (%u bytes each)",
+    ESP_LOGI(TAG, "LVGL buffers: buf1=%p  buf2=%p  (%u bytes each, partial mode)",
              buf1, buf2, (unsigned)buf_bytes);
 
     lv_display_set_buffers(disp, buf1, buf2, buf_bytes,
-                           LV_DISPLAY_RENDER_MODE_FULL);
+                           LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
     lv_display_set_user_data(disp, s_panel);
 
-    // 90° software rotation: portrait panel (800×1280) → landscape UI (1280×800)
-    lv_display_set_rotation(disp, DISPLAY_ROTATION);
-    ESP_LOGI(TAG, "LVGL display created — logical %dx%d (SW rotation 90°)",
+    ESP_LOGI(TAG, "LVGL display created — logical %dx%d (SW rotation 90°, partial mode)",
              DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
 
     // ── 4. Touch ──────────────────────────────────────────────
