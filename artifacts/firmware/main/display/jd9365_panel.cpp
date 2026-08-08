@@ -153,11 +153,12 @@ esp_lcd_panel_handle_t jd9365_panel_init(void)
     ESP_LOGI(TAG, "Step 2 OK");
 
     // Step 3 — DPI panel (2 FBs in PSRAM, DMA2D off for diagnostics)
-    ESP_LOGI(TAG, "Step 3: esp_lcd_new_panel_dpi (clk=30MHz, fbs=2, dma2d=on)");
+    ESP_LOGI(TAG, "Step 3: esp_lcd_new_panel_dpi (clk=10MHz, fbs=2, dma2d=on)");
     esp_lcd_panel_handle_t panel_handle;
     esp_lcd_dpi_panel_config_t dpi_cfg = {};
     dpi_cfg.dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
-    dpi_cfg.dpi_clock_freq_mhz = 30;    // 30 MHz: safe with 20 MHz PSRAM (~47 MB/s needed vs ~80 MB/s available)
+    dpi_cfg.dpi_clock_freq_mhz = 10;    // 10 MHz: ~16 MB/s needed, well within 20 MHz PSRAM (~40 MB/s)
+                                        // Static UI only — refresh ~8 Hz, no flicker for non-animated content
     dpi_cfg.virtual_channel    = 0;
     dpi_cfg.pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565;
     dpi_cfg.num_fbs            = 2;
