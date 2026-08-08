@@ -158,13 +158,12 @@ void gsl3680_touch_init(lv_display_t *disp)
              TOUCH_I2C_PORT, TOUCH_I2C_SCL, TOUCH_I2C_SDA);
 
     // Reset pin
-    gpio_config_t rst_cfg = {
-        .pin_bit_mask = 1ULL << TOUCH_RESET_PIN,
-        .mode         = GPIO_MODE_OUTPUT,
-        .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_DISABLE,
-    };
+    gpio_config_t rst_cfg = {};
+    rst_cfg.pin_bit_mask = 1ULL << TOUCH_RESET_PIN;
+    rst_cfg.mode         = GPIO_MODE_OUTPUT;
+    rst_cfg.pull_up_en   = GPIO_PULLUP_DISABLE;
+    rst_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    rst_cfg.intr_type    = GPIO_INTR_DISABLE;
     gpio_config(&rst_cfg);
     gpio_set_level(TOUCH_RESET_PIN, 0);
     vTaskDelay(pdMS_TO_TICKS(20));

@@ -129,7 +129,7 @@ void screen_resultate_refresh(void)
 
     // Compute per-player lauf1/lauf2 totals (sort descending by total)
     typedef struct { int id; const char *name; int lauf1; int lauf2; int total; } Row;
-    Row rows[MAX_SPIELER] = {0};
+    Row rows[MAX_SPIELER] = {};
     for (int i = 0; i < n; i++) {
         rows[i].id   = fg->spielerIds[i];
         rows[i].name = fg->spielerNamen[i];

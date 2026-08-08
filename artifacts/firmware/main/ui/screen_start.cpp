@@ -10,12 +10,10 @@
 #include "screen_start.h"
 
 static lv_obj_t *s_scr;
-static lv_obj_t *s_modus_btngroup;
 static lv_obj_t *s_player_rows[MAX_SPIELER];
 static lv_obj_t *s_player_dropdowns[MAX_SPIELER];
 static lv_obj_t *s_maschinen_btns[MASCHINE_COUNT];
 static lv_obj_t *s_lbl_error;
-static lv_obj_t *s_player_count_lbl;
 
 // ── Build player dropdown options string ──────────────────────
 static void build_player_opts(char *buf, size_t len)

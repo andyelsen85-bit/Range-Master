@@ -38,6 +38,7 @@ static void scan_cb(lv_event_t *e)
         static int s_net_count = 0;
         memcpy(s_net_names, names, sizeof(s_net_names));
         s_net_count = count;
+        (void)s_net_count; // read via extern in lv_async_call lambda below
 
         lv_async_call([](void *arg2) {
             extern char s_net_names[20][33];
@@ -86,7 +87,7 @@ static void connect_cb(lv_event_t *e)
 
     // Connect in background
     xTaskCreate([](void *arg) {
-        esp_err_t err = cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
+        cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
         lv_async_call([](void *arg2) {
             bool ok = cop_wifi_is_connected();
             g_store.wifiConnected = ok;

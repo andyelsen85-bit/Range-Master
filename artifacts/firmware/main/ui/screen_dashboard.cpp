@@ -10,8 +10,6 @@
 #include "game_store.h"
 #include "screen_dashboard.h"
 
-static const char *TAG = "scr_dashboard";
-
 // Persistent widget handles for refresh
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_sync_status;

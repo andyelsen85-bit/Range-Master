@@ -15,14 +15,13 @@ void lora_stub_init(void)
              LORA_UART_PORT, LORA_UART_TX, LORA_UART_RX, LORA_UART_BAUD);
 
     // Reserve the UART pins so phase-2 code just enables the driver.
-    uart_config_t cfg = {
-        .baud_rate  = LORA_UART_BAUD,
-        .data_bits  = UART_DATA_8_BITS,
-        .parity     = UART_PARITY_DISABLE,
-        .stop_bits  = UART_STOP_BITS_1,
-        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
+    uart_config_t cfg = {};
+    cfg.baud_rate  = LORA_UART_BAUD;
+    cfg.data_bits  = UART_DATA_8_BITS;
+    cfg.parity     = UART_PARITY_DISABLE;
+    cfg.stop_bits  = UART_STOP_BITS_1;
+    cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
+    cfg.source_clk = UART_SCLK_DEFAULT;
     // Install driver (small buffers; no real traffic yet)
     uart_driver_install(LORA_UART_PORT, 256, 256, 0, NULL, 0);
     uart_param_config(LORA_UART_PORT, &cfg);

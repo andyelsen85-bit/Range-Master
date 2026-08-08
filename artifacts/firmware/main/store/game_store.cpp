@@ -32,6 +32,7 @@ static void nvs_open(void)
     ESP_ERROR_CHECK(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &s_nvs));
 }
 
+static void nvs_save_str(const char *key, const char *val) __attribute__((unused));
 static void nvs_save_str(const char *key, const char *val)
 {
     nvs_set_str(s_nvs, key, val);
@@ -228,16 +229,15 @@ void store_eintragen(int punkte)
     SequenzEintrag *se = &s->sequenz[s->taubeIndex];
     Spieler *sp = &s->spieler[s->spielerIndex];
 
-    Ergebnis e = {
-        .spielerId  = sp->id,
-        .lauf       = s->lauf,
-        .taube      = s->taubeIndex + 1,
-        .maschine   = se->maschine,
-        .posten     = get_current_posten(s->spielerIndex, s->taubeIndex,
-                                         s->spielerCount),
-        .punkte     = punkte,
-        .wiederholt = false,
-    };
+    Ergebnis e = {};
+    e.spielerId  = sp->id;
+    e.lauf       = s->lauf;
+    e.taube      = s->taubeIndex + 1;
+    e.maschine   = se->maschine;
+    e.posten     = get_current_posten(s->spielerIndex, s->taubeIndex,
+                                      s->spielerCount);
+    e.punkte     = punkte;
+    e.wiederholt = false;
 
     // Scoring rules (mirrors TS eintragenErgebnis):
     // Doublette (H): each shot is 2pts. Single: 1st=2pts,2nd=1pt
@@ -279,7 +279,7 @@ static void _store_finish_game(void)
     GameStore *s = &g_store;
 
     // Build FinishedGame
-    FinishedGame fg = {0};
+    FinishedGame fg = {};
     fg.base.modus         = s->modus;
     fg.base.lauf          = s->lauf;
     fg.base.taubenProLauf = s->sequenzLen;

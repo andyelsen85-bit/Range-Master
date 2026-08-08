@@ -130,15 +130,12 @@ static const jd9365_cmd_t JD9365_INIT[] = {
 };
 #define JD9365_INIT_LEN (sizeof(JD9365_INIT) / sizeof(JD9365_INIT[0]))
 
-// ── Frame-buffer flush callback ──────────────────────────────
-static bool flush_ready_cb(esp_lcd_panel_io_handle_t panel_io,
-                            esp_lcd_panel_io_event_data_t *edata,
-                            void *user_ctx)
-{
-    lv_display_t *disp = (lv_display_t *)user_ctx;
-    lv_display_flush_ready(disp);
-    return false;
-}
+// NOTE: flush_ready_cb is intentionally absent for DPI panels.
+// esp_lcd_panel_draw_bitmap() is synchronous for MIPI DSI DPI —
+// the frame buffer is updated before it returns, so lv_display_flush_ready()
+// is called immediately inside lvgl_flush_cb above. Registering a separate
+// on_color_trans_done callback would cause a double flush_ready and corrupt
+// the LVGL render loop.
 
 // ── Public init ──────────────────────────────────────────────
 lv_display_t *jd9365_panel_init(void)
