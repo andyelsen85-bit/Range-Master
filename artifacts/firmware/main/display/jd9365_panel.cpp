@@ -19,6 +19,20 @@
 
 static const char *TAG = "jd9365";
 
+// ── LVGL flush callback (C-compatible, no lambda) ────────────
+static void lvgl_flush_cb(lv_display_t *disp,
+                          const lv_area_t *area,
+                          uint8_t *px_map)
+{
+    esp_lcd_panel_handle_t ph =
+        (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
+    esp_lcd_panel_draw_bitmap(ph,
+                              area->x1, area->y1,
+                              area->x2 + 1, area->y2 + 1,
+                              px_map);
+    lv_display_flush_ready(disp);
+}
+
 // ── JD9365 init command sequence ────────────────────────────
 // Derived from open-source BSP for this exact panel.
 typedef struct {
@@ -217,17 +231,8 @@ lv_display_t *jd9365_panel_init(void)
                            buf_sz, LV_DISPLAY_RENDER_MODE_PARTIAL);
 
     // Flush callback — write rendered area to DPI frame buffer
-    lv_display_set_flush_cb(disp, [](lv_display_t *d,
-                                     const lv_area_t *area,
-                                     uint8_t *px_map) {
-        esp_lcd_panel_handle_t ph =
-            (esp_lcd_panel_handle_t)lv_display_get_user_data(d);
-        int x1 = area->x1, y1 = area->y1;
-        int x2 = area->x2, y2 = area->y2;
-        esp_lcd_panel_draw_bitmap(ph, x1, y1, x2 + 1, y2 + 1, px_map);
-        lv_display_flush_ready(d);
-    });
     lv_display_set_user_data(disp, panel_handle);
+    lv_display_set_flush_cb(disp, lvgl_flush_cb);
 
     ESP_LOGI(TAG, "LVGL display registered (%dx%d logical)",
              DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);

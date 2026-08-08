@@ -1,23 +1,23 @@
 idf_component_register(
     SRCS
-        "main.c"
-        "display/jd9365_panel.c"
-        "display/gsl3680_touch.c"
-        "store/game_store.c"
-        "net/coprocessor.c"
-        "net/http_sync.c"
-        "ui/ui_manager.c"
-        "ui/screen_dashboard.c"
-        "ui/screen_start.c"
-        "ui/screen_spiel.c"
-        "ui/screen_resultate.c"
-        "ui/screen_geschichte.c"
-        "ui/screen_kredite.c"
-        "ui/screen_einstellungen.c"
-        "ui/screen_spiller.c"
-        "ui/screen_wifi.c"
-        "ui/screen_bluetooth.c"
-        "lora_stub/lora_stub.c"
+        "main.cpp"
+        "display/jd9365_panel.cpp"
+        "display/gsl3680_touch.cpp"
+        "store/game_store.cpp"
+        "net/coprocessor.cpp"
+        "net/http_sync.cpp"
+        "ui/ui_manager.cpp"
+        "ui/screen_dashboard.cpp"
+        "ui/screen_start.cpp"
+        "ui/screen_spiel.cpp"
+        "ui/screen_resultate.cpp"
+        "ui/screen_geschichte.cpp"
+        "ui/screen_kredite.cpp"
+        "ui/screen_einstellungen.cpp"
+        "ui/screen_spiller.cpp"
+        "ui/screen_wifi.cpp"
+        "ui/screen_bluetooth.cpp"
+        "lora_stub/lora_stub.cpp"
     INCLUDE_DIRS
         "."
         "display"
@@ -27,7 +27,6 @@ idf_component_register(
         "lora_stub"
     REQUIRES
         esp_lcd
-        esp_lcd_mipi_dsi
         esp_lvgl_port
         lvgl
         driver
