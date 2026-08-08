@@ -14,6 +14,7 @@
 static const char *TAG = "coprocessor";
 
 static QueueHandle_t s_uart_queue;
+static TaskHandle_t  s_event_task    = NULL;   // handle for suspend/resume
 static char          s_rx_buf[C6_UART_RX_BUF];
 static volatile bool s_wifi_connected = false;
 static volatile bool s_ble_connected  = false;
@@ -23,7 +24,11 @@ static volatile char s_last_key       = 0;
 static esp_err_t at_send(const char *cmd, const char *expect,
                          char *resp, size_t resp_len, uint32_t timeout_ms)
 {
-    uart_flush(C6_UART_PORT);
+    // Suspend the event task so it cannot consume RX bytes that belong to
+    // this synchronous request/response exchange.
+    if (s_event_task) vTaskSuspend(s_event_task);
+
+    uart_flush_input(C6_UART_PORT);   // discard any stale RX bytes
     uart_write_bytes(C6_UART_PORT, cmd, strlen(cmd));
     uart_write_bytes(C6_UART_PORT, "\r\n", 2);
 
@@ -43,12 +48,17 @@ static esp_err_t at_send(const char *cmd, const char *expect,
                     strncpy(resp, s_rx_buf, resp_len - 1);
                     resp[resp_len - 1] = '\0';
                 }
+                if (s_event_task) vTaskResume(s_event_task);
                 return ESP_OK;
             }
-            if (strstr(s_rx_buf, "ERROR")) return ESP_FAIL;
+            if (strstr(s_rx_buf, "ERROR")) {
+                if (s_event_task) vTaskResume(s_event_task);
+                return ESP_FAIL;
+            }
         }
     }
     ESP_LOGW(TAG, "AT timeout waiting for '%s'. Got: %.80s", expect, s_rx_buf);
+    if (s_event_task) vTaskResume(s_event_task);
     return ESP_ERR_TIMEOUT;
 }
 
@@ -104,7 +114,7 @@ void coprocessor_init(void)
     ESP_ERROR_CHECK(uart_set_pin(C6_UART_PORT, C6_UART_TX, C6_UART_RX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
-    xTaskCreate(uart_event_task, "cop_uart", 4096, NULL, 10, NULL);
+    xTaskCreate(uart_event_task, "cop_uart", 4096, NULL, 10, &s_event_task);
 
     // Wake up C6 and confirm AT echo
     vTaskDelay(pdMS_TO_TICKS(200));
