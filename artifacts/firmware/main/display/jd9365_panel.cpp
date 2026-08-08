@@ -161,7 +161,7 @@ esp_lcd_panel_handle_t jd9365_panel_init(void)
                                         // Static UI only — refresh ~8 Hz, no flicker for non-animated content
     dpi_cfg.virtual_channel    = 0;
     dpi_cfg.pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565;
-    dpi_cfg.num_fbs            = 2;
+    dpi_cfg.num_fbs            = 1;    // single buffer — no swap needed for static test
     dpi_cfg.flags.use_dma2d    = true;   // DMA2D: ESP32-P4 PSRAM→DSI engine, eliminates underrun
     dpi_cfg.video_timing.h_size            = DISPLAY_H_RES;
     dpi_cfg.video_timing.v_size            = DISPLAY_V_RES;

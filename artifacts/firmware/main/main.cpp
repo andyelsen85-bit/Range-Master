@@ -27,6 +27,19 @@ static const char *TAG = "main";
 // ── Backlight ─────────────────────────────────────────────────
 static void backlight_init(void)
 {
+    // Force GPIO high first — rules out LEDC as the failure point.
+    // If the screen lights up here, LEDC config is the issue.
+    gpio_config_t bl_cfg = {};
+    bl_cfg.pin_bit_mask = (1ULL << LCD_BL_PIN);
+    bl_cfg.mode         = GPIO_MODE_OUTPUT;
+    bl_cfg.pull_up_en   = GPIO_PULLUP_DISABLE;
+    bl_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    bl_cfg.intr_type    = GPIO_INTR_DISABLE;
+    gpio_config(&bl_cfg);
+    gpio_set_level(LCD_BL_PIN, 1);
+    ESP_LOGI(TAG, "Backlight GPIO%d forced HIGH", (int)LCD_BL_PIN);
+
+    // Now hand control to LEDC for PWM dimming.
     ledc_timer_config_t timer = {};
     timer.speed_mode      = LEDC_LOW_SPEED_MODE;
     timer.duty_resolution = LEDC_TIMER_10_BIT;
@@ -44,34 +57,30 @@ static void backlight_init(void)
     ch.duty       = LCD_BL_DUTY_MAX;
     ch.hpoint     = 0;
     ESP_ERROR_CHECK(ledc_channel_config(&ch));
-    ESP_LOGI(TAG, "Backlight on");
+    ESP_LOGI(TAG, "Backlight LEDC on (GPIO%d, duty=%d)", (int)LCD_BL_PIN, LCD_BL_DUTY_MAX);
 }
 
-// ── Fill both DPI frame buffers with a solid RGB565 colour ───
-// Writing both FBs avoids a flash of old content during the
-// buffer swap that the DPI driver performs on each vsync.
-static void fill_framebuffers(esp_lcd_panel_handle_t panel,
-                              uint16_t rgb565)
+// ── Fill the single DPI frame buffer with a solid RGB565 colour ──
+static void *s_fb = NULL;   // cached on first call
+
+static void fill_framebuffer(esp_lcd_panel_handle_t panel, uint16_t rgb565)
 {
-    void *fb0 = NULL, *fb1 = NULL;
-    // Retrieve both frame buffer pointers managed by the DPI driver.
-    esp_err_t err = esp_lcd_dpi_panel_get_frame_buffer(panel, 2, &fb0, &fb1);
-    if (err != ESP_OK || !fb0 || !fb1) {
-        ESP_LOGE(TAG, "get_frame_buffer failed (%s)", esp_err_to_name(err));
-        return;
+    if (!s_fb) {
+        esp_err_t err = esp_lcd_dpi_panel_get_frame_buffer(panel, 1, &s_fb);
+        if (err != ESP_OK || !s_fb) {
+            ESP_LOGE(TAG, "get_frame_buffer failed (%s)", esp_err_to_name(err));
+            return;
+        }
+        ESP_LOGI(TAG, "Framebuffer @ %p  size=%u bytes  in PSRAM=%s",
+                 s_fb,
+                 (unsigned)(DISPLAY_H_RES * DISPLAY_V_RES * 2),
+                 ((uintptr_t)s_fb >= 0x48000000u) ? "YES" : "NO — check PSRAM init");
     }
 
     const size_t total_pixels = DISPLAY_H_RES * DISPLAY_V_RES;
-
-    // Write 2 pixels per 32-bit store for speed (PSRAM prefers wider bursts).
     uint32_t word = ((uint32_t)rgb565 << 16) | rgb565;
-    uint32_t *p0  = (uint32_t *)fb0;
-    uint32_t *p1  = (uint32_t *)fb1;
-    for (size_t i = 0; i < total_pixels / 2; i++) {
-        p0[i] = word;
-        p1[i] = word;
-    }
-    // Odd pixel (1280×800 = 1,024,000 pixels — even, so loop covers all)
+    uint32_t *p   = (uint32_t *)s_fb;
+    for (size_t i = 0; i < total_pixels / 2; i++) p[i] = word;
 }
 
 // ── app_main ──────────────────────────────────────────────────
@@ -124,7 +133,7 @@ extern "C" void app_main(void)
     for (;;) {
         ESP_LOGI(TAG, "Filling framebuffer: %s (0x%04X)",
                  COLOURS[idx].name, COLOURS[idx].colour);
-        fill_framebuffers(panel, COLOURS[idx].colour);
+        fill_framebuffer(panel, COLOURS[idx].colour);
         idx = (idx + 1) % NUM_COLOURS;
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
