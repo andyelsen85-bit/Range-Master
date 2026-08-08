@@ -17,6 +17,11 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
+# Disable PSRAM instruction/data fetching — these enable the linker flag
+# --enable-non-contiguous-regions which then discards every .sbss section
+# it cannot place, causing a link error on IDF 5.3.x / ESP32-P4.
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=n
+CONFIG_SPIRAM_RODATA=n
 
 # ── MIPI DSI ──────────────────────────────────────────────────────────────
 CONFIG_LCD_ENABLE_DEBUG_LOG=n
