@@ -13,7 +13,6 @@
 #include "game_store.h"
 #include "screen_dashboard.h"
 
-static const char *TAG = "dash";
 
 // Persistent widget handles for screen_dashboard_refresh()
 static lv_obj_t *s_scr;
@@ -146,7 +145,7 @@ lv_obj_t *screen_dashboard_create(void)
     lv_label_set_text(hist_hdr, "LESCHTE SPILLER");
     lv_obj_set_style_text_font(hist_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(hist_hdr, lv_color_hex(CLR_MUTED), 0);
-    lv_obj_set_style_letter_space(hist_hdr, 2, 0);
+    lv_obj_set_style_text_letter_space(hist_hdr, 2, 0);
 
     s_history_list = lv_list_create(hist_card);
     lv_obj_set_size(s_history_list, LV_PCT(100), 0);
@@ -237,7 +236,7 @@ lv_obj_t *screen_dashboard_create(void)
     lv_label_set_text(q_hdr, "OFFLINE QUEUE");
     lv_obj_set_style_text_font(q_hdr, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(q_hdr, lv_color_hex(CLR_MUTED), 0);
-    lv_obj_set_style_letter_space(q_hdr, 1, 0);
+    lv_obj_set_style_text_letter_space(q_hdr, 1, 0);
 
     s_lbl_pending = lv_label_create(queue);
     lv_label_set_text(s_lbl_pending, "0 Spiller am Waardraum");
