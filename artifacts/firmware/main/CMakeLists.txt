@@ -40,4 +40,5 @@ idf_component_register(
         spi_flash
         esp_system
         esp_psram
+        esp_mm
 )

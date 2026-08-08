@@ -28,7 +28,7 @@
 #define TOUCH_I2C_FREQ          400000
 
 // ── Backlight PWM ───────────────────────────────────────────
-#define LCD_BL_PIN              GPIO_NUM_26
+#define LCD_BL_PIN              GPIO_NUM_23   // confirmed: CelliesProjects pins.h LCD_LED=23
 #define LCD_BL_LEDC_CHANNEL     LEDC_CHANNEL_0
 #define LCD_BL_LEDC_TIMER       LEDC_TIMER_0
 #define LCD_BL_DUTY_MAX         1023
