@@ -148,21 +148,19 @@ lv_display_t *jd9365_panel_init(void)
 
     // ── MIPI DSI bus
     esp_lcd_dsi_bus_handle_t dsi_bus;
-    esp_lcd_dsi_bus_config_t bus_cfg = {
-        .bus_id             = 0,
-        .num_data_lanes     = MIPI_DSI_LANE_NUM,
-        .phy_clk_src        = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
-        .lane_bit_rate_mbps = MIPI_DSI_LANE_BIT_RATE,
-    };
+    esp_lcd_dsi_bus_config_t bus_cfg = {};
+    bus_cfg.bus_id             = 0;
+    bus_cfg.num_data_lanes     = MIPI_DSI_LANE_NUM;
+    bus_cfg.phy_clk_src        = MIPI_DSI_PHY_CLK_SRC_DEFAULT;
+    bus_cfg.lane_bit_rate_mbps = MIPI_DSI_LANE_BIT_RATE;
     ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_cfg, &dsi_bus));
 
     // ── DBI (command) IO handle
     esp_lcd_panel_io_handle_t io_handle;
-    esp_lcd_dbi_io_config_t dbi_cfg = {
-        .virtual_channel = 0,
-        .lcd_cmd_bits    = 8,
-        .lcd_param_bits  = 8,
-    };
+    esp_lcd_dbi_io_config_t dbi_cfg = {};
+    dbi_cfg.virtual_channel = 0;
+    dbi_cfg.lcd_cmd_bits    = 8;
+    dbi_cfg.lcd_param_bits  = 8;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(dsi_bus, &dbi_cfg, &io_handle));
 
     // ── Panel driver (generic MIPI)

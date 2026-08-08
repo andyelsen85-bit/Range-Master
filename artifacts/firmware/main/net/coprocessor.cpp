@@ -90,14 +90,13 @@ void coprocessor_init(void)
     ESP_LOGI(TAG, "Init UART%d to ESP32-C6 TX=%d RX=%d @%d baud",
              C6_UART_PORT, C6_UART_TX, C6_UART_RX, C6_UART_BAUD);
 
-    uart_config_t cfg = {
-        .baud_rate  = C6_UART_BAUD,
-        .data_bits  = UART_DATA_8_BITS,
-        .parity     = UART_PARITY_DISABLE,
-        .stop_bits  = UART_STOP_BITS_1,
-        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
+    uart_config_t cfg = {};
+    cfg.baud_rate  = C6_UART_BAUD;
+    cfg.data_bits  = UART_DATA_8_BITS;
+    cfg.parity     = UART_PARITY_DISABLE;
+    cfg.stop_bits  = UART_STOP_BITS_1;
+    cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
+    cfg.source_clk = UART_SCLK_DEFAULT;
     ESP_ERROR_CHECK(uart_driver_install(C6_UART_PORT, C6_UART_RX_BUF * 2,
                                         0, 20, &s_uart_queue, 0));
     ESP_ERROR_CHECK(uart_param_config(C6_UART_PORT, &cfg));
