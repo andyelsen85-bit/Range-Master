@@ -160,10 +160,12 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     ++s_touch;
     if (s_touch <= 30 || s_touch % 50 == 0) {
         ESP_LOGI(TAG, "TOUCH #%lu  tp=[%02x %02x %02x %02x]  "
-                      "raw(%u,%u) → phys(%u,%u)  cnt=%u",
+                      "raw(%u,%u) -> phys(%lu,%lu)  cnt=%u",
                  (unsigned long)s_touch,
                  tp[0], tp[1], tp[2], tp[3],
-                 raw_x, raw_y, phys_x, phys_y, count);
+                 (unsigned)raw_x, (unsigned)raw_y,
+                 (unsigned long)phys_x, (unsigned long)phys_y,
+                 (unsigned)count);
     }
 
     // Rotate 90° CCW: physical portrait (phys_x, phys_y) → logical landscape
