@@ -87,8 +87,8 @@ static void lvgl_flush_cb(lv_display_t *disp,
         int32_t log_h = lv_display_get_vertical_resolution(disp);
         ESP_LOGI("flush", "#%d  area=(%d,%d)-(%d,%d)  px0=0x%04x (R%d G%d B%d)  logical=%dx%d",
                  s_flush_count,
-                 area->x1, area->y1, area->x2, area->y2,
-                 px0, r, g, b, log_w, log_h);
+                 (int)area->x1, (int)area->y1, (int)area->x2, (int)area->y2,
+                 px0, (int)r, (int)g, (int)b, (int)log_w, (int)log_h);
         s_flush_count++;
     }
     // ──────────────────────────────────────────────────────────
