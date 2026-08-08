@@ -1,36 +1,53 @@
 ---
-name: ESP32-P4 IDF version compatibility
-description: IDF 5.5.x is incompatible with ESP32-P4 ECO2 (chip rev v1.3); must use IDF 5.4.x
+name: ESP32-P4 IDF version constraints and linker bug
+description: IDF version rules for ECO2, DSI hang fix, LDO power-up, and the sections.ld .sbss.* linker bug workaround
 ---
 
-## Rule
-Always build the TrapMaster firmware with **IDF 5.3.x** (specifically 5.3.2). Do not use IDF 5.4.x or later.
+## IDF Version Rules (Guition JC8012P4A1C / ESP32-P4 rev v1.3 ECO2)
 
-**Why:** The Guition JC8012P4A1C board carries an ESP32-P4 revision v1.3 (ROM string: `esp32p4-eco2-20240710`, ECO2 silicon).
+- **IDF 5.5.x** — refuses ECO2 entirely (requires v3.1+). Do not use.
+- **IDF 5.4.x** — `esp_lcd_new_dsi_bus()` hangs on ECO2 D-PHY (IDF issue #17778). Do not use.
+- **IDF 5.3.5** — USE THIS. Boots, DSI bus works after LDO fix below.
 
-- **IDF 5.5.x+**: Compiles bootloader targeting ECO3 (v3.1+). Crashes immediately at `call_start_cpu0` with "Illegal instruction" on ECO2 silicon. Cannot be worked around.
-- **IDF 5.4.2+**: Flashes and boots OK, but `esp_lcd_new_dsi_bus()` hangs forever — the DSI PHY PLL initialization sequence was changed in 5.4.2 in a way that breaks ECO2's D-PHY. This is confirmed by IDF GitHub issue #17778 (filed for V5.4.2 and V5.5). `CONFIG_ESP32P4_REV_MIN_FULL=100`, `use_dma2d=false`, lane rate changes (500/1000 Mbps) — none of these fix the hang.
-- **IDF 5.3.x**: ECO2 was the ONLY available ESP32-P4 silicon when 5.3 was developed. All DSI PHY code was written and tested against ECO2. This is the correct version.
+## D-PHY LDO (root cause of original DSI hang)
 
-**How to apply:** Pin the firmware build to IDF 5.3.x. The Windows installer creates a separate `ESP-IDF 5.3 CMD` shortcut that coexists with other versions. Also revert any dma2d/lane_rate diagnostic changes before the final build.
+The MIPI DSI D-PHY has a dedicated internal 2.5 V LDO (channel 3) that is OFF by default. Without it the PLL has no supply and `esp_lcd_new_dsi_bus()` spins forever.
 
-## Root cause of esp_lcd_new_dsi_bus() hang — MISSING LDO
-
-**This is the real fix.** On ESP32-P4, the MIPI DSI D-PHY sits behind a dedicated internal 2.5V LDO (channel 3) that is OFF by default. Without powering it on first, the PLL has no supply and can never lock — `esp_lcd_new_dsi_bus()` spins forever regardless of IDF version, lane rate, or clock config.
-
-Add this immediately before `esp_lcd_new_dsi_bus()`:
 ```cpp
-#include "esp_private/esp_ldo.h"
+#include "esp_ldo_regulator.h"   // IDF 5.3.x path (NOT esp_private/esp_ldo.h, NOT esp_ldo.h)
 esp_ldo_channel_handle_t ldo_mipi_phy = NULL;
-esp_ldo_channel_config_t ldo_cfg = {};
-ldo_cfg.chan_id    = 3;
-ldo_cfg.voltage_mv = 2500;
+esp_ldo_channel_config_t ldo_cfg = { .chan_id = 3, .voltage_mv = 2500 };
 ESP_ERROR_CHECK(esp_ldo_acquire_channel(&ldo_cfg, &ldo_mipi_phy));
+// keep ldo_mipi_phy alive for driver lifetime
 ```
-Keep the handle alive for the lifetime of the driver — never release it. Every reference (CelliesProjects, profi-max, Espressif esp_lcd_jd9365, Waveshare) does this.
 
-**Why:** `CONFIG_PM_ENABLE=y` and IDF version switching were red herrings — neither addresses the missing power rail. The `esp_perip_clk_init()` stub warning is unrelated noise.
+Must be called BEFORE `esp_lcd_new_dsi_bus()`.
 
-## Additional required sdkconfig setting
+## DPI Panel API gotchas
 
-`CONFIG_PM_ENABLE=y` must be set in `sdkconfig.defaults`. Without it, `esp_perip_clk_init()` is a no-op stub on ESP32-P4/IDF 5.3.x (warning: "has not been implemented yet"). The stub means the MIPI DSI D-PHY PLL reference clock gate (`MIPI_DSI_DPHY_PLL_REFCLK_EN` in `HP_SYS_CLKRST.PERI_CLK_CTRL03`) is never opened, so `esp_lcd_new_dsi_bus()` hangs forever waiting for PLL lock. Enabling PM triggers the full clock-init path. Also set `CONFIG_FREERTOS_USE_TICKLESS_IDLE=0` to prevent the scheduler from sleeping under the always-running LVGL display task.
+- `esp_lcd_panel_reset(dpi_handle)` → ESP_ERR_NOT_SUPPORTED. Reset JD9365 via GPIO directly (GPIO 27 on Guition board).
+- `esp_lcd_panel_mirror(dpi_handle, ...)` → ESP_ERR_NOT_SUPPORTED. Rotation handled by LVGL.
+- `esp_lcd_panel_disp_on_off(dpi_handle, ...)` → ESP_ERR_NOT_SUPPORTED. Display-on handled by backlight PWM.
+
+## LVGL init order
+
+`lv_init()` must be called before `lv_display_create()` / any LVGL API. Missing this causes a load access fault in LVGL's TLSF allocator.
+
+## sdkconfig.defaults for ESP32-P4
+
+- `CONFIG_SPIRAM_MODE_OCT` and `CONFIG_SPIRAM_SPEED_80M` are **not valid Kconfig symbols** on ESP32-P4. IDF auto-detects HEX PSRAM. Remove them.
+- `CONFIG_FREERTOS_USE_TICKLESS_IDLE` is a bool — use `=n` not `=0`.
+- `CONFIG_SPIRAM_FETCH_INSTRUCTIONS` / `CONFIG_SPIRAM_RODATA` do not exist for ESP32-P4; setting them has no effect.
+
+## --enable-non-contiguous-regions linker bug (IDF 5.3.x)
+
+**Root cause:** On ESP32-P4+PSRAM, IDF unconditionally injects `-Wl,--enable-non-contiguous-regions`. Under this flag the linker discards any section not explicitly placed in the linker script. IDF 5.3.x `sections.ld.in` for ESP32-P4 is missing `*(.sbss.*)` and `*(.bss.*)` wildcard entries (fixed in IDF 5.4.x).
+
+**Symptom:** Link fails with ~70 KB of `error: --enable-non-contiguous-regions discards section .sbss.XXX` from every IDF component.
+
+**What does NOT work:**
+- `CONFIG_SPIRAM_FETCH_INSTRUCTIONS=n` / `CONFIG_SPIRAM_RODATA=n` in sdkconfig.defaults (symbols don't exist for P4)
+- CMake `get_target_property` / `set_target_properties` to strip the flag from `esp_psram` (flag is injected differently in this IDF version)
+- Linker fragment `.lf` files — the IDF 5.3.x fragment parser on this toolchain rejects `[sections:]` blocks
+
+**What works:** A Python `PRE_LINK` hook (`tools/patch_sections_ld.py`) that patches the generated `sections.ld` immediately before the link step, inserting `*(.sbss.*)` after `*(.sbss )` and `*(.bss.*)` after `*(.bss )`. Registered in top-level `CMakeLists.txt` using `add_custom_command(TARGET ${CMAKE_PROJECT_NAME}.elf PRE_LINK ...)`.
