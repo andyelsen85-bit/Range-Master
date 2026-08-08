@@ -233,8 +233,9 @@ lv_display_t *jd9365_panel_init(void)
     ESP_LOGI(TAG, "Step 6: esp_lcd_panel_init");
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
     ESP_LOGI(TAG, "Step 6 OK");
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, false, false));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
+    // Note: esp_lcd_panel_mirror / esp_lcd_panel_disp_on_off are not supported
+    // by a raw DPI panel handle — skip them.  Rotation is handled by LVGL;
+    // display-on is handled by the backlight PWM in app_main.
     ESP_LOGI(TAG, "JD9365 panel on");
 
     // ── Allocate LVGL frame buffers in PSRAM
