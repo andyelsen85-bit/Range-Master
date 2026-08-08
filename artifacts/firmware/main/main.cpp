@@ -69,10 +69,10 @@ static void backlight_init(void)
 }
 
 // ── LVGL flush callback ───────────────────────────────────────
-// Rotation buffer — allocated once in lvgl_task, used every flush.
-// Must be 64-byte aligned so esp_cache_msync() accepts it.
-static uint16_t *s_rot_buf = nullptr;
-static size_t    s_rot_buf_bytes = 0;
+// lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90) + PARTIAL render mode
+// means LVGL's own engine already delivers px_map and area in physical panel
+// coordinates (800×1280 portrait) — no manual rotation step needed here.
+// A second rotation would stack on top of LVGL's and produce a 180° transform.
 
 static void lvgl_flush_cb(lv_display_t *disp,
                            const lv_area_t *area,
@@ -85,63 +85,25 @@ static void lvgl_flush_cb(lv_display_t *disp,
     static int s_flush_count = 0;
     if (s_flush_count < 4) {
         uint16_t px0 = ((uint16_t *)px_map)[0];
-        ESP_LOGI("flush", "#%d  log_area=(%d,%d)-(%d,%d)  px0=0x%04x",
+        ESP_LOGI("flush", "#%d  area=(%d,%d)-(%d,%d)  px0=0x%04x",
                  s_flush_count,
                  (int)area->x1, (int)area->y1,
                  (int)area->x2, (int)area->y2, px0);
         s_flush_count++;
     }
 
-    // ── Pixel rotation + coordinate transform ─────────────────
-    // LVGL 9 SW rotation passes LOGICAL (1280×800) coordinates to
-    // flush_cb, with px_map in logical row-major order.
-    // Physical panel: 800×1280 portrait.
-    // Rotation: 90° CCW (portrait tilt-left → landscape user view).
-    //   Logical (lx, ly) → Physical (DISPLAY_H_RES-1-ly, lx)
-    //
-    // Physical region for this logical strip:
-    //   phys_x1 = DISPLAY_H_RES-1 - area->y2
-    //   phys_x2 = DISPLAY_H_RES-1 - area->y1
-    //   phys_y1 = area->x1,  phys_y2 = area->x2
-    //
-    // Pixel mapping into s_rot_buf[py * phys_w + px]:
-    //   py = lx,  px = (log_h-1) - ly
-    //   → s_rot_buf[lx * phys_w + (log_h-1-ly)] = src[ly * log_w + lx]
-
-    int32_t log_w  = area->x2 - area->x1 + 1;   // 1280
-    int32_t log_h  = area->y2 - area->y1 + 1;   // 80
-    int32_t phys_w = log_h;                      // 80  (physical strip width)
-
-    // Rotate 90° CCW into s_rot_buf.
-    // Iterate destination-row-major so every write is to a consecutive address —
-    // this is critical for PSRAM throughput: column-stride writes (the naive loop)
-    // hit a different cache-line per write (160-byte stride @ phys_w=80 px),
-    // stalling the bus.  Row-major writes burst an entire 80-px row in one pass.
-    uint16_t *src = (uint16_t *)px_map;
-    for (int32_t lx = 0; lx < log_w; lx++) {
-        uint16_t *dp = &s_rot_buf[lx * phys_w];   // destination row — sequential
-        for (int32_t px = 0; px < phys_w; px++) { // forward = contiguous writes
-            dp[px] = src[(phys_w - 1 - px) * log_w + lx];
-        }
-    }
-
-    // Physical area for draw_bitmap
-    int32_t phys_x1 = DISPLAY_H_RES - 1 - area->y2;
-    int32_t phys_x2 = DISPLAY_H_RES - 1 - area->y1;
-    int32_t phys_y1 = area->x1;
-    int32_t phys_y2 = area->x2;
-
-    // Write-back s_rot_buf from CPU cache to physical PSRAM so
-    // DMA2D sees the freshly-rotated pixels (not stale cache lines).
-    // s_rot_buf is 64-byte aligned (heap_caps_aligned_alloc) and
-    // s_rot_buf_bytes is a multiple of 64 — msync will succeed.
-    esp_cache_msync(s_rot_buf, s_rot_buf_bytes,
+    // Write-back px_map from CPU cache to physical PSRAM so DMA2D sees
+    // fresh pixels.  buf1/buf2 are 64-byte aligned and their size is a
+    // multiple of 64 — msync will succeed on any sub-region.
+    int32_t w = area->x2 - area->x1 + 1;
+    int32_t h = area->y2 - area->y1 + 1;
+    esp_cache_msync(px_map, (size_t)w * h * sizeof(lv_color16_t),
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
+    // Pass LVGL's already-rotated tile straight to the panel.
     esp_lcd_panel_draw_bitmap(panel,
-        phys_x1, phys_y1,
-        phys_x2 + 1, phys_y2 + 1,
-        s_rot_buf);
+        area->x1, area->y1, area->x2 + 1, area->y2 + 1,
+        px_map);
 
     lv_display_flush_ready(disp);
 }
@@ -191,17 +153,14 @@ static void lvgl_task(void *arg)
     // esp_cache_msync requires it.  Use heap_caps_aligned_alloc instead.
     void *buf1 = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
     void *buf2 = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
-    s_rot_buf  = (uint16_t *)
-                 heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
-    s_rot_buf_bytes = buf_bytes;
 
-    if (!buf1 || !buf2 || !s_rot_buf) {
-        ESP_LOGE(TAG, "LVGL buffer alloc failed (need 3×%u bytes in PSRAM)",
+    if (!buf1 || !buf2) {
+        ESP_LOGE(TAG, "LVGL buffer alloc failed (need 2×%u bytes in PSRAM)",
                  (unsigned)buf_bytes);
         vTaskDelete(NULL);
     }
-    ESP_LOGI(TAG, "LVGL buffers: buf1=%p  buf2=%p  rot=%p  (%u B each, 64-byte aligned)",
-             buf1, buf2, (void *)s_rot_buf, (unsigned)buf_bytes);
+    ESP_LOGI(TAG, "LVGL buffers: buf1=%p  buf2=%p  (%u B each, 64-byte aligned)",
+             buf1, buf2, (unsigned)buf_bytes);
 
     lv_display_set_buffers(disp, buf1, buf2, buf_bytes,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
