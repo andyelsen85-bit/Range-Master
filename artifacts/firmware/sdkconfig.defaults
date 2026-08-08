@@ -21,6 +21,17 @@ CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 # ── MIPI DSI ──────────────────────────────────────────────────────────────
 CONFIG_LCD_ENABLE_DEBUG_LOG=n
 
+# ── Power management — REQUIRED for MIPI DSI on ESP32-P4 IDF 5.3.x ───────
+# Without CONFIG_PM_ENABLE, esp_perip_clk_init() is a no-op stub (warning:
+# "has not been implemented yet"). The MIPI DSI D-PHY PLL reference clock
+# (MIPI_DSI_DPHY_PLL_REFCLK_EN) is never enabled, so esp_lcd_new_dsi_bus()
+# hangs forever waiting for PLL lock. PM_ENABLE triggers the full clock-init
+# path and opens those gates before our display init runs.
+CONFIG_PM_ENABLE=y
+# Keep tickless idle off — our LVGL loop always has work to do and we don't
+# want the scheduler sleeping under the display task.
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=0
+
 # ── FreeRTOS ──────────────────────────────────────────────────────────────
 CONFIG_FREERTOS_HZ=1000
 CONFIG_FREERTOS_UNICORE=n
