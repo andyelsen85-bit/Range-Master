@@ -1,6 +1,6 @@
 // ============================================================
-// Spillgeschicht screen — local game history list
-// Mirrors SpielgeschichteScreen.tsx / SpillgeschichteScreen.tsx
+// SPILLGESCHICHT screen - local game history list
+// Mirrors SpielgeschichteScreen.tsx / SPILLGESCHICHTeScreen.tsx
 // ============================================================
 #include <stdio.h>
 #include <string.h>
@@ -44,7 +44,7 @@ static void build_history_rows(void)
 
         char row[128];
         snprintf(row, sizeof(row),
-                 "%s  |  %s  |  %d Spiller  |  " LV_SYMBOL_CHARGE " %s (%d Pkt)",
+                 "%s  |  %s  |  %d SPILLER  |  " LV_SYMBOL_CHARGE " %s (%d PKT)",
                  fg->finishedAt,
                  modus_label(fg->base.modus),
                  fg->spieler_count,
@@ -85,13 +85,13 @@ lv_obj_t *screen_geschichte_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl = lv_label_create(back);
-    lv_label_set_text(bl, LV_SYMBOL_HOME "  Zréck");
+    lv_label_set_text(bl, LV_SYMBOL_HOME "  ZURUCK");
     lv_obj_set_style_text_color(bl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl);
 
     // Count label
     s_lbl_empty = lv_label_create(s_scr);
-    lv_label_set_text(s_lbl_empty, "Keng Spiller nach");
+    lv_label_set_text(s_lbl_empty, "KENG SPILLER NACH");
     lv_obj_set_style_text_font(s_lbl_empty, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(s_lbl_empty, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_empty, LV_ALIGN_CENTER, 0, 0);

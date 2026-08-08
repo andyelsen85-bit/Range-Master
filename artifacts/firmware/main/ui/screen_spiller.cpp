@@ -1,6 +1,6 @@
 // ============================================================
-// Spillerverwaltung screen — player management
-// Mirrors SpillerScreen.tsx
+// SPILLERverwaltung screen - player management
+// Mirrors SPILLERScreen.tsx
 // ============================================================
 #include <stdio.h>
 #include <string.h>
@@ -19,14 +19,14 @@ static void add_local_cb(lv_event_t *e)
 {
     const char *name = lv_textarea_get_text(s_ta_new_name);
     if (!name || strlen(name) == 0) {
-        lv_label_set_text(s_lbl_status, "Numm ass eidel");
+        lv_label_set_text(s_lbl_status, "NUMM ASS EIDEL");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
     int new_id;
-    store_add_lokal_spieler(name, &new_id);
+    store_add_LOKAL_spieler(name, &new_id);
     lv_textarea_set_text(s_ta_new_name, "");
-    lv_label_set_text(s_lbl_status, LV_SYMBOL_OK " Spiller dobäigesat (lokal)");
+    lv_label_set_text(s_lbl_status, LV_SYMBOL_OK " SPILLER DOBAIGESAT (LOKAL)");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     screen_spiller_refresh();
 }
@@ -35,7 +35,7 @@ static void add_local_cb(lv_event_t *e)
 static void reload_cb(lv_event_t *e)
 {
     store_load_portal_spieler();
-    lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " Portal lueden...");
+    lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " PORTAL LUEDEN...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
 }
 
@@ -77,9 +77,9 @@ static void build_list(void)
         lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_TEXT), 0);
 
-        if (ps->lokal) {
+        if (ps->LOKAL) {
             lv_obj_t *badge = lv_label_create(name_row);
-            lv_label_set_text(badge, "lokal");
+            lv_label_set_text(badge, "LOKAL");
             lv_obj_set_style_text_font(badge, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(badge, lv_color_hex(CLR_WARN), 0);
             lv_obj_set_style_bg_color(badge, lv_color_hex(0x78350F), 0);
@@ -108,7 +108,7 @@ static void build_list(void)
 
     if (g_store.portalSpielerCount == 0) {
         lv_obj_t *empty = lv_label_create(s_list);
-        lv_label_set_text(empty, "Keng Spiller. Portal lueden oder lokal dobäisetzen.");
+        lv_label_set_text(empty, "KENG SPILLER. PORTAL LUEDEN ODER LOKAL DOBAISETZEN.");
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
     }
@@ -163,7 +163,7 @@ lv_obj_t *screen_spiller_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
-    lv_label_set_text(bl2, LV_SYMBOL_HOME "  Zréck");
+    lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURUCK");
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 
@@ -178,7 +178,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_style_pad_column(add_row, 12, 0);
 
     lv_obj_t *add_hdr = lv_label_create(add_row);
-    lv_label_set_text(add_hdr, "Neie Spiller:");
+    lv_label_set_text(add_hdr, "Neie SPILLER:");
     lv_obj_set_style_text_font(add_hdr, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(add_hdr, lv_color_hex(CLR_TEXT), 0);
 

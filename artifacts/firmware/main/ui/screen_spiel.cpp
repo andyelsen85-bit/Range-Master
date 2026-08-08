@@ -1,5 +1,5 @@
 // ============================================================
-// Spiel screen — active game scoring
+// Spiel screen - active game scoring
 // Mirrors SpielScreen.tsx
 // ============================================================
 #include <stdio.h>
@@ -74,12 +74,12 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_text_color(s_lbl_modus, lv_color_hex(CLR_PRIMARY), 0);
 
     s_lbl_lauf = lv_label_create(topbar);
-    lv_label_set_text(s_lbl_lauf, "Lauf 1");
+    lv_label_set_text(s_lbl_lauf, "LAUF 1");
     lv_obj_set_style_text_font(s_lbl_lauf, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(s_lbl_lauf, lv_color_hex(CLR_TEXT), 0);
 
     s_lbl_taube = lv_label_create(topbar);
-    lv_label_set_text(s_lbl_taube, "Taube 1 / 8");
+    lv_label_set_text(s_lbl_taube, "TAUBE 1 / 8");
     lv_obj_set_style_text_font(s_lbl_taube, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_lbl_taube, lv_color_hex(CLR_MUTED), 0);
 
@@ -131,7 +131,7 @@ lv_obj_t *screen_spiel_create(void)
         lv_obj_center(lbl);
     }
 
-    // Wiederhole + Skip row
+    // Wiederhole + SKIP row
     lv_obj_t *ctrl_row = lv_obj_create(left);
     lv_obj_set_size(ctrl_row, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(ctrl_row, LV_OPA_0, 0);
@@ -145,7 +145,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_size(s_btn_wiederhole, LV_PCT(50), 44);
     lv_obj_add_event_cb(s_btn_wiederhole, wiederhole_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = lv_label_create(s_btn_wiederhole);
-    lv_label_set_text(wl, LV_SYMBOL_REFRESH " Wdh");
+    lv_label_set_text(wl, LV_SYMBOL_REFRESH " WDH");
     lv_obj_set_style_text_color(wl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(wl);
 
@@ -154,7 +154,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_size(skip_btn, LV_PCT(50), 44);
     lv_obj_add_event_cb(skip_btn, skip_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *sl = lv_label_create(skip_btn);
-    lv_label_set_text(sl, LV_SYMBOL_NEXT " Skip");
+    lv_label_set_text(sl, LV_SYMBOL_NEXT " SKIP");
     lv_obj_set_style_text_color(sl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sl);
 
@@ -170,7 +170,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_pad_row(right, 12, 0);
 
     lv_obj_t *pg_hdr = lv_label_create(right);
-    lv_label_set_text(pg_hdr, "Spiller am aktuelle Posten");
+    lv_label_set_text(pg_hdr, "SPILLER am aktuelle POSTEN");
     lv_obj_set_style_text_font(pg_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(pg_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -184,7 +184,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_pad_column(s_player_grid, 8, 0);
 
     lv_obj_t *sc_hdr = lv_label_create(right);
-    lv_label_set_text(sc_hdr, "Punktestand");
+    lv_label_set_text(sc_hdr, "PUNKTESTAND");
     lv_obj_set_style_text_font(sc_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(sc_hdr, lv_color_hex(CLR_TEXT), 0);
 
@@ -194,9 +194,9 @@ lv_obj_t *screen_spiel_create(void)
     lv_table_set_col_width(s_score_table, 0, 200);
     lv_table_set_col_width(s_score_table, 1, 80);
     lv_table_set_col_width(s_score_table, 2, 80);
-    lv_table_set_cell_value(s_score_table, 0, 0, "Spiller");
-    lv_table_set_cell_value(s_score_table, 0, 1, "Posten");
-    lv_table_set_cell_value(s_score_table, 0, 2, "Punkte");
+    lv_table_set_cell_value(s_score_table, 0, 0, "SPILLER");
+    lv_table_set_cell_value(s_score_table, 0, 1, "POSTEN");
+    lv_table_set_cell_value(s_score_table, 0, 2, "PUNKTE");
     lv_obj_set_style_text_font(s_score_table, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_score_table, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_bg_color(s_score_table, lv_color_hex(CLR_CARD), 0);
@@ -215,9 +215,9 @@ void screen_spiel_refresh(void)
     char buf[64];
     snprintf(buf, sizeof(buf), "%s", modus_label(s->modus));
     lv_label_set_text(s_lbl_modus, buf);
-    snprintf(buf, sizeof(buf), "Lauf %d", s->lauf);
+    snprintf(buf, sizeof(buf), "LAUF %d", s->lauf);
     lv_label_set_text(s_lbl_lauf, buf);
-    snprintf(buf, sizeof(buf), "Taube %d / %d",
+    snprintf(buf, sizeof(buf), "TAUBE %d / %d",
              s->taubeIndex + 1, s->sequenzLen);
     lv_label_set_text(s_lbl_taube, buf);
 
@@ -253,7 +253,7 @@ void screen_spiel_refresh(void)
         lv_obj_align(name_lbl, LV_ALIGN_TOP_LEFT, 0, 0);
 
         char pts[16];
-        snprintf(pts, sizeof(pts), "%d Pkt", s->spieler[i].punkte);
+        snprintf(pts, sizeof(pts), "%d PKT", s->spieler[i].punkte);
         lv_obj_t *pts_lbl = lv_label_create(card);
         lv_label_set_text(pts_lbl, pts);
         lv_obj_set_style_text_font(pts_lbl, &lv_font_montserrat_12, 0);
@@ -265,7 +265,7 @@ void screen_spiel_refresh(void)
     for (int i = 0; i < s->spielerCount; i++) {
         char row_buf[32];
         lv_table_set_cell_value(s_score_table, i + 1, 0, s->spieler[i].name);
-        snprintf(row_buf, sizeof(row_buf), "P%d", s->spieler[i].startPosten);
+        snprintf(row_buf, sizeof(row_buf), "P%d", s->spieler[i].startPOSTEN);
         lv_table_set_cell_value(s_score_table, i + 1, 1, row_buf);
         snprintf(row_buf, sizeof(row_buf), "%d", s->spieler[i].punkte);
         lv_table_set_cell_value(s_score_table, i + 1, 2, row_buf);
@@ -275,5 +275,5 @@ void screen_spiel_refresh(void)
 
 void screen_spiel_tick(void)
 {
-    // Nothing needed — score buttons call refresh directly
+    // Nothing needed - score buttons call refresh directly
 }

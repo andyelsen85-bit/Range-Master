@@ -1,5 +1,5 @@
 // ============================================================
-// Astellungen screen — settings: API, machines, custom seqs,
+// ASTELLUNGEN screen - settings: API, machines, custom seqs,
 //                     WiFi tab, Bluetooth tab, system info
 // Mirrors EinstellungenScreen.tsx
 // ============================================================
@@ -25,7 +25,7 @@ static void save_api_cb(lv_event_t *e)
     strncpy(g_store.apiUrl, url, MAX_URL_LEN - 1); g_store.apiUrl[MAX_URL_LEN - 1] = '\0';
     strncpy(g_store.apiKey, key, MAX_KEY_LEN - 1); g_store.apiKey[MAX_KEY_LEN - 1] = '\0';
     game_store_save();
-    lv_label_set_text(s_lbl_api_status, LV_SYMBOL_OK " Gespäichert");
+    lv_label_set_text(s_lbl_api_status, LV_SYMBOL_OK " GESPEICHERT");
     lv_obj_set_style_text_color(s_lbl_api_status, lv_color_hex(CLR_SUCCESS), 0);
 }
 
@@ -36,7 +36,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_all(parent, 16, 0);
 
     lv_obj_t *url_lbl = lv_label_create(parent);
-    lv_label_set_text(url_lbl, "Portal API URL");
+    lv_label_set_text(url_lbl, "PORTAL API URL");
     lv_obj_set_style_text_font(url_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(url_lbl, lv_color_hex(CLR_TEXT), 0);
 
@@ -49,7 +49,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_text_color(s_ta_url, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *key_lbl = lv_label_create(parent);
-    lv_label_set_text(key_lbl, "API Key");
+    lv_label_set_text(key_lbl, "API KEY");
     lv_obj_set_style_text_font(key_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(key_lbl, lv_color_hex(CLR_TEXT), 0);
 
@@ -67,7 +67,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_size(save_btn, 160, 44);
     lv_obj_add_event_cb(save_btn, save_api_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *sl = lv_label_create(save_btn);
-    lv_label_set_text(sl, LV_SYMBOL_SAVE " Späicheren");
+    lv_label_set_text(sl, LV_SYMBOL_SAVE " SPEICHERN");
     lv_obj_set_style_text_color(sl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sl);
 
@@ -78,7 +78,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     return parent;
 }
 
-// ── Tab: Maschinnen ───────────────────────────────────────────
+// ── Tab: MASCHINNEN ───────────────────────────────────────────
 static lv_obj_t *s_mach_sw[MASCHINE_COUNT];
 
 static void mach_sw_cb(lv_event_t *e)
@@ -92,8 +92,8 @@ static void mach_sw_cb(lv_event_t *e)
 static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 {
     static const char *labels[] = {
-        "Maschinn A","Maschinn B","Maschinn C","Maschinn D",
-        "Maschinn E","Maschinn F","Maschinn G","Maschinn H (Doublette)"
+        "MASCHINN A","MASCHINN B","MASCHINN C","MASCHINN D",
+        "MASCHINN E","MASCHINN F","MASCHINN G","MASCHINN H (DOUBLETTE)"
     };
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(parent, 8, 0);
@@ -128,7 +128,7 @@ static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_all(parent, 16, 0);
 
     lv_obj_t *info = lv_label_create(parent);
-    lv_label_set_text(info, "WiFi Astellungen kann op der WiFi-Säit geännert ginn.");
+    lv_label_set_text(info, "WiFi ASTELLUNGEN kann op der WiFi-SAit geAnnert ginn.");
     lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(info, lv_color_hex(CLR_MUTED), 0);
 
@@ -139,7 +139,7 @@ static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
         ui_manager_show(SCREEN_WIFI);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl = lv_label_create(btn);
-    lv_label_set_text(bl, LV_SYMBOL_WIFI "  WiFi Säit");
+    lv_label_set_text(bl, LV_SYMBOL_WIFI "  WIFI SAEIT");
     lv_obj_set_style_text_color(bl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl);
     return parent;
@@ -152,7 +152,7 @@ static lv_obj_t *build_bt_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_all(parent, 16, 0);
 
     lv_obj_t *info = lv_label_create(parent);
-    lv_label_set_text(info, "Bluetooth HID Keyboard Kopplung.");
+    lv_label_set_text(info, "BLUETOOTH HID KEYBOARD KOPPLUNG.");
     lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(info, lv_color_hex(CLR_MUTED), 0);
 
@@ -163,7 +163,7 @@ static lv_obj_t *build_bt_tab(lv_obj_t *parent)
         ui_manager_show(SCREEN_BLUETOOTH);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl = lv_label_create(btn);
-    lv_label_set_text(bl, LV_SYMBOL_BLUETOOTH "  Bluetooth Säit");
+    lv_label_set_text(bl, LV_SYMBOL_BLUETOOTH "  BLUETOOTH SAEIT");
     lv_obj_set_style_text_color(bl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl);
     return parent;
@@ -177,13 +177,13 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_row(parent, 8, 0);
 
     static const char *info_rows[] = {
-        "Firmware: " APP_VERSION,
-        "Board: Guition JC8012P4A1C-I-W-Y",
-        "SoC: ESP32-P4NRW32",
-        "Koprocessor: ESP32-C6-MINI-1U-N4",
-        "Display: 10.1\" MIPI-DSI JD9365 1280×800",
-        "Touch: GSL3680 I²C",
-        "Portal: " DEFAULT_API_URL,
+        "FIRMWARE: " APP_VERSION,
+        "BOARD: GUITION JC8012P4A1C-I-W-Y",
+        "SOC: ESP32-P4NRW32",
+        "KOPROZESSOR: ESP32-C6-MINI-1U-N4",
+        "Display: 10.1\" MIPI-DSI JD9365 1280x800",
+        "TOUCH: GSL3680 I2C",
+        "PORTAL: " DEFAULT_API_URL,
     };
     for (int i = 0; i < (int)(sizeof(info_rows)/sizeof(info_rows[0])); i++) {
         lv_obj_t *lbl = lv_label_create(parent);
@@ -227,7 +227,7 @@ lv_obj_t *screen_einstellungen_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
-    lv_label_set_text(bl2, LV_SYMBOL_HOME "  Zréck");
+    lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURUCK");
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 
@@ -240,7 +240,7 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_set_style_text_font(s_tab_view, &lv_font_montserrat_14, 0);
 
     lv_obj_t *tab_api  = lv_tabview_add_tab(s_tab_view, "Portal API");
-    lv_obj_t *tab_mach = lv_tabview_add_tab(s_tab_view, "Maschinnen");
+    lv_obj_t *tab_mach = lv_tabview_add_tab(s_tab_view, "MASCHINNEN");
     lv_obj_t *tab_wifi = lv_tabview_add_tab(s_tab_view, "WiFi");
     lv_obj_t *tab_bt   = lv_tabview_add_tab(s_tab_view, "Bluetooth");
     lv_obj_t *tab_sys  = lv_tabview_add_tab(s_tab_view, "System");

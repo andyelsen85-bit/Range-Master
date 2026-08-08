@@ -1,5 +1,5 @@
 // ============================================================
-// Kreditter screen — credit management for today's players
+// Kreditter screen - credit management for today's players
 // Mirrors KrediteScreen.tsx
 // ============================================================
 #include <stdio.h>
@@ -30,7 +30,7 @@ static void add_player_cb(lv_event_t *e)
     if (sel >= (uint16_t)g_store.portalSpielerCount) return;
     PortalSpieler *ps = &g_store.portalSpieler[sel];
     store_register_spieler_fuer_tag(ps->id);
-    lv_label_set_text(s_lbl_status, "Spiller dobäigesat");
+    lv_label_set_text(s_lbl_status, "SPILLER DOBAIGESAT");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     screen_kredite_refresh();
 }
@@ -47,7 +47,7 @@ static void build_player_list(void)
         KreditStand *k = &g_store.kredite[i];
 
         // Find player name
-        const char *name = "Onbekannt";
+        const char *name = "ONBEKANNT";
         for (int j = 0; j < g_store.portalSpielerCount; j++) {
             if (g_store.portalSpieler[j].id == sid) {
                 name = g_store.portalSpieler[j].name;
@@ -79,7 +79,7 @@ static void build_player_list(void)
         char cred_buf[48];
         int avail = k->gewaehrt - k->verbraucht;
         snprintf(cred_buf, sizeof(cred_buf),
-                 "%d Kreditter verfügbar  (%d/%d verbraucht)",
+                 "%d KREDITTER VERFUGBAR  (%d/%d VERBRAUCHT)",
                  avail, k->verbraucht, k->gewaehrt);
         lv_obj_t *cred_lbl = lv_label_create(info);
         lv_label_set_text(cred_lbl, cred_buf);
@@ -104,7 +104,7 @@ static void build_player_list(void)
 
     if (count == 0) {
         lv_obj_t *empty = lv_label_create(s_player_list);
-        lv_label_set_text(empty, "Keng Spiller fir haut registréiert");
+        lv_label_set_text(empty, "Keng SPILLER fir HAUT REGISTRIERT");
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
     }
@@ -142,7 +142,7 @@ lv_obj_t *screen_kredite_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
-    lv_label_set_text(bl2, LV_SYMBOL_HOME "  Zréck");
+    lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURUCK");
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 
@@ -157,7 +157,7 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_style_pad_column(add_row, 12, 0);
 
     lv_obj_t *add_lbl = lv_label_create(add_row);
-    lv_label_set_text(add_lbl, "Spiller dobäisetzen:");
+    lv_label_set_text(add_lbl, "SPILLER DOBAISETZEN:");
     lv_obj_set_style_text_font(add_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(add_lbl, lv_color_hex(CLR_TEXT), 0);
 
@@ -166,14 +166,14 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_style_text_font(s_dd_add, &lv_font_montserrat_14, 0);
     lv_obj_set_style_bg_color(s_dd_add, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_dd_add, lv_color_hex(CLR_TEXT), 0);
-    lv_dropdown_set_options(s_dd_add, "—");
+    lv_dropdown_set_options(s_dd_add, "-");
 
     lv_obj_t *add_btn = lv_btn_create(add_row);
     lv_obj_add_style(add_btn, &g_style_btn_primary, 0);
     lv_obj_set_size(add_btn, 120, 44);
     lv_obj_add_event_cb(add_btn, add_player_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *abl = lv_label_create(add_btn);
-    lv_label_set_text(abl, "+ Dobäisetzen");
+    lv_label_set_text(abl, "+ DOBAISETZEN");
     lv_obj_set_style_text_font(abl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(abl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(abl);
@@ -202,13 +202,13 @@ void screen_kredite_refresh(void)
 {
     if (!s_player_list) return;
 
-    // Rebuild dropdown — heap-allocated: ~13 KB is too large for stack AND for
+    // Rebuild dropdown - heap-allocated: ~13 KB is too large for stack AND for
     // static BSS (static lands in internal DRAM, which is the scarce resource).
     // lv_dropdown_set_options() copies via lv_strdup(), so free() is safe after.
     const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 4;
     char *opts = (char *)malloc(opts_sz);
     if (!opts) return;
-    opts[0] = '\0'; strncat(opts, "—", opts_sz - 1);
+    opts[0] = '\0'; strncat(opts, "-", opts_sz - 1);
     for (int i = 0; i < g_store.portalSpielerCount; i++) {
         strncat(opts, "\n", opts_sz - strlen(opts) - 1);
         strncat(opts, g_store.portalSpieler[i].name,

@@ -1,5 +1,5 @@
 // ============================================================
-// Resultater screen — post-game score summary + winner
+// Resultater screen - post-game score summary + winner
 // Mirrors ResultateScreen.tsx
 // ============================================================
 #include <stdio.h>
@@ -52,7 +52,7 @@ lv_obj_t *screen_resultate_create(void)
         store_dismiss_resultate();
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *dl = lv_label_create(done_btn);
-    lv_label_set_text(dl, LV_SYMBOL_HOME "  Ofschlossen");
+    lv_label_set_text(dl, LV_SYMBOL_HOME "  OFSCHLOSSEN");
     lv_obj_set_style_text_color(dl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(dl);
 
@@ -77,11 +77,11 @@ lv_obj_t *screen_resultate_create(void)
     lv_obj_set_style_text_color(trophy, lv_color_hex(CLR_WARN), 0);
 
     s_lbl_winner = lv_label_create(win_card);
-    lv_label_set_text(s_lbl_winner, "Winner: —");
+    lv_label_set_text(s_lbl_winner, "WINNER: -");
     lv_obj_set_style_text_font(s_lbl_winner, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(s_lbl_winner, lv_color_hex(CLR_WARN), 0);
 
-    s_lbl_max = lv_label_create(win_card);
+    s_lbl_MAX = lv_label_create(win_card);
     lv_label_set_text(s_lbl_max, "");
     lv_obj_set_style_text_font(s_lbl_max, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_lbl_max, lv_color_hex(CLR_MUTED), 0);
@@ -94,19 +94,19 @@ lv_obj_t *screen_resultate_create(void)
     lv_table_set_col_cnt(s_table, 5);
     lv_table_set_col_width(s_table, 0, 50);  // Rank
     lv_table_set_col_width(s_table, 1, 240); // Name
-    lv_table_set_col_width(s_table, 2, 110); // Lauf 1
-    lv_table_set_col_width(s_table, 3, 110); // Lauf 2
-    lv_table_set_col_width(s_table, 4, 110); // Total
+    lv_table_set_col_width(s_table, 2, 110); // LAUF 1
+    lv_table_set_col_width(s_table, 3, 110); // LAUF 2
+    lv_table_set_col_width(s_table, 4, 110); // TOTAL
     lv_obj_set_style_text_font(s_table, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_table, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_bg_color(s_table, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_color(s_table, lv_color_hex(CLR_BORDER), 0);
 
     lv_table_set_cell_value(s_table, 0, 0, "#");
-    lv_table_set_cell_value(s_table, 0, 1, "Spiller");
-    lv_table_set_cell_value(s_table, 0, 2, "Lauf 1");
-    lv_table_set_cell_value(s_table, 0, 3, "Lauf 2");
-    lv_table_set_cell_value(s_table, 0, 4, "Total");
+    lv_table_set_cell_value(s_table, 0, 1, "SPILLER");
+    lv_table_set_cell_value(s_table, 0, 2, "LAUF 1");
+    lv_table_set_cell_value(s_table, 0, 3, "LAUF 2");
+    lv_table_set_cell_value(s_table, 0, 4, "TOTAL");
 
     return s_scr;
 }
@@ -121,7 +121,7 @@ void screen_resultate_refresh(void)
 
     // Meta line
     char buf[80];
-    snprintf(buf, sizeof(buf), "%s  ·  %s  ·  %d Tauben/Lauf",
+    snprintf(buf, sizeof(buf), "%s   |   %s   |   %d Tauben/Lauf",
              fg->finishedAt,
              modus_label(fg->base.modus),
              fg->base.taubenProLauf);
@@ -148,11 +148,11 @@ void screen_resultate_refresh(void)
 
     // Winner banner
     if (n > 0) {
-        snprintf(buf, sizeof(buf), "Winner: %s  (%d Punkte)",
+        snprintf(buf, sizeof(buf), "WINNER: %s  (%d PUNKTE)",
                  rows[0].name, rows[0].total);
         lv_label_set_text(s_lbl_winner, buf);
-        int maxScore = fg->base.taubenProLauf * 2 * 2;
-        snprintf(buf, sizeof(buf), "max %d Pkt", maxScore);
+        int maxScore = fg->base.taubenProLAUF * 2 * 2;
+        snprintf(buf, sizeof(buf), "MAX %d PKT", maxScore);
         lv_label_set_text(s_lbl_max, buf);
     }
 

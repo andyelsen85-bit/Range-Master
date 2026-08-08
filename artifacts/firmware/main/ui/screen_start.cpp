@@ -1,5 +1,5 @@
 // ============================================================
-// Start screen — game setup: assign players, pick mode
+// Start screen - game setup: assign players, pick mode
 // Mirrors StartScreen.tsx
 // ============================================================
 #include <stdio.h>
@@ -18,8 +18,8 @@ static lv_obj_t *s_lbl_error;
 // ── Build player dropdown options string ──────────────────────
 static void build_player_opts(char *buf, size_t len)
 {
-    // "--- Kee Spiller ---\nName1\nName2\n..."
-    strncpy(buf, "--- Kee Spiller ---", len - 1);
+    // "--- Kee SPILLER ---\nName1\nName2\n..."
+    strncpy(buf, "--- Kee SPILLER ---", len - 1);
     buf[len-1] = '\0';
     for (int i = 0; i < g_store.portalSpielerCount; i++) {
         strncat(buf, "\n", len - strlen(buf) - 1);
@@ -35,27 +35,27 @@ static void start_cb(lv_event_t *e)
     for (int i = 0; i < MAX_SPIELER; i++) {
         if (!s_player_dropdowns[i]) continue;
         uint16_t sel = lv_dropdown_get_selected(s_player_dropdowns[i]);
-        if (sel == 0) continue; // "--- Kee Spiller ---"
+        if (sel == 0) continue; // "--- Kee SPILLER ---"
         int pidx = (int)sel - 1;
         if (pidx >= g_store.portalSpielerCount) continue;
         PortalSpieler *ps = &g_store.portalSpieler[pidx];
 
         Spieler *sp = &g_store.spieler[g_store.spielerCount];
         sp->id          = ps->id;
-        sp->startPosten = g_store.spielerCount + 1;
+        sp->startPOSTEN = g_store.spielerCount + 1;
         sp->punkte      = 0;
         snprintf(sp->name, MAX_NAME_LEN, "%s", ps->name);
         g_store.spielerCount++;
     }
 
     if (g_store.spielerCount == 0) {
-        lv_label_set_text(s_lbl_error, "Mindestens 1 Spiller auswiele!");
+        lv_label_set_text(s_lbl_error, "Mindestens 1 SPILLER auswiele!");
         lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);
         return;
     }
 
     if (!store_start_spiel()) {
-        lv_label_set_text(s_lbl_error, "Fehler: Spiller hunn keng Kreditter!");
+        lv_label_set_text(s_lbl_error, "Fehler: SPILLER hunn keng Kreditter!");
         lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);
         return;
     }
@@ -114,7 +114,7 @@ lv_obj_t *screen_start_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_lbl = lv_label_create(back_btn);
-    lv_label_set_text(back_lbl, LV_SYMBOL_HOME "  Zréck");
+    lv_label_set_text(back_lbl, LV_SYMBOL_HOME "  ZURUCK");
     lv_obj_set_style_text_color(back_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(back_lbl);
 
@@ -138,7 +138,7 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_pad_row(left, 10, 0);
 
     lv_obj_t *players_hdr = lv_label_create(left);
-    lv_label_set_text(players_hdr, "Spiller zouweisen");
+    lv_label_set_text(players_hdr, "SPILLER zouweisen");
     lv_obj_set_style_text_font(players_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(players_hdr, lv_color_hex(CLR_TEXT), 0);
 
@@ -171,7 +171,7 @@ lv_obj_t *screen_start_create(void)
         lv_obj_set_width(pos_lbl, 32);
 
         lv_obj_t *dd = lv_dropdown_create(row);
-        lv_dropdown_set_options(dd, opts ? opts : "—"); // safe if malloc failed
+        lv_dropdown_set_options(dd, opts ? opts : "-"); // safe if malloc failed
         lv_obj_set_flex_grow(dd, 1);
         lv_obj_set_height(dd, 40);
         lv_obj_set_style_text_font(dd, &lv_font_montserrat_14, 0);
@@ -180,7 +180,7 @@ lv_obj_t *screen_start_create(void)
         s_player_dropdowns[i] = dd;
         s_player_rows[i] = row;
     }
-    free(opts); // lv_dropdown_set_options copies via lv_strdup — safe to free now
+    free(opts); // lv_dropdown_set_options copies via lv_strdup - safe to free now
 
     s_lbl_error = lv_label_create(left);
     lv_label_set_text(s_lbl_error, "");
@@ -197,11 +197,11 @@ lv_obj_t *screen_start_create(void)
 
     // Modus buttons
     lv_obj_t *modus_hdr = lv_label_create(right);
-    lv_label_set_text(modus_hdr, "Spillmodus");
+    lv_label_set_text(modus_hdr, "SPILLMODUS");
     lv_obj_set_style_text_font(modus_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(modus_hdr, lv_color_hex(CLR_TEXT), 0);
 
-    static const char *MODUS_NAMES[] = {"Normal","Harakiri","Custom 1","Custom 2","Custom 3","Custom 4"};
+    static const char *MODUS_NAMES[] = {"NORMAL","HARAKIRI","CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4"};
     lv_obj_t *modus_grid = lv_obj_create(right);
     lv_obj_set_size(modus_grid, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(modus_grid, LV_OPA_0, 0);
@@ -225,7 +225,7 @@ lv_obj_t *screen_start_create(void)
 
     // Machine toggles
     lv_obj_t *mach_hdr = lv_label_create(right);
-    lv_label_set_text(mach_hdr, "Aktiv Maschinnen");
+    lv_label_set_text(mach_hdr, "Aktiv MASCHINNEN");
     lv_obj_set_style_text_font(mach_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(mach_hdr, lv_color_hex(CLR_TEXT), 0);
 

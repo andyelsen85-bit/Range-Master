@@ -1,9 +1,9 @@
 // ============================================================
-// Dashboard screen — home screen with game history + nav sidebar
+// Dashboard screen - home screen with game history + nav sidebar
 // Mirrors DashboardScreen.tsx layout:
-//   LEFT  960px — "Leschte Spiller" game history card
-//   RIGHT 320px — navigation buttons + offline queue panel
-//   TOP    80px — header with club name + WiFi
+//   LEFT  960px - "Leschte SPILLER" game history card
+//   RIGHT 320px - navigation buttons + offline queue panel
+//   TOP    80px - header with club name + WiFi
 // ============================================================
 #include <stdio.h>
 #include <string.h>
@@ -117,7 +117,7 @@ lv_obj_t *screen_dashboard_create(void)
 
     // WiFi status sits in header (right side)
     s_lbl_wifi = lv_label_create(header);
-    lv_label_set_text(s_lbl_wifi, LV_SYMBOL_WIFI "  net verbonnen");
+    lv_label_set_text(s_lbl_wifi, LV_SYMBOL_WIFI "  NET VERBONNEN");
     lv_obj_set_style_text_font(s_lbl_wifi, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_wifi, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -169,14 +169,14 @@ lv_obj_t *screen_dashboard_create(void)
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(sidebar, LV_OBJ_FLAG_SCROLLABLE);
 
-    // 1. Large primary "Spill Start" button (140 px tall)
-    big_btn(sidebar, LV_SYMBOL_PLAY, "Spill Start", 140, SCREEN_START);
+    // 1. Large primary "SPILL START" button (140 px tall)
+    big_btn(sidebar, LV_SYMBOL_PLAY, "SPILL START", 140, SCREEN_START);
 
-    // 2. "Spiller vum Dag" (credits) — full width, 88 px
-    sec_btn(sidebar, LV_SYMBOL_CHARGE, "Spiller vum Dag",
+    // 2. "SPILLER VUM DAG" (credits) - full width, 88 px
+    sec_btn(sidebar, LV_SYMBOL_CHARGE, "SPILLER VUM DAG",
             SIDEBAR_W - 32, 88, SCREEN_KREDITE);
 
-    // 3. Row: "Spiller" | "Astellungen" side-by-side
+    // 3. Row: "SPILLER" | "ASTELLUNGEN" side-by-side
     // Inner width = SIDEBAR_W - 2*pad(16) = 288. Half = (288-8)/2 = 140 px each.
     lv_obj_t *row = lv_obj_create(sidebar);
     lv_obj_set_size(row, SIDEBAR_W - 32, 88);
@@ -188,10 +188,10 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    sec_btn(row, LV_SYMBOL_LIST,     "Spiller",    140, 88, SCREEN_SPILLER);
-    sec_btn(row, LV_SYMBOL_SETTINGS, "Astellungen",140, 88, SCREEN_EINSTELLUNGEN);
+    sec_btn(row, LV_SYMBOL_LIST,     "SPILLER",    140, 88, SCREEN_SPILLER);
+    sec_btn(row, LV_SYMBOL_SETTINGS, "ASTELLUNGEN",140, 88, SCREEN_EINSTELLUNGEN);
 
-    // 4. "Spillgeschicht" — muted ghost style
+    // 4. "SPILLGESCHICHT" - muted ghost style
     lv_obj_t *hist_btn = lv_btn_create(sidebar);
     lv_obj_set_size(hist_btn, SIDEBAR_W - 32, 68);
     lv_obj_set_style_bg_color(hist_btn, lv_color_hex(CLR_BORDER), 0);
@@ -212,11 +212,11 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_color(hist_ic, lv_color_hex(CLR_MUTED), 0);
 
     lv_obj_t *hist_lbl = lv_label_create(hist_btn);
-    lv_label_set_text(hist_lbl, "Spillgeschicht");
+    lv_label_set_text(hist_lbl, "SPILLGESCHICHT");
     lv_obj_set_style_text_font(hist_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(hist_lbl, lv_color_hex(CLR_MUTED), 0);
 
-    // 5. Offline Queue panel — flex-grow fills the remaining space
+    // 5. Offline Queue panel - flex-grow fills the remaining space
     lv_obj_t *queue = lv_obj_create(sidebar);
     lv_obj_set_flex_grow(queue, 1);
     lv_obj_set_width(queue, SIDEBAR_W - 32);
@@ -239,12 +239,12 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_letter_space(q_hdr, 1, 0);
 
     s_lbl_pending = lv_label_create(queue);
-    lv_label_set_text(s_lbl_pending, "0 Spiller am Waardraum");
+    lv_label_set_text(s_lbl_pending, "0 SPILLER AM WAARDRAUM");
     lv_obj_set_style_text_font(s_lbl_pending, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_pending, lv_color_hex(CLR_TEXT), 0);
 
     s_lbl_sync_status = lv_label_create(queue);
-    lv_label_set_text(s_lbl_sync_status, "Bereet");
+    lv_label_set_text(s_lbl_sync_status, "BEREET");
     lv_obj_set_style_text_font(s_lbl_sync_status, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_lbl_sync_status, lv_color_hex(CLR_MUTED), 0);
 
@@ -254,7 +254,7 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_add_event_cb(sync_btn, sync_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *sync_lbl = lv_label_create(sync_btn);
-    lv_label_set_text(sync_lbl, LV_SYMBOL_REFRESH "  Alles syncen");
+    lv_label_set_text(sync_lbl, LV_SYMBOL_REFRESH "  ALLES SYNCEN");
     lv_obj_set_style_text_font(sync_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(sync_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sync_lbl);
@@ -271,15 +271,15 @@ void screen_dashboard_refresh(void)
     char buf[64];
     switch (g_store.syncStatus) {
         case SYNC_IDLE:
-            lv_label_set_text(s_lbl_sync_status, "Bereet");
+            lv_label_set_text(s_lbl_sync_status, "BEREET");
             break;
         case SYNC_RUNNING:
             lv_label_set_text(s_lbl_sync_status,
-                              LV_SYMBOL_REFRESH " Synciséiert...");
+                              LV_SYMBOL_REFRESH " SYNCISIERT...");
             break;
         case SYNC_SUCCESS:
             lv_label_set_text(s_lbl_sync_status,
-                              LV_SYMBOL_OK " Synciséiert");
+                              LV_SYMBOL_OK " SYNCISIERT");
             break;
         case SYNC_ERROR:
             snprintf(buf, sizeof(buf),
@@ -289,7 +289,7 @@ void screen_dashboard_refresh(void)
     }
 
     // Pending games
-    snprintf(buf, sizeof(buf), "%d Spiller am Waardraum",
+    snprintf(buf, sizeof(buf), "%d SPILLER AM WAARDRAUM",
              g_store.pendingGamesCount);
     lv_label_set_text(s_lbl_pending, buf);
 
@@ -301,7 +301,7 @@ void screen_dashboard_refresh(void)
                                     lv_color_hex(CLR_SUCCESS), 0);
     } else {
         lv_label_set_text(s_lbl_wifi,
-                          LV_SYMBOL_WIFI "  net verbonnen");
+                          LV_SYMBOL_WIFI "  NET VERBONNEN");
         lv_obj_set_style_text_color(s_lbl_wifi,
                                     lv_color_hex(CLR_MUTED), 0);
     }
@@ -316,14 +316,14 @@ void screen_dashboard_refresh(void)
     for (int i = g_store.historyCount - 1; i >= start; i--) {
         const FinishedGame *fg = &g_store.history[i];
         char item[160];
-        snprintf(item, sizeof(item), "%s  ·  %s  ·  %s",
+        snprintf(item, sizeof(item), "%s   |   %s   |   %s",
                  fg->finishedAt,
                  modus_label(fg->base.modus),
                  fg->spieler_count > 0 ? fg->spielerNamen[0] : "");
         lv_list_add_text(s_history_list, item);
     }
     if (g_store.historyCount == 0) {
-        lv_list_add_text(s_history_list, "Keng Spiller nach");
+        lv_list_add_text(s_history_list, "KENG SPILLER NACH");
     }
 }
 
