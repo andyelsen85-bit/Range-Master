@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """
 IDF 5.3.x / ESP32-P4 linker-script patch
-=========================================
-IDF unconditionally passes --enable-non-contiguous-regions for ESP32-P4+PSRAM.
-Under that flag the linker discards every section that has no explicit placement
-rule.  The IDF 5.3.x sections.ld.in for ESP32-P4 is missing *(.sbss.*) and
-*(.bss.*) wildcard entries (fixed in IDF 5.4.x).
-
-This script runs PRE_LINK and inserts those two lines into the already-generated
-sections.ld so that every .sbss.XXX / .bss.XXX subsection is placed in DRAM
-instead of being silently discarded.
+Inserts *(.sbss.*) and *(.bss.*) into sections.ld before linking.
+NOTE: INSERT AFTER is explicitly incompatible with --enable-non-contiguous-regions
+      so we must edit sections.ld in-place rather than appending a new SECTIONS block.
 """
 import sys, os, re
 
@@ -20,37 +14,43 @@ if not os.path.isfile(path):
     sys.exit(0)
 
 with open(path, encoding="utf-8") as fh:
-    src = fh.read()
+    content = fh.read()
 
-if "*(.sbss.*)" in src:
+if "*(.sbss.*)" in content:
     print("[patch_sections_ld] already patched – nothing to do")
     sys.exit(0)
 
-# Insert *(.sbss.*) right after every *(.sbss ) pattern (with optional spaces)
-out = re.sub(r'(\*\(\.sbss[ \t]*\))', r'\1\n        *(.sbss.*)', src)
+# ── Diagnostic: show every line that mentions bss so we know the real format ──
+bss_lines = [(i+1, l) for i, l in enumerate(content.splitlines())
+             if re.search(r'\.(s?bss|COMMON)', l, re.IGNORECASE)]
+print("[patch_sections_ld] BSS-related lines in sections.ld:")
+for lineno, line in bss_lines[:30]:
+    print(f"  {lineno:4d}: {line}")
 
-# Insert *(.bss.*)  right after every *(.bss )  pattern
-out = re.sub(r'(\*\(\.bss[ \t]*\))',  r'\1\n        *(.bss.*)',  out)
+out = content
 
-if out == src:
-    # Fallback: just append an extra SECTIONS block with INSERT AFTER
-    print("[patch_sections_ld] WARNING: could not find .sbss/.bss anchors; "
-          "trying INSERT AFTER fallback")
-    out = src + """
+# Strategy 1 – add wildcard right after any *(.sbss...) pattern
+out = re.sub(r'(\*\(\.sbss\b[^)]*\))', r'\1\n        *(.sbss.*)', out)
 
-/* ---- IDF 5.3.x ESP32-P4 BSS wildcard fix (appended by patch_sections_ld.py) ---- */
-SECTIONS
-{
-  .dram0.bss_wildcards (NOLOAD) :
-  {
-    *(.sbss.*)
-    *(.bss.*)
-  }
-}
-INSERT AFTER .dram0.bss;
-"""
+# Strategy 2 – add wildcard right after any *(.bss...) pattern
+out = re.sub(r'(\*\(\.bss\b[^)]*\))', r'\1\n        *(.bss.*)', out)
+
+# Strategy 3 (fallback) – if still nothing matched, inject before _bss_end
+if "*(.sbss.*)" not in out:
+    print("[patch_sections_ld] strategies 1+2 missed; trying _bss_end anchor")
+    out = re.sub(
+        r'(\s*_bss_end\s*=\s*ABSOLUTE\s*\(\s*\.\s*\)\s*;)',
+        r'\n        *(.sbss.*)\n        *(.bss.*)\1',
+        out
+    )
+
+if "*(.sbss.*)" not in out:
+    print("[patch_sections_ld] ERROR: all strategies failed – first 60 lines of sections.ld:")
+    for i, l in enumerate(content.splitlines()[:60]):
+        print(f"  {i+1:4d}: {l}")
+    sys.exit(1)
 
 with open(path, "w", encoding="utf-8") as fh:
     fh.write(out)
 
-print(f"[patch_sections_ld] patched {path}")
+print("[patch_sections_ld] patched successfully")
