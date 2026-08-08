@@ -15,6 +15,7 @@
 #include "nvs_flash.h"
 #include "driver/ledc.h"
 #include "esp_heap_caps.h"
+#include "esp_cache.h"         // esp_cache_msync — flush CPU cache → PSRAM for DMA2D
 #include "esp_lcd_mipi_dsi.h"  // esp_lcd_dpi_panel_get_frame_buffer
 
 #include "app_config.h"
@@ -81,6 +82,11 @@ static void fill_framebuffer(esp_lcd_panel_handle_t panel, uint16_t rgb565)
     uint32_t word = ((uint32_t)rgb565 << 16) | rgb565;
     uint32_t *p   = (uint32_t *)s_fb;
     for (size_t i = 0; i < total_pixels / 2; i++) p[i] = word;
+
+    // Flush CPU L2 cache → physical PSRAM so DMA2D sees the written pixels.
+    // Without this the DPI controller reads stale zeros from PSRAM.
+    const size_t fb_bytes = DISPLAY_H_RES * DISPLAY_V_RES * 2;
+    esp_cache_msync(s_fb, fb_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 }
 
 // ── app_main ──────────────────────────────────────────────────

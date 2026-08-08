@@ -109,9 +109,10 @@ static const jd9365_cmd_t JD9365_INIT[] = {
     {0xE0, {0x00}, 1, 0},
     {0xE6, {0x02}, 1, 0},
     {0xE7, {0x02}, 1, 0},
-    // Sleep out + display on
+    // Sleep out — must come before video stream starts; 120 ms mandatory
     {0x11, {0x00}, 0, 120},
-    {0x29, {0x00}, 0, 20},
+    // NOTE: Display ON (0x29) is sent AFTER esp_lcd_panel_init() starts the
+    // DPI video stream — many MIPI panels ignore 0x29 if no sync is running.
 };
 #define JD9365_INIT_LEN (sizeof(JD9365_INIT) / sizeof(JD9365_INIT[0]))
 
@@ -205,6 +206,14 @@ esp_lcd_panel_handle_t jd9365_panel_init(void)
     ESP_LOGI(TAG, "Step 6: esp_lcd_panel_init");
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
     ESP_LOGI(TAG, "Step 6 OK — DSI video stream running");
+
+    // Step 7 — Display ON *after* video stream is live.
+    // JD9365 (and most MIPI video-mode panels) ignore 0x29 if sent before
+    // the DPI pixel clock is running; the TCON won't enable the LCD cells.
+    ESP_LOGI(TAG, "Step 7: Display ON (0x29) — video stream must be running first");
+    esp_lcd_panel_io_tx_param(io_handle, 0x29, NULL, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    ESP_LOGI(TAG, "Step 7 OK");
 
     return panel_handle;
 }
