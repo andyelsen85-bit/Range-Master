@@ -1,5 +1,4 @@
 idf_component_register(
-    LDFRAGMENTS "esp32p4_bss_fix.lf"
     SRCS
         "main.cpp"
         "display/jd9365_panel.cpp"
