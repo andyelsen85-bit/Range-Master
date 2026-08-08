@@ -161,14 +161,22 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
 
     // ── Coordinate transform ─────────────────────────────────────
-    // Raw values map directly to LVGL logical space — no rotation, no mirror.
-    // Confirmed by 4-corner calibration:
+    // Calibrated linear map from measured raw range → LVGL logical space.
+    // 4-corner measurements (no rotation, no mirror — axes align directly):
     //   raw(55,30)   → top-left      raw(1631,25)  → top-right
     //   raw(42,878)  → bottom-left   raw(1640,877) → bottom-right
-    // Raw range slightly exceeds logical dimensions (~1640 vs 1280, ~880 vs 800);
-    // the clamp block below handles the overshoot.
-    int32_t lx = (int32_t)raw_x;
-    int32_t ly = (int32_t)raw_y;
+    // Raw sensor range: X ∈ [42..1640], Y ∈ [25..878]
+    // Linear scale stretches the measured range to fill the full logical display
+    // so that every pixel is reachable (simple pass-through leaves ~40 px dead
+    // at each edge because the sensor never reaches 0 or 1280/800).
+#define TOUCH_RAW_X_MIN  42
+#define TOUCH_RAW_X_MAX  1640
+#define TOUCH_RAW_Y_MIN  25
+#define TOUCH_RAW_Y_MAX  878
+    int32_t lx = (int32_t)((raw_x - TOUCH_RAW_X_MIN) *
+                 (DISPLAY_LOGICAL_W - 1) / (TOUCH_RAW_X_MAX - TOUCH_RAW_X_MIN));
+    int32_t ly = (int32_t)((raw_y - TOUCH_RAW_Y_MIN) *
+                 (DISPLAY_LOGICAL_H - 1) / (TOUCH_RAW_Y_MAX - TOUCH_RAW_Y_MIN));
 
     // Clamp to logical display
     if (lx < 0) lx = 0;
