@@ -1,7 +1,7 @@
 # TrapMaster Terminal — Installatiounsguide
 
 **Hardware:** Guition JC8012P4A1C-I-W-Y (ESP32-P4 + ESP32-C6, 10.1″ 1280×800)  
-**Software:** ESP-IDF 5.4 + LVGL v9
+**Software:** ESP-IDF 5.5.5 + LVGL v9
 
 ---
 
