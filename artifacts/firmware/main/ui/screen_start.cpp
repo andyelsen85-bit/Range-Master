@@ -142,9 +142,13 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_text_font(players_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(players_hdr, lv_color_hex(CLR_TEXT), 0);
 
-    // static: ~13 KB — too large for the LVGL task stack as a local variable.
-    static char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32];
-    build_player_opts(opts, sizeof(opts));
+    // Heap-allocated: ~13 KB is too large for stack and too large for static BSS
+    // (static BSS lands in internal DRAM which is already scarce on ESP32-P4).
+    // lv_dropdown_set_options() calls lv_strdup() internally, so free() is safe
+    // immediately after the dropdown calls below.
+    const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32;
+    char *opts = (char *)malloc(opts_sz);
+    if (opts) build_player_opts(opts, opts_sz);
 
     for (int i = 0; i < MAX_SPIELER; i++) {
         lv_obj_t *row = lv_obj_create(left);
@@ -176,6 +180,7 @@ lv_obj_t *screen_start_create(void)
         s_player_dropdowns[i] = dd;
         s_player_rows[i] = row;
     }
+    free(opts); // lv_dropdown_set_options copies via lv_strdup — safe to free now
 
     s_lbl_error = lv_label_create(left);
     lv_label_set_text(s_lbl_error, "");
@@ -264,12 +269,15 @@ void screen_start_refresh(void)
 {
     // Rebuild dropdown options when portal players change
     if (!s_player_dropdowns[0]) return;
-    static char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32];
-    build_player_opts(opts, sizeof(opts));
+    const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32;
+    char *opts = (char *)malloc(opts_sz);
+    if (!opts) return;
+    build_player_opts(opts, opts_sz);
     for (int i = 0; i < MAX_SPIELER; i++) {
         if (s_player_dropdowns[i])
             lv_dropdown_set_options(s_player_dropdowns[i], opts);
     }
+    free(opts);
     // Sync machine button states
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         if (!s_maschinen_btns[m]) continue;

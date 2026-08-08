@@ -202,16 +202,20 @@ void screen_kredite_refresh(void)
 {
     if (!s_player_list) return;
 
-    // Rebuild dropdown
-    // static: ~13 KB — too large for the LVGL task stack as a local variable.
-    static char opts[MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 4];
-    opts[0] = '\0'; strncat(opts, "—", sizeof(opts) - 1);
+    // Rebuild dropdown — heap-allocated: ~13 KB is too large for stack AND for
+    // static BSS (static lands in internal DRAM, which is the scarce resource).
+    // lv_dropdown_set_options() copies via lv_strdup(), so free() is safe after.
+    const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 4;
+    char *opts = (char *)malloc(opts_sz);
+    if (!opts) return;
+    opts[0] = '\0'; strncat(opts, "—", opts_sz - 1);
     for (int i = 0; i < g_store.portalSpielerCount; i++) {
-        strncat(opts, "\n", sizeof(opts) - strlen(opts) - 1);
+        strncat(opts, "\n", opts_sz - strlen(opts) - 1);
         strncat(opts, g_store.portalSpieler[i].name,
-                sizeof(opts) - strlen(opts) - 1);
+                opts_sz - strlen(opts) - 1);
     }
     if (s_dd_add) lv_dropdown_set_options(s_dd_add, opts);
+    free(opts);
 
     build_player_list();
 }
