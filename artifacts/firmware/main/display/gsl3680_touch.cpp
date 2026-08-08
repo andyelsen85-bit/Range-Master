@@ -99,12 +99,26 @@ static void gsl3680_load_firmware(void)
 // ── LVGL input read callback ─────────────────────────────────
 static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
-    // Read touch count register
+    // ── Diagnostics — log the first 20 status reads unconditionally,
+    // then once every 500 calls, so the user can paste the monitor
+    // output and we can diagnose I²C failures or missing touch data.
+    static uint32_t s_call = 0;
+    ++s_call;
+    bool log_status = (s_call <= 20) || (s_call % 500 == 0);
+
+    // Read touch count / status register
     uint8_t reg = GSL3680_REG_STATUS;
     uint8_t status[4] = {0};
     esp_err_t err = i2c_master_write_read_device(
         TOUCH_I2C_PORT, TOUCH_I2C_ADDR,
         &reg, 1, status, 4, pdMS_TO_TICKS(10));
+
+    if (log_status) {
+        ESP_LOGI(TAG, "[%lu] stat i2c=%s  raw=[%02x %02x %02x %02x]",
+                 (unsigned long)s_call,
+                 err == ESP_OK ? "OK" : esp_err_to_name(err),
+                 status[0], status[1], status[2], status[3]);
+    }
 
     if (err != ESP_OK) {
         data->state = LV_INDEV_STATE_RELEASED;
@@ -118,7 +132,9 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     }
     if (count > GSL3680_MAX_POINTS) count = GSL3680_MAX_POINTS;
 
-    // Read first touch point (4 bytes: id, y_lo, x_hi, x_lo, y_hi)
+    // Read first touch point (4 bytes at register 0x84)
+    //   tp[0] = y_lo,  tp[1] = finger_id[7:4] | y_hi[3:0]
+    //   tp[2] = x_lo,  tp[3] = 0000            | x_hi[3:0]
     uint8_t tp_reg = GSL3680_REG_TOUCH;
     uint8_t tp[4] = {0};
     err = i2c_master_write_read_device(
@@ -130,24 +146,36 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         return;
     }
 
-    // GSL3680 raw coords are in panel-native orientation (800×1280)
+    // GSL3680 raw coords are in panel-native portrait (800×1280):
+    //   raw_x range 0..799,  raw_y range 0..1279
     uint16_t raw_x = ((tp[3] & 0x0F) << 8) | tp[2];
     uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
 
-    // Rotate 90° to logical landscape (1280×800):
-    //   logical_x = raw_y
-    //   logical_y = DISPLAY_H_RES - 1 - raw_x
+    // Log every actual touch event (first 30, then every 50th)
+    static uint32_t s_touch = 0;
+    ++s_touch;
+    if (s_touch <= 30 || s_touch % 50 == 0) {
+        ESP_LOGI(TAG, "TOUCH #%lu  tp=[%02x %02x %02x %02x]  "
+                      "raw_x=%u raw_y=%u  cnt=%u",
+                 (unsigned long)s_touch,
+                 tp[0], tp[1], tp[2], tp[3],
+                 raw_x, raw_y, count);
+    }
+
+    // Rotate 90° CCW: portrait physical → landscape logical
+    //   logical_x = raw_y            (0..1279)
+    //   logical_y = (H_RES-1) - raw_x  (0..799)
     int32_t lx = (int32_t)raw_y;
     int32_t ly = (int32_t)(DISPLAY_H_RES - 1 - raw_x);
 
-    // Clamp
+    // Clamp to logical display
     if (lx < 0) lx = 0;
     if (lx >= DISPLAY_LOGICAL_W) lx = DISPLAY_LOGICAL_W - 1;
     if (ly < 0) ly = 0;
     if (ly >= DISPLAY_LOGICAL_H) ly = DISPLAY_LOGICAL_H - 1;
 
-    data->point.x = (int32_t)lx;
-    data->point.y = (int32_t)ly;
+    data->point.x = lx;
+    data->point.y = ly;
     data->state   = LV_INDEV_STATE_PRESSED;
 }
 
