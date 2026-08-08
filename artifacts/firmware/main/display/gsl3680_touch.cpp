@@ -161,16 +161,14 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
 
     // ── Coordinate transform ─────────────────────────────────────
-    // We need to map (raw_x, raw_y) → LVGL logical (lx, ly).
-    // The panel coordinate origin and axis directions are still being
-    // calibrated from physical tap measurements.
-    //
-    // Current best guess (to be updated from corner-tap log data):
-    //   lx = DISPLAY_LOGICAL_W  - 1 - raw_x   (X mirrored)
-    //   ly = DISPLAY_LOGICAL_H - 1 - raw_y   (Y mirrored)
-    // Scale factors TBD once we have 4-corner raw values.
-    int32_t lx = (int32_t)(DISPLAY_LOGICAL_W  - 1) - (int32_t)raw_x;
-    int32_t ly = (int32_t)(DISPLAY_LOGICAL_H - 1) - (int32_t)raw_y;
+    // Raw values map directly to LVGL logical space — no rotation, no mirror.
+    // Confirmed by 4-corner calibration:
+    //   raw(55,30)   → top-left      raw(1631,25)  → top-right
+    //   raw(42,878)  → bottom-left   raw(1640,877) → bottom-right
+    // Raw range slightly exceeds logical dimensions (~1640 vs 1280, ~880 vs 800);
+    // the clamp block below handles the overshoot.
+    int32_t lx = (int32_t)raw_x;
+    int32_t ly = (int32_t)raw_y;
 
     // Clamp to logical display
     if (lx < 0) lx = 0;
