@@ -265,7 +265,7 @@ void screen_spiel_refresh(void)
     for (int i = 0; i < s->spielerCount; i++) {
         char row_buf[32];
         lv_table_set_cell_value(s_score_table, i + 1, 0, s->spieler[i].name);
-        snprintf(row_buf, sizeof(row_buf), "P%d", s->spieler[i].startPOSTEN);
+        snprintf(row_buf, sizeof(row_buf), "P%d", s->spieler[i].startPosten);
         lv_table_set_cell_value(s_score_table, i + 1, 1, row_buf);
         snprintf(row_buf, sizeof(row_buf), "%d", s->spieler[i].punkte);
         lv_table_set_cell_value(s_score_table, i + 1, 2, row_buf);

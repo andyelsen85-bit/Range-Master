@@ -42,7 +42,7 @@ static void start_cb(lv_event_t *e)
 
         Spieler *sp = &g_store.spieler[g_store.spielerCount];
         sp->id          = ps->id;
-        sp->startPOSTEN = g_store.spielerCount + 1;
+        sp->startPosten = g_store.spielerCount + 1;
         sp->punkte      = 0;
         snprintf(sp->name, MAX_NAME_LEN, "%s", ps->name);
         g_store.spielerCount++;

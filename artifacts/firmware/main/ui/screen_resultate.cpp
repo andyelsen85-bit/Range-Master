@@ -81,7 +81,7 @@ lv_obj_t *screen_resultate_create(void)
     lv_obj_set_style_text_font(s_lbl_winner, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(s_lbl_winner, lv_color_hex(CLR_WARN), 0);
 
-    s_lbl_MAX = lv_label_create(win_card);
+    s_lbl_max = lv_label_create(win_card);
     lv_label_set_text(s_lbl_max, "");
     lv_obj_set_style_text_font(s_lbl_max, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_lbl_max, lv_color_hex(CLR_MUTED), 0);
@@ -151,7 +151,7 @@ void screen_resultate_refresh(void)
         snprintf(buf, sizeof(buf), "WINNER: %s  (%d PUNKTE)",
                  rows[0].name, rows[0].total);
         lv_label_set_text(s_lbl_winner, buf);
-        int maxScore = fg->base.taubenProLAUF * 2 * 2;
+        int maxScore = fg->base.taubenProLauf * 2 * 2;
         snprintf(buf, sizeof(buf), "MAX %d PKT", maxScore);
         lv_label_set_text(s_lbl_max, buf);
     }
