@@ -77,8 +77,8 @@ static void connect_cb(lv_event_t *e)
     }
 
     // Save to store
-    snprintf(g_store.wifiSsid, MAX_SSID_LEN, "%s", ssid);
-    snprintf(g_store.wifiPass, MAX_PASS_LEN, "%s", pass);
+    strncpy(g_store.wifiSsid, ssid, MAX_SSID_LEN - 1); g_store.wifiSsid[MAX_SSID_LEN - 1] = '\0';
+    strncpy(g_store.wifiPass, pass, MAX_PASS_LEN - 1); g_store.wifiPass[MAX_PASS_LEN - 1] = '\0';
     game_store_save();
 
     lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " Verbanne...");

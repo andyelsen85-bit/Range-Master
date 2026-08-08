@@ -219,8 +219,14 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
         cJSON *jaktiv= cJSON_GetObjectItem(item, "portalAktiv");
 
         if (jid   && cJSON_IsNumber(jid))   ps->id = (int)jid->valuedouble;
-        if (jname && cJSON_IsString(jname)) snprintf(ps->name, MAX_NAME_LEN, "%s", jname->valuestring);
-        if (jnr   && cJSON_IsString(jnr))   snprintf(ps->mitgliedNr, sizeof(ps->mitgliedNr), "%s", jnr->valuestring);
+        if (jname && cJSON_IsString(jname)) {
+            strncpy(ps->name, jname->valuestring, MAX_NAME_LEN - 1);
+            ps->name[MAX_NAME_LEN - 1] = '\0';
+        }
+        if (jnr && cJSON_IsString(jnr)) {
+            strncpy(ps->mitgliedNr, jnr->valuestring, sizeof(ps->mitgliedNr) - 1);
+            ps->mitgliedNr[sizeof(ps->mitgliedNr) - 1] = '\0';
+        }
         if (jaktiv && cJSON_IsBool(jaktiv)) ps->portalAktiv = cJSON_IsTrue(jaktiv);
     }
 

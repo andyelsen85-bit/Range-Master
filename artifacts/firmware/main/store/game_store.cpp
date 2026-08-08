@@ -388,7 +388,8 @@ void store_add_lokal_spieler(const char *name, int *out_id)
     ps->id        = s_local_id--;
     ps->lokal     = true;
     ps->portalAktiv = false;
-    snprintf(ps->name, MAX_NAME_LEN, "%s", name);
+    strncpy(ps->name, name, MAX_NAME_LEN - 1);
+    ps->name[MAX_NAME_LEN - 1] = '\0';
     g_store.portalSpielerCount++;
     if (out_id) *out_id = ps->id;
     game_store_save();

@@ -22,8 +22,8 @@ static void save_api_cb(lv_event_t *e)
 {
     const char *url = lv_textarea_get_text(s_ta_url);
     const char *key = lv_textarea_get_text(s_ta_key);
-    snprintf(g_store.apiUrl, MAX_URL_LEN, "%s", url);
-    snprintf(g_store.apiKey, MAX_KEY_LEN, "%s", key);
+    strncpy(g_store.apiUrl, url, MAX_URL_LEN - 1); g_store.apiUrl[MAX_URL_LEN - 1] = '\0';
+    strncpy(g_store.apiKey, key, MAX_KEY_LEN - 1); g_store.apiKey[MAX_KEY_LEN - 1] = '\0';
     game_store_save();
     lv_label_set_text(s_lbl_api_status, LV_SYMBOL_OK " Gespäichert");
     lv_obj_set_style_text_color(s_lbl_api_status, lv_color_hex(CLR_SUCCESS), 0);

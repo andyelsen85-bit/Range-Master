@@ -40,7 +40,8 @@ static esp_err_t at_send(const char *cmd, const char *expect,
             s_rx_buf[total] = '\0';
             if (strstr(s_rx_buf, expect)) {
                 if (resp && resp_len) {
-                    snprintf(resp, resp_len, "%s", s_rx_buf);
+                    strncpy(resp, s_rx_buf, resp_len - 1);
+                    resp[resp_len - 1] = '\0';
                 }
                 return ESP_OK;
             }
