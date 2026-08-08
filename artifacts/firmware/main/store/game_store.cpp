@@ -291,7 +291,8 @@ static void _store_finish_game(void)
 
     struct timeval tv; gettimeofday(&tv, NULL);
     snprintf(fg.finishedAt, sizeof(fg.finishedAt), "%lld", (long long)tv.tv_sec);
-    snprintf(fg.base.externalId, sizeof(fg.base.externalId), "%s", s->spielId);
+    strncpy(fg.base.externalId, s->spielId, sizeof(fg.base.externalId) - 1);
+    fg.base.externalId[sizeof(fg.base.externalId) - 1] = '\0';
 
     // Snapshot player names
     for (int i = 0; i < s->spielerCount; i++) {

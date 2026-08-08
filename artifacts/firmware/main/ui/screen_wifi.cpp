@@ -25,7 +25,7 @@ static void scan_cb(lv_event_t *e)
 {
     lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " Scannt...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
-    lv_list_clean(s_list_networks);
+    lv_obj_clean(s_list_networks);
 
     // Run scan in background task
     xTaskCreate([](void *arg) {
@@ -42,7 +42,7 @@ static void scan_cb(lv_event_t *e)
         lv_async_call([](void *arg2) {
             extern char s_net_names[20][33];
             extern int s_net_count;
-            lv_list_clean(s_list_networks);
+            lv_obj_clean(s_list_networks);
             for (int i = 0; i < s_net_count; i++) {
                 lv_obj_t *btn = lv_list_add_btn(s_list_networks,
                                                 LV_SYMBOL_WIFI, s_net_names[i]);

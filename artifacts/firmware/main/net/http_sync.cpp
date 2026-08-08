@@ -49,13 +49,12 @@ static esp_err_t http_post_json(const char *path, const char *body,
     http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap };
     if (resp_buf) resp_buf[0] = '\0';
 
-    esp_http_client_config_t cfg = {
-        .url             = url,
-        .event_handler   = http_event_handler,
-        .user_data       = resp_buf ? &acc : NULL,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms      = 15000,
-    };
+    esp_http_client_config_t cfg = {};
+    cfg.url               = url;
+    cfg.event_handler     = http_event_handler;
+    cfg.user_data         = resp_buf ? &acc : NULL;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.timeout_ms        = 15000;
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
@@ -86,13 +85,12 @@ static esp_err_t http_get_json(const char *path,
     http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap };
     resp_buf[0] = '\0';
 
-    esp_http_client_config_t cfg = {
-        .url             = url,
-        .event_handler   = http_event_handler,
-        .user_data       = &acc,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms      = 15000,
-    };
+    esp_http_client_config_t cfg = {};
+    cfg.url               = url;
+    cfg.event_handler     = http_event_handler;
+    cfg.user_data         = &acc;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.timeout_ms        = 15000;
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
 
