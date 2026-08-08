@@ -112,11 +112,16 @@ static void lvgl_flush_cb(lv_display_t *disp,
     int32_t log_h  = area->y2 - area->y1 + 1;   // 80
     int32_t phys_w = log_h;                      // 80  (physical strip width)
 
+    // Rotate 90° CCW into s_rot_buf.
+    // Iterate destination-row-major so every write is to a consecutive address —
+    // this is critical for PSRAM throughput: column-stride writes (the naive loop)
+    // hit a different cache-line per write (160-byte stride @ phys_w=80 px),
+    // stalling the bus.  Row-major writes burst an entire 80-px row in one pass.
     uint16_t *src = (uint16_t *)px_map;
-    for (int32_t ly = 0; ly < log_h; ly++) {
-        int32_t px = log_h - 1 - ly;             // physical col within strip
-        for (int32_t lx = 0; lx < log_w; lx++) {
-            s_rot_buf[lx * phys_w + px] = src[ly * log_w + lx];
+    for (int32_t lx = 0; lx < log_w; lx++) {
+        uint16_t *dp = &s_rot_buf[lx * phys_w];   // destination row — sequential
+        for (int32_t px = 0; px < phys_w; px++) { // forward = contiguous writes
+            dp[px] = src[(phys_w - 1 - px) * log_w + lx];
         }
     }
 

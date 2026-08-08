@@ -146,27 +146,31 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         return;
     }
 
-    // GSL3680 raw coords are in panel-native portrait (800×1280):
-    //   raw_x range 0..799,  raw_y range 0..1279
-    uint16_t raw_x = ((tp[3] & 0x0F) << 8) | tp[2];
-    uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
+    // GSL3680 firmware reports in 12-bit virtual space (0..4095) regardless
+    // of the physical panel size.  Scale to physical panel pixels first.
+    uint16_t raw_x = ((tp[3] & 0x0F) << 8) | tp[2];   // 0..4095
+    uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];   // 0..4095
+
+    // Scale to physical portrait pixels (round to nearest)
+    uint32_t phys_x = ((uint32_t)raw_x * DISPLAY_H_RES + 2048) / 4096; // 0..799
+    uint32_t phys_y = ((uint32_t)raw_y * DISPLAY_V_RES + 2048) / 4096; // 0..1279
 
     // Log every actual touch event (first 30, then every 50th)
     static uint32_t s_touch = 0;
     ++s_touch;
     if (s_touch <= 30 || s_touch % 50 == 0) {
         ESP_LOGI(TAG, "TOUCH #%lu  tp=[%02x %02x %02x %02x]  "
-                      "raw_x=%u raw_y=%u  cnt=%u",
+                      "raw(%u,%u) → phys(%u,%u)  cnt=%u",
                  (unsigned long)s_touch,
                  tp[0], tp[1], tp[2], tp[3],
-                 raw_x, raw_y, count);
+                 raw_x, raw_y, phys_x, phys_y, count);
     }
 
-    // Rotate 90° CCW: portrait physical → landscape logical
-    //   logical_x = raw_y            (0..1279)
-    //   logical_y = (H_RES-1) - raw_x  (0..799)
-    int32_t lx = (int32_t)raw_y;
-    int32_t ly = (int32_t)(DISPLAY_H_RES - 1 - raw_x);
+    // Rotate 90° CCW: physical portrait (phys_x, phys_y) → logical landscape
+    //   logical_x = phys_y            (0..1279)
+    //   logical_y = (H_RES-1) - phys_x  (0..799)
+    int32_t lx = (int32_t)phys_y;
+    int32_t ly = (int32_t)(DISPLAY_H_RES - 1 - phys_x);
 
     // Clamp to logical display
     if (lx < 0) lx = 0;
