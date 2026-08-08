@@ -146,33 +146,35 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
         return;
     }
 
-    // GSL3680 firmware reports in 12-bit virtual space (0..4095) regardless
-    // of the physical panel size.  Scale to physical panel pixels first.
-    uint16_t raw_x = ((tp[3] & 0x0F) << 8) | tp[2];   // 0..4095
-    uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];   // 0..4095
-
-    // Scale to physical portrait pixels (round to nearest)
-    uint32_t phys_x = ((uint32_t)raw_x * DISPLAY_H_RES + 2048) / 4096; // 0..799
-    uint32_t phys_y = ((uint32_t)raw_y * DISPLAY_V_RES + 2048) / 4096; // 0..1279
+    // GSL3680 firmware for this panel (JC8012P4A1C) was calibrated in
+    // LANDSCAPE orientation — raw_x / raw_y are already in logical landscape
+    // pixel space (approximately 0..1600 × 0..800).  No rotation or 4096
+    // scaling is needed; just clamp to the display bounds.
+    //
+    // Evidence from captured data:
+    //   "Spill Start" tap (top-right sidebar) → raw_x≈1424, raw_y≈197
+    //   Button logical range: x=960..1279, y=96..235 → raw_x→1279 (clamped ✓),
+    //   raw_y=197 → directly inside button ✓
+    //   Content-area taps (no reaction): raw_x=218..809 → lx=218..809 (not
+    //   in any button widget) ✓
+    uint16_t raw_x = ((tp[3] & 0x0F) << 8) | tp[2];
+    uint16_t raw_y = ((tp[1] & 0x0F) << 8) | tp[0];
 
     // Log every actual touch event (first 30, then every 50th)
     static uint32_t s_touch = 0;
     ++s_touch;
     if (s_touch <= 30 || s_touch % 50 == 0) {
         ESP_LOGI(TAG, "TOUCH #%lu  tp=[%02x %02x %02x %02x]  "
-                      "raw(%u,%u) -> phys(%lu,%lu)  cnt=%u",
+                      "raw(%u,%u)  cnt=%u",
                  (unsigned long)s_touch,
                  tp[0], tp[1], tp[2], tp[3],
                  (unsigned)raw_x, (unsigned)raw_y,
-                 (unsigned long)phys_x, (unsigned long)phys_y,
                  (unsigned)count);
     }
 
-    // Rotate 90° CCW: physical portrait (phys_x, phys_y) → logical landscape
-    //   logical_x = phys_y            (0..1279)
-    //   logical_y = (H_RES-1) - phys_x  (0..799)
-    int32_t lx = (int32_t)phys_y;
-    int32_t ly = (int32_t)(DISPLAY_H_RES - 1 - phys_x);
+    // Use raw values directly as landscape logical coordinates
+    int32_t lx = (int32_t)raw_x;
+    int32_t ly = (int32_t)raw_y;
 
     // Clamp to logical display
     if (lx < 0) lx = 0;
