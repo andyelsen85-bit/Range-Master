@@ -27,8 +27,10 @@ static void add_player_cb(lv_event_t *e)
 {
     if (!s_dd_add) return;
     uint16_t sel = lv_dropdown_get_selected(s_dd_add);
-    if (sel >= (uint16_t)g_store.portalSpielerCount) return;
-    PortalSpieler *ps = &g_store.portalSpieler[sel];
+    if (sel == 0) return;                              // "-" placeholder
+    uint16_t idx = sel - 1;                            // offset for leading "-"
+    if (idx >= (uint16_t)g_store.portalSpielerCount) return;
+    PortalSpieler *ps = &g_store.portalSpieler[idx];
     store_register_spieler_fuer_tag(ps->id);
     lv_label_set_text(s_lbl_status, "SPILLER DOBAIGESAT");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
