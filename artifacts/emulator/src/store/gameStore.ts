@@ -277,6 +277,20 @@ export function getCurrentPosten(spieler: Spieler, taubeIndex: number, totalSpie
   return ((spieler.startPosten - 1 + taubeIndex) % 5) + 1;
 }
 
+/**
+ * Count H2 (doubletteNr === 2) entries at indices strictly before `before`.
+ * H1 + H2 occupy two taubeIndex slots but represent ONE physical position.
+ * Subtracting this count converts a raw taubeIndex into a logical position index,
+ * so entries after an H doublette advance by +1 post, not +2.
+ */
+export function countH2Before(sequenz: SequenzEintrag[], before: number): number {
+  let n = 0;
+  for (let i = 0; i < before; i++) {
+    if (sequenz[i].doubletteNr === 2) n++;
+  }
+  return n;
+}
+
 /** True for all three Harakiri variants — in those modes each post faces a different machine */
 export function isHarakiriModus(modus: Modus): boolean {
   return modus === 'HARAKIRI';
@@ -646,7 +660,10 @@ export const useGameStore = create<GameState>((set, get) => {
         !isHarakiriModus(state.modus) && eintrag?.doubletteNr === 2
           ? state.taubeIndex - 1
           : state.taubeIndex;
-      const posten = getCurrentPosten(currentSpieler, effectiveTaubeIdx, state.spieler.length);
+      // H1+H2 together = ONE physical position step. Subtract H2 entries seen before
+      // this slot so entries after an H advance by +1 post, not +2.
+      const h2Offset = isHarakiriModus(state.modus) ? 0 : countH2Before(state.sequenz, effectiveTaubeIdx);
+      const posten = getCurrentPosten(currentSpieler, effectiveTaubeIdx - h2Offset, state.spieler.length);
 
       if (!eintrag) return state;
 

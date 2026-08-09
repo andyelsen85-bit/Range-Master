@@ -211,6 +211,16 @@ bool store_start_spiel(void)
     return true;
 }
 
+// Count isDoublette (H2) entries at indices strictly before `before`.
+// H1 and H2 together occupy one physical position but two taubeIndex slots.
+// Subtracting this count converts a raw taubeIndex into a logical position index.
+static int count_h2_before(const GameStore *s, int before) {
+    int n = 0;
+    for (int i = 0; i < before && i < s->sequenzLen; i++)
+        if (s->sequenz[i].isDoublette) n++;
+    return n;
+}
+
 // ── store_eintragen ──────────────────────────────────────────
 // H-doublette interleaving rule:
 //   H1 entry (isDoublette=false, next entry isDoublette=true):
@@ -234,8 +244,11 @@ void store_eintragen(int punkte)
                 && (s->taubeIndex + 1 < s->sequenzLen)
                 && s->sequenz[s->taubeIndex + 1].isDoublette;
 
-    // H2 records at the same post as H1 (taubeIndex-1)
-    int posIdx = (isH2 && s->taubeIndex > 0) ? s->taubeIndex - 1 : s->taubeIndex;
+    // Logical position index: H1 + H2 together = ONE physical position step.
+    // rawIdx: align H2 back to H1's slot; then subtract H2 entries seen before
+    // that slot (each one represents a slot that does NOT advance the position).
+    int rawIdx = (isH2 && s->taubeIndex > 0) ? s->taubeIndex - 1 : s->taubeIndex;
+    int posIdx = rawIdx - count_h2_before(s, rawIdx);
     int base   = s->spieler[s->spielerIndex].startPosten - 1;
 
     Ergebnis e = {};

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useGameStore, getCurrentPosten, isHarakiriModus, getEintragForPlayer } from '@/store/gameStore';
+import { useGameStore, getCurrentPosten, isHarakiriModus, getEintragForPlayer, countH2Before } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import { SkipForward, RotateCcw, XOctagon, Zap, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -37,9 +37,12 @@ export function SpielScreen() {
   // H2 post-stays-same-as-H1 adjustment — Normal mode only; Harakiri advances naturally
   const effectiveTaubeIdx =
     !harakiri && doubletteNr === 2 ? store.taubeIndex - 1 : store.taubeIndex;
-  const posMap = buildPositionMap(store.spieler, effectiveTaubeIdx);
+  // H1+H2 = ONE physical position: subtract H2 entries before this slot
+  const h2Offset = harakiri ? 0 : countH2Before(store.sequenz, effectiveTaubeIdx);
+  const logicalTaubeIdx = effectiveTaubeIdx - h2Offset;
+  const posMap = buildPositionMap(store.spieler, logicalTaubeIdx);
   const aktuellePosten = aktiverSpieler
-    ? getCurrentPosten(aktiverSpieler, effectiveTaubeIdx, store.spieler.length)
+    ? getCurrentPosten(aktiverSpieler, logicalTaubeIdx, store.spieler.length)
     : 1;
 
   return (
