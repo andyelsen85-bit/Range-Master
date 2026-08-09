@@ -35,8 +35,8 @@
 
 // ── UART to ESP32-C6 co-processor ───────────────────────────
 #define C6_UART_PORT            UART_NUM_1
-#define C6_UART_TX              GPIO_NUM_4
-#define C6_UART_RX              GPIO_NUM_5
+#define C6_UART_TX              GPIO_NUM_5   // swapped: GPIO5=P4→C6 TX, GPIO4=P4←C6 RX
+#define C6_UART_RX              GPIO_NUM_4
 #define C6_UART_BAUD            115200
 #define C6_UART_RX_BUF         4096
 #define C6_AT_TIMEOUT_MS        8000

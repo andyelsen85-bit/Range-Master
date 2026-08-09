@@ -121,27 +121,37 @@ void coprocessor_init(void)
 
     xTaskCreate(uart_event_task, "cop_uart", 4096, NULL, 10, &s_event_task);
 
-    // Wake up C6 and confirm AT echo.
-    // The factory Guition firmware already has Espressif ESP-AT loaded on the
-    // C6 — no reflash needed.  Give the C6 time to boot, then probe.
-    vTaskDelay(pdMS_TO_TICKS(500));
-    if (at_send("AT", "OK", NULL, 0, 2000) == ESP_OK) {
-        ESP_LOGI(TAG, "C6 co-processor responsive");
-        at_send("ATE0", "OK", NULL, 0, 1000);  // disable echo
-        // Set station mode so AT+CWJAP works without manual configuration.
-        // Mode 1 = STA only.  Must be done before any WiFi command.
-        at_send("AT+CWMODE=1", "OK", NULL, 0, 2000);
+    // Probe the C6 — retry up to 5× with increasing delay.
+    // The factory Guition board has Espressif ESP-AT pre-loaded; no flash needed.
+    // The C6 AT firmware can take 1-2 s to boot, so we retry rather than give up.
+    bool c6_ok = false;
+    for (int attempt = 0; attempt < 5; attempt++) {
+        vTaskDelay(pdMS_TO_TICKS(attempt == 0 ? 500 : 1000));
+        if (at_send("AT", "OK", NULL, 0, 2000) == ESP_OK) {
+            ESP_LOGI(TAG, "C6 responsive (attempt %d/5)", attempt + 1);
+            c6_ok = true;
+            break;
+        }
+        ESP_LOGW(TAG, "C6 AT probe %d/5 — no response yet", attempt + 1);
+    }
+    if (c6_ok) {
+        at_send("ATE0",       "OK", NULL, 0, 1000);  // disable echo
+        at_send("AT+CWMODE=1","OK", NULL, 0, 2000);  // STA mode — required before CWJAP
     } else {
-        ESP_LOGW(TAG, "C6 not responding — check GPIO4/5 wiring");
+        ESP_LOGE(TAG, "C6 not responding after 5 attempts — check GPIO4/5 wiring");
     }
 }
 
 // ── WiFi ─────────────────────────────────────────────────────
 esp_err_t cop_wifi_connect(const char *ssid, const char *pass)
 {
+    // Always ensure STA mode before connecting — handles the case where
+    // the init-time probe timed out and CWMODE was never set.
+    at_send("AT+CWMODE=1", "OK", NULL, 0, 3000);
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "AT+CWJAP=\"%s\",\"%s\"", ssid, pass);
-    return at_send(cmd, "WIFI GOT IP", NULL, 0, C6_AT_TIMEOUT_MS);
+    // 15 s: AT+CWJAP can take up to ~10 s for association + DHCP; 8 s was too tight.
+    return at_send(cmd, "WIFI GOT IP", NULL, 0, 15000);
 }
 
 esp_err_t cop_wifi_disconnect(void)

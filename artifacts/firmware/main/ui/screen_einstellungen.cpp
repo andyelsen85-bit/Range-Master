@@ -122,76 +122,102 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 }
 
 // ── Tab: CUSTOM SEQUENZEN ─────────────────────────────────────
-// For each CUSTOM 1..4: toggle which machines are in the sequence,
-// and pick 1 or 2 Läufe.  Changes are live-written to g_store.
+// Ordered sequence builder: tap A-H to APPEND a machine to the sequence
+// (same machine can appear multiple times, up to 16 total); tap any badge
+// in the sequence strip to REMOVE that slot; pick 1 or 2 Läufe.
+// Mirrors the emulator's CustomSequenzEditor component.
 static const char *CUSTOM_NAMES[] = {"CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4"};
 static const char *MACH_LBL[]     = {"A","B","C","D","E","F","G","H"};
+#define CUSTOM_SEQ_MAX 16
 
-static void custom_mach_cb(lv_event_t *e)
+// Per-mode widget references — rebuilt on each add/remove
+static lv_obj_t *s_custom_seq_cont[4];
+static lv_obj_t *s_stat_tauben[4];
+static lv_obj_t *s_stat_pkt_lauf[4];
+static lv_obj_t *s_stat_pkt_spiel[4];
+static lv_obj_t *s_lauf_btn[4][2];
+
+// ── Helpers ───────────────────────────────────────────────────
+static void refresh_custom_stats(int ci)
 {
-    // user_data = (ci << 4) | machine_index
-    int packed = (int)(intptr_t)lv_event_get_user_data(e);
-    int ci = (packed >> 4) & 0xF;
-    int mi = packed & 0xF;
-    Maschine m = (Maschine)mi;
+    if (!s_stat_tauben[ci]) return;
+    int tauben = 0;
+    for (int i = 0; i < g_store.customSequenzLen[ci]; i++)
+        tauben += (g_store.customSequenzen[ci][i] == MASCHINE_H) ? 2 : 1;
+    int pktLauf  = tauben * 2;
+    int pktSpiel = pktLauf * g_store.customLaeufe[ci];
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", tauben);  lv_label_set_text(s_stat_tauben[ci],    buf);
+    snprintf(buf, sizeof(buf), "%d", pktLauf); lv_label_set_text(s_stat_pkt_lauf[ci],  buf);
+    snprintf(buf, sizeof(buf), "%d", pktSpiel);lv_label_set_text(s_stat_pkt_spiel[ci], buf);
+}
 
-    // Toggle presence in the custom sequence
-    Maschine *seq = g_store.customSequenzen[ci];
-    int len       = g_store.customSequenzLen[ci];
-    bool found = false;
+static void refresh_custom_seq(int ci)
+{
+    lv_obj_t *cont = s_custom_seq_cont[ci];
+    if (!cont) return;
+    lv_obj_clean(cont);
+    int len = g_store.customSequenzLen[ci];
+    if (len == 0) {
+        lv_obj_t *ph = lv_label_create(cont);
+        lv_label_set_text(ph, "KENG SCHANZEN");
+        lv_obj_set_style_text_color(ph, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_style_text_font(ph, &lv_font_montserrat_14, 0);
+        lv_obj_center(ph);
+        return;
+    }
     for (int i = 0; i < len; i++) {
-        if (seq[i] == m) {
-            // Remove: shift left
-            for (int j = i; j < len - 1; j++) seq[j] = seq[j+1];
-            g_store.customSequenzLen[ci]--;
-            found = true;
-            break;
-        }
+        Maschine m  = g_store.customSequenzen[ci][i];
+        bool    isH = (m == MASCHINE_H);
+        lv_obj_t *badge = lv_btn_create(cont);
+        lv_obj_set_size(badge, 46, 46);
+        lv_obj_set_style_radius(badge, 8, 0);
+        lv_obj_set_style_bg_color(badge,
+            isH ? lv_color_hex(0xD97706) : lv_color_hex(CLR_PRIMARY), 0);
+        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(badge, 0, 0);
+        // Pack ci (3 bits) and slot index i (5 bits) into user_data
+        int packed = (ci << 5) | i;
+        lv_obj_add_event_cb(badge, [](lv_event_t *ev) {
+            int pk  = (int)(intptr_t)lv_event_get_user_data(ev);
+            int c   = (pk >> 5) & 0x7;
+            int idx = pk & 0x1F;
+            int ln  = g_store.customSequenzLen[c];
+            if (idx >= ln) return;
+            for (int j = idx; j < ln - 1; j++)
+                g_store.customSequenzen[c][j] = g_store.customSequenzen[c][j + 1];
+            g_store.customSequenzLen[c]--;
+            game_store_save();
+            refresh_custom_seq(c);
+            refresh_custom_stats(c);
+        }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
+        lv_obj_t *lbl = lv_label_create(badge);
+        lv_label_set_text(lbl, MACH_LBL[(int)m]);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(lbl);
     }
-    if (!found && len < 16) {
-        seq[len] = m;
-        g_store.customSequenzLen[ci]++;
-    }
-
-    // Update button colour
-    lv_obj_t *btn = lv_event_get_target_obj(e);
-    bool active = false;
-    int newLen = g_store.customSequenzLen[ci];
-    for (int i = 0; i < newLen; i++) {
-        if (g_store.customSequenzen[ci][i] == m) { active = true; break; }
-    }
-    lv_obj_set_style_bg_color(btn,
-        active ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
-    lv_obj_invalidate(btn);
-    game_store_save();
 }
 
-static void custom_laeufe_cb(lv_event_t *e)
-{
-    int ci = (int)(intptr_t)lv_event_get_user_data(e);
-    lv_obj_t *dd = lv_event_get_target_obj(e);
-    uint16_t sel = lv_dropdown_get_selected(dd);
-    g_store.customLaeufe[ci] = (sel == 0) ? 1 : 2;
-    game_store_save();
-}
-
+// ── Build ─────────────────────────────────────────────────────
 static lv_obj_t *build_custom_tab(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(parent, 16, 0);
-    lv_obj_set_style_pad_row(parent, 14, 0);
+    lv_obj_set_style_pad_all(parent, 14, 0);
+    lv_obj_set_style_pad_row(parent, 12, 0);
 
     for (int ci = 0; ci < 4; ci++) {
-        // Section card
+
+        // ── Card ──────────────────────────────────────────────
         lv_obj_t *card = lv_obj_create(parent);
         lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_add_style(card, &g_style_card, 0);
         lv_obj_set_style_pad_all(card, 12, 0);
-        lv_obj_set_style_pad_row(card, 10, 0);
+        lv_obj_set_style_pad_row(card, 8, 0);
         lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
-        // Title row
+        // ── Title + CLEAR button ───────────────────────────────
         lv_obj_t *title_row = lv_obj_create(card);
         lv_obj_set_size(title_row, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(title_row, LV_OPA_0, 0);
@@ -200,53 +226,192 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         lv_obj_set_flex_flow(title_row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(title_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(title_row, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *cname = lv_label_create(title_row);
         lv_label_set_text(cname, CUSTOM_NAMES[ci]);
         lv_obj_set_style_text_font(cname, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(cname, lv_color_hex(CLR_TEXT), 0);
 
-        // Läufe dropdown
-        lv_obj_t *dd = lv_dropdown_create(title_row);
-        lv_dropdown_set_options(dd, "1 LAUF\n2 LAEUFE");
-        lv_dropdown_set_selected(dd, (g_store.customLaeufe[ci] >= 2) ? 1 : 0);
-        lv_obj_set_size(dd, 130, 36);
-        lv_obj_set_style_text_font(dd, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_bg_color(dd, lv_color_hex(CLR_BORDER), 0);
-        lv_obj_set_style_text_color(dd, lv_color_hex(CLR_TEXT), 0);
-        lv_obj_add_event_cb(dd, custom_laeufe_cb, LV_EVENT_VALUE_CHANGED,
-                            (void*)(intptr_t)ci);
+        lv_obj_t *clr = lv_btn_create(title_row);
+        lv_obj_add_style(clr, &g_style_btn_secondary, 0);
+        lv_obj_set_size(clr, 120, 34);
+        lv_obj_add_event_cb(clr, [](lv_event_t *ev) {
+            int c = (int)(intptr_t)lv_event_get_user_data(ev);
+            g_store.customSequenzLen[c] = 0;
+            game_store_save();
+            refresh_custom_seq(c);
+            refresh_custom_stats(c);
+        }, LV_EVENT_CLICKED, (void*)(intptr_t)ci);
+        lv_obj_t *clrl = lv_label_create(clr);
+        lv_label_set_text(clrl, LV_SYMBOL_CLOSE "  LOESCHEN");
+        lv_obj_set_style_text_font(clrl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(clrl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(clrl);
 
-        // Machine toggle row
-        lv_obj_t *mrow = lv_obj_create(card);
-        lv_obj_set_size(mrow, LV_PCT(100), LV_SIZE_CONTENT);
-        lv_obj_set_style_bg_opa(mrow, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(mrow, 0, 0);
-        lv_obj_set_style_pad_all(mrow, 0, 0);
-        lv_obj_set_flex_flow(mrow, LV_FLEX_FLOW_ROW);
-        lv_obj_set_style_pad_column(mrow, 8, 0);
+        // ── Section label: SEQUENZ ────────────────────────────
+        lv_obj_t *seq_hdr = lv_label_create(card);
+        lv_label_set_text(seq_hdr, "SEQUENZ  (tippen op eng Schanz fir ze loeschen)");
+        lv_obj_set_style_text_font(seq_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(seq_hdr, lv_color_hex(CLR_MUTED), 0);
+
+        // ── Sequence strip (horizontally scrollable) ──────────
+        lv_obj_t *seq_cont = lv_obj_create(card);
+        s_custom_seq_cont[ci] = seq_cont;
+        lv_obj_set_size(seq_cont, LV_PCT(100), 62);
+        lv_obj_set_style_bg_color(seq_cont, lv_color_hex(0x0A0A0A), 0);
+        lv_obj_set_style_bg_opa(seq_cont, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(seq_cont, 1, 0);
+        lv_obj_set_style_border_color(seq_cont, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_radius(seq_cont, 8, 0);
+        lv_obj_set_style_pad_all(seq_cont, 6, 0);
+        lv_obj_set_style_pad_column(seq_cont, 4, 0);
+        lv_obj_set_flex_flow(seq_cont, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(seq_cont, LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_scroll_dir(seq_cont, LV_DIR_HOR);
+        lv_obj_clear_flag(seq_cont, LV_OBJ_FLAG_SCROLL_ELASTIC);
+
+        refresh_custom_seq(ci);
+
+        // ── Section label: ADD ────────────────────────────────
+        lv_obj_t *add_hdr = lv_label_create(card);
+        lv_label_set_text(add_hdr, "SCHANZ DOBAISETZEN");
+        lv_obj_set_style_text_font(add_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(add_hdr, lv_color_hex(CLR_MUTED), 0);
+
+        // ── 8 machine add-buttons (A-H) ───────────────────────
+        lv_obj_t *add_row = lv_obj_create(card);
+        lv_obj_set_size(add_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(add_row, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(add_row, 0, 0);
+        lv_obj_set_style_pad_all(add_row, 0, 0);
+        lv_obj_set_style_pad_column(add_row, 6, 0);
+        lv_obj_set_flex_flow(add_row, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(add_row, LV_OBJ_FLAG_SCROLLABLE);
 
         for (int mi = 0; mi < MASCHINE_COUNT; mi++) {
-            bool active = false;
-            for (int k = 0; k < g_store.customSequenzLen[ci]; k++) {
-                if (g_store.customSequenzen[ci][k] == (Maschine)mi) { active = true; break; }
-            }
-            lv_obj_t *mb = lv_btn_create(mrow);
-            lv_obj_set_size(mb, 52, 52);
-            lv_obj_set_style_bg_color(mb,
-                active ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
-            lv_obj_set_style_bg_opa(mb, LV_OPA_COVER, 0);
-            lv_obj_set_style_radius(mb, 8, 0);
-            lv_obj_set_style_border_width(mb, 0, 0);
+            bool isH = (mi == (int)MASCHINE_H);
+            lv_obj_t *ab = lv_btn_create(add_row);
+            lv_obj_set_size(ab, 52, 52);
+            lv_obj_set_style_radius(ab, 8, 0);
+            lv_obj_set_style_bg_color(ab,
+                isH ? lv_color_hex(0x78350F) : lv_color_hex(CLR_SIDEBAR), 0);
+            lv_obj_set_style_bg_opa(ab, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(ab, 2, 0);
+            lv_obj_set_style_border_color(ab,
+                isH ? lv_color_hex(0xD97706) : lv_color_hex(CLR_PRIMARY), 0);
+            // Pack ci (4 bits) and mi (4 bits)
             int packed = (ci << 4) | mi;
-            lv_obj_add_event_cb(mb, custom_mach_cb, LV_EVENT_CLICKED,
-                                (void*)(intptr_t)packed);
-            lv_obj_t *ml = lv_label_create(mb);
+            lv_obj_add_event_cb(ab, [](lv_event_t *ev) {
+                int pk = (int)(intptr_t)lv_event_get_user_data(ev);
+                int c  = (pk >> 4) & 0xF;
+                int m  = pk & 0xF;
+                if (g_store.customSequenzLen[c] >= CUSTOM_SEQ_MAX) return;
+                g_store.customSequenzen[c][g_store.customSequenzLen[c]] = (Maschine)m;
+                g_store.customSequenzLen[c]++;
+                game_store_save();
+                refresh_custom_seq(c);
+                refresh_custom_stats(c);
+            }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
+            lv_obj_t *ml = lv_label_create(ab);
             lv_label_set_text(ml, MACH_LBL[mi]);
             lv_obj_set_style_text_font(ml, &lv_font_montserrat_18, 0);
             lv_obj_set_style_text_color(ml, lv_color_hex(CLR_TEXT), 0);
             lv_obj_center(ml);
         }
+
+        // ── Läufe toggle (1 / 2) ─────────────────────────────
+        lv_obj_t *lauf_hdr = lv_label_create(card);
+        lv_label_set_text(lauf_hdr, "UNZUEL VUN DE LAEUF");
+        lv_obj_set_style_text_font(lauf_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(lauf_hdr, lv_color_hex(CLR_MUTED), 0);
+
+        lv_obj_t *lauf_row = lv_obj_create(card);
+        lv_obj_set_size(lauf_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(lauf_row, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(lauf_row, 0, 0);
+        lv_obj_set_style_pad_all(lauf_row, 0, 0);
+        lv_obj_set_style_pad_column(lauf_row, 8, 0);
+        lv_obj_set_flex_flow(lauf_row, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(lauf_row, LV_OBJ_FLAG_SCROLLABLE);
+
+        for (int li = 0; li < 2; li++) {
+            bool sel = (g_store.customLaeufe[ci] == li + 1);
+            lv_obj_t *lb = lv_btn_create(lauf_row);
+            s_lauf_btn[ci][li] = lb;
+            lv_obj_set_size(lb, 160, 44);
+            lv_obj_set_style_radius(lb, 8, 0);
+            lv_obj_set_style_bg_color(lb,
+                sel ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
+            lv_obj_set_style_bg_opa(lb, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(lb, 2, 0);
+            lv_obj_set_style_border_color(lb,
+                sel ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_BORDER), 0);
+            int packed = (ci << 4) | li;
+            lv_obj_add_event_cb(lb, [](lv_event_t *ev) {
+                int pk = (int)(intptr_t)lv_event_get_user_data(ev);
+                int c  = (pk >> 4) & 0xF;
+                int l  = (pk & 0xF) + 1;   // 1 or 2
+                g_store.customLaeufe[c] = l;
+                game_store_save();
+                for (int x = 0; x < 2; x++) {
+                    bool s = (g_store.customLaeufe[c] == x + 1);
+                    lv_obj_set_style_bg_color(s_lauf_btn[c][x],
+                        s ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
+                    lv_obj_set_style_border_color(s_lauf_btn[c][x],
+                        s ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_BORDER), 0);
+                    lv_obj_invalidate(s_lauf_btn[c][x]);
+                }
+                refresh_custom_stats(c);
+            }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
+            lv_obj_t *ll = lv_label_create(lb);
+            char lbuf[16];
+            snprintf(lbuf, sizeof(lbuf), "%d %s", li + 1, li == 0 ? "LAUF" : "LAEUF");
+            lv_label_set_text(ll, lbuf);
+            lv_obj_set_style_text_font(ll, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(ll, lv_color_hex(CLR_TEXT), 0);
+            lv_obj_center(ll);
+        }
+
+        // ── Live stats (Tauben / Max Pkt Lauf / Max Pkt Spill) ─
+        lv_obj_t *stats_row = lv_obj_create(card);
+        lv_obj_set_size(stats_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(stats_row, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(stats_row, 0, 0);
+        lv_obj_set_style_pad_all(stats_row, 0, 0);
+        lv_obj_set_style_pad_column(stats_row, 6, 0);
+        lv_obj_set_flex_flow(stats_row, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(stats_row, LV_OBJ_FLAG_SCROLLABLE);
+
+        static const char *stat_lbl[] = {"TAUBEN/LAUF","MAX PKT/LAUF","MAX PKT/SPILL"};
+        lv_obj_t **stat_ptrs[3] = {
+            &s_stat_tauben[ci], &s_stat_pkt_lauf[ci], &s_stat_pkt_spiel[ci]
+        };
+        for (int si = 0; si < 3; si++) {
+            lv_obj_t *sc = lv_obj_create(stats_row);
+            lv_obj_set_height(sc, LV_SIZE_CONTENT);
+            lv_obj_set_flex_grow(sc, 1);
+            lv_obj_add_style(sc, &g_style_card, 0);
+            lv_obj_set_style_pad_all(sc, 8, 0);
+            lv_obj_set_flex_flow(sc, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(sc, LV_FLEX_ALIGN_CENTER,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_clear_flag(sc, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_obj_t *sv = lv_label_create(sc);
+            *stat_ptrs[si] = sv;
+            lv_label_set_text(sv, "0");
+            lv_obj_set_style_text_font(sv, &lv_font_montserrat_22, 0);
+            lv_obj_set_style_text_color(sv, lv_color_hex(CLR_PRIMARY), 0);
+
+            lv_obj_t *sl = lv_label_create(sc);
+            lv_label_set_text(sl, stat_lbl[si]);
+            lv_obj_set_style_text_font(sl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(sl, lv_color_hex(CLR_MUTED), 0);
+        }
+
+        refresh_custom_stats(ci);
     }
     return parent;
 }
