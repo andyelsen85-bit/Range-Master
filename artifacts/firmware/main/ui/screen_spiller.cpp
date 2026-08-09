@@ -24,7 +24,7 @@ static void add_local_cb(lv_event_t *e)
         return;
     }
     int new_id;
-    store_add_LOKAL_spieler(name, &new_id);
+    store_add_lokal_spieler(name, &new_id);
     lv_textarea_set_text(s_ta_new_name, "");
     lv_label_set_text(s_lbl_status, LV_SYMBOL_OK " SPILLER DOBAIGESAT (LOKAL)");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
@@ -77,7 +77,7 @@ static void build_list(void)
         lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_TEXT), 0);
 
-        if (ps->LOKAL) {
+        if (ps->lokal) {
             lv_obj_t *badge = lv_label_create(name_row);
             lv_label_set_text(badge, "LOKAL");
             lv_obj_set_style_text_font(badge, &lv_font_montserrat_12, 0);
