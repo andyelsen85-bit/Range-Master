@@ -146,7 +146,7 @@ static void refresh_custom_stats(int ci)
         tauben += (g_store.customSequenzen[ci][i] == MASCHINE_H) ? 2 : 1;
     int pktLauf  = tauben * 2;
     int pktSpiel = pktLauf * g_store.customLaeufe[ci];
-    char buf[8];
+    char buf[12];   // int can be up to 11 digits + NUL — was 8, causing -Werror=format-truncation
     snprintf(buf, sizeof(buf), "%d", tauben);  lv_label_set_text(s_stat_tauben[ci],    buf);
     snprintf(buf, sizeof(buf), "%d", pktLauf); lv_label_set_text(s_stat_pkt_lauf[ci],  buf);
     snprintf(buf, sizeof(buf), "%d", pktSpiel);lv_label_set_text(s_stat_pkt_spiel[ci], buf);
