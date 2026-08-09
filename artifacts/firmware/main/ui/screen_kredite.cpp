@@ -14,11 +14,43 @@ static lv_obj_t *s_player_list;
 static lv_obj_t *s_dd_add;
 static lv_obj_t *s_lbl_status;
 
-// ── Grant credit button callback ──────────────────────────────
+// ── Grant credit (+1) ─────────────────────────────────────────
 static void grant_cb(lv_event_t *e)
 {
     int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
     store_add_kredite(spieler_id, 1);
+    screen_kredite_refresh();
+}
+
+// ── Revoke credit (-1, never below 0 available) ───────────────
+static void revoke_cb(lv_event_t *e)
+{
+    int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
+    for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
+        if (g_store.kreditPlayerIds[i] != spieler_id) continue;
+        KreditStand *k = &g_store.kredite[i];
+        if (k->gewaehrt > k->verbraucht) {   // keep available >= 0
+            k->gewaehrt--;
+            game_store_save();
+        }
+        break;
+    }
+    screen_kredite_refresh();
+}
+
+// ── Remove player from today's list ──────────────────────────
+static void remove_player_cb(lv_event_t *e)
+{
+    int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
+    for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
+        if (g_store.kreditPlayerIds[i] != spieler_id) continue;
+        g_store.kreditPlayerIds[i] = 0;
+        g_store.kredite[i]         = (KreditStand){0, 0};
+        game_store_save();
+        break;
+    }
+    lv_label_set_text(s_lbl_status, "SPILLER GELOSCHT");
+    lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
     screen_kredite_refresh();
 }
 
@@ -89,17 +121,56 @@ static void build_player_list(void)
         lv_obj_set_style_text_color(cred_lbl,
             avail > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_DANGER), 0);
 
-        // +1 credit button
-        lv_obj_t *btn = lv_btn_create(row);
-        lv_obj_add_style(btn, &g_style_btn_primary, 0);
-        lv_obj_set_size(btn, 80, 44);
-        lv_obj_add_event_cb(btn, grant_cb, LV_EVENT_CLICKED,
+        // Button group: [-1]  [+1]  [X]
+        lv_obj_t *btn_grp = lv_obj_create(row);
+        lv_obj_set_size(btn_grp, LV_SIZE_CONTENT, 44);
+        lv_obj_set_style_bg_opa(btn_grp, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(btn_grp, 0, 0);
+        lv_obj_set_style_pad_all(btn_grp, 0, 0);
+        lv_obj_set_flex_flow(btn_grp, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(btn_grp, 8, 0);
+
+        // -1
+        lv_obj_t *btn_minus = lv_btn_create(btn_grp);
+        lv_obj_set_size(btn_minus, 72, 44);
+        lv_obj_set_style_bg_color(btn_minus, lv_color_hex(CLR_WARN), 0);
+        lv_obj_set_style_bg_opa(btn_minus, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(btn_minus, 8, 0);
+        lv_obj_set_style_border_width(btn_minus, 0, 0);
+        lv_obj_add_event_cb(btn_minus, revoke_cb, LV_EVENT_CLICKED,
                             (void*)(intptr_t)sid);
-        lv_obj_t *bl = lv_label_create(btn);
-        lv_label_set_text(bl, "+ 1");
-        lv_obj_set_style_text_font(bl, &lv_font_montserrat_18, 0);
-        lv_obj_set_style_text_color(bl, lv_color_hex(CLR_TEXT), 0);
-        lv_obj_center(bl);
+        lv_obj_t *bml = lv_label_create(btn_minus);
+        lv_label_set_text(bml, "- 1");
+        lv_obj_set_style_text_font(bml, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(bml, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(bml);
+
+        // +1
+        lv_obj_t *btn_plus = lv_btn_create(btn_grp);
+        lv_obj_add_style(btn_plus, &g_style_btn_primary, 0);
+        lv_obj_set_size(btn_plus, 72, 44);
+        lv_obj_add_event_cb(btn_plus, grant_cb, LV_EVENT_CLICKED,
+                            (void*)(intptr_t)sid);
+        lv_obj_t *bpl = lv_label_create(btn_plus);
+        lv_label_set_text(bpl, "+ 1");
+        lv_obj_set_style_text_font(bpl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(bpl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(bpl);
+
+        // X (remove from today's list)
+        lv_obj_t *btn_del = lv_btn_create(btn_grp);
+        lv_obj_set_size(btn_del, 52, 44);
+        lv_obj_set_style_bg_color(btn_del, lv_color_hex(CLR_DANGER), 0);
+        lv_obj_set_style_bg_opa(btn_del, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(btn_del, 8, 0);
+        lv_obj_set_style_border_width(btn_del, 0, 0);
+        lv_obj_add_event_cb(btn_del, remove_player_cb, LV_EVENT_CLICKED,
+                            (void*)(intptr_t)sid);
+        lv_obj_t *bdl = lv_label_create(btn_del);
+        lv_label_set_text(bdl, LV_SYMBOL_TRASH);
+        lv_obj_set_style_text_font(bdl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(bdl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(bdl);
 
         count++;
     }
