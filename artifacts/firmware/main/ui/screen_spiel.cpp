@@ -109,7 +109,6 @@ lv_obj_t *screen_spiel_create(void)
     // Score buttons: 2, 1, 0
     static const char *sc_labels[] = {"2", "1", "0"};
     static int sc_pts[]            = {2, 1, 0};
-    static lv_obj_t **sc_refs[]    = {&s_btn_wiederhole, nullptr, nullptr}; // reused below
     static uint32_t sc_colors[]    = {CLR_SUCCESS, CLR_WARN, CLR_DANGER};
 
     for (int i = 0; i < 3; i++) {
