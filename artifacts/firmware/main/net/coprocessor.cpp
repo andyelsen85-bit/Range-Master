@@ -75,14 +75,19 @@ static void uart_event_task(void *arg)
                                         pdMS_TO_TICKS(20));
                 if (n > 0) {
                     buf[n] = '\0';
-                    // Handle unsolicited events from C6:
-                    if (strstr((char *)buf, "+WIFI:CONNECTED"))
+                    // Handle unsolicited events from Espressif ESP-AT firmware.
+                    // Standard strings (no '+' prefix, no colon):
+                    //   "WIFI CONNECTED"  "WIFI GOT IP"  "WIFI DISCONNECT"
+                    //   "+BLE_CONN:"  "+BLE_DISCONN:"  (BLE varies by version)
+                    if (strstr((char *)buf, "WIFI GOT IP"))
                         s_wifi_connected = true;
-                    if (strstr((char *)buf, "+WIFI:DISCONNECTED"))
+                    if (strstr((char *)buf, "WIFI DISCONNECT"))
                         s_wifi_connected = false;
-                    if (strstr((char *)buf, "+BLE:CONNECTED"))
+                    if (strstr((char *)buf, "+BLE_CONN:") ||
+                        strstr((char *)buf, "+BLE:CONNECTED"))
                         s_ble_connected = true;
-                    if (strstr((char *)buf, "+BLE:DISCONNECTED"))
+                    if (strstr((char *)buf, "+BLE_DISCONN:") ||
+                        strstr((char *)buf, "+BLE:DISCONNECTED"))
                         s_ble_connected = false;
                     // BLE HID key event: "+KEY:A"
                     const char *kp = strstr((char *)buf, "+KEY:");
@@ -116,13 +121,18 @@ void coprocessor_init(void)
 
     xTaskCreate(uart_event_task, "cop_uart", 4096, NULL, 10, &s_event_task);
 
-    // Wake up C6 and confirm AT echo
-    vTaskDelay(pdMS_TO_TICKS(200));
+    // Wake up C6 and confirm AT echo.
+    // The factory Guition firmware already has Espressif ESP-AT loaded on the
+    // C6 — no reflash needed.  Give the C6 time to boot, then probe.
+    vTaskDelay(pdMS_TO_TICKS(500));
     if (at_send("AT", "OK", NULL, 0, 2000) == ESP_OK) {
         ESP_LOGI(TAG, "C6 co-processor responsive");
-        at_send("ATE0", "OK", NULL, 0, 1000); // disable echo
+        at_send("ATE0", "OK", NULL, 0, 1000);  // disable echo
+        // Set station mode so AT+CWJAP works without manual configuration.
+        // Mode 1 = STA only.  Must be done before any WiFi command.
+        at_send("AT+CWMODE=1", "OK", NULL, 0, 2000);
     } else {
-        ESP_LOGW(TAG, "C6 co-processor not responding (will retry on demand)");
+        ESP_LOGW(TAG, "C6 not responding — check GPIO4/5 wiring");
     }
 }
 

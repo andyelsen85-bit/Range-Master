@@ -117,15 +117,6 @@ static int generate_sequenz(SequenzEintrag *out, Modus modus,
     return idx;
 }
 
-// ── getCurrentPosten (mirrors TS) ────────────────────────────
-// Returns 1-based post for player at spielerIndex, taubeIndex in sequenz
-static int get_current_posten(int spielerIndex, int taubeIndex, int spielerCount)
-{
-    // Round-robin rotation: (startPosten-1 + taubeIndex) mod 5 → post 1..5
-    int base = g_store.spieler[spielerIndex].startPosten - 1;
-    return ((base + taubeIndex) % 5) + 1;
-}
-
 // ── Credit helpers ────────────────────────────────────────────
 int store_kredite_verfuegbar(int spieler_id)
 {

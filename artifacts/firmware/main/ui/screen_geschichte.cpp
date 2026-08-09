@@ -108,7 +108,7 @@ static void build_history_rows(void)
 
         lv_obj_t *ts_lbl = lv_label_create(btn);
         lv_label_set_text(ts_lbl, fg->finishedAt);
-        lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_13, 0);
+        lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(ts_lbl, lv_color_hex(CLR_MUTED), 0);
         lv_obj_set_width(ts_lbl, 170);
 
@@ -123,7 +123,7 @@ static void build_history_rows(void)
                  winner, best_pts);
         lv_obj_t *win_lbl = lv_label_create(btn);
         lv_label_set_text(win_lbl, w_buf);
-        lv_obj_set_style_text_font(win_lbl, &lv_font_montserrat_15, 0);
+        lv_obj_set_style_text_font(win_lbl, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(win_lbl, lv_color_hex(CLR_TEXT), 0);
 
         char p_buf[16];
@@ -220,7 +220,7 @@ lv_obj_t *screen_geschichte_create(void)
 
     s_detail_date = lv_label_create(s_detail_card);
     lv_label_set_text(s_detail_date, "");
-    lv_obj_set_style_text_font(s_detail_date, &lv_font_montserrat_13, 0);
+    lv_obj_set_style_text_font(s_detail_date, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_detail_date, lv_color_hex(CLR_MUTED), 0);
 
     // Divider
