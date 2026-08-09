@@ -309,21 +309,74 @@ void screen_dashboard_refresh(void)
         lv_label_set_text(s_lbl_wifi, buf);
     }
 
-    // History list (most-recent 5 entries)
+    // History list (most-recent 5 entries) - proper-height rows
     lv_obj_clean(s_history_list);
-    int start = g_store.historyCount - 5;
-    if (start < 0) start = 0;
-    for (int i = g_store.historyCount - 1; i >= start; i--) {
-        const FinishedGame *fg = &g_store.history[i];
-        char item[160];
-        snprintf(item, sizeof(item), "%s   |   %s   |   %s",
-                 fg->finishedAt,
-                 modus_label(fg->base.modus),
-                 fg->spieler_count > 0 ? fg->spielerNamen[0] : "");
-        lv_list_add_text(s_history_list, item);
-    }
     if (g_store.historyCount == 0) {
-        lv_list_add_text(s_history_list, "KENG SPILLER NACH");
+        lv_obj_t *empty = lv_label_create(s_history_list);
+        lv_label_set_text(empty, "KENG SPILLER NACH");
+        lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
+    } else {
+        int start = g_store.historyCount - 5;
+        if (start < 0) start = 0;
+        for (int i = g_store.historyCount - 1; i >= start; i--) {
+            const FinishedGame *fg = &g_store.history[i];
+
+            // Find winner name
+            int best_pts = -1, best_id = -1;
+            for (int t = 0; t < fg->base.teilnahmen_count; t++) {
+                if (fg->base.teilnahmen[t].punkte > best_pts) {
+                    best_pts = fg->base.teilnahmen[t].punkte;
+                    best_id  = fg->base.teilnahmen[t].spielerId;
+                }
+            }
+            const char *winner = "---";
+            for (int j = 0; j < fg->spieler_count; j++) {
+                if (fg->spielerIds[j] == best_id) { winner = fg->spielerNamen[j]; break; }
+            }
+
+            lv_obj_t *row = lv_obj_create(s_history_list);
+            lv_obj_set_size(row, LV_PCT(100), 52);
+            lv_obj_set_style_bg_color(row, lv_color_hex(CLR_CARD), 0);
+            lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_color(row, lv_color_hex(CLR_BORDER), 0);
+            lv_obj_set_style_border_width(row, 1, 0);
+            lv_obj_set_style_radius(row, 6, 0);
+            lv_obj_set_style_pad_hor(row, 14, 0);
+            lv_obj_set_style_pad_ver(row, 0, 0);
+            lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+            char ts[24]; snprintf(ts, sizeof(ts), "%s", fg->finishedAt);
+            lv_obj_t *ts_lbl = lv_label_create(row);
+            lv_label_set_text(ts_lbl, ts);
+            lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(ts_lbl, lv_color_hex(CLR_MUTED), 0);
+            lv_obj_set_width(ts_lbl, 180);
+
+            lv_obj_t *mode_lbl = lv_label_create(row);
+            lv_label_set_text(mode_lbl, modus_label(fg->base.modus));
+            lv_obj_set_style_text_font(mode_lbl, &lv_font_montserrat_16, 0);
+            lv_obj_set_style_text_color(mode_lbl, lv_color_hex(CLR_PRIMARY), 0);
+            lv_obj_set_width(mode_lbl, 120);
+
+            char w_buf[80];
+            snprintf(w_buf, sizeof(w_buf), LV_SYMBOL_CHARGE " %s  %dPKT",
+                     winner, best_pts);
+            lv_obj_t *win_lbl = lv_label_create(row);
+            lv_label_set_text(win_lbl, w_buf);
+            lv_obj_set_style_text_font(win_lbl, &lv_font_montserrat_16, 0);
+            lv_obj_set_style_text_color(win_lbl, lv_color_hex(CLR_TEXT), 0);
+
+            char p_buf[12];
+            snprintf(p_buf, sizeof(p_buf), "%d SPILLER", fg->spieler_count);
+            lv_obj_t *p_lbl = lv_label_create(row);
+            lv_label_set_text(p_lbl, p_buf);
+            lv_obj_set_style_text_font(p_lbl, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(p_lbl, lv_color_hex(CLR_MUTED), 0);
+        }
     }
 }
 

@@ -13,6 +13,7 @@ static lv_obj_t *s_scr;
 static lv_obj_t *s_player_rows[MAX_SPIELER];
 static lv_obj_t *s_player_dropdowns[MAX_SPIELER];
 static lv_obj_t *s_maschinen_btns[MASCHINE_COUNT];
+static lv_obj_t *s_modus_btns[MODUS_COUNT];
 static lv_obj_t *s_lbl_error;
 
 // ── Build player dropdown options string ──────────────────────
@@ -64,10 +65,24 @@ static void start_cb(lv_event_t *e)
 }
 
 // ── Modus button callback ─────────────────────────────────────
+static void update_modus_styles(void)
+{
+    for (int i = 0; i < MODUS_COUNT; i++) {
+        if (!s_modus_btns[i]) continue;
+        lv_obj_set_style_bg_color(s_modus_btns[i],
+            (i == (int)g_store.modus)
+                ? lv_color_hex(CLR_PRIMARY)
+                : lv_color_hex(CLR_SIDEBAR), 0);
+        lv_obj_set_style_bg_opa(s_modus_btns[i], LV_OPA_COVER, 0);
+        lv_obj_invalidate(s_modus_btns[i]);
+    }
+}
+
 static void modus_cb(lv_event_t *e)
 {
     Modus m = (Modus)(intptr_t)lv_event_get_user_data(e);
     g_store.modus = m;
+    update_modus_styles();
 }
 
 // ── Machine toggle callback ───────────────────────────────────
@@ -213,9 +228,14 @@ lv_obj_t *screen_start_create(void)
 
     for (int m = 0; m < MODUS_COUNT; m++) {
         lv_obj_t *mb = lv_btn_create(modus_grid);
-        lv_obj_add_style(mb, (m == 0) ? &g_style_btn_primary : &g_style_btn_secondary, 0);
         lv_obj_set_size(mb, 130, 44);
+        lv_obj_set_style_bg_color(mb,
+            (m == (int)g_store.modus) ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
+        lv_obj_set_style_bg_opa(mb, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(mb, 8, 0);
+        lv_obj_set_style_border_width(mb, 0, 0);
         lv_obj_add_event_cb(mb, modus_cb, LV_EVENT_CLICKED, (void*)(intptr_t)m);
+        s_modus_btns[m] = mb;
         lv_obj_t *ml = lv_label_create(mb);
         lv_label_set_text(ml, MODUS_NAMES[m]);
         lv_obj_set_style_text_font(ml, &lv_font_montserrat_14, 0);
@@ -278,6 +298,8 @@ void screen_start_refresh(void)
             lv_dropdown_set_options(s_player_dropdowns[i], opts);
     }
     free(opts);
+    // Sync modus button states
+    update_modus_styles();
     // Sync machine button states
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         if (!s_maschinen_btns[m]) continue;

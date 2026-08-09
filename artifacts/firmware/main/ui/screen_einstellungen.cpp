@@ -121,6 +121,136 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
     return parent;
 }
 
+// ── Tab: CUSTOM SEQUENZEN ─────────────────────────────────────
+// For each CUSTOM 1..4: toggle which machines are in the sequence,
+// and pick 1 or 2 Läufe.  Changes are live-written to g_store.
+static const char *CUSTOM_NAMES[] = {"CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4"};
+static const char *MACH_LBL[]     = {"A","B","C","D","E","F","G","H"};
+
+static void custom_mach_cb(lv_event_t *e)
+{
+    // user_data = (ci << 4) | machine_index
+    int packed = (int)(intptr_t)lv_event_get_user_data(e);
+    int ci = (packed >> 4) & 0xF;
+    int mi = packed & 0xF;
+    Maschine m = (Maschine)mi;
+
+    // Toggle presence in the custom sequence
+    Maschine *seq = g_store.customSequenzen[ci];
+    int len       = g_store.customSequenzLen[ci];
+    bool found = false;
+    for (int i = 0; i < len; i++) {
+        if (seq[i] == m) {
+            // Remove: shift left
+            for (int j = i; j < len - 1; j++) seq[j] = seq[j+1];
+            g_store.customSequenzLen[ci]--;
+            found = true;
+            break;
+        }
+    }
+    if (!found && len < 16) {
+        seq[len] = m;
+        g_store.customSequenzLen[ci]++;
+    }
+
+    // Update button colour
+    lv_obj_t *btn = lv_event_get_target_obj(e);
+    bool active = false;
+    int newLen = g_store.customSequenzLen[ci];
+    for (int i = 0; i < newLen; i++) {
+        if (g_store.customSequenzen[ci][i] == m) { active = true; break; }
+    }
+    lv_obj_set_style_bg_color(btn,
+        active ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
+    lv_obj_invalidate(btn);
+    game_store_save();
+}
+
+static void custom_laeufe_cb(lv_event_t *e)
+{
+    int ci = (int)(intptr_t)lv_event_get_user_data(e);
+    lv_obj_t *dd = lv_event_get_target_obj(e);
+    uint16_t sel = lv_dropdown_get_selected(dd);
+    g_store.customLaeufe[ci] = (sel == 0) ? 1 : 2;
+    game_store_save();
+}
+
+static lv_obj_t *build_custom_tab(lv_obj_t *parent)
+{
+    lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(parent, 16, 0);
+    lv_obj_set_style_pad_row(parent, 14, 0);
+
+    for (int ci = 0; ci < 4; ci++) {
+        // Section card
+        lv_obj_t *card = lv_obj_create(parent);
+        lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_add_style(card, &g_style_card, 0);
+        lv_obj_set_style_pad_all(card, 12, 0);
+        lv_obj_set_style_pad_row(card, 10, 0);
+        lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+        // Title row
+        lv_obj_t *title_row = lv_obj_create(card);
+        lv_obj_set_size(title_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(title_row, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(title_row, 0, 0);
+        lv_obj_set_style_pad_all(title_row, 0, 0);
+        lv_obj_set_flex_flow(title_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(title_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        lv_obj_t *cname = lv_label_create(title_row);
+        lv_label_set_text(cname, CUSTOM_NAMES[ci]);
+        lv_obj_set_style_text_font(cname, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(cname, lv_color_hex(CLR_TEXT), 0);
+
+        // Läufe dropdown
+        lv_obj_t *dd = lv_dropdown_create(title_row);
+        lv_dropdown_set_options(dd, "1 LAUF\n2 LAEUFE");
+        lv_dropdown_set_selected(dd, (g_store.customLaeufe[ci] >= 2) ? 1 : 0);
+        lv_obj_set_size(dd, 130, 36);
+        lv_obj_set_style_text_font(dd, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_bg_color(dd, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_text_color(dd, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_add_event_cb(dd, custom_laeufe_cb, LV_EVENT_VALUE_CHANGED,
+                            (void*)(intptr_t)ci);
+
+        // Machine toggle row
+        lv_obj_t *mrow = lv_obj_create(card);
+        lv_obj_set_size(mrow, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(mrow, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(mrow, 0, 0);
+        lv_obj_set_style_pad_all(mrow, 0, 0);
+        lv_obj_set_flex_flow(mrow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(mrow, 8, 0);
+
+        for (int mi = 0; mi < MASCHINE_COUNT; mi++) {
+            bool active = false;
+            for (int k = 0; k < g_store.customSequenzLen[ci]; k++) {
+                if (g_store.customSequenzen[ci][k] == (Maschine)mi) { active = true; break; }
+            }
+            lv_obj_t *mb = lv_btn_create(mrow);
+            lv_obj_set_size(mb, 52, 52);
+            lv_obj_set_style_bg_color(mb,
+                active ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
+            lv_obj_set_style_bg_opa(mb, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(mb, 8, 0);
+            lv_obj_set_style_border_width(mb, 0, 0);
+            int packed = (ci << 4) | mi;
+            lv_obj_add_event_cb(mb, custom_mach_cb, LV_EVENT_CLICKED,
+                                (void*)(intptr_t)packed);
+            lv_obj_t *ml = lv_label_create(mb);
+            lv_label_set_text(ml, MACH_LBL[mi]);
+            lv_obj_set_style_text_font(ml, &lv_font_montserrat_18, 0);
+            lv_obj_set_style_text_color(ml, lv_color_hex(CLR_TEXT), 0);
+            lv_obj_center(ml);
+        }
+    }
+    return parent;
+}
+
 // ── Tab: WiFi ─────────────────────────────────────────────────
 static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
 {
@@ -239,14 +369,16 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_set_style_bg_color(s_tab_view, lv_color_hex(CLR_BG), 0);
     lv_obj_set_style_text_font(s_tab_view, &lv_font_montserrat_14, 0);
 
-    lv_obj_t *tab_api  = lv_tabview_add_tab(s_tab_view, "Portal API");
-    lv_obj_t *tab_mach = lv_tabview_add_tab(s_tab_view, "MASCHINNEN");
-    lv_obj_t *tab_wifi = lv_tabview_add_tab(s_tab_view, "WiFi");
-    lv_obj_t *tab_bt   = lv_tabview_add_tab(s_tab_view, "Bluetooth");
-    lv_obj_t *tab_sys  = lv_tabview_add_tab(s_tab_view, "System");
+    lv_obj_t *tab_api    = lv_tabview_add_tab(s_tab_view, "Portal API");
+    lv_obj_t *tab_mach   = lv_tabview_add_tab(s_tab_view, "MASCHINNEN");
+    lv_obj_t *tab_custom = lv_tabview_add_tab(s_tab_view, "CUSTOM");
+    lv_obj_t *tab_wifi   = lv_tabview_add_tab(s_tab_view, "WiFi");
+    lv_obj_t *tab_bt     = lv_tabview_add_tab(s_tab_view, "Bluetooth");
+    lv_obj_t *tab_sys    = lv_tabview_add_tab(s_tab_view, "System");
 
     build_api_tab(tab_api);
     build_mach_tab(tab_mach);
+    build_custom_tab(tab_custom);
     build_wifi_tab(tab_wifi);
     build_bt_tab(tab_bt);
     build_system_tab(tab_sys);

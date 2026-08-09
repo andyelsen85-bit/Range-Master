@@ -221,6 +221,14 @@ bool store_start_spiel(void)
 }
 
 // ── store_eintragen ──────────────────────────────────────────
+// H-doublette interleaving rule:
+//   H1 entry (isDoublette=false, next entry isDoublette=true):
+//     → record for current player, keep spielerIndex, advance taubeIndex to H2
+//   H2 entry (isDoublette=true):
+//     → record for same player, then advance spielerIndex.
+//       If more players remain → step taubeIndex back to H1 so next player
+//       also shoots H1 then H2.
+//       If all players done → advance past H2, reset spielerIndex.
 void store_eintragen(int punkte)
 {
     GameStore *s = &g_store;
@@ -229,21 +237,29 @@ void store_eintragen(int punkte)
     SequenzEintrag *se = &s->sequenz[s->taubeIndex];
     Spieler *sp = &s->spieler[s->spielerIndex];
 
+    // Classify current entry
+    bool isH2 = (se->maschine == MASCHINE_H) && se->isDoublette;
+    bool isH1 = (se->maschine == MASCHINE_H) && !se->isDoublette
+                && (s->taubeIndex + 1 < s->sequenzLen)
+                && s->sequenz[s->taubeIndex + 1].isDoublette;
+
+    // H2 records at the same post as H1 (taubeIndex-1)
+    int posIdx = (isH2 && s->taubeIndex > 0) ? s->taubeIndex - 1 : s->taubeIndex;
+    int base   = s->spieler[s->spielerIndex].startPosten - 1;
+
     Ergebnis e = {};
     e.spielerId  = sp->id;
     e.lauf       = s->lauf;
     e.taube      = s->taubeIndex + 1;
     e.maschine   = se->maschine;
-    e.posten     = get_current_posten(s->spielerIndex, s->taubeIndex,
-                                      s->spielerCount);
+    e.posten     = ((base + posIdx) % 5) + 1;
     e.punkte     = punkte;
     e.wiederholt = false;
 
-    // Scoring rules (mirrors TS eintragenErgebnis):
-    // Doublette (H): each shot is 2pts. Single: 1st=2pts,2nd=1pt
+    // Scoring rules
     if (se->maschine == MASCHINE_H) {
         e.schuss1 = (punkte >= 1);
-        e.schuss2 = false; // each H entry is one shot
+        e.schuss2 = false;
     } else {
         e.schuss1 = (punkte == 2);
         e.schuss2 = (punkte == 1);
@@ -253,20 +269,44 @@ void store_eintragen(int punkte)
     if (s->ergebnisseCount < MAX_ERGEBNISSE)
         s->ergebnisse[s->ergebnisseCount++] = e;
 
-    // Advance: next player; if all players done → next taube
-    s->spielerIndex++;
-    if (s->spielerIndex >= s->spielerCount) {
-        s->spielerIndex = 0;
+    // ── Advance state ────────────────────────────────────────
+    auto finish_lauf_or_game = [&]() -> bool {
+        if (s->lauf < 2) {
+            s->lauf++;
+            s->taubeIndex = 0;
+            return false;
+        }
+        _store_finish_game();
+        return true;
+    };
+
+    if (isH1) {
+        // Same player shoots H2 immediately — only advance taubeIndex
         s->taubeIndex++;
-        // Check if this lauf is done
-        if (s->taubeIndex >= s->sequenzLen) {
-            if (s->lauf < 2) {  // always 2 Läufe for Normal/Harakiri
-                s->lauf++;
-                s->taubeIndex = 0;
-            } else {
-                // Game finished
-                _store_finish_game();
-                return;
+
+    } else if (isH2) {
+        // Move to next player
+        s->spielerIndex++;
+        if (s->spielerIndex < s->spielerCount) {
+            // Step back to H1 so the next player also shoots H1 then H2
+            s->taubeIndex--;
+        } else {
+            // All players done with this doublette pair
+            s->spielerIndex = 0;
+            s->taubeIndex++;   // advance past H2
+            if (s->taubeIndex >= s->sequenzLen) {
+                if (finish_lauf_or_game()) return;
+            }
+        }
+
+    } else {
+        // Normal advance: next player; when all done → next taube
+        s->spielerIndex++;
+        if (s->spielerIndex >= s->spielerCount) {
+            s->spielerIndex = 0;
+            s->taubeIndex++;
+            if (s->taubeIndex >= s->sequenzLen) {
+                if (finish_lauf_or_game()) return;
             }
         }
     }
