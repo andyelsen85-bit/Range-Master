@@ -468,6 +468,13 @@ void game_store_init(void)
         snprintf(ps->mitgliedNr, sizeof(ps->mitgliedNr), "TEST-%d", i + 1);
     }
     g_store.portalSpielerCount = DUMMY_COUNT;
+
+    // Seed 5 starting credits per dummy player so games can start immediately.
+    // kreditPlayerIds[i]==0 means "empty slot", so use the player's real ID (1..6).
+    for (int i = 0; i < DUMMY_COUNT; i++) {
+        g_store.kreditPlayerIds[i] = i + 1;          // IDs 1..6
+        g_store.kredite[i]         = (KreditStand){5, 0};
+    }
     // ─────────────────────────────────────────────────────────
 
     ESP_LOGI(TAG, "Store initialised. API: %s modus: %s  (%d dummy players seeded)",
