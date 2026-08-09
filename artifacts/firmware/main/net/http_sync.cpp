@@ -162,6 +162,21 @@ esp_err_t http_push_pending_games(void)
     int synced = 0;
 
     for (int i = 0; i < g_store.pendingGamesCount; i++) {
+        // Skip games that contain local (negative-ID) players — the portal
+        // cannot resolve them and the sync would fail or produce corrupt data.
+        bool has_local = false;
+        for (int j = 0; j < g_store.pendingGames[i].teilnahmen_count; j++) {
+            if (g_store.pendingGames[i].teilnahmen[j].spielerId < 0) {
+                has_local = true;
+                break;
+            }
+        }
+        if (has_local) {
+            ESP_LOGI(TAG, "Discarding game %d: contains local player(s)", i);
+            synced++; // remove from queue on next flush
+            continue;
+        }
+
         cJSON *obj = pending_game_to_json(&g_store.pendingGames[i]);
         char *body = cJSON_PrintUnformatted(obj);
         cJSON_Delete(obj);
