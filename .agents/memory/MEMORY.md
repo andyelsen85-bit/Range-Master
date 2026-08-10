@@ -6,4 +6,5 @@
 - [drizzle push blocked](drizzle-push-blocked.md) — `db push` hangs on a TTY prompt from api_keys drift; apply new tables with idempotent SQL from lib/db, then `tsc -b lib/db`
 - [API keys DB pattern](api-keys-db.md) — sync keys in api_keys table (not env var); requireApiKey is async DB lookup; 6 pre-seeded rows; run migrations from lib/db/ with node --input-type=module
 - [LVGL 9.5 Kconfig symbols](lvgl95-kconfig.md) — confirmed symbol names from managed_components/lvgl__lvgl/Kconfig
-- [C6 WiFi architecture](c6-wifi-architecture.md) — factory C6 runs esp_hosted slave (not AT); must flash AT firmware; CHIP_PU pulls up; GPIO5/4 TX/RX unconfirmed
+- [C6 WiFi architecture](c6-wifi-architecture.md) — factory C6 runs esp_hosted slave (not AT); SDIO on GPIO14-19/54/6; P4 host via esp_wifi_remote
+- [esp-hosted Kconfig structure](esp-hosted-kconfig.md) — 2.12.12 pin symbols are nested (grep "^config" misses them); P4 Slot 1 defaults match this board; no pin overrides needed
