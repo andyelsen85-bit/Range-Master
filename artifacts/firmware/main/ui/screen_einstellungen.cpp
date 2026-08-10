@@ -569,9 +569,9 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_set_style_border_width(s_kb, 1, LV_PART_ITEMS);
     lv_obj_set_style_border_color(s_kb, lv_color_hex(CLR_BG), LV_PART_ITEMS);
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_PRIMARY),
-                              LV_PART_ITEMS | LV_STATE_PRESSED);
+                              (lv_style_selector_t)((uint32_t)LV_PART_ITEMS | (uint32_t)LV_STATE_PRESSED));
     lv_obj_set_style_text_color(s_kb, lv_color_hex(0xFFFFFF),
-                                LV_PART_ITEMS | LV_STATE_PRESSED);
+                                (lv_style_selector_t)((uint32_t)LV_PART_ITEMS | (uint32_t)LV_STATE_PRESSED));
 
     lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
         lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);

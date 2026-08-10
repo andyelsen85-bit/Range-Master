@@ -344,9 +344,9 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_border_color(s_kb, lv_color_hex(CLR_BG), LV_PART_ITEMS);
     // Pressed state
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_PRIMARY),
-                              LV_PART_ITEMS | LV_STATE_PRESSED);
+                              (lv_style_selector_t)((uint32_t)LV_PART_ITEMS | (uint32_t)LV_STATE_PRESSED));
     lv_obj_set_style_text_color(s_kb, lv_color_hex(0xFFFFFF),
-                                LV_PART_ITEMS | LV_STATE_PRESSED);
+                                (lv_style_selector_t)((uint32_t)LV_PART_ITEMS | (uint32_t)LV_STATE_PRESSED));
 
     // "OK" or "Close" key on the keyboard hides it
     lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
