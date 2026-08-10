@@ -65,26 +65,25 @@ CONFIG_NVS_ENCRYPTION=n
 # backend — confirmed working ("Using Hosted Wi-Fi" in build output).
 CONFIG_ESP_WIFI_REMOTE_ENABLED=y
 CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
-#
-# ── SDIO pin Kconfig — FILL IN AFTER FIRST SUCCESSFUL BUILD ─────────────
-# The pin symbol names below were unknown in esp_hosted 2.12.12.
-# Run this grep to find the real names, then uncomment + correct below:
-#
-#   grep -rn "^config " managed_components\espressif__esp_hosted\ --include=Kconfig*
-#
-# Board wiring (profi-max/JC8012P4A1_BSP_ESP32P4 BSP confirmed):
-#   CLK=GPIO18  CMD=GPIO19  D0=GPIO14  D1=GPIO15  D2=GPIO16  D3=GPIO17
-#   C6 CHIP_PU (reset)=GPIO54   C6 IO2 (wakeup)=GPIO6
-#
-# Paste your grep output and these will be filled in correctly.
-# CONFIG_<CLK_SYMBOL>=18
-# CONFIG_<CMD_SYMBOL>=19
-# CONFIG_<D0_SYMBOL>=14
-# CONFIG_<D1_SYMBOL>=15
-# CONFIG_<D2_SYMBOL>=16
-# CONFIG_<D3_SYMBOL>=17
-# CONFIG_<RESET_SYMBOL>=54
-# CONFIG_<WAKEUP_SYMBOL>=6
+# C6 as slave target (also set by esp_wifi_remote; explicit here for clarity)
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+# SDIO transport (automatic default for P4+C6, but explicit is safer)
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+# Slot 1 — Slot 0 on P4 uses fixed IOMUX pins (GPIO39/40/41/42/43/44), not our wiring
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+# ── SDIO pin assignments ──────────────────────────────────────────────────
+# No overrides needed: the esp_hosted 2.12.12 defaults for ESP32-P4 Slot 1
+# already match this board exactly (confirmed from Kconfig + BSP docs):
+#   CLK  GPIO18  symbol: ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_1  default=18 ✓
+#   CMD  GPIO19  symbol: ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_1  default=19 ✓
+#   D0   GPIO14  symbol: ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1   default=14 ✓
+#   D1   GPIO15  symbol: ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1 default=15 ✓
+#   D2   GPIO16  symbol: ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1 default=16 ✓
+#   D3   GPIO17  symbol: ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1 default=17 ✓
+#   RST  GPIO54  symbol: ESP_HOSTED_SDIO_GPIO_RESET_SLAVE     default=54 ✓
+# To change any pin: add CONFIG_<symbol_name>=<gpio> here.
+# SDIO clock — default 40 MHz; 20 MHz conservative start, raise once link stable
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=20000
 
 # ── UART ──────────────────────────────────────────────────────────────────
 CONFIG_UART_ISR_IN_IRAM=y
