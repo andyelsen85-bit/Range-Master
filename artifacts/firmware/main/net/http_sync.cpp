@@ -71,6 +71,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
     } else {
         ESP_LOGE(TAG, "POST %s failed: %s", path, esp_err_to_name(err));
     }
+    esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return err;
 }
@@ -104,6 +105,7 @@ static esp_err_t http_get_json(const char *path,
     } else {
         ESP_LOGE(TAG, "GET %s failed: %s", path, esp_err_to_name(err));
     }
+    esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return err;
 }
