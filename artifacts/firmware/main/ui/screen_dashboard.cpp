@@ -11,7 +11,6 @@
 #include "esp_log.h"
 #include "ui_manager.h"
 #include "game_store.h"
-#include "battery.h"
 #include "screen_dashboard.h"
 
 
@@ -20,7 +19,6 @@ static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_sync_status;
 static lv_obj_t *s_lbl_pending;
 static lv_obj_t *s_lbl_wifi;
-static lv_obj_t *s_lbl_battery;
 static lv_obj_t *s_history_list;
 
 #define SIDEBAR_W   320
@@ -117,35 +115,12 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_color(club_lbl, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_align(club_lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
-    // Right-side status area: WiFi (top) + Battery (bottom)
+    // WiFi status (right side of header)
     s_lbl_wifi = lv_label_create(header);
     lv_label_set_text(s_lbl_wifi, LV_SYMBOL_WIFI "  NET VERBONNEN");
     lv_obj_set_style_text_font(s_lbl_wifi, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_MUTED), 0);
-    lv_obj_align(s_lbl_wifi, LV_ALIGN_RIGHT_MID, 0, -18);
-
-    s_lbl_battery = lv_label_create(header);
-    lv_obj_set_style_text_font(s_lbl_battery, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(s_lbl_battery, lv_color_hex(CLR_MUTED), 0);
-    lv_obj_align(s_lbl_battery, LV_ALIGN_RIGHT_MID, 0, +16);
-    if (battery_is_available()) {
-        // Initial reading shown at screen creation
-        int pct = battery_get_percent();
-        char batt_buf[32];
-        const char *sym = (pct >= 80) ? LV_SYMBOL_BATTERY_FULL :
-                          (pct >= 60) ? LV_SYMBOL_BATTERY_3    :
-                          (pct >= 40) ? LV_SYMBOL_BATTERY_2    :
-                          (pct >= 20) ? LV_SYMBOL_BATTERY_1    :
-                                        LV_SYMBOL_BATTERY_EMPTY;
-        uint32_t clr = (pct >= 60) ? CLR_SUCCESS :
-                       (pct >= 20) ? CLR_WARN    : CLR_DANGER;
-        snprintf(batt_buf, sizeof(batt_buf), "%s  %d%%", sym, pct);
-        lv_label_set_text(s_lbl_battery, batt_buf);
-        lv_obj_set_style_text_color(s_lbl_battery,
-                                    lv_color_hex(clr), 0);
-    } else {
-        lv_label_set_text(s_lbl_battery, "");
-    }
+    lv_obj_align(s_lbl_wifi, LV_ALIGN_RIGHT_MID, 0, 0);
 
     // ── Left content area (game history) ──────────────────────
     lv_obj_t *content = lv_obj_create(s_scr);
@@ -326,24 +301,6 @@ void screen_dashboard_refresh(void)
     } else {
         lv_label_set_text(s_lbl_wifi, LV_SYMBOL_WIFI "  NET VERBONNEN");
         lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_MUTED), 0);
-    }
-
-    // Battery
-    if (s_lbl_battery && battery_is_available()) {
-        int pct = battery_get_percent();
-        if (pct >= 0) {
-            const char *sym = (pct >= 80) ? LV_SYMBOL_BATTERY_FULL :
-                              (pct >= 60) ? LV_SYMBOL_BATTERY_3    :
-                              (pct >= 40) ? LV_SYMBOL_BATTERY_2    :
-                              (pct >= 20) ? LV_SYMBOL_BATTERY_1    :
-                                            LV_SYMBOL_BATTERY_EMPTY;
-            uint32_t clr = (pct >= 60) ? CLR_SUCCESS :
-                           (pct >= 20) ? CLR_WARN    : CLR_DANGER;
-            snprintf(buf, sizeof(buf), "%s  %d%%", sym, pct);
-            lv_label_set_text(s_lbl_battery, buf);
-            lv_obj_set_style_text_color(s_lbl_battery,
-                                        lv_color_hex(clr), 0);
-        }
     }
 
     // History list (most-recent 5 entries) - proper-height rows

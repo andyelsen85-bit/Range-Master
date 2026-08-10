@@ -14,7 +14,6 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "game_store.h"
-#include "battery.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,13 +109,6 @@ static const char HTML_HEAD[] =
     "<h1>&#127919; TrapMaster</h1>"
     "<p class=sub>Terminal-Konfiguration</p>";
 
-static const char HTML_BATT_SECT[] =
-    "<div style='background:#1e2130;border:1px solid #3d4460;border-radius:8px;"
-    "padding:.75rem 1rem;margin-bottom:1.2rem;font-size:.9rem'>"
-    "<span style='color:#94a3b8'>&#128267; BATTERIE &nbsp;</span>";
-// dynamic battery text is inserted between HTML_BATT_SECT and HTML_BATT_END
-static const char HTML_BATT_END[] = "</div>";
-
 static const char HTML_FORM_START[] =
     "<form method=POST action=/save>"
     "<label>API URL</label>"
@@ -145,37 +137,6 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, HTML_HEAD);
 
     if (banner) httpd_resp_sendstr_chunk(req, banner);
-
-    // Battery status section — built from small chunks to avoid snprintf
-    // buffer-size warnings on -Werror=format-truncation.
-    if (battery_is_available()) {
-        int pct = battery_get_percent();
-        int mv  = battery_get_mv();
-        httpd_resp_sendstr_chunk(req, HTML_BATT_SECT);
-        if (pct >= 0) {
-            const char *clr_hex = (pct >= 60) ? "22C55E"
-                                : (pct >= 20) ? "F59E0B" : "EF4444";
-            // Percentage with colour
-            char tmp[48];
-            httpd_resp_sendstr_chunk(req,
-                "<span style='color:#");
-            httpd_resp_sendstr_chunk(req, clr_hex);
-            httpd_resp_sendstr_chunk(req, ";font-weight:600'>");
-            snprintf(tmp, sizeof(tmp), "%d%%", pct);
-            httpd_resp_sendstr_chunk(req, tmp);
-            httpd_resp_sendstr_chunk(req, "</span>");
-            // Raw mV for calibration
-            httpd_resp_sendstr_chunk(req,
-                "<span style='color:#64748b;font-size:.8rem'> &nbsp;(");
-            snprintf(tmp, sizeof(tmp), "%d mV", mv);
-            httpd_resp_sendstr_chunk(req, tmp);
-            httpd_resp_sendstr_chunk(req, ")</span>");
-        } else {
-            httpd_resp_sendstr_chunk(req,
-                "<span style='color:#64748b'>N/A</span>");
-        }
-        httpd_resp_sendstr_chunk(req, HTML_BATT_END);
-    }
 
     httpd_resp_sendstr_chunk(req, HTML_FORM_START);
     httpd_resp_sendstr_chunk(req, g_store.apiUrl);

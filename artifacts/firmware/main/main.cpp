@@ -33,7 +33,6 @@
 #include "ui_manager.h"
 #include "game_store.h"
 #include "coprocessor.h"
-#include "battery.h"
 #include "lora_stub.h"
 
 static const char *TAG = "main";
@@ -253,13 +252,6 @@ extern "C" void app_main(void)
 
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
     coprocessor_init();
-
-    // ── Battery ADC (GPIO52 voltage divider, IP5306 board) ───
-    // Initialised AFTER coprocessor_init() because adc_oneshot_new_unit()
-    // acquires the ADC1 power domain and releases GPIO pad holds, which
-    // clears the pullup on GPIO19 (SDIO CMD) set by esp_hosted — causing
-    // the C6 SDIO link to fail if called before WiFi is up.
-    battery_init();
 
     // ── LoRa stub (phase 3 placeholder) ───────────────────────
     lora_stub_init();

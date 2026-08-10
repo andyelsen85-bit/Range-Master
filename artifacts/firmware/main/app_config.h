@@ -67,22 +67,6 @@
 // ── Portal API ──────────────────────────────────────────────
 #define DEFAULT_API_URL         "https://rangemaster.hostzone.lu"
 
-// ── Battery ADC (IP5306 voltage divider — Guition JC8012P4A1C) ─
-// GPIO52 = ADC1 channel 3 on ESP32-P4.
-// 1:1 voltage divider: cell voltage / 2 appears at the ADC pin.
-// Calibration thresholds (millivolts at ADC input):
-//   BATT_MV_EMPTY → ADC voltage when cell is at 3.0 V (flat)
-//   BATT_MV_FULL  → ADC voltage when cell is at 4.2 V (full)
-// Tune these against battery_get_mv() + a multimeter if readings
-// look wrong on your unit.
-// ADC unit/channel are plain ints to avoid pulling esp_adc headers
-// into every translation unit.  battery.cpp casts them explicitly.
-#define BATT_ADC_GPIO           GPIO_NUM_52
-#define BATT_ADC_UNIT_NUM       0               // ADC_UNIT_1
-#define BATT_ADC_CHANNEL_NUM    3               // ADC_CHANNEL_3 = GPIO52 on ESP32-P4
-#define BATT_MV_EMPTY           1500            // 3.0 V cell / 2
-#define BATT_MV_FULL            2100            // 4.2 V cell / 2
-
 // ── Misc ────────────────────────────────────────────────────
 #define APP_VERSION             "1.0.0-phase1"
 #define CLUB_NAME               "F.S.H.C.L. SEKTIOUN WOLZ"
