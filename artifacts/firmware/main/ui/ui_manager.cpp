@@ -111,6 +111,13 @@ void ui_manager_init(void)
     ESP_LOGI(TAG, "Building LVGL screens...");
     styles_init();
 
+    // Create persistent WiFi worker tasks NOW, before any screen_*_create()
+    // call consumes internal RAM.  After all 10 screens are built, internal
+    // RAM drops to ~52 bytes — far too little for a FreeRTOS TCB (~200 B).
+    // Workers created here (while ~93 KB is still free) block on queues and
+    // cost no allocations when scan_cb / connect_cb fire at tap time.
+    screen_wifi_create_workers();
+
     // Yield 5 ms between each screen build so FreeRTOS IDLE1 can run and
     // reset the task watchdog.  Without this, 10 consecutive heavy screen
     // constructions (widget creation events + flush_cb rotation loops) can

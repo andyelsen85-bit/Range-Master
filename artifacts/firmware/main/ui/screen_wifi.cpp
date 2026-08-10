@@ -7,6 +7,7 @@
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "freertos/idf_additions.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -25,74 +26,118 @@ static lv_obj_t *s_lbl_ip;
 static lv_obj_t *s_btn_connect;
 static lv_obj_t *s_kb;
 
-// File-scope scan result buffer - shared between the scan task and the
-// lv_async_call lambda that renders the list (static locals inside lambdas
-// have no external linkage so extern references to them fail to link).
-static char s_scan_names[20][33];
-static int  s_scan_count = 0;
+// ── Persistent worker tasks — created once at boot while RAM is healthy ───
+// Internal RAM is exhausted (~52 bytes) by the time the WiFi screen is
+// first shown (SDIO + LVGL 10 screens consume the entire ~93 KB budget).
+// Any xTaskCreate() call at tap time fails because FreeRTOS TCBs need
+// internal RAM regardless of where the stack lives.
+// Pattern: create ONE long-lived task per operation at boot; scan_cb /
+// connect_cb just queue-send (queue send costs no allocations).
+static QueueHandle_t s_scan_queue = NULL;
+static QueueHandle_t s_conn_queue = NULL;
 
-// ── Scan networks ─────────────────────────────────────────────
+// Shared scan result buffers (written by worker, read by lv_async_call).
+static char      s_scan_names[20][33];
+static int       s_scan_count = 0;
+static esp_err_t s_scan_err   = ESP_OK;
+
+void screen_wifi_create_workers(void)
+{
+    // Scan worker — blocks on queue, runs cop_wifi_scan, notifies LVGL.
+    s_scan_queue = xQueueCreate(1, sizeof(uint32_t));
+    xTaskCreateWithCaps([](void *arg) {
+        uint32_t dummy;
+        for (;;) {
+            xQueueReceive(s_scan_queue, &dummy, portMAX_DELAY);
+            char names[20][33];
+            int count = 0;
+            s_scan_err = cop_wifi_scan(names, 20, &count);
+            memcpy(s_scan_names, names, sizeof(s_scan_names));
+            s_scan_count = count;
+            lv_async_call([](void *) {
+                if (!s_list_networks) return;
+                lv_obj_clean(s_list_networks);
+                if (s_scan_err == ESP_ERR_TIMEOUT) {
+                    lv_list_add_text(s_list_networks,
+                                     LV_SYMBOL_WARNING " SCAN TIMEOUT");
+                    lv_label_set_text(s_lbl_status,
+                        LV_SYMBOL_WARNING " TIMEOUT — SDIO Verbindung pruefen");
+                    lv_obj_set_style_text_color(s_lbl_status,
+                        lv_color_hex(CLR_DANGER), 0);
+                    return;
+                }
+                for (int i = 0; i < s_scan_count; i++) {
+                    lv_obj_t *btn = lv_list_add_btn(s_list_networks,
+                                                    LV_SYMBOL_WIFI, s_scan_names[i]);
+                    lv_obj_set_style_text_font(btn, &lv_font_montserrat_14, 0);
+                    lv_obj_set_style_text_color(btn, lv_color_hex(CLR_TEXT), 0);
+                    lv_obj_add_event_cb(btn, [](lv_event_t *ev) {
+                        lv_obj_t *b = lv_event_get_target_obj(ev);
+                        const char *net = lv_list_get_btn_text(s_list_networks, b);
+                        if (s_ta_ssid) lv_textarea_set_text(s_ta_ssid, net);
+                    }, LV_EVENT_CLICKED, NULL);
+                }
+                if (s_scan_count == 0)
+                    lv_list_add_text(s_list_networks, "KENG NETZWIERKER FONNT");
+                if (s_lbl_status) {
+                    lv_label_set_text(s_lbl_status, "SCAN FAERDEG");
+                    lv_obj_set_style_text_color(s_lbl_status,
+                        lv_color_hex(CLR_SUCCESS), 0);
+                }
+            }, NULL);
+        }
+    }, "wifi_scan_w", 8192, NULL, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    // Connect worker — blocks on queue, runs cop_wifi_connect, notifies LVGL.
+    s_conn_queue = xQueueCreate(1, sizeof(uint32_t));
+    xTaskCreateWithCaps([](void *arg) {
+        uint32_t dummy;
+        for (;;) {
+            xQueueReceive(s_conn_queue, &dummy, portMAX_DELAY);
+            cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
+            lv_async_call([](void *) {
+                bool ok = cop_wifi_is_connected();
+                g_store.wifiConnected = ok;
+                if (ok) {
+                    char ip[16];
+                    cop_wifi_get_ip(ip, sizeof(ip));
+                    snprintf(g_store.wifiIp, sizeof(g_store.wifiIp), "%s", ip);
+                    char buf[48];
+                    snprintf(buf, sizeof(buf), "VERBONNEN! IP: %s", ip);
+                    if (s_lbl_status) {
+                        lv_label_set_text(s_lbl_status, buf);
+                        lv_obj_set_style_text_color(s_lbl_status,
+                            lv_color_hex(CLR_SUCCESS), 0);
+                    }
+                    if (s_lbl_ip) lv_label_set_text(s_lbl_ip, buf);
+                } else {
+                    if (s_lbl_status) {
+                        lv_label_set_text(s_lbl_status,
+                            LV_SYMBOL_WARNING " VERBINDUNG FEHLGESCHLOEN");
+                        lv_obj_set_style_text_color(s_lbl_status,
+                            lv_color_hex(CLR_DANGER), 0);
+                    }
+                }
+            }, NULL);
+        }
+    }, "wifi_conn_w", 8192, NULL, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    ESP_LOGI("wifi_screen", "Workers created. Internal RAM remaining: %u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+}
+
+// ── Scan button — just triggers the persistent worker ─────────
 static void scan_cb(lv_event_t *e)
 {
+    if (!s_scan_queue) return;
     lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " SCANNT...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
     lv_obj_clean(s_list_networks);
-
-    // Run scan in background task (cop_wifi_scan blocks up to 30 s then times out)
-    // xTaskCreate draws stack from internal RAM which is exhausted by SDIO+LVGL.
-    // xTaskCreateWithCaps allocates the stack from PSRAM instead.
-    ESP_LOGI("wifi_screen", "scan_cb: free internal=%u PSRAM=%u",
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    BaseType_t task_ok = xTaskCreateWithCaps([](void *arg) {
-        ESP_LOGI("wifi_screen", "wifi_scan task: started");
-        char names[20][33];
-        int count = 0;
-        esp_err_t err = cop_wifi_scan(names, 20, &count);
-        ESP_LOGI("wifi_screen", "wifi_scan task: done — %s count=%d",
-                 esp_err_to_name(err), count);
-        memcpy(s_scan_names, names, sizeof(s_scan_names));
-        s_scan_count = count;
-        static esp_err_t s_scan_err;
-        s_scan_err = err;
-        lv_async_call([](void *arg2) {
-            lv_obj_clean(s_list_networks);
-            if (s_scan_err == ESP_ERR_TIMEOUT) {
-                lv_list_add_text(s_list_networks, LV_SYMBOL_WARNING " SCAN TIMEOUT");
-                lv_label_set_text(s_lbl_status,
-                    LV_SYMBOL_WARNING " TIMEOUT — SDIO Verbindung pruefen");
-                lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
-                return;
-            }
-            for (int i = 0; i < s_scan_count; i++) {
-                lv_obj_t *btn = lv_list_add_btn(s_list_networks,
-                                                LV_SYMBOL_WIFI, s_scan_names[i]);
-                lv_obj_set_style_text_font(btn, &lv_font_montserrat_14, 0);
-                lv_obj_set_style_text_color(btn, lv_color_hex(CLR_TEXT), 0);
-                lv_obj_add_event_cb(btn, [](lv_event_t *ev) {
-                    lv_obj_t *b = lv_event_get_target_obj(ev);
-                    const char *net = lv_list_get_btn_text(s_list_networks, b);
-                    if (s_ta_ssid) lv_textarea_set_text(s_ta_ssid, net);
-                }, LV_EVENT_CLICKED, NULL);
-            }
-            if (s_scan_count == 0) {
-                lv_list_add_text(s_list_networks, "KENG NETZWIERKER FONNT");
-            }
-            lv_label_set_text(s_lbl_status, "SCAN FAERDEG");
-            lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
-        }, NULL);
-        vTaskDelete(NULL);
-    }, "wifi_scan", 8192, NULL, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-
-    if (task_ok != pdPASS) {
-        ESP_LOGE("wifi_screen", "scan_cb: xTaskCreateWithCaps FAILED");
-        lv_label_set_text(s_lbl_status,
-            LV_SYMBOL_WARNING " INTERN FEELER: Task net erstallt");
-        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
-    }
+    uint32_t trigger = 1;
+    xQueueSend(s_scan_queue, &trigger, 0);   // costs no RAM at call time
 }
 
-// ── Connect ───────────────────────────────────────────────────
+// ── Connect button — just triggers the persistent worker ──────
 static void connect_cb(lv_event_t *e)
 {
     const char *ssid = lv_textarea_get_text(s_ta_ssid);
@@ -102,39 +147,17 @@ static void connect_cb(lv_event_t *e)
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
-
-    // Save to store
-    strncpy(g_store.wifiSsid, ssid, MAX_SSID_LEN - 1); g_store.wifiSsid[MAX_SSID_LEN - 1] = '\0';
-    strncpy(g_store.wifiPass, pass, MAX_PASS_LEN - 1); g_store.wifiPass[MAX_PASS_LEN - 1] = '\0';
+    strncpy(g_store.wifiSsid, ssid, MAX_SSID_LEN - 1);
+    g_store.wifiSsid[MAX_SSID_LEN - 1] = '\0';
+    strncpy(g_store.wifiPass, pass, MAX_PASS_LEN - 1);
+    g_store.wifiPass[MAX_PASS_LEN - 1] = '\0';
     game_store_save();
-
     lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " VERBANNE...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
-
-    // Stack from PSRAM — same reason as scan task above.
-    xTaskCreateWithCaps([](void *arg) {
-        cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
-        lv_async_call([](void *arg2) {
-            bool ok = cop_wifi_is_connected();
-            g_store.wifiConnected = ok;
-            if (ok) {
-                char ip[16];
-                cop_wifi_get_ip(ip, sizeof(ip));
-                snprintf(g_store.wifiIp, sizeof(g_store.wifiIp), "%s", ip);
-                char buf[48];
-                snprintf(buf, sizeof(buf), "VERBONNEN! IP: %s", ip);
-                lv_label_set_text(s_lbl_status, buf);
-                lv_obj_set_style_text_color(s_lbl_status,
-                    lv_color_hex(CLR_SUCCESS), 0);
-                lv_label_set_text(s_lbl_ip, buf);
-            } else {
-                lv_label_set_text(s_lbl_status, LV_SYMBOL_WARNING " VERBINDUNG FEHLGESCHLOEN");
-                lv_obj_set_style_text_color(s_lbl_status,
-                    lv_color_hex(CLR_DANGER), 0);
-            }
-        }, NULL);
-        vTaskDelete(NULL);
-    }, "wifi_conn", 8192, NULL, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_conn_queue) {
+        uint32_t trigger = 1;
+        xQueueSend(s_conn_queue, &trigger, 0);
+    }
 }
 
 lv_obj_t *screen_wifi_create(void)
