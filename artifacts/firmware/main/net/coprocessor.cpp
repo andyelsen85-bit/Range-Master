@@ -215,19 +215,51 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
         return ESP_ERR_TIMEOUT;
     }
 
-    uint16_t ap_num = (uint16_t)max;
+    ESP_LOGI(TAG, "SCAN_DONE received");
+
+    // Ask the driver how many APs it actually captured — this is the
+    // ground truth before we allocate the records buffer.
+    uint16_t ap_count_raw = 0;
+    esp_err_t num_err = esp_wifi_scan_get_ap_num(&ap_count_raw);
+    ESP_LOGI(TAG, "esp_wifi_scan_get_ap_num: err=%s count=%u",
+             esp_err_to_name(num_err), (unsigned)ap_count_raw);
+
+    uint16_t ap_num = (ap_count_raw < (uint16_t)max)
+                    ? ap_count_raw : (uint16_t)max;
+    if (ap_num == 0) {
+        // Driver returned zero records — scan ran but found nothing
+        // (or the esp_hosted RPC hasn't delivered results yet).
+        // Small delay + retry once to handle C6 result latency.
+        ESP_LOGW(TAG, "ap_num=0 after SCAN_DONE — retrying get_ap_num in 500 ms");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_wifi_scan_get_ap_num(&ap_count_raw);
+        ap_num = (ap_count_raw < (uint16_t)max) ? ap_count_raw : (uint16_t)max;
+        ESP_LOGI(TAG, "retry ap_num=%u", (unsigned)ap_num);
+    }
+
+    if (ap_num == 0) {
+        ESP_LOGW(TAG, "Still 0 APs — returning empty list");
+        *count = 0;
+        return ESP_OK;
+    }
+
     wifi_ap_record_t *records =
         (wifi_ap_record_t *)malloc(ap_num * sizeof(wifi_ap_record_t));
     if (!records) return ESP_ERR_NO_MEM;
 
-    err = esp_wifi_scan_get_ap_records(&ap_num, records);
+    uint16_t fetched = ap_num;
+    err = esp_wifi_scan_get_ap_records(&fetched, records);
+    ESP_LOGI(TAG, "esp_wifi_scan_get_ap_records: err=%s fetched=%u",
+             esp_err_to_name(err), (unsigned)fetched);
     if (err == ESP_OK) {
-        for (int i = 0; i < ap_num; i++) {
+        for (int i = 0; i < fetched; i++) {
             strncpy(names[i], (char *)records[i].ssid, 32);
             names[i][32] = '\0';
+            ESP_LOGI(TAG, "  AP[%d]: ssid=\"%s\" rssi=%d ch=%d",
+                     i, names[i], records[i].rssi, records[i].primary);
         }
-        *count = (int)ap_num;
-        ESP_LOGI(TAG, "Scan found %d networks", *count);
+        *count = (int)fetched;
+        ESP_LOGI(TAG, "Scan complete: %d networks found", *count);
     }
     free(records);
     return err;
