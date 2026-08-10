@@ -18,6 +18,7 @@
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
 #include "coprocessor.h"
+#include "game_store.h"
 #include "web_config.h"
 #include "app_config.h"
 
