@@ -19,6 +19,7 @@ static lv_obj_t *s_ta_ssid;
 static lv_obj_t *s_ta_pass;
 static lv_obj_t *s_lbl_ip;
 static lv_obj_t *s_btn_connect;
+static lv_obj_t *s_kb;
 
 // File-scope scan result buffer - shared between the scan task and the
 // lv_async_call lambda that renders the list (static locals inside lambdas
@@ -252,6 +253,33 @@ lv_obj_t *screen_wifi_create(void)
         lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_MUTED), 0);
     }
     lv_obj_set_style_text_font(s_lbl_ip, &lv_font_montserrat_14, 0);
+
+    // ── On-screen keyboard ────────────────────────────────────────
+    // Created last so it renders on top of all other content.
+    s_kb = lv_keyboard_create(s_scr);
+    lv_obj_set_size(s_kb, DISPLAY_LOGICAL_W, LV_SIZE_CONTENT);
+    lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+
+    // "OK" or "Close" key on the keyboard hides it
+    lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
+        lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(s_kb, NULL);
+    }, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
+        lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(s_kb, NULL);
+    }, LV_EVENT_CANCEL, NULL);
+
+    // Tapping a textarea links it and shows the keyboard
+    lv_obj_add_event_cb(s_ta_ssid, [](lv_event_t *e) {
+        lv_keyboard_set_textarea(s_kb, s_ta_ssid);
+        lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(s_ta_pass, [](lv_event_t *e) {
+        lv_keyboard_set_textarea(s_kb, s_ta_pass);
+        lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_FOCUSED, NULL);
 
     return s_scr;
 }

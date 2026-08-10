@@ -12,6 +12,7 @@
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_tab_view;
+static lv_obj_t *s_kb;
 
 // ── Tab: Portal API ───────────────────────────────────────────
 static lv_obj_t *s_ta_url;
@@ -547,6 +548,32 @@ lv_obj_t *screen_einstellungen_create(void)
     build_wifi_tab(tab_wifi);
     build_bt_tab(tab_bt);
     build_system_tab(tab_sys);
+
+    // ── On-screen keyboard ────────────────────────────────────────
+    // Created last (after all tabs) so it renders on top.
+    s_kb = lv_keyboard_create(s_scr);
+    lv_obj_set_size(s_kb, DISPLAY_LOGICAL_W, LV_SIZE_CONTENT);
+    lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
+        lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(s_kb, NULL);
+    }, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
+        lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(s_kb, NULL);
+    }, LV_EVENT_CANCEL, NULL);
+
+    // API tab textareas
+    lv_obj_add_event_cb(s_ta_url, [](lv_event_t *e) {
+        lv_keyboard_set_textarea(s_kb, s_ta_url);
+        lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(s_ta_key, [](lv_event_t *e) {
+        lv_keyboard_set_textarea(s_kb, s_ta_key);
+        lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_FOCUSED, NULL);
 
     return s_scr;
 }
