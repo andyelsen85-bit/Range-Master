@@ -7,8 +7,10 @@
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "coprocessor.h"
@@ -37,32 +39,29 @@ static void scan_cb(lv_event_t *e)
     lv_obj_clean(s_list_networks);
 
     // Run scan in background task (cop_wifi_scan blocks up to 30 s then times out)
-    ESP_LOGI("wifi_screen", "scan_cb: creating wifi_scan task");
-    BaseType_t task_ok = xTaskCreate([](void *arg) {
-        ESP_LOGI("wifi_screen", "wifi_scan task: started, calling cop_wifi_scan");
+    // xTaskCreate draws stack from internal RAM which is exhausted by SDIO+LVGL.
+    // xTaskCreateWithCaps allocates the stack from PSRAM instead.
+    ESP_LOGI("wifi_screen", "scan_cb: free internal=%u PSRAM=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    BaseType_t task_ok = xTaskCreateWithCaps([](void *arg) {
+        ESP_LOGI("wifi_screen", "wifi_scan task: started");
         char names[20][33];
         int count = 0;
         esp_err_t err = cop_wifi_scan(names, 20, &count);
-        ESP_LOGI("wifi_screen", "wifi_scan task: cop_wifi_scan returned %s count=%d",
+        ESP_LOGI("wifi_screen", "wifi_scan task: done — %s count=%d",
                  esp_err_to_name(err), count);
-        // LVGL update must happen in LVGL context; use lv_async_call.
-        // Stash results in static file-scope buffers first.
         memcpy(s_scan_names, names, sizeof(s_scan_names));
         s_scan_count = count;
-
-        // Stash the error so the lambda can read it without a capture.
         static esp_err_t s_scan_err;
         s_scan_err = err;
-
         lv_async_call([](void *arg2) {
             lv_obj_clean(s_list_networks);
             if (s_scan_err == ESP_ERR_TIMEOUT) {
-                // Scan timed out — C6 slave not yet flashed or SDIO link issue.
                 lv_list_add_text(s_list_networks, LV_SYMBOL_WARNING " SCAN TIMEOUT");
                 lv_label_set_text(s_lbl_status,
-                    LV_SYMBOL_WARNING " TIMEOUT — C6 net geflasht? tools/flash_c6_slave.sh lufen");
-                lv_obj_set_style_text_color(s_lbl_status,
-                    lv_color_hex(CLR_DANGER), 0);
+                    LV_SYMBOL_WARNING " TIMEOUT — SDIO Verbindung pruefen");
+                lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
                 return;
             }
             for (int i = 0; i < s_scan_count; i++) {
@@ -82,17 +81,14 @@ static void scan_cb(lv_event_t *e)
             lv_label_set_text(s_lbl_status, "SCAN FAERDEG");
             lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
         }, NULL);
-
         vTaskDelete(NULL);
-    }, "wifi_scan", 8192, NULL, 5, NULL);
+    }, "wifi_scan", 8192, NULL, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     if (task_ok != pdPASS) {
-        ESP_LOGE("wifi_screen", "scan_cb: xTaskCreate FAILED (pdFAIL) — heap full?");
+        ESP_LOGE("wifi_screen", "scan_cb: xTaskCreateWithCaps FAILED");
         lv_label_set_text(s_lbl_status,
-            LV_SYMBOL_WARNING " INTERN FEELER: Task erstellen gescheitert");
+            LV_SYMBOL_WARNING " INTERN FEELER: Task net erstallt");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
-    } else {
-        ESP_LOGI("wifi_screen", "scan_cb: wifi_scan task created OK");
     }
 }
 
@@ -115,8 +111,8 @@ static void connect_cb(lv_event_t *e)
     lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " VERBANNE...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
 
-    // Connect in background
-    xTaskCreate([](void *arg) {
+    // Stack from PSRAM — same reason as scan task above.
+    xTaskCreateWithCaps([](void *arg) {
         cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
         lv_async_call([](void *arg2) {
             bool ok = cop_wifi_is_connected();
@@ -138,7 +134,7 @@ static void connect_cb(lv_event_t *e)
             }
         }, NULL);
         vTaskDelete(NULL);
-    }, "wifi_conn", 8192, NULL, 5, NULL);
+    }, "wifi_conn", 8192, NULL, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
 lv_obj_t *screen_wifi_create(void)
@@ -288,6 +284,25 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_size(s_kb, DISPLAY_LOGICAL_W, LV_SIZE_CONTENT);
     lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+
+    // Explicit dark-theme styling — without this the default LVGL theme
+    // renders white keys on white background (invisible on this display).
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_kb, 0, 0);
+    // Key buttons
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_BORDER), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(CLR_TEXT), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_kb, &lv_font_montserrat_16, LV_PART_ITEMS);
+    lv_obj_set_style_radius(s_kb, 6, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(s_kb, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(s_kb, lv_color_hex(CLR_BG), LV_PART_ITEMS);
+    // Pressed state
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_PRIMARY),
+                              LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(0xFFFFFF),
+                                LV_PART_ITEMS | LV_STATE_PRESSED);
 
     // "OK" or "Close" key on the keyboard hides it
     lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
