@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "cJSON.h"
@@ -286,6 +287,9 @@ esp_err_t http_sync_all(void)
 {
     ESP_LOGI(TAG, "Starting full sync...");
     ESP_LOGI(TAG, "  URL: %s  key: '%s'", g_store.apiUrl, g_store.apiKey);
+    ESP_LOGI(TAG, "  internal free=%u B  largest block=%u B",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     esp_err_t err = http_push_pending_games();
     if (err != ESP_OK) return err;
 
