@@ -60,34 +60,31 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 CONFIG_NVS_ENCRYPTION=n
 
 # ── ESP-Hosted SDIO (P4 host ↔ C6 slave) ────────────────────────────────
-# espressif/esp_hosted ≥2.4.2 + espressif/esp_wifi_remote ≥1.0.0
-# C6 must run ESP-Hosted-MCU slave firmware (SDIO mode, not AT firmware).
-# Pins confirmed from profi-max/JC8012P4A1_BSP_ESP32P4 BSP documentation.
-# If symbols differ after `idf.py menuconfig`, adjust here to match.
+# C6 running ESP-Hosted-MCU slave v2.3.2 (SDIO).  Host component: 2.12.12.
+# CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y selects esp_hosted as the WiFi
+# backend — confirmed working ("Using Hosted Wi-Fi" in build output).
 CONFIG_ESP_WIFI_REMOTE_ENABLED=y
 CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
-# Use SDIO host interface (not SPI/UART)
-CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
-# Target slave chip
-CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
-# SDIO GPIO matrix — required on ESP32-P4 for non-slot-default pins
-CONFIG_SDMMC_USE_GPIO_MATRIX=y
-# SDIO pin assignments — confirmed from profi-max/JC8012P4A1_BSP_ESP32P4
-# SD2_CLK=GPIO18, SD2_CMD=GPIO19, SD2_D0-D3=GPIO14-17
-# NOTE: exact Kconfig symbol names must be verified after first idf.py build:
-#   grep -r "SDIO.*GPIO\|GPIO.*SDIO" managed_components/espressif__esp_hosted/
-# Update these names if the build rejects them.
-CONFIG_ESP_HOSTED_SDIO_CLK_GPIO=18
-CONFIG_ESP_HOSTED_SDIO_CMD_GPIO=19
-CONFIG_ESP_HOSTED_SDIO_D0_GPIO=14
-CONFIG_ESP_HOSTED_SDIO_D1_GPIO=15
-CONFIG_ESP_HOSTED_SDIO_D2_GPIO=16
-CONFIG_ESP_HOSTED_SDIO_D3_GPIO=17
-# C6 reset (CHIP_PU → GPIO54) and wakeup (IO2 → GPIO6)
-CONFIG_ESP_HOSTED_RESET_GPIO=54
-CONFIG_ESP_HOSTED_WAKEUP_GPIO=6
-# SDIO clock — start at 20 MHz (conservative); raise to 40 MHz if stable
-CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=20000
+#
+# ── SDIO pin Kconfig — FILL IN AFTER FIRST SUCCESSFUL BUILD ─────────────
+# The pin symbol names below were unknown in esp_hosted 2.12.12.
+# Run this grep to find the real names, then uncomment + correct below:
+#
+#   grep -rn "^config " managed_components\espressif__esp_hosted\ --include=Kconfig*
+#
+# Board wiring (profi-max/JC8012P4A1_BSP_ESP32P4 BSP confirmed):
+#   CLK=GPIO18  CMD=GPIO19  D0=GPIO14  D1=GPIO15  D2=GPIO16  D3=GPIO17
+#   C6 CHIP_PU (reset)=GPIO54   C6 IO2 (wakeup)=GPIO6
+#
+# Paste your grep output and these will be filled in correctly.
+# CONFIG_<CLK_SYMBOL>=18
+# CONFIG_<CMD_SYMBOL>=19
+# CONFIG_<D0_SYMBOL>=14
+# CONFIG_<D1_SYMBOL>=15
+# CONFIG_<D2_SYMBOL>=16
+# CONFIG_<D3_SYMBOL>=17
+# CONFIG_<RESET_SYMBOL>=54
+# CONFIG_<WAKEUP_SYMBOL>=6
 
 # ── UART ──────────────────────────────────────────────────────────────────
 CONFIG_UART_ISR_IN_IRAM=y

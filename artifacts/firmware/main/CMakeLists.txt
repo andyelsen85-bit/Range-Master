@@ -41,4 +41,9 @@ idf_component_register(
         esp_system
         esp_psram
         esp_mm
+    PRIV_REQUIRES
+        # ESP-Hosted WiFi stack (coprocessor.cpp uses esp_wifi_*, esp_netif_*, esp_event_*)
+        esp_wifi
+        esp_netif
+        esp_event
 )
