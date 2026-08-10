@@ -253,6 +253,9 @@ extern "C" void app_main(void)
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
     coprocessor_init();
 
+    // ── Auto-connect to last known WiFi (non-blocking task) ──
+    coprocessor_autoconnect();
+
     // ── LoRa stub (phase 3 placeholder) ───────────────────────
     lora_stub_init();
 

@@ -35,8 +35,8 @@ static void add_local_cb(lv_event_t *e)
 // ── Sync portal list ──────────────────────────────────────────
 static void reload_cb(lv_event_t *e)
 {
-    store_load_portal_spieler();
-    lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " PORTAL LUEDEN...");
+    store_sync();
+    lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " SYNC LUEFT...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
 }
 

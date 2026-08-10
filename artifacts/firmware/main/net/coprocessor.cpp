@@ -281,6 +281,29 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
 
 bool cop_wifi_is_connected(void) { return s_wifi_connected; }
 
+// ── Auto-connect on boot ──────────────────────────────────────
+void coprocessor_autoconnect(void)
+{
+    if (g_store.wifiSsid[0] == '\0') {
+        ESP_LOGI(TAG, "autoconnect: no stored SSID — skipping");
+        return;
+    }
+    ESP_LOGI(TAG, "autoconnect: connecting to stored SSID '%s'", g_store.wifiSsid);
+
+    // One-shot task — connects and deletes itself.
+    // Stack in SPIRAM; TCB needs internal RAM (always the case with xTaskCreate).
+    xTaskCreateWithCaps([](void *arg) {
+        esp_err_t err = cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
+        if (err == ESP_OK) {
+            ESP_LOGI("autoconnect", "Connected. IP: %s", g_store.wifiIp);
+        } else {
+            ESP_LOGW("autoconnect", "Failed to connect to '%s'", g_store.wifiSsid);
+        }
+        vTaskDelete(NULL);
+    }, "autoconn", 4096, NULL, 4, NULL,
+       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
 // ── BLE HID — future work via ESP-Hosted BLE transport ───────
 // BLE through esp_hosted requires additional hosted BLE configuration
 // on both the C6 slave and P4 host. Stubbed for phase 1/2.

@@ -9,6 +9,13 @@
 /** Initialise UART to the C6 co-processor. */
 void coprocessor_init(void);
 
+/**
+ * If a WiFi SSID is stored in NVS, spawn a one-shot background task that
+ * calls cop_wifi_connect() automatically.  Call after coprocessor_init()
+ * and game_store_init().
+ */
+void coprocessor_autoconnect(void);
+
 // ── WiFi (AT command wrappers) ───────────────────────────────
 
 /** Connect to SSID/password. Blocks up to C6_AT_TIMEOUT_MS. */

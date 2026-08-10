@@ -543,33 +543,7 @@ void game_store_init(void)
     if (nvs_get_i32(s_nvs, "modus", &modus) == ESP_OK)
         g_store.modus = (Modus)modus;
 
-    // ── Dummy players for offline testing ────────────────────
-    // Seeded every boot (portalSpieler is not persisted to NVS).
-    // Remove this block once live portal sync is in place.
-    static const char *DUMMY_NAMES[] = {
-        "PLAYER 1", "PLAYER 2", "PLAYER 3",
-        "PLAYER 4", "PLAYER 5", "PLAYER 6"
-    };
-    static const int DUMMY_COUNT = 6;
-    for (int i = 0; i < DUMMY_COUNT; i++) {
-        PortalSpieler *ps = &g_store.portalSpieler[i];
-        ps->id         = i + 1;          // IDs 1..6
-        ps->lokal      = false;
-        ps->portalAktiv = true;
-        snprintf(ps->name,       sizeof(ps->name),       "%s", DUMMY_NAMES[i]);
-        snprintf(ps->mitgliedNr, sizeof(ps->mitgliedNr), "TEST-%d", i + 1);
-    }
-    g_store.portalSpielerCount = DUMMY_COUNT;
-
-    // Seed 5 starting credits per dummy player so games can start immediately.
-    // kreditPlayerIds[i]==0 means "empty slot", so use the player's real ID (1..6).
-    for (int i = 0; i < DUMMY_COUNT; i++) {
-        g_store.kreditPlayerIds[i] = i + 1;          // IDs 1..6
-        g_store.kredite[i]         = (KreditStand){5, 0};
-    }
-    // ─────────────────────────────────────────────────────────
-
-    ESP_LOGI(TAG, "Store initialised. API: %s modus: %s  (%d dummy players seeded)",
-             g_store.apiUrl, modus_label(g_store.modus), DUMMY_COUNT);
+    ESP_LOGI(TAG, "Store initialised. API: %s modus: %s",
+             g_store.apiUrl, modus_label(g_store.modus));
     ESP_LOGI(TAG, "API key in use: '%s'", g_store.apiKey);
 }

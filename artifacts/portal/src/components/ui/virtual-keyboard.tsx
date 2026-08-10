@@ -120,7 +120,7 @@ function KeyboardPanel({
   return (
     <div
       className={cn(
-        "fixed bottom-0 left-0 right-0 z-[300]",
+        "fixed bottom-0 left-0 right-0 z-[9999]",
         "bg-card border-t border-border/60 shadow-2xl",
         "px-2 pt-3 pb-safe-or-3",
         "animate-in slide-in-from-bottom duration-200",
