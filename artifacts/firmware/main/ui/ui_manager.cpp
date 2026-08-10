@@ -98,7 +98,9 @@ static void styles_init(void)
 }
 
 // ── Helper: set display bg to dark ────────────────────────────
-static void screen_base_init(lv_obj_t *scr)
+// Called by each screen's _create() right after lv_obj_create(NULL),
+// so screens come up fully styled in a single build pass.
+void screen_base_init(lv_obj_t *scr)
 {
     lv_obj_set_style_bg_color(scr, lv_color_hex(CLR_BG), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
@@ -117,6 +119,8 @@ void ui_manager_init(void)
     // Workers created here (while ~93 KB is still free) block on queues and
     // cost no allocations when scan_cb / connect_cb fire at tap time.
     screen_wifi_create_workers();
+    screen_bluetooth_create_workers();
+    store_create_workers();
 
     // Yield 5 ms between each screen build so FreeRTOS IDLE1 can run and
     // reset the task watchdog.  Without this, 10 consecutive heavy screen
@@ -132,11 +136,6 @@ void ui_manager_init(void)
     s_screens[SCREEN_EINSTELLUNGEN]= screen_einstellungen_create();vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_WIFI]         = screen_wifi_create();         vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_BLUETOOTH]    = screen_bluetooth_create();
-
-    // Apply dark background to all
-    for (int i = 0; i < SCREEN_COUNT; i++) {
-        if (s_screens[i]) screen_base_init(s_screens[i]);
-    }
 
     // Register a timer to poll store.screen changes
     lv_timer_create([](lv_timer_t *t) {

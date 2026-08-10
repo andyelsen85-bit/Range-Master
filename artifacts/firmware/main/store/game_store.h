@@ -194,6 +194,7 @@ void store_skip_taube(void);
 void store_dismiss_resultate(void);
 
 // ── Players ──────────────────────────────────────────────────
+void store_create_workers(void);       // call ONCE at boot (before screens are built)
 void store_load_portal_spieler(void);  // async via HTTP
 void store_add_lokal_spieler(const char *name, int *out_id);
 

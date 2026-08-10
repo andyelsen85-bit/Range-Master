@@ -49,7 +49,7 @@ lv_obj_t *screen_spiel_create(void)
 {
     s_scr = lv_obj_create(NULL);
     lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
-    lv_obj_clear_flag(s_scr, LV_OBJ_FLAG_SCROLLABLE);
+    screen_base_init(s_scr);   // dark bg, opaque, non-scrollable
 
     // ── Top status bar (70px) ─────────────────────────────
     lv_obj_t *topbar = lv_obj_create(s_scr);

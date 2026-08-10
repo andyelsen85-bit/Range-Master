@@ -8,7 +8,10 @@
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/idf_additions.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -407,26 +410,70 @@ void store_navigate(Screen s)
     // ui_manager_show is called by the UI layer watching g_store.screen
 }
 
+// ── Persistent workers — created once at boot while internal RAM is
+// healthy.  After all 10 screens are built, internal RAM is nearly gone,
+// so any xTaskCreate() at tap time silently fails (TCBs need internal
+// RAM regardless of stack placement) and the action hangs.  Same pattern
+// as screen_wifi_create_workers(): workers block on queues; call sites
+// just queue-send, which costs no allocations.
+static QueueHandle_t s_load_spieler_queue = NULL;
+static QueueHandle_t s_sync_queue         = NULL;
+
+void store_create_workers(void)
+{
+    // Portal-player load worker
+    s_load_spieler_queue = xQueueCreate(1, sizeof(uint32_t));
+    xTaskCreateWithCaps([](void *arg) {
+        uint32_t dummy;
+        for (;;) {
+            xQueueReceive(s_load_spieler_queue, &dummy, portMAX_DELAY);
+            // Heap-allocate in SPIRAM: 200×~104 B = ~20 KB would blow the
+            // stack, and internal RAM may be exhausted by now.
+            int count = 0;
+            PortalSpieler *buf = (PortalSpieler *)heap_caps_malloc(
+                MAX_PORTAL_SPIELER * sizeof(PortalSpieler),
+                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (buf) {
+                if (http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) == ESP_OK) {
+                    memcpy(g_store.portalSpieler, buf,
+                           count * sizeof(PortalSpieler));
+                    g_store.portalSpielerCount = count;
+                    game_store_save();
+                    ESP_LOGI(TAG, "Loaded %d portal players", count);
+                }
+                heap_caps_free(buf);
+            }
+        }
+    }, "load_spieler_w", 8192, NULL, 5, NULL,
+       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    // Sync worker
+    s_sync_queue = xQueueCreate(1, sizeof(uint32_t));
+    xTaskCreateWithCaps([](void *arg) {
+        uint32_t dummy;
+        for (;;) {
+            xQueueReceive(s_sync_queue, &dummy, portMAX_DELAY);
+            esp_err_t err = http_sync_all();
+            g_store.syncStatus = (err == ESP_OK) ? SYNC_SUCCESS : SYNC_ERROR;
+            if (err != ESP_OK) {
+                snprintf(g_store.syncError, sizeof(g_store.syncError),
+                         "HTTP sync failed: %s", esp_err_to_name(err));
+            }
+        }
+    }, "sync_w", 12288, NULL, 5, NULL,
+       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    ESP_LOGI(TAG, "Store workers created. Internal RAM remaining: %u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+}
+
 // ── Portal players ───────────────────────────────────────────
 void store_load_portal_spieler(void)
 {
-    // Spawns a FreeRTOS task so it doesn't block the LVGL loop
-    xTaskCreate([](void *arg) {
-        // Heap-allocate: 200×~104 B = ~20 KB would blow this task's 8 KB stack.
-        int count = 0;
-        PortalSpieler *buf = (PortalSpieler *)malloc(MAX_PORTAL_SPIELER * sizeof(PortalSpieler));
-        if (buf) {
-            if (http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) == ESP_OK) {
-                memcpy(g_store.portalSpieler, buf,
-                       count * sizeof(PortalSpieler));
-                g_store.portalSpielerCount = count;
-                game_store_save();
-                ESP_LOGI(TAG, "Loaded %d portal players", count);
-            }
-            free(buf);
-        }
-        vTaskDelete(NULL);
-    }, "load_spieler", 8192, NULL, 5, NULL);
+    // Just trigger the persistent worker — costs no RAM at call time.
+    if (!s_load_spieler_queue) return;
+    uint32_t trigger = 1;
+    xQueueSend(s_load_spieler_queue, &trigger, 0);
 }
 
 void store_add_lokal_spieler(const char *name, int *out_id)
@@ -446,16 +493,11 @@ void store_add_lokal_spieler(const char *name, int *out_id)
 // ── Sync ─────────────────────────────────────────────────────
 void store_sync(void)
 {
+    // Just trigger the persistent worker — costs no RAM at call time.
+    if (!s_sync_queue) return;
     g_store.syncStatus = SYNC_RUNNING;
-    xTaskCreate([](void *arg) {
-        esp_err_t err = http_sync_all();
-        g_store.syncStatus = (err == ESP_OK) ? SYNC_SUCCESS : SYNC_ERROR;
-        if (err != ESP_OK) {
-            snprintf(g_store.syncError, sizeof(g_store.syncError),
-                     "HTTP sync failed: %s", esp_err_to_name(err));
-        }
-        vTaskDelete(NULL);
-    }, "sync_task", 12288, NULL, 5, NULL);
+    uint32_t trigger = 1;
+    xQueueSend(s_sync_queue, &trigger, 0);
 }
 
 // ── Persistence (JSON in NVS) ─────────────────────────────────

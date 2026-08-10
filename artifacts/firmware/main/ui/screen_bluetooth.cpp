@@ -7,6 +7,9 @@
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/idf_additions.h"
+#include "esp_heap_caps.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "coprocessor.h"
@@ -21,37 +24,55 @@ static lv_obj_t *s_list_log;
 
 static bool s_advertising = false;
 
+// ── Persistent pairing worker — created once at boot while internal RAM
+// is healthy.  xTaskCreate() at tap time fails silently once the screens
+// have drained internal RAM (TCBs need internal RAM regardless of stack
+// placement).  Same pattern as screen_wifi_create_workers().
+static QueueHandle_t s_pair_queue = NULL;
+
+void screen_bluetooth_create_workers(void)
+{
+    s_pair_queue = xQueueCreate(1, sizeof(uint32_t));
+    xTaskCreateWithCaps([](void *arg) {
+        uint32_t dummy;
+        for (;;) {
+            xQueueReceive(s_pair_queue, &dummy, portMAX_DELAY);
+            cop_ble_start();
+            vTaskDelay(pdMS_TO_TICKS(30000)); // 30s advertising window
+            // Check if connected
+            lv_async_call([](void *arg2) {
+                if (cop_ble_is_connected()) {
+                    lv_label_set_text(s_lbl_state, LV_SYMBOL_OK "  KEYBOARD VERBONNEN!");
+                    lv_obj_set_style_text_color(s_lbl_state,
+                        lv_color_hex(CLR_SUCCESS), 0);
+                    lv_label_set_text(s_lbl_device, "BLE HID Keyboard");
+                    lv_list_add_text(s_list_log, LV_SYMBOL_OK " KEYBOARD VERBONNEN");
+                } else {
+                    s_advertising = false;
+                    lv_label_set_text(s_lbl_state, "KENG VERBINDUNG - NEI PROBIEREN");
+                    lv_obj_set_style_text_color(s_lbl_state,
+                        lv_color_hex(CLR_MUTED), 0);
+                    lv_obj_clear_flag(s_btn_pair, LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_add_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);
+                }
+            }, NULL);
+        }
+    }, "ble_pair_w", 4096, NULL, 5, NULL,
+       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
 // ── Start advertising ─────────────────────────────────────────
 static void pair_cb(lv_event_t *e)
 {
+    if (!s_pair_queue || s_advertising) return;
     s_advertising = true;
     lv_label_set_text(s_lbl_state, LV_SYMBOL_BLUETOOTH "  ANNONCIERT... (KOPPEL AM HANDY)");
     lv_obj_set_style_text_color(s_lbl_state, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_add_flag(s_btn_pair, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);
 
-    xTaskCreate([](void *arg) {
-        cop_ble_start();
-        vTaskDelay(pdMS_TO_TICKS(30000)); // 30s advertising window
-        // Check if connected
-        lv_async_call([](void *arg2) {
-            if (cop_ble_is_connected()) {
-                lv_label_set_text(s_lbl_state, LV_SYMBOL_OK "  KEYBOARD VERBONNEN!");
-                lv_obj_set_style_text_color(s_lbl_state,
-                    lv_color_hex(CLR_SUCCESS), 0);
-                lv_label_set_text(s_lbl_device, "BLE HID Keyboard");
-                lv_list_add_text(s_list_log, LV_SYMBOL_OK " KEYBOARD VERBONNEN");
-            } else {
-                s_advertising = false;
-                lv_label_set_text(s_lbl_state, "KENG VERBINDUNG - NEI PROBIEREN");
-                lv_obj_set_style_text_color(s_lbl_state,
-                    lv_color_hex(CLR_MUTED), 0);
-                lv_obj_clear_flag(s_btn_pair, LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);
-            }
-        }, NULL);
-        vTaskDelete(NULL);
-    }, "ble_pair", 4096, NULL, 5, NULL);
+    uint32_t trigger = 1;
+    xQueueSend(s_pair_queue, &trigger, 0);   // costs no RAM at call time
 }
 
 // ── Disconnect ────────────────────────────────────────────────
@@ -71,7 +92,7 @@ lv_obj_t *screen_bluetooth_create(void)
 {
     s_scr = lv_obj_create(NULL);
     lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
-    lv_obj_clear_flag(s_scr, LV_OBJ_FLAG_SCROLLABLE);
+    screen_base_init(s_scr);   // dark bg, opaque, non-scrollable
 
     // Header
     lv_obj_t *hdr = lv_obj_create(s_scr);

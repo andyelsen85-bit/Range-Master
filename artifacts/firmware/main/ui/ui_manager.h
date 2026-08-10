@@ -14,6 +14,10 @@ void ui_manager_show(Screen s);
 /** Call from the LVGL timer task to react to store state changes. */
 void ui_manager_tick(void);
 
+/** Base screen styling (dark bg, opaque, non-scrollable). Each screen's
+ *  _create() calls this right after lv_obj_create(NULL). */
+void screen_base_init(lv_obj_t *scr);
+
 // ── Shared style helpers ─────────────────────────────────────
 #include "lvgl.h"
 
