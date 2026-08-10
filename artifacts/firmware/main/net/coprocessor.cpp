@@ -16,6 +16,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
+#include "esp_heap_caps.h"
 #include "coprocessor.h"
 #include "app_config.h"
 
@@ -72,6 +73,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
 // ── Public init ───────────────────────────────────────────────
 void coprocessor_init(void)
 {
+    // Diagnostic: show remaining internal RAM after esp_hosted early-init.
+    // esp_hosted runs before app_main and consumes DMA-capable internal SRAM
+    // for SDIO TX/RX queue buffers. This number must stay above ~16 KB or
+    // the PSRAM DMA reserve pool reservation will fail and abort.
+    ESP_LOGI(TAG, "Internal RAM free (post esp_hosted init): %u bytes",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     ESP_LOGI(TAG, "ESP-Hosted SDIO init: CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d RST=%d",
              C6_SDIO_CLK, C6_SDIO_CMD,
              C6_SDIO_D0, C6_SDIO_D1, C6_SDIO_D2, C6_SDIO_D3,
