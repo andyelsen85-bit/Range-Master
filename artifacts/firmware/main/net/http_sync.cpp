@@ -54,7 +54,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
     cfg.event_handler     = http_event_handler;
     cfg.user_data         = resp_buf ? &acc : NULL;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    cfg.timeout_ms        = 15000;
+    cfg.timeout_ms        = 30000;
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
@@ -90,7 +90,7 @@ static esp_err_t http_get_json(const char *path,
     cfg.event_handler     = http_event_handler;
     cfg.user_data         = &acc;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    cfg.timeout_ms        = 15000;
+    cfg.timeout_ms        = 30000;
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
 
