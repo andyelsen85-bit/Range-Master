@@ -7,6 +7,7 @@ import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react/cust
 import { setOnUnauthorized } from '@workspace/api-client-react/custom-fetch';
 import { useAuthStore } from '@/store/use-auth-store';
 
+import { VirtualKeyboardProvider } from '@/components/ui/virtual-keyboard';
 import Layout from '@/components/layout';
 import Login from '@/pages/login';
 import Dashboard from '@/pages/dashboard';
@@ -90,10 +91,12 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
+        <VirtualKeyboardProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+            <Router />
+          </WouterRouter>
+          <Toaster />
+        </VirtualKeyboardProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

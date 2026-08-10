@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
-import { Plus, Pencil, Trash2, KeyRound, Shield, CheckCircle2, XCircle, Eye } from "lucide-react";
+import { Plus, Pencil, Trash2, KeyRound, Shield, CheckCircle2, XCircle, Eye, Search } from "lucide-react";
+import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ export default function Admin() {
   const apiFetch = useAdminFetch();
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const vk = useVirtualKeyboard();
 
   const [addOpen, setAddOpen] = useState(false);
   const [editPlayer, setEditPlayer] = useState<AdminPlayer | null>(null);
@@ -63,12 +65,25 @@ export default function Admin() {
   const [addForm, setAddForm] = useState<PlayerForm>(emptyForm);
   const [editForm, setEditForm] = useState<Omit<PlayerForm, "passwort">>({ name: "", email: "", mitgliedNr: "", portalAktiv: false, isAdmin: false });
   const [newPwd, setNewPwd] = useState("");
+  const [search, setSearch] = useState("");
 
   // ── Queries ──────────────────────────────────────────────────────────────
 
   const { data, isLoading } = useQuery<{ spieler: AdminPlayer[] }>({
     queryKey: ["admin-spieler"],
     queryFn: () => apiFetch("/api/admin/spieler"),
+  });
+
+  // ── Filtered list ─────────────────────────────────────────────────────────
+
+  const filtered = (data?.spieler ?? []).filter((p) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      p.name.toLowerCase().includes(q) ||
+      (p.email ?? "").toLowerCase().includes(q) ||
+      (p.mitgliedNr ?? "").toLowerCase().includes(q)
+    );
   });
 
   // ── Mutations ─────────────────────────────────────────────────────────────
@@ -125,6 +140,18 @@ export default function Admin() {
         </button>
       </header>
 
+      {/* ── Search ───────────────────────────────────────────────────────── */}
+      <div className="relative">
+        <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onFocus={() => vk.open({ getValue: () => search, setValue: setSearch })}
+          placeholder="Spiller sichen… (Numm, Email, Mitglied Nr)"
+          className="w-full bg-card border border-border/60 rounded-lg pl-9 pr-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
+        />
+      </div>
+
       <div className="bg-card border border-border/50 rounded-xl overflow-hidden shadow-sm">
         {isLoading ? (
           <div className="p-6 space-y-3">
@@ -147,7 +174,14 @@ export default function Admin() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(data?.spieler ?? []).map((p) => (
+                {filtered.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground font-medium">
+                      {search ? `Keng Resultater fir "${search}"` : "Keng Spiller fonnt"}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filtered.map((p) => (
                   <TableRow key={p.id} className="border-border/30 hover:bg-secondary/20 transition-colors">
                     <TableCell className="font-bold text-foreground">{p.name}</TableCell>
                     <TableCell className="text-muted-foreground text-sm font-mono">{p.email || <span className="opacity-30">–</span>}</TableCell>
@@ -179,7 +213,7 @@ export default function Admin() {
         )}
       </div>
 
-      {/* ── Add Dialog ────────────────────────────────────────────────── */}
+      {/* ── Add Dialog ────────────────────────────────────────────────────── */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -200,7 +234,7 @@ export default function Admin() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Edit Dialog ───────────────────────────────────────────────── */}
+      {/* ── Edit Dialog ───────────────────────────────────────────────────── */}
       <Dialog open={!!editPlayer} onOpenChange={(o) => !o && setEditPlayer(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -221,7 +255,7 @@ export default function Admin() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Delete Dialog ─────────────────────────────────────────────── */}
+      {/* ── Delete Dialog ─────────────────────────────────────────────────── */}
       <Dialog open={!!deletePlayer} onOpenChange={(o) => !o && setDeletePlayer(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -243,22 +277,14 @@ export default function Admin() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Password Dialog ───────────────────────────────────────────── */}
+      {/* ── Password Dialog ───────────────────────────────────────────────── */}
       <Dialog open={!!pwdPlayer} onOpenChange={(o) => !o && setPwdPlayer(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Passwuert setzen</DialogTitle>
             <DialogDescription>Neit Passwuert fir <strong>{pwdPlayer?.name}</strong>.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-1.5 py-2">
-            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Neit Passwuert</label>
-            <input
-              type="password" autoComplete="new-password"
-              value={newPwd} onChange={(e) => setNewPwd(e.target.value)}
-              className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
-              placeholder="Min. 6 Zeechen"
-            />
-          </div>
+          <PwdField value={newPwd} onChange={setNewPwd} />
           <DialogFooter>
             <button onClick={() => setPwdPlayer(null)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Ofbriechen</button>
             <button
@@ -275,6 +301,24 @@ export default function Admin() {
   );
 }
 
+// ─── Password field (isolated so it can access VK context) ───────────────────
+
+function PwdField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const vk = useVirtualKeyboard();
+  return (
+    <div className="space-y-1.5 py-2">
+      <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Neit Passwuert</label>
+      <input
+        type="password" autoComplete="new-password"
+        value={value} onChange={(e) => onChange(e.target.value)}
+        onFocus={() => vk.open({ getValue: () => value, setValue: onChange })}
+        className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
+        placeholder="Min. 6 Zeechen"
+      />
+    </div>
+  );
+}
+
 // ─── Shared form component ────────────────────────────────────────────────────
 
 function PlayerFormFields({
@@ -286,17 +330,24 @@ function PlayerFormFields({
   isEdit?: boolean;
 }) {
   const set = (k: string, v: any) => onChange((f: any) => ({ ...f, [k]: v }));
+  const vk = useVirtualKeyboard();
   return (
     <div className="space-y-4 py-2">
       <FormField label="Numm *" id="name">
-        <input id="name" value={form.name} onChange={(e) => set("name", e.target.value)} required
+        <input
+          id="name" value={form.name} onChange={(e) => set("name", e.target.value)} required
+          onFocus={() => vk.open({ getValue: () => form.name, setValue: (v) => set("name", v) })}
           className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
-          placeholder="Max Mustermann" />
+          placeholder="Max Mustermann"
+        />
       </FormField>
       <FormField label="Email" id="email">
-        <input id="email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)}
+        <input
+          id="email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)}
+          onFocus={() => vk.open({ getValue: () => form.email, setValue: (v) => set("email", v) })}
           className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
-          placeholder="max@beispill.lu" />
+          placeholder="max@beispill.lu"
+        />
       </FormField>
       {isEdit ? (
         <FormField label="Mitglied Nr" id="nr">
@@ -312,9 +363,13 @@ function PlayerFormFields({
       )}
       {showPassword && (
         <FormField label="Passwuert (fir Portal-Zougang)" id="pwd">
-          <input id="pwd" type="password" autoComplete="new-password" value={form.passwort} onChange={(e) => set("passwort", e.target.value)}
+          <input
+            id="pwd" type="password" autoComplete="new-password" value={form.passwort}
+            onChange={(e) => set("passwort", e.target.value)}
+            onFocus={() => vk.open({ getValue: () => form.passwort, setValue: (v) => set("passwort", v) })}
             className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
-            placeholder="Min. 6 Zeechen" />
+            placeholder="Min. 6 Zeechen"
+          />
         </FormField>
       )}
       <div className="flex gap-6 pt-1">
@@ -338,18 +393,20 @@ function Toggle({ label, checked, onToggle }: { label: string; checked: boolean;
   return (
     <button type="button" onClick={() => onToggle(!checked)}
       className="flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">
-      <div className={`w-9 h-5 rounded-full transition-colors relative ${checked ? "bg-primary" : "bg-secondary"}`}>
-        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`} />
+      <div className={`w-9 h-5 rounded-full transition-colors relative ${checked ? "bg-primary" : "bg-secondary border border-border/60"}`}>
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${checked ? "left-4.5" : "left-0.5"}`} />
       </div>
       {label}
     </button>
   );
 }
 
-function IconBtn({ children, onClick, title, danger = false }: { children: React.ReactNode; onClick: () => void; title: string; danger?: boolean }) {
+function IconBtn({ children, onClick, title, danger }: { children: React.ReactNode; onClick: () => void; title: string; danger?: boolean }) {
   return (
-    <button title={title} onClick={onClick}
-      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${danger ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>
+    <button
+      type="button" title={title} onClick={onClick}
+      className={`p-1.5 rounded-lg transition-colors ${danger ? "hover:bg-destructive/20 hover:text-destructive text-muted-foreground/60" : "hover:bg-secondary text-muted-foreground/60 hover:text-foreground"}`}
+    >
       {children}
     </button>
   );
