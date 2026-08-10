@@ -1,69 +1,58 @@
 ---
 name: C6 WiFi architecture on Guition JC8012P4A1C
-description: How the ESP32-C6 co-processor connects to the ESP32-P4 on this board, confirmed from official Guition schematics, burn files, and live device boot log.
+description: How the ESP32-C6 co-processor connects to the ESP32-P4 on this board — confirmed from BSP documentation and Espressif compatibility docs.
 ---
 
-## Factory C6 firmware is NOT AT firmware
+## CONFIRMED: The P4↔C6 link is SDIO, not UART AT
 
-The Guition burn-files folder contains `JC-C6-slave_v2.3.2.bin`.
-"Slave" = esp_hosted slave firmware. The C6 acts as a WiFi radio over **SDIO** (SD2_CMD/CLK/D0–D3 lines in the schematic), not UART AT commands.
+The Guition JC8012P4A1C board was designed and wired exclusively for **SDIO** communication between the P4 and C6. There is NO UART data link between them. GPIO4/GPIO5 on the P4 are NOT connected to the C6 in any way — all UART AT work using those pins was targeting a connection that does not physically exist on this board.
 
-**The C6 must be reflashed with Espressif AT firmware before any AT command will ever get a reply.**
-AT firmware zip: `attached_assets/ESP32-C6-4MB-AT-V4.1.1.0_1786225071929.zip`
-Flash `factory/factory_ESP32C6-4MB.bin` at address 0x0 via CN5 (C6 UART0, the flashing/debug connector).
-
-**Why:** The Guition demo (xiaozhi) uses the C6 natively via esp_hosted/SDIO — that's why none of the demo `config.h` files have any UART pins for the C6.
-
-## C6 EN/CHIP_PU — boots automatically, no P4 action needed
-
-Schematic page `5_ESP32-C6.png` shows R59 (10 kΩ) pulling CHIP_PU to ESP_3V3 directly.
-The C6 boots on its own power-on; the P4 does not need to drive any enable GPIO.
-
-## AT firmware UART pin assignment — CONFIRMED FROM LIVE DEVICE
-
-Boot log from device (CN5 @ 115200, after reflash with v4.1.1.0):
-```
-I (815) at-uart: AT cmd port:uart1 tx:7 rx:6 cts:5 rts:4 baudrate:115200
-I (816) at-init: module_name: ESP32C6-4MB
-I (819) at-init: v4.1.1.0 (gitlab)
-```
-
-**C6 AT UART1 default pin assignment (stock firmware):**
-| Signal | C6 GPIO |
+**Confirmed P4↔C6 interface (from profi-max/JC8012P4A1_BSP_ESP32P4 BSP docs):**
+| Signal | P4 GPIO |
 |--------|---------|
-| AT TX (C6 sends) | GPIO7 |
-| AT RX (C6 receives) | GPIO6 |
-| CTS | GPIO5 |
-| RTS | GPIO4 |
+| SDIO CMD | GPIO18 |
+| SDIO CLK | GPIO19 |
+| SDIO D0  | GPIO14 |
+| SDIO D1  | GPIO15 |
+| SDIO D2  | GPIO16 |
+| SDIO D3  | GPIO17 |
+| C6 Reset | GPIO54 |
+| C6 Wakeup| GPIO6  |
 
-**The P4's current wiring (app_config.h: C6_UART_TX=GPIO5, C6_UART_RX=GPIO4) hits C6's CTS/RTS — not the data lines. That's the root cause of all AT silence.**
+## Factory C6 firmware: ESP-Hosted-MCU slave (NOT AT firmware)
 
-## CN5 connector
+The C6 shipped with **`ESP-Hosted-MCU slave firmware v0.0.6`** (SDIO slave mode). It was never meant to run AT firmware. The entire reflash-to-AT-firmware effort (CN5 flashing, UART pin remapping, at_customize NVS erasure) was correct execution against a wrong architectural assumption inherited from the original `coprocessor.cpp`.
 
-CN5 = C6's UART0 (flashing/boot port, GPIO16/GPIO17 on the C6). It shows boot logs and is how you flash the C6. It is NOT the AT command port — AT commands go to UART1 (GPIO6/GPIO7). CN5 is the only physical USB/serial access to the C6.
+The C6 needs to be **reflashed back to ESP-Hosted slave firmware** before the SDIO approach can work.
 
-## Solution: custom AT firmware with UART remapped to GPIO4/GPIO5
+## IDF compatibility: already satisfied
 
-Because the PCB was designed for SDIO (not UART AT), C6 GPIO6/GPIO7 are likely not routed to the P4. The pins that ARE connected to the P4 are GPIO4 (→ P4-GPIO4) and GPIO5 (→ P4-GPIO5).
+From Espressif official compatibility docs:
+> "ESP32-C6: It is recommended to use esp_hosted ≥ 2.4.2, esp_wifi_remote ≥ 1.0.0, ESP-IDF ≥ v5.3.2"
 
-**Build a custom AT firmware remapping UART1 to GPIO4/GPIO5:**
+**Our project runs IDF v5.3.5 — already above the minimum.** No IDF upgrade needed.
 
-In `module_config/module_esp32c6_mini_1/sdkconfig.defaults` (or equivalent C6-MINI-1 folder):
-```
-CONFIG_AT_UART_PORT_TX_PIN=4    # C6 GPIO4 → wire → P4 RX (P4-GPIO4)
-CONFIG_AT_UART_PORT_RX_PIN=5    # C6 GPIO5 → wire → P4 TX (P4-GPIO5)
-CONFIG_AT_UART_PORT_RTS_PIN=-1  # disable flow control
-CONFIG_AT_UART_PORT_CTS_PIN=-1
-```
+## Correct P4-side implementation
 
-After reflashing, P4's `app_config.h` needs NO changes (C6_UART_TX=GPIO5, C6_UART_RX=GPIO4 stays as-is).
+Replace the custom UART AT `coprocessor.cpp` with:
+1. `esp_hosted` managed component (SDIO master on P4)
+2. `esp_wifi_remote` managed component (WiFi API over hosted)
+3. Configure SDIO on P4 GPIOs 14/15/16/17/18/19, reset=GPIO54, wakeup=GPIO6
 
-**Why GPIO4=TX and GPIO5=RX on C6 side:**
-- P4-GPIO5 is set as UART TX (sends commands) → must connect to C6 RX = C6 GPIO5
-- P4-GPIO4 is set as UART RX (receives replies) → must connect to C6 TX = C6 GPIO4
+**Reference example:** `Simple_WiFi_hosted` folder in the `profi-max/JC8012P4A1_BSP_ESP32P4` GitHub repo — working SDIO+hosted integration for this exact board.
 
-## Correct unsolicited event strings (Espressif ESP-AT)
+## What NOT to do
 
-- Connected + IP: `"WIFI GOT IP"` (sets s_wifi_connected = true)
-- Disconnected:   `"WIFI DISCONNECT"` (sets s_wifi_connected = false)
-- NOT: `"+WIFI:CONNECTED"` / `"+WIFI:DISCONNECTED"` (those were wrong — fixed in 2c84cd7)
+- Do not attempt UART AT communication between P4 and C6 — the PCB traces don't exist
+- Do not use P4 GPIO4/5 for C6 communication — they are not connected to C6
+- Do not use IDF 5.4.x or 5.5.x — the P4 ECO2 DSI display only works stably on 5.3.x
+
+## AT firmware residue
+
+The C6 currently has custom-built AT firmware (v4.1.1.0, with UART remapped to GPIO4/5, at_customize partition erased) as a result of the investigation. This must be replaced with ESP-Hosted slave firmware before the SDIO path works.
+
+## Correct unsolicited event strings (kept for reference, no longer used)
+
+These were correct for the AT approach — no longer relevant.
+- Connected + IP: `"WIFI GOT IP"`
+- Disconnected: `"WIFI DISCONNECT"`
