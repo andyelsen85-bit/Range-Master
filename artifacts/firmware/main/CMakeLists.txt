@@ -19,6 +19,7 @@ idf_component_register(
         "ui/screen_bluetooth.cpp"
         "lora_stub/lora_stub.cpp"
         "net/web_config.cpp"
+        "battery.cpp"
     INCLUDE_DIRS
         "."
         "display"
@@ -33,6 +34,7 @@ idf_component_register(
         driver
         esp_http_client
         esp_http_server
+        esp_adc
         mbedtls
         nvs_flash
         json

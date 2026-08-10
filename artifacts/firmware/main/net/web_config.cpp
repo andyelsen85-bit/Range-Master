@@ -14,6 +14,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "game_store.h"
+#include "battery.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -109,6 +110,13 @@ static const char HTML_HEAD[] =
     "<h1>&#127919; TrapMaster</h1>"
     "<p class=sub>Terminal-Konfiguration</p>";
 
+static const char HTML_BATT_SECT[] =
+    "<div style='background:#1e2130;border:1px solid #3d4460;border-radius:8px;"
+    "padding:.75rem 1rem;margin-bottom:1.2rem;font-size:.9rem'>"
+    "<span style='color:#94a3b8'>&#128267; BATTERIE &nbsp;</span>";
+// dynamic battery text is inserted between HTML_BATT_SECT and HTML_BATT_END
+static const char HTML_BATT_END[] = "</div>";
+
 static const char HTML_FORM_START[] =
     "<form method=POST action=/save>"
     "<label>API URL</label>"
@@ -138,13 +146,30 @@ static esp_err_t root_get_handler(httpd_req_t *req)
 
     if (banner) httpd_resp_sendstr_chunk(req, banner);
 
+    // Battery status section
+    if (battery_is_available()) {
+        int pct = battery_get_percent();
+        int mv  = battery_get_mv();
+        char batt_buf[80];
+        if (pct >= 0) {
+            uint32_t clr = (pct >= 60) ? 0x22C55E :
+                           (pct >= 20) ? 0xF59E0B : 0xEF4444;
+            snprintf(batt_buf, sizeof(batt_buf),
+                     "<span style='color:#%06lx;font-weight:600'>%d%%</span>"
+                     "<span style='color:#64748b;font-size:.8rem'> &nbsp;(%d mV)</span>",
+                     (unsigned long)clr, pct, mv);
+        } else {
+            snprintf(batt_buf, sizeof(batt_buf),
+                     "<span style='color:#64748b'>N/A</span>");
+        }
+        httpd_resp_sendstr_chunk(req, HTML_BATT_SECT);
+        httpd_resp_sendstr_chunk(req, batt_buf);
+        httpd_resp_sendstr_chunk(req, HTML_BATT_END);
+    }
+
     httpd_resp_sendstr_chunk(req, HTML_FORM_START);
     httpd_resp_sendstr_chunk(req, g_store.apiUrl);
     httpd_resp_sendstr_chunk(req, HTML_FORM_MID);
-    // Don't pre-fill the key in the password field for security;
-    // show a placeholder indicating whether one is set.
-    // Actually operators need to re-enter only when changing — pre-fill
-    // with current value so they can see and edit it.
     httpd_resp_sendstr_chunk(req, g_store.apiKey);
     httpd_resp_sendstr_chunk(req, HTML_FORM_END);
 

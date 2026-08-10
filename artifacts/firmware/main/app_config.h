@@ -3,7 +3,8 @@
 // TrapMaster Firmware — Hardware configuration
 // Board: Guition JC8012P4A1C-I-W-Y  (ESP32-P4 + ESP32-C6)
 // ============================================================
-#include "driver/gpio.h"   // GPIO_NUM_x constants needed by pin macros
+#include "driver/gpio.h"          // GPIO_NUM_x constants needed by pin macros
+#include "esp_adc/adc_oneshot.h"  // ADC_UNIT_x, ADC_CHANNEL_x
 
 // ── Display (MIPI DSI / JD9365) ─────────────────────────────
 #define DISPLAY_H_RES           800
@@ -66,6 +67,20 @@
 
 // ── Portal API ──────────────────────────────────────────────
 #define DEFAULT_API_URL         "https://rangemaster.hostzone.lu"
+
+// ── Battery ADC (IP5306 voltage divider — Guition JC8012P4A1C) ─
+// GPIO52 = ADC1 channel 3 on ESP32-P4.
+// 1:1 voltage divider: cell voltage / 2 appears at the ADC pin.
+// Calibration thresholds (millivolts at ADC input):
+//   BATT_MV_EMPTY → ADC voltage when cell is at 3.0 V (flat)
+//   BATT_MV_FULL  → ADC voltage when cell is at 4.2 V (full)
+// Tune these against battery_get_mv() + a multimeter if readings
+// look wrong on your unit.
+#define BATT_ADC_GPIO           GPIO_NUM_52
+#define BATT_ADC_UNIT           ADC_UNIT_1
+#define BATT_ADC_CHANNEL        ADC_CHANNEL_3   // GPIO52 on ESP32-P4
+#define BATT_MV_EMPTY           1500            // 3.0 V cell / 2
+#define BATT_MV_FULL            2100            // 4.2 V cell / 2
 
 // ── Misc ────────────────────────────────────────────────────
 #define APP_VERSION             "1.0.0-phase1"

@@ -33,6 +33,7 @@
 #include "ui_manager.h"
 #include "game_store.h"
 #include "coprocessor.h"
+#include "battery.h"
 #include "lora_stub.h"
 
 static const char *TAG = "main";
@@ -249,6 +250,11 @@ extern "C" void app_main(void)
 
     // ── Backlight ─────────────────────────────────────────────
     backlight_init();
+
+    // ── Battery ADC (GPIO52 voltage divider, IP5306 board) ───
+    // Init early — before LVGL task — so battery_get_percent()
+    // is ready the moment the dashboard screen is built.
+    battery_init();
 
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
     coprocessor_init();
