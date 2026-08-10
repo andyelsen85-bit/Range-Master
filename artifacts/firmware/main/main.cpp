@@ -251,7 +251,10 @@ extern "C" void app_main(void)
     backlight_init();
 
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
-    coprocessor_init();
+    // TEMPORARILY DISABLED — re-enable after C6 slave firmware is flashed.
+    // With coprocessor_init() active, esp_wifi_init() triggers esp_hosted to
+    // pulse GPIO54 (C6 reset) ~2 s after boot, killing any C6 flash session.
+    // coprocessor_init();
 
     // ── LoRa stub (phase 3 placeholder) ───────────────────────
     lora_stub_init();
