@@ -52,8 +52,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
             case WIFI_EVENT_SCAN_DONE:
                 // Signal cop_wifi_scan() that results are ready.
                 // s_scan_done_group is NULL when no scan is in progress.
+                // NOTE: this handler runs in the event-loop task (not an ISR),
+                // so use xEventGroupSetBits — the ISR variant routes through
+                // the timer daemon and can silently drop the signal.
                 if (s_scan_done_group) {
-                    xEventGroupSetBitsFromISR(s_scan_done_group, SCAN_DONE_BIT, NULL);
+                    xEventGroupSetBits(s_scan_done_group, SCAN_DONE_BIT);
                 }
                 break;
 
