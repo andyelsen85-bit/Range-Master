@@ -17,7 +17,10 @@ dependencies:
   ## C6 must be flashed with ESP-Hosted-MCU slave firmware (SDIO mode).
   ## esp_wifi_remote intercepts esp_wifi_* calls and routes them to the C6.
   ## Requires IDF ≥5.3.2 — our IDF 5.3.5 satisfies this.
+  ## Pin to exactly 2.3.2 — matches the slave firmware running on the C6.
+  ## Espressif warns that host/slave version mismatches cause communication
+  ## failures. Do not bump this without also updating the C6 slave binary.
   espressif/esp_hosted:
-    version: ">=2.4.2"
+    version: "2.3.2"
   espressif/esp_wifi_remote:
-    version: ">=1.0.0"
+    version: "*"

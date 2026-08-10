@@ -37,8 +37,8 @@
 // Source: profi-max/JC8012P4A1_BSP_ESP32P4 BSP documentation
 // P4 is SDIO master; C6 is SDIO slave (ESP-Hosted-MCU firmware).
 // SDIO pin config is also declared in sdkconfig.defaults for Kconfig.
-#define C6_SDIO_CLK             GPIO_NUM_19
-#define C6_SDIO_CMD             GPIO_NUM_18
+#define C6_SDIO_CLK             GPIO_NUM_18   // SD2_CLK — confirmed from BSP
+#define C6_SDIO_CMD             GPIO_NUM_19   // SD2_CMD — confirmed from BSP
 #define C6_SDIO_D0              GPIO_NUM_14
 #define C6_SDIO_D1              GPIO_NUM_15
 #define C6_SDIO_D2              GPIO_NUM_16
