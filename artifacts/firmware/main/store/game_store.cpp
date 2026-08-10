@@ -489,6 +489,11 @@ void game_store_init(void)
     // Load persisted values
     nvs_load_str("api_url",   g_store.apiUrl,   MAX_URL_LEN);
     nvs_load_str("api_key",   g_store.apiKey,   MAX_KEY_LEN);
+    // NVS may have stored an empty string from a previous flash — restore default
+    if (g_store.apiKey[0] == '\0')
+        snprintf(g_store.apiKey, MAX_KEY_LEN, "%s", DEFAULT_API_KEY);
+    if (g_store.apiUrl[0] == '\0')
+        snprintf(g_store.apiUrl, MAX_URL_LEN, "%s", DEFAULT_API_URL);
     nvs_load_str("wifi_ssid", g_store.wifiSsid, MAX_SSID_LEN);
     nvs_load_str("wifi_pass", g_store.wifiPass, MAX_PASS_LEN);
 
