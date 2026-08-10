@@ -150,7 +150,7 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     if (battery_is_available()) {
         int pct = battery_get_percent();
         int mv  = battery_get_mv();
-        char batt_buf[80];
+        char batt_buf[160];
         if (pct >= 0) {
             uint32_t clr = (pct >= 60) ? 0x22C55E :
                            (pct >= 20) ? 0xF59E0B : 0xEF4444;
