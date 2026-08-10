@@ -165,8 +165,8 @@ static void connect_cb(lv_event_t *e)
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
-    strncpy(g_store.wifiSsid, ssid, MAX_SSID_LEN - 1);
-    g_store.wifiSsid[MAX_SSID_LEN - 1] = '\0';
+    strncpy(g_store.wifiSsid, ssid, TM_MAX_SSID_LEN - 1);
+    g_store.wifiSsid[TM_MAX_SSID_LEN - 1] = '\0';
     strncpy(g_store.wifiPass, pass, MAX_PASS_LEN - 1);
     g_store.wifiPass[MAX_PASS_LEN - 1] = '\0';
     game_store_save();

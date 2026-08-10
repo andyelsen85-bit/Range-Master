@@ -16,7 +16,7 @@
 #define MAX_SPIELER_UPDATES 10
 #define MAX_URL_LEN         128
 #define MAX_KEY_LEN         65
-#define MAX_SSID_LEN        33
+#define TM_MAX_SSID_LEN     33
 #define MAX_PASS_LEN        64
 
 // ── Types ────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ typedef struct {
     bool    maschinenAktiv[MASCHINE_COUNT];
     char    apiUrl[MAX_URL_LEN];
     char    apiKey[MAX_KEY_LEN];
-    char    wifiSsid[MAX_SSID_LEN];
+    char    wifiSsid[TM_MAX_SSID_LEN];
     char    wifiPass[MAX_PASS_LEN];
     Maschine customSequenzen[4][16]; // CUSTOM_1..4 up to 16 machines each
     int      customSequenzLen[4];

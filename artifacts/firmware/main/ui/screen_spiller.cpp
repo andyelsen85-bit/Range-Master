@@ -603,7 +603,7 @@ lv_obj_t *screen_spiller_create(void)
     // Search textarea
     s_ta_search = lv_textarea_create(right_panel);
     lv_obj_set_size(s_ta_search, LV_PCT(100), 50);
-    lv_textarea_set_placeholder_text(s_ta_search, LV_SYMBOL_SEARCH "  Spiller sichen...");
+    lv_textarea_set_placeholder_text(s_ta_search, LV_SYMBOL_LIST "  Spiller sichen...");
     lv_textarea_set_one_line(s_ta_search, true);
     lv_obj_set_style_text_font(s_ta_search, &lv_font_montserrat_16, 0);
     lv_obj_set_style_bg_color(s_ta_search, lv_color_hex(CLR_CARD), 0);
