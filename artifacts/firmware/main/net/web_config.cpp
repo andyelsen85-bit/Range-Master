@@ -244,7 +244,10 @@ void web_config_start(void)
     cfg.server_port      = 80;
     cfg.stack_size       = 6144;
     cfg.max_uri_handlers = 4;
-    cfg.max_open_sockets = 1;   // config page: one client at a time is enough
+    cfg.max_open_sockets  = 1;     // config page: one client at a time is enough
+    cfg.max_req_hdr_len   = 2048;  // default 512 B is too small for browser headers
+                                   // (User-Agent + Accept + Cookie easily exceed 512 B
+                                   // → 431 "Request Header Fields Too Large")
 
     esp_err_t err = httpd_start(&s_server, &cfg);
     if (err != ESP_OK) {
