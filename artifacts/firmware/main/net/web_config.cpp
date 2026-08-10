@@ -146,24 +146,34 @@ static esp_err_t root_get_handler(httpd_req_t *req)
 
     if (banner) httpd_resp_sendstr_chunk(req, banner);
 
-    // Battery status section
+    // Battery status section — built from small chunks to avoid snprintf
+    // buffer-size warnings on -Werror=format-truncation.
     if (battery_is_available()) {
         int pct = battery_get_percent();
         int mv  = battery_get_mv();
-        char batt_buf[160];
-        if (pct >= 0) {
-            uint32_t clr = (pct >= 60) ? 0x22C55E :
-                           (pct >= 20) ? 0xF59E0B : 0xEF4444;
-            snprintf(batt_buf, sizeof(batt_buf),
-                     "<span style='color:#%06lx;font-weight:600'>%d%%</span>"
-                     "<span style='color:#64748b;font-size:.8rem'> &nbsp;(%d mV)</span>",
-                     (unsigned long)clr, pct, mv);
-        } else {
-            snprintf(batt_buf, sizeof(batt_buf),
-                     "<span style='color:#64748b'>N/A</span>");
-        }
         httpd_resp_sendstr_chunk(req, HTML_BATT_SECT);
-        httpd_resp_sendstr_chunk(req, batt_buf);
+        if (pct >= 0) {
+            const char *clr_hex = (pct >= 60) ? "22C55E"
+                                : (pct >= 20) ? "F59E0B" : "EF4444";
+            // Percentage with colour
+            char tmp[48];
+            httpd_resp_sendstr_chunk(req,
+                "<span style='color:#");
+            httpd_resp_sendstr_chunk(req, clr_hex);
+            httpd_resp_sendstr_chunk(req, ";font-weight:600'>");
+            snprintf(tmp, sizeof(tmp), "%d%%", pct);
+            httpd_resp_sendstr_chunk(req, tmp);
+            httpd_resp_sendstr_chunk(req, "</span>");
+            // Raw mV for calibration
+            httpd_resp_sendstr_chunk(req,
+                "<span style='color:#64748b;font-size:.8rem'> &nbsp;(");
+            snprintf(tmp, sizeof(tmp), "%d mV", mv);
+            httpd_resp_sendstr_chunk(req, tmp);
+            httpd_resp_sendstr_chunk(req, ")</span>");
+        } else {
+            httpd_resp_sendstr_chunk(req,
+                "<span style='color:#64748b'>N/A</span>");
+        }
         httpd_resp_sendstr_chunk(req, HTML_BATT_END);
     }
 
