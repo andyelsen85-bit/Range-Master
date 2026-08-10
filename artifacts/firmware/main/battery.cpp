@@ -7,28 +7,34 @@
 //   Cell 3.0 V (empty) → ADC ~1500 mV
 //   Cell 4.2 V (full)  → ADC ~2100 mV
 //
-// Charging state cannot be read from firmware on this board —
-// there is no accessible I2C or GPIO charge-state line.
+// No calibration scheme is used — the esp_adc calibration API
+// differs between targets and IDF versions.  A simple raw→mV
+// linear mapping is accurate within ±50 mV, which is close
+// enough for a percentage bar.  Use battery_get_mv() + a
+// multimeter to tune BATT_MV_EMPTY / BATT_MV_FULL in app_config.h
+// if the percentage looks wrong on your unit.
+//
+// Charging state cannot be read from firmware on this board.
 // ============================================================
 #include "battery.h"
 #include "app_config.h"
 #include "esp_adc/adc_oneshot.h"
-#include "esp_adc/adc_cali.h"
-#include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
-#include <string.h>
 
 static const char *TAG = "battery";
 
 static adc_oneshot_unit_handle_t s_adc   = NULL;
-static adc_cali_handle_t         s_cali  = NULL;
 static bool                      s_ready = false;
+
+// ADC full-scale millivolts for ADC_ATTEN_DB_12 on ESP32-P4
+// (12-bit, ~3100 mV full-scale).
+#define ADC_FULL_SCALE_MV   3100
+#define ADC_MAX_RAW         4095
 
 bool battery_init(void)
 {
-    // ── ADC unit 1 ───────────────────────────────────────────
     adc_oneshot_unit_init_cfg_t unit_cfg = {};
-    unit_cfg.unit_id  = BATT_ADC_UNIT;
+    unit_cfg.unit_id  = (adc_unit_t)BATT_ADC_UNIT_NUM;
     unit_cfg.ulp_mode = ADC_ULP_MODE_DISABLE;
 
     esp_err_t err = adc_oneshot_new_unit(&unit_cfg, &s_adc);
@@ -38,43 +44,25 @@ bool battery_init(void)
         return false;
     }
 
-    // ── Channel config ───────────────────────────────────────
-    // ADC_ATTEN_DB_12 → input range 0–3100 mV (covers 0–2100 mV divider range)
     adc_oneshot_chan_cfg_t chan_cfg = {};
-    chan_cfg.atten    = ADC_ATTEN_DB_12;
+    chan_cfg.atten    = ADC_ATTEN_DB_12;   // 0–3100 mV range; covers divider output
     chan_cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
 
-    err = adc_oneshot_config_channel(s_adc, BATT_ADC_CHANNEL, &chan_cfg);
+    err = adc_oneshot_config_channel(s_adc,
+                                     (adc_channel_t)BATT_ADC_CHANNEL_NUM,
+                                     &chan_cfg);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "adc_oneshot_config_channel failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "adc_oneshot_config_channel failed: %s",
+                 esp_err_to_name(err));
         adc_oneshot_del_unit(s_adc);
         s_adc = NULL;
         return false;
     }
 
-    // ── Calibration (curve fitting — preferred on ESP32-P4) ──
-    // Falls back to uncalibrated raw conversion if eFuse values
-    // are absent or the scheme is not compiled in.
-    adc_cali_curve_fitting_config_t cali_cfg = {};
-    cali_cfg.unit_id  = BATT_ADC_UNIT;
-    cali_cfg.chan     = BATT_ADC_CHANNEL;
-    cali_cfg.atten    = ADC_ATTEN_DB_12;
-    cali_cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
-
-    err = adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "ADC calibration: curve fitting");
-    } else {
-        ESP_LOGW(TAG, "Curve-fitting calibration unavailable (%s) — "
-                      "using raw conversion (readings may vary ±50 mV)",
-                 esp_err_to_name(err));
-        s_cali = NULL;
-    }
-
     s_ready = true;
-    ESP_LOGI(TAG, "Battery ADC ready: GPIO%d  channel=%d  "
+    ESP_LOGI(TAG, "Battery ADC ready: GPIO%d  ch=%d  "
                   "empty=%d mV  full=%d mV",
-             (int)BATT_ADC_GPIO, (int)BATT_ADC_CHANNEL,
+             (int)BATT_ADC_GPIO, BATT_ADC_CHANNEL_NUM,
              BATT_MV_EMPTY, BATT_MV_FULL);
     return true;
 }
@@ -87,25 +75,18 @@ int battery_get_mv(void)
     int32_t raw_sum = 0;
     for (int i = 0; i < 8; i++) {
         int raw = 0;
-        adc_oneshot_read(s_adc, BATT_ADC_CHANNEL, &raw);
+        adc_oneshot_read(s_adc, (adc_channel_t)BATT_ADC_CHANNEL_NUM, &raw);
         raw_sum += raw;
     }
-    int raw = (int)(raw_sum / 8);
-
-    int mv = 0;
-    if (s_cali) {
-        adc_cali_raw_to_voltage(s_cali, raw, &mv);
-    } else {
-        // Approximate: 12-bit ADC, ~3100 mV full scale at DB_12
-        mv = (raw * 3100) / 4095;
-    }
-    return mv;
+    int raw_avg = (int)(raw_sum / 8);
+    // Linear raw → mV (no calibration; ±50 mV typical error)
+    return (raw_avg * ADC_FULL_SCALE_MV) / ADC_MAX_RAW;
 }
 
 int battery_get_percent(void)
 {
     int mv = battery_get_mv();
-    if (mv < 0) return -1;
+    if (mv < 0)            return -1;
     if (mv <= BATT_MV_EMPTY) return 0;
     if (mv >= BATT_MV_FULL)  return 100;
     return (int)(((long)(mv - BATT_MV_EMPTY) * 100) /
