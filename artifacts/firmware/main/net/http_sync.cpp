@@ -293,6 +293,61 @@ esp_err_t http_fetch_spielhistorie(void)
     return ESP_OK;
 }
 
+// ── http_push_spieler_updates ─────────────────────────────────
+esp_err_t http_push_spieler_updates(void)
+{
+    if (g_store.spielerUpdateCount == 0) return ESP_OK;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr  = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "updates", arr);
+
+    for (int i = 0; i < g_store.spielerUpdateCount; i++) {
+        SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
+        if (!e->used) continue;
+
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "externalId", e->externalId);
+        cJSON_AddNumberToObject(item, "spielerId", (double)e->spielerId);
+
+        if (e->typ == SPIELER_UPDATE_PASSWORT_RESET) {
+            cJSON_AddStringToObject(item, "typ", "PASSWORT_RESET");
+        } else {
+            cJSON_AddStringToObject(item, "typ", "UPDATE");
+            cJSON_AddStringToObject(item, "name", e->name);
+            if (e->email[0]) {
+                cJSON_AddStringToObject(item, "email", e->email);
+            } else {
+                cJSON_AddNullToObject(item, "email");
+            }
+            cJSON_AddBoolToObject(item, "portalAktiv", e->portalAktiv);
+        }
+        cJSON_AddItemToArray(arr, item);
+    }
+
+    char *body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!body) return ESP_ERR_NO_MEM;
+
+    char *resp = (char *)malloc(512);
+    esp_err_t err = ESP_ERR_NO_MEM;
+    if (resp) {
+        err = http_post_json("/api/sync/spieler-updates", body, resp, 512);
+        free(resp);
+    }
+    free(body);
+
+    if (err == ESP_OK) {
+        int pushed = g_store.spielerUpdateCount;
+        memset(g_store.spielerUpdates, 0, sizeof(g_store.spielerUpdates));
+        g_store.spielerUpdateCount = 0;
+        ESP_LOGI(TAG, "Pushed %d spieler update(s) — queue cleared", pushed);
+    } else {
+        ESP_LOGW(TAG, "Spieler updates push failed (%s) — queue retained", esp_err_to_name(err));
+    }
+    return err;
+}
+
 // ── http_sync_all ─────────────────────────────────────────────
 esp_err_t http_sync_all(void)
 {
@@ -305,6 +360,12 @@ esp_err_t http_sync_all(void)
     ESP_LOGI(TAG, "  internal free=%u B  largest block=%u B",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    // Push queued player edits first (non-critical — don't abort sync on failure)
+    esp_err_t pue = http_push_spieler_updates();
+    if (pue != ESP_OK) {
+        ESP_LOGW(TAG, "Spieler updates push failed — continuing sync");
+    }
+
     esp_err_t err = http_push_pending_games();
     if (err != ESP_OK) return err;
 

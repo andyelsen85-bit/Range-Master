@@ -16,13 +16,25 @@ static lv_obj_t *s_maschinen_btns[MASCHINE_COUNT];
 static lv_obj_t *s_modus_btns[MODUS_COUNT];
 static lv_obj_t *s_lbl_error;
 
+// option-index → portalSpieler[] index (index 0 = "Kee SPILLER" sentinel)
+static int s_option_to_pidx[MAX_PORTAL_SPIELER + 1];
+static int s_options_count = 0;
+
 // ── Build player dropdown options string ──────────────────────
+// Only includes players that have at least 1 day-credit remaining.
+// Populates s_option_to_pidx[] so start_cb can look up the correct
+// portal player without relying on a direct sel-1 index offset.
 static void build_player_opts(char *buf, size_t len)
 {
-    // "--- Kee SPILLER ---\nName1\nName2\n..."
     strncpy(buf, "--- Kee SPILLER ---", len - 1);
     buf[len-1] = '\0';
+    s_options_count = 1;  // option 0 = "Kee SPILLER"
+
     for (int i = 0; i < g_store.portalSpielerCount; i++) {
+        if (store_kredite_verfuegbar(g_store.portalSpieler[i].id) <= 0) continue;
+        if (s_options_count > MAX_PORTAL_SPIELER) break;
+        s_option_to_pidx[s_options_count] = i;
+        s_options_count++;
         strncat(buf, "\n", len - strlen(buf) - 1);
         strncat(buf, g_store.portalSpieler[i].name, len - strlen(buf) - 1);
     }
@@ -37,8 +49,9 @@ static void start_cb(lv_event_t *e)
         if (!s_player_dropdowns[i]) continue;
         uint16_t sel = lv_dropdown_get_selected(s_player_dropdowns[i]);
         if (sel == 0) continue; // "--- Kee SPILLER ---"
-        int pidx = (int)sel - 1;
-        if (pidx >= g_store.portalSpielerCount) continue;
+        if ((int)sel >= s_options_count) continue;
+        int pidx = s_option_to_pidx[sel];
+        if (pidx < 0 || pidx >= g_store.portalSpielerCount) continue;
         PortalSpieler *ps = &g_store.portalSpieler[pidx];
 
         Spieler *sp = &g_store.spieler[g_store.spielerCount];
@@ -161,7 +174,7 @@ lv_obj_t *screen_start_create(void)
     // (static BSS lands in internal DRAM which is already scarce on ESP32-P4).
     // lv_dropdown_set_options() calls lv_strdup() internally, so free() is safe
     // immediately after the dropdown calls below.
-    const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32;
+    const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 64;
     char *opts = (char *)malloc(opts_sz);
     if (opts) build_player_opts(opts, opts_sz);
 
@@ -289,7 +302,7 @@ void screen_start_refresh(void)
 {
     // Rebuild dropdown options when portal players change
     if (!s_player_dropdowns[0]) return;
-    const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 32;
+    const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 64;
     char *opts = (char *)malloc(opts_sz);
     if (!opts) return;
     build_player_opts(opts, opts_sz);

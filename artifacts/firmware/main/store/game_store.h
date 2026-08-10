@@ -12,6 +12,8 @@
 #define MAX_PENDING_GAMES   30   // unsynced queue; portal sync flushes this
 #define MAX_ERGEBNISSE      200
 #define MAX_NAME_LEN        64
+#define MAX_EMAIL_LEN       64
+#define MAX_SPIELER_UPDATES 10
 #define MAX_URL_LEN         128
 #define MAX_KEY_LEN         65
 #define MAX_SSID_LEN        33
@@ -87,6 +89,21 @@ typedef struct {
     bool  lokal;          // created on terminal, not yet pushed
     bool  portalAktiv;
 } PortalSpieler;
+
+typedef enum {
+    SPIELER_UPDATE_PROFILE = 0,
+    SPIELER_UPDATE_PASSWORT_RESET,
+} SpielerUpdateTyp;
+
+typedef struct {
+    bool             used;
+    int              spielerId;
+    SpielerUpdateTyp typ;
+    char             externalId[36];
+    char             name[MAX_NAME_LEN];
+    char             email[MAX_EMAIL_LEN];
+    bool             portalAktiv;
+} SpielerUpdateEntry;
 
 typedef struct {
     int   gewaehrt;
@@ -171,6 +188,10 @@ typedef struct {
     FinishedGame history[MAX_HISTORY];
     int          historyCount;
 
+    // Queued player edits (pushed on next sync)
+    SpielerUpdateEntry spielerUpdates[MAX_SPIELER_UPDATES];
+    int                spielerUpdateCount;
+
     // WiFi state
     bool    wifiConnected;
     char    wifiIp[16];
@@ -204,6 +225,11 @@ void store_register_spieler_fuer_tag(int spieler_id);
 
 // ── Sync ─────────────────────────────────────────────────────
 void store_sync(void);   // pushes pending games + pulls history
+
+// ── Player updates ───────────────────────────────────────────
+void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv);
+void store_queue_passwort_reset(int spieler_id);
+int  store_pending_update_count(void);
 
 // ── Helpers ──────────────────────────────────────────────────
 const char *maschine_label(Maschine m);

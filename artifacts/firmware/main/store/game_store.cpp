@@ -490,6 +490,56 @@ void store_add_lokal_spieler(const char *name, int *out_id)
     game_store_save();
 }
 
+// ── Player update queue ──────────────────────────────────────
+void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv)
+{
+    if (g_store.spielerUpdateCount >= MAX_SPIELER_UPDATES) {
+        ESP_LOGW(TAG, "spielerUpdates queue full");
+        return;
+    }
+    SpielerUpdateEntry *e = &g_store.spielerUpdates[g_store.spielerUpdateCount++];
+    e->used       = true;
+    e->spielerId  = spieler_id;
+    e->typ        = SPIELER_UPDATE_PROFILE;
+    snprintf(e->externalId, sizeof(e->externalId), "upd-%d-%u",
+             spieler_id, (unsigned)xTaskGetTickCount());
+    strncpy(e->name,  name  ? name  : "", MAX_NAME_LEN - 1);
+    e->name[MAX_NAME_LEN - 1] = '\0';
+    strncpy(e->email, email ? email : "", MAX_EMAIL_LEN - 1);
+    e->email[MAX_EMAIL_LEN - 1] = '\0';
+    e->portalAktiv = portal_aktiv;
+
+    // Reflect changes in local cache immediately
+    for (int i = 0; i < g_store.portalSpielerCount; i++) {
+        if (g_store.portalSpieler[i].id == spieler_id) {
+            if (name) {
+                strncpy(g_store.portalSpieler[i].name, name, MAX_NAME_LEN - 1);
+                g_store.portalSpieler[i].name[MAX_NAME_LEN - 1] = '\0';
+            }
+            g_store.portalSpieler[i].portalAktiv = portal_aktiv;
+            break;
+        }
+    }
+    ESP_LOGI(TAG, "Queued spieler update id=%d name='%s' aktiv=%d", spieler_id, e->name, (int)portal_aktiv);
+}
+
+void store_queue_passwort_reset(int spieler_id)
+{
+    if (g_store.spielerUpdateCount >= MAX_SPIELER_UPDATES) {
+        ESP_LOGW(TAG, "spielerUpdates queue full");
+        return;
+    }
+    SpielerUpdateEntry *e = &g_store.spielerUpdates[g_store.spielerUpdateCount++];
+    e->used      = true;
+    e->spielerId = spieler_id;
+    e->typ       = SPIELER_UPDATE_PASSWORT_RESET;
+    snprintf(e->externalId, sizeof(e->externalId), "pwd-%d-%u",
+             spieler_id, (unsigned)xTaskGetTickCount());
+    ESP_LOGI(TAG, "Queued passwort reset for spieler id=%d", spieler_id);
+}
+
+int store_pending_update_count(void) { return g_store.spielerUpdateCount; }
+
 // ── Sync ─────────────────────────────────────────────────────
 void store_sync(void)
 {
