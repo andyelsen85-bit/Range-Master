@@ -14,15 +14,11 @@ dependencies:
       - if: "target == esp32p4"
 
   ## ESP-Hosted: P4 (SDIO master) ↔ C6 (SDIO slave) WiFi bridge
-  ## C6 must be flashed with ESP-Hosted-MCU slave firmware (SDIO mode).
-  ## esp_wifi_remote intercepts esp_wifi_* calls and routes them to the C6.
-  ## Requires IDF ≥5.3.2 — our IDF 5.3.5 satisfies this.
-  ## esp_hosted host component — C6 slave runs ESP-Hosted-MCU v2.3.2 (SDIO).
-  ## The registry version number differs from the slave firmware version.
-  ## ">=2.3.2" fetches the latest compatible release. After the first build,
-  ## check managed_components/espressif__esp_hosted/idf_component.yml for the
-  ## installed version and verify slave/host compatibility in esp_hosted docs.
+  ## C6 must be flashed with ESP-Hosted-MCU slave firmware (SDIO mode) at the
+  ## SAME version as this host component — otherwise the RPC protocol mismatches
+  ## and WiFi scans time out.  Use tools/flash_c6_slave.sh to build and flash.
+  ## Pinned to 2.12.12 — bump this AND rebuild the C6 slave together.
   espressif/esp_hosted:
-    version: ">=2.3.2"
+    version: "==2.12.12"
   espressif/esp_wifi_remote:
-    version: "*"
+    version: ">=0.1.17"

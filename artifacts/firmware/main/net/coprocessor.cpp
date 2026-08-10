@@ -33,7 +33,7 @@ static int                 s_retry_count    = 0;
 #define WIFI_FAIL_BIT       BIT1
 #define SCAN_DONE_BIT       BIT2
 #define WIFI_CONNECT_TIMEOUT_MS  20000   // 20 s — DHCP can be slow
-#define WIFI_SCAN_TIMEOUT_MS     30000   // 30 s — RPC round-trip can be slow on mismatched slave
+#define WIFI_SCAN_TIMEOUT_MS     30000   // 30 s — allow for slow RPC; reduce once C6 slave is at 2.12.12
 
 // ── WiFi event handler ───────────────────────────────────────
 static void wifi_event_handler(void *arg, esp_event_base_t base,
@@ -175,8 +175,8 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
     *count = 0;
 
     // Use non-blocking scan so we can apply a hard timeout.
-    // With host v2.12.x ↔ slave v2.3.x version mismatch the scan RPC can
-    // stall indefinitely; blocking mode (true) has no escape hatch.
+    // A version-matched slave (esp_hosted 2.12.12 on both sides) responds
+    // within a few seconds; blocking mode (true) has no escape hatch if it stalls.
     s_scan_done_group = xEventGroupCreate();
     if (!s_scan_done_group) return ESP_ERR_NO_MEM;
 
@@ -203,9 +203,9 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
 
     if (!(bits & SCAN_DONE_BIT)) {
         ESP_LOGW(TAG, "Scan timed out after %d s — "
-                      "RPC delay likely due to host/slave version mismatch "
-                      "(host 2.12.x vs slave 2.3.x). Rebuild C6 slave from "
-                      "the same esp_hosted version to fix.",
+                      "check: (1) C6 slave flashed with esp_hosted 2.12.12? "
+                      "Run tools/flash_c6_slave.sh. "
+                      "(2) SDIO link stable? Check GPIO14-19/54 connections.",
                  WIFI_SCAN_TIMEOUT_MS / 1000);
         esp_wifi_scan_stop();
         return ESP_ERR_TIMEOUT;

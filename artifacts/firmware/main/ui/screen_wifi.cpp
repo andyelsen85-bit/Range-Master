@@ -51,10 +51,10 @@ static void scan_cb(lv_event_t *e)
         lv_async_call([](void *arg2) {
             lv_obj_clean(s_list_networks);
             if (s_scan_err == ESP_ERR_TIMEOUT) {
-                // Scan timed out — most likely host/slave version mismatch.
+                // Scan timed out — C6 slave not yet flashed or SDIO link issue.
                 lv_list_add_text(s_list_networks, LV_SYMBOL_WARNING " SCAN TIMEOUT");
                 lv_label_set_text(s_lbl_status,
-                    LV_SYMBOL_WARNING " TIMEOUT — C6 Slave veraltet (v2.3 vs host v2.12)");
+                    LV_SYMBOL_WARNING " TIMEOUT — C6 net geflasht? tools/flash_c6_slave.sh lufen");
                 lv_obj_set_style_text_color(s_lbl_status,
                     lv_color_hex(CLR_DANGER), 0);
                 return;

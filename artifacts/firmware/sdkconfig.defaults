@@ -60,7 +60,8 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 CONFIG_NVS_ENCRYPTION=n
 
 # ── ESP-Hosted SDIO (P4 host ↔ C6 slave) ────────────────────────────────
-# C6 running ESP-Hosted-MCU slave v2.3.2 (SDIO).  Host component: 2.12.12.
+# C6 slave must be flashed with esp_hosted 2.12.12 slave firmware (SDIO).
+# Run tools/flash_c6_slave.sh to build and flash the matching slave.
 # CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y selects esp_hosted as the WiFi
 # backend — confirmed working ("Using Hosted Wi-Fi" in build output).
 CONFIG_ESP_WIFI_REMOTE_ENABLED=y

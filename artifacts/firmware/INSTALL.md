@@ -173,9 +173,54 @@ D'Display leeft op. `Ctrl+]` fir Monitor ofschalten.
 
 ---
 
-## Deel 4 — Éischte Start: WiFi a Portal-Schlëssel astellen
+## Deel 4 — C6 Slave-Firmware flashen (eemol néideg)
 
-### 4.1 WiFi-Netz verbinden
+D'Guition-Board huet zwee USB-C Connectors:
+
+| Connector | Zouch |
+|-----------|-------|
+| **CN4** (ënnen) | ESP32-**P4** Haaptprozessor |
+| **CN5** (uewen) | ESP32-**C6** WiFi Co-Prozessor |
+
+D'C6-Firmware muss eemol op d'**selwecht Versioun** wéi de Host-Komponent geflasht ginn (`espressif/esp_hosted 2.12.12`). Ouni dëst matcht de RPC-Protokoll net a WiFi-Scans lafen a Timeout (30 s).
+
+> **Wann?** Nëmmen eemol beim initialen Setup oder wann `espressif/esp_hosted` an `idf_component.yml` op eng nei Versioun gepiñt gëtt.
+
+### 4.1 C6 via CN5 flashen
+
+1. USB-C Kabel un **CN5** (uewen) unschléissen — net CN4!
+2. IDF-Ëmfeld aktiv hunn: `. $IDF_PATH/export.sh`
+3. Skript lafen:
+
+```bash
+# Linux / Mac
+cd artifacts/firmware
+chmod +x tools/flash_c6_slave.sh
+./tools/flash_c6_slave.sh /dev/ttyUSB1
+
+# Windows (Git Bash mat IDF aktiv)
+./tools/flash_c6_slave.sh COM4
+```
+
+> D'Port-Nummer fir CN5 ass meeschtens **een héijer** wéi CN4. Falls CN4 = COM3, dann CN5 = COM4. Kontrolléiert am Device Manager.
+
+4. Wënnt den Skript fäerdeg ass → Board **RST** drécken
+5. CN4 unschléissen a P4-Firmware flashen (Deel 3 virdrunnen)
+
+### 4.2 Kontrolléieren ob d'C6-Firmware stëmmt
+
+Am P4-Monitor (`idf.py -p COM3 monitor`) **dierf dëse Warning NET méi erschéngen**:
+```
+W (...) transport: Version mismatch: Host [2.12.x] > Co-proc [2.3.x]
+```
+
+Wann de Warning fort ass → WiFi-Scan funktionnéiert a puer Sekonnen.
+
+---
+
+## Deel 5 — Éischte Start: WiFi a Portal-Schlëssel astellen
+
+### 5.1 WiFi-Netz verbinden
 
 1. Haaptmenü → **Astellungen** (Zantrad-Symbol)
 2. Tab **WiFi**
@@ -186,7 +231,7 @@ D'Display leeft op. `Ctrl+]` fir Monitor ofschalten.
 
 ---
 
-### 4.2 Portal-URL a API-Schlëssel aginn
+### 5.2 Portal-URL a API-Schlëssel aginn
 
 Den API-Schlëssel kritt dir vum Portal-Admin:
 
