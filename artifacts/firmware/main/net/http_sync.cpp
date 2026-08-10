@@ -177,9 +177,14 @@ esp_err_t http_push_pending_games(void)
             continue;
         }
 
-        cJSON *obj = pending_game_to_json(&g_store.pendingGames[i]);
-        char *body = cJSON_PrintUnformatted(obj);
-        cJSON_Delete(obj);
+        // Server expects { "spiele": [ <game> ] }
+        cJSON *obj  = pending_game_to_json(&g_store.pendingGames[i]);
+        cJSON *arr  = cJSON_CreateArray();
+        cJSON *wrap = cJSON_CreateObject();
+        cJSON_AddItemToArray(arr, obj);
+        cJSON_AddItemToObject(wrap, "spiele", arr);
+        char *body = cJSON_PrintUnformatted(wrap);
+        cJSON_Delete(wrap);          // frees obj and arr too
         if (!body) continue;
 
         esp_err_t err = http_post_json("/api/sync/spiele", body, resp, HTTP_BUF_SIZE);
@@ -211,7 +216,7 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
     char *resp = (char *)malloc(HTTP_BUF_SIZE);
     if (!resp) return ESP_ERR_NO_MEM;
 
-    esp_err_t err = http_get_json("/api/portal/spieler-vum-dag", resp, HTTP_BUF_SIZE);
+    esp_err_t err = http_get_json("/api/sync/spieler", resp, HTTP_BUF_SIZE);
     if (err != ESP_OK) { free(resp); return err; }
 
     cJSON *root = cJSON_Parse(resp);
