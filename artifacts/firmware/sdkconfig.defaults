@@ -149,6 +149,11 @@ CONFIG_LWIP_MAX_SOCKETS=4
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16
 CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN=4096
 CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN=y
+# Disable hardware AES engine — it requires DMA-aligned internal SRAM buffers
+# that are unavailable by sync time (LVGL + WiFi stack have fragmented the pool).
+# Software AES draws from PSRAM via the system malloc, which is always available.
+# TLS handshake is ~200 ms slower but sync runs once per session — acceptable.
+CONFIG_MBEDTLS_HARDWARE_AES=n
 
 # ── LVGL memory: use system malloc instead of a static internal pool ──────
 # lv_mem_core_builtin.c declares `static uint8_t work_mem_int[LV_MEM_SIZE]`
