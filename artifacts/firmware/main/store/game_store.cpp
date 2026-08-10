@@ -529,4 +529,5 @@ void game_store_init(void)
 
     ESP_LOGI(TAG, "Store initialised. API: %s modus: %s  (%d dummy players seeded)",
              g_store.apiUrl, modus_label(g_store.modus), DUMMY_COUNT);
+    ESP_LOGI(TAG, "API key in use: '%s'", g_store.apiKey);
 }

@@ -283,6 +283,7 @@ esp_err_t http_fetch_spielhistorie(void)
 esp_err_t http_sync_all(void)
 {
     ESP_LOGI(TAG, "Starting full sync...");
+    ESP_LOGI(TAG, "  URL: %s  key: '%s'", g_store.apiUrl, g_store.apiKey);
     esp_err_t err = http_push_pending_games();
     if (err != ESP_OK) return err;
 
