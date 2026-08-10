@@ -24,13 +24,16 @@ static const char *TAG = "coprocessor";
 
 // ── WiFi state ───────────────────────────────────────────────
 static EventGroupHandle_t  s_wifi_event_group;
+static EventGroupHandle_t  s_scan_done_group  = NULL;  // non-NULL only during cop_wifi_scan()
 static volatile bool       s_wifi_connected = false;
 static char                s_ip_addr[16]    = {0};
 static int                 s_retry_count    = 0;
 
 #define WIFI_CONNECTED_BIT  BIT0
 #define WIFI_FAIL_BIT       BIT1
+#define SCAN_DONE_BIT       BIT2
 #define WIFI_CONNECT_TIMEOUT_MS  20000   // 20 s — DHCP can be slow
+#define WIFI_SCAN_TIMEOUT_MS     30000   // 30 s — RPC round-trip can be slow on mismatched slave
 
 // ── WiFi event handler ───────────────────────────────────────
 static void wifi_event_handler(void *arg, esp_event_base_t base,
@@ -44,6 +47,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
 
             case WIFI_EVENT_STA_CONNECTED:
                 ESP_LOGI(TAG, "WiFi associated");
+                break;
+
+            case WIFI_EVENT_SCAN_DONE:
+                // Signal cop_wifi_scan() that results are ready.
+                // s_scan_done_group is NULL when no scan is in progress.
+                if (s_scan_done_group) {
+                    xEventGroupSetBitsFromISR(s_scan_done_group, SCAN_DONE_BIT, NULL);
+                }
                 break;
 
             case WIFI_EVENT_STA_DISCONNECTED: {
@@ -163,12 +174,41 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
 {
     *count = 0;
 
+    // Use non-blocking scan so we can apply a hard timeout.
+    // With host v2.12.x ↔ slave v2.3.x version mismatch the scan RPC can
+    // stall indefinitely; blocking mode (true) has no escape hatch.
+    s_scan_done_group = xEventGroupCreate();
+    if (!s_scan_done_group) return ESP_ERR_NO_MEM;
+
     wifi_scan_config_t scan_cfg = {};
     scan_cfg.show_hidden = false;
-    esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);  // blocking
+    esp_err_t err = esp_wifi_scan_start(&scan_cfg, false);   // non-blocking
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Scan failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Scan start failed: %s", esp_err_to_name(err));
+        vEventGroupDelete(s_scan_done_group);
+        s_scan_done_group = NULL;
         return err;
+    }
+
+    // Wait for WIFI_EVENT_SCAN_DONE, signalled from wifi_event_handler.
+    ESP_LOGI(TAG, "Scan started — waiting up to %d s for results",
+             WIFI_SCAN_TIMEOUT_MS / 1000);
+    EventBits_t bits = xEventGroupWaitBits(
+        s_scan_done_group, SCAN_DONE_BIT,
+        pdFALSE, pdFALSE,
+        pdMS_TO_TICKS(WIFI_SCAN_TIMEOUT_MS));
+
+    vEventGroupDelete(s_scan_done_group);
+    s_scan_done_group = NULL;
+
+    if (!(bits & SCAN_DONE_BIT)) {
+        ESP_LOGW(TAG, "Scan timed out after %d s — "
+                      "RPC delay likely due to host/slave version mismatch "
+                      "(host 2.12.x vs slave 2.3.x). Rebuild C6 slave from "
+                      "the same esp_hosted version to fix.",
+                 WIFI_SCAN_TIMEOUT_MS / 1000);
+        esp_wifi_scan_stop();
+        return ESP_ERR_TIMEOUT;
     }
 
     uint16_t ap_num = (uint16_t)max;

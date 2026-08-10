@@ -34,18 +34,31 @@ static void scan_cb(lv_event_t *e)
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
     lv_obj_clean(s_list_networks);
 
-    // Run scan in background task
+    // Run scan in background task (cop_wifi_scan blocks up to 30 s then times out)
     xTaskCreate([](void *arg) {
         char names[20][33];
         int count = 0;
-        cop_wifi_scan(names, 20, &count);
-        // LVGL update must happen in LVGL context; use lv_async_call
-        // Here we store results in a static buffer and use a timer
+        esp_err_t err = cop_wifi_scan(names, 20, &count);
+        // LVGL update must happen in LVGL context; use lv_async_call.
+        // Stash results in static file-scope buffers first.
         memcpy(s_scan_names, names, sizeof(s_scan_names));
         s_scan_count = count;
 
+        // Stash the error so the lambda can read it without a capture.
+        static esp_err_t s_scan_err;
+        s_scan_err = err;
+
         lv_async_call([](void *arg2) {
             lv_obj_clean(s_list_networks);
+            if (s_scan_err == ESP_ERR_TIMEOUT) {
+                // Scan timed out — most likely host/slave version mismatch.
+                lv_list_add_text(s_list_networks, LV_SYMBOL_WARNING " SCAN TIMEOUT");
+                lv_label_set_text(s_lbl_status,
+                    LV_SYMBOL_WARNING " TIMEOUT — C6 Slave veraltet (v2.3 vs host v2.12)");
+                lv_obj_set_style_text_color(s_lbl_status,
+                    lv_color_hex(CLR_DANGER), 0);
+                return;
+            }
             for (int i = 0; i < s_scan_count; i++) {
                 lv_obj_t *btn = lv_list_add_btn(s_list_networks,
                                                 LV_SYMBOL_WIFI, s_scan_names[i]);

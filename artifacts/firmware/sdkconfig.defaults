@@ -122,6 +122,8 @@ CONFIG_PARTITION_TABLE_OFFSET=0x8000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
 # ── Unused wireless stacks — disable to recover ~80 KB of DRAM BSS ───────
 # Bluetooth and OpenThread are not used in this project. Leaving them at
 # IDF defaults bloats BSS so far that --enable-non-contiguous-regions

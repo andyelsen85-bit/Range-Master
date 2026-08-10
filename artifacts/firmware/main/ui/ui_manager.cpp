@@ -111,15 +111,19 @@ void ui_manager_init(void)
     ESP_LOGI(TAG, "Building LVGL screens...");
     styles_init();
 
-    s_screens[SCREEN_DASHBOARD]    = screen_dashboard_create();
-    s_screens[SCREEN_START]        = screen_start_create();
-    s_screens[SCREEN_SPIEL]        = screen_spiel_create();
-    s_screens[SCREEN_RESULTATE]    = screen_resultate_create();
-    s_screens[SCREEN_GESCHICHTE]   = screen_geschichte_create();
-    s_screens[SCREEN_KREDITE]      = screen_kredite_create();
-    s_screens[SCREEN_SPILLER]      = screen_spiller_create();
-    s_screens[SCREEN_EINSTELLUNGEN]= screen_einstellungen_create();
-    s_screens[SCREEN_WIFI]         = screen_wifi_create();
+    // Yield 5 ms between each screen build so FreeRTOS IDLE1 can run and
+    // reset the task watchdog.  Without this, 10 consecutive heavy screen
+    // constructions (widget creation events + flush_cb rotation loops) can
+    // hold CPU1 for > 5 s — the default WDT timeout — tripping a false alarm.
+    s_screens[SCREEN_DASHBOARD]    = screen_dashboard_create();    vTaskDelay(pdMS_TO_TICKS(5));
+    s_screens[SCREEN_START]        = screen_start_create();        vTaskDelay(pdMS_TO_TICKS(5));
+    s_screens[SCREEN_SPIEL]        = screen_spiel_create();        vTaskDelay(pdMS_TO_TICKS(5));
+    s_screens[SCREEN_RESULTATE]    = screen_resultate_create();    vTaskDelay(pdMS_TO_TICKS(5));
+    s_screens[SCREEN_GESCHICHTE]   = screen_geschichte_create();   vTaskDelay(pdMS_TO_TICKS(5));
+    s_screens[SCREEN_KREDITE]      = screen_kredite_create();      vTaskDelay(pdMS_TO_TICKS(5));
+    s_screens[SCREEN_SPILLER]      = screen_spiller_create();      vTaskDelay(pdMS_TO_TICKS(5));
+    s_screens[SCREEN_EINSTELLUNGEN]= screen_einstellungen_create();vTaskDelay(pdMS_TO_TICKS(5));
+    s_screens[SCREEN_WIFI]         = screen_wifi_create();         vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_BLUETOOTH]    = screen_bluetooth_create();
 
     // Apply dark background to all
