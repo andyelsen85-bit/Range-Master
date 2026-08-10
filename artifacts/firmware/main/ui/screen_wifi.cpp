@@ -309,7 +309,10 @@ lv_obj_t *screen_wifi_create(void)
     // ── On-screen keyboard ────────────────────────────────────────
     // Created last so it renders on top of all other content.
     s_kb = lv_keyboard_create(s_scr);
-    lv_obj_set_size(s_kb, DISPLAY_LOGICAL_W, LV_SIZE_CONTENT);
+    // LV_SIZE_CONTENT computes an oversized height on this 1280×800 display,
+    // pushing all but the top row off-screen.  Fix with an explicit height:
+    // 320 px ≈ 4 key-rows × 80 px, leaving ~410 px of form area above.
+    lv_obj_set_size(s_kb, DISPLAY_LOGICAL_W, 320);
     lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
 
