@@ -40,74 +40,84 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
-// ── Generic POST helper ───────────────────────────────────────
+// ── Generic POST helper (with retry) ─────────────────────────
 static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap)
 {
     char url[256];
     snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
 
-    http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap };
-    if (resp_buf) resp_buf[0] = '\0';
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        if (resp_buf) resp_buf[0] = '\0';
+        http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap };
 
-    esp_http_client_config_t cfg = {};
-    cfg.url               = url;
-    cfg.event_handler     = http_event_handler;
-    cfg.user_data         = resp_buf ? &acc : NULL;
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    cfg.timeout_ms        = 30000;
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    esp_http_client_set_method(client, HTTP_METHOD_POST);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
-    esp_http_client_set_post_field(client, body, strlen(body));
+        esp_http_client_config_t cfg = {};
+        cfg.url               = url;
+        cfg.event_handler     = http_event_handler;
+        cfg.user_data         = resp_buf ? &acc : NULL;
+        cfg.crt_bundle_attach = esp_crt_bundle_attach;
+        cfg.timeout_ms        = 12000;
+        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        esp_http_client_set_method(client, HTTP_METHOD_POST);
+        esp_http_client_set_header(client, "Content-Type", "application/json");
+        esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
+        esp_http_client_set_post_field(client, body, strlen(body));
 
-    esp_err_t err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        int status = esp_http_client_get_status_code(client);
-        if (status < 200 || status >= 300) {
-            ESP_LOGW(TAG, "POST %s → HTTP %d", path, status);
-            err = ESP_FAIL;
+        err = esp_http_client_perform(client);
+        if (err == ESP_OK) {
+            int status = esp_http_client_get_status_code(client);
+            if (status < 200 || status >= 300) {
+                ESP_LOGW(TAG, "POST %s → HTTP %d", path, status);
+                err = ESP_FAIL;
+            }
+        } else {
+            ESP_LOGW(TAG, "POST %s attempt %d/3 failed: %s", path, attempt, esp_err_to_name(err));
         }
-    } else {
-        ESP_LOGE(TAG, "POST %s failed: %s", path, esp_err_to_name(err));
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        if (err == ESP_OK) break;
+        if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
     return err;
 }
 
-// ── Generic GET helper ────────────────────────────────────────
+// ── Generic GET helper (with retry) ──────────────────────────
 static esp_err_t http_get_json(const char *path,
                                char *resp_buf, size_t resp_cap)
 {
     char url[256];
     snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
 
-    http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap };
-    resp_buf[0] = '\0';
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        resp_buf[0] = '\0';
+        http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap };
 
-    esp_http_client_config_t cfg = {};
-    cfg.url               = url;
-    cfg.event_handler     = http_event_handler;
-    cfg.user_data         = &acc;
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    cfg.timeout_ms        = 30000;
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
+        esp_http_client_config_t cfg = {};
+        cfg.url               = url;
+        cfg.event_handler     = http_event_handler;
+        cfg.user_data         = &acc;
+        cfg.crt_bundle_attach = esp_crt_bundle_attach;
+        cfg.timeout_ms        = 12000;
+        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
 
-    esp_err_t err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        int status = esp_http_client_get_status_code(client);
-        if (status < 200 || status >= 300) {
-            ESP_LOGW(TAG, "GET %s → HTTP %d", path, status);
-            err = ESP_FAIL;
+        err = esp_http_client_perform(client);
+        if (err == ESP_OK) {
+            int status = esp_http_client_get_status_code(client);
+            if (status < 200 || status >= 300) {
+                ESP_LOGW(TAG, "GET %s → HTTP %d", path, status);
+                err = ESP_FAIL;
+            }
+        } else {
+            ESP_LOGW(TAG, "GET %s attempt %d/3 failed: %s", path, attempt, esp_err_to_name(err));
         }
-    } else {
-        ESP_LOGE(TAG, "GET %s failed: %s", path, esp_err_to_name(err));
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        if (err == ESP_OK) break;
+        if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
     return err;
 }
 

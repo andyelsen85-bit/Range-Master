@@ -90,14 +90,16 @@ CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
 # To change any pin: add CONFIG_<symbol_name>=<gpio> here.
 # SDIO clock — default 40 MHz; 20 MHz conservative start, raise once link stable
 CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=40000
-# ── SDIO queue depth — balance DMA RAM vs. burst throughput ──────────────
-# Default is TX=20, RX=20. At ~1600 bytes/entry (max WiFi frame, DMA-capable
-# internal RAM only), that's ~64 KB of internal SRAM before main_task starts.
-# Previously reduced to 6/6 to fix a boot-time DMA-pool crash; that crash was
-# cured by ALWAYSINTERNAL=0 freeing general internal RAM. 10/10 gives the RX
-# queue enough depth to absorb a TLS response burst without dropping packets.
-CONFIG_ESP_HOSTED_SDIO_TX_Q_SIZE=10
-CONFIG_ESP_HOSTED_SDIO_RX_Q_SIZE=10
+# ── SDIO queue depth — keep at 6/6 to preserve internal SRAM for mbedTLS ─
+# Default is TX=20, RX=20. At ~1600 bytes/entry (DMA-capable internal RAM),
+# that's ~64 KB consumed at boot. 6/6 was the fix for the original boot crash.
+# Raising to 10/10 consumed ~13 KB more internal SRAM; the largest contiguous
+# free block dropped to 11 KB, causing mbedtls_ssl_setup to fail with
+# MBEDTLS_ERR_SSL_ALLOC_FAILED (-0x7F00) on every sync attempt.
+# The occasional SDIO RX packet drop is handled by retry logic in http_sync.cpp
+# (3 attempts × 12 s timeout) — no need for a deeper queue to compensate.
+CONFIG_ESP_HOSTED_SDIO_TX_Q_SIZE=6
+CONFIG_ESP_HOSTED_SDIO_RX_Q_SIZE=6
 # ── PSRAM DMA reserve pool — disable the pre-reservation entirely ─────────
 # IDF's app_startup.c does:
 #   #if CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL
