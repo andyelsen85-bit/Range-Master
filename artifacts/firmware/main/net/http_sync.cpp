@@ -15,6 +15,7 @@
 #include "http_sync.h"
 #include "game_store.h"
 #include "app_config.h"
+#include "coprocessor.h"
 
 static const char *TAG = "http_sync";
 
@@ -295,6 +296,10 @@ esp_err_t http_fetch_spielhistorie(void)
 // ── http_sync_all ─────────────────────────────────────────────
 esp_err_t http_sync_all(void)
 {
+    if (!cop_wifi_is_connected()) {
+        ESP_LOGW(TAG, "Sync skipped — WiFi not connected");
+        return ESP_ERR_INVALID_STATE;
+    }
     ESP_LOGI(TAG, "Starting full sync...");
     ESP_LOGI(TAG, "  URL: %s  key: '%s'", g_store.apiUrl, g_store.apiKey);
     ESP_LOGI(TAG, "  internal free=%u B  largest block=%u B",

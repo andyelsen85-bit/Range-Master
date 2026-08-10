@@ -82,6 +82,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         s_wifi_connected = true;
         s_retry_count    = 0;
         ESP_LOGI(TAG, "WiFi got IP: %s", s_ip_addr);
+        strncpy(g_store.wifiIp, s_ip_addr, sizeof(g_store.wifiIp) - 1);
+        g_store.wifiIp[sizeof(g_store.wifiIp) - 1] = '\0';
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         // Start the config web server so operators can set API URL / key
         // from any browser on the same network without using the on-screen
