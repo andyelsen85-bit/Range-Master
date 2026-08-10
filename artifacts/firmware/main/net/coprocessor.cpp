@@ -51,13 +51,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
 
             case WIFI_EVENT_SCAN_DONE:
                 // Signal cop_wifi_scan() that results are ready.
-                // s_scan_done_group is NULL when no scan is in progress.
+                // s_scan_done_group is pre-allocated in coprocessor_init().
                 // NOTE: this handler runs in the event-loop task (not an ISR),
                 // so use xEventGroupSetBits — the ISR variant routes through
                 // the timer daemon and can silently drop the signal.
-                if (s_scan_done_group) {
-                    xEventGroupSetBits(s_scan_done_group, SCAN_DONE_BIT);
-                }
+                // Spurious firings are harmless: cop_wifi_scan() clears the
+                // bit with xEventGroupClearBits() before each new scan.
+                xEventGroupSetBits(s_scan_done_group, SCAN_DONE_BIT);
                 break;
 
             case WIFI_EVENT_STA_DISCONNECTED: {
@@ -99,6 +99,12 @@ void coprocessor_init(void)
              C6_RESET_PIN);
 
     s_wifi_event_group = xEventGroupCreate();
+    // Pre-allocate the scan-done event group here, while internal RAM is
+    // still healthy (~93 KB free).  cop_wifi_scan() previously called
+    // xEventGroupCreate() on every scan tap — by then only ~52 bytes of
+    // internal RAM remain, so the allocation fails and the scan silently
+    // returns ESP_ERR_NO_MEM with zero results.
+    s_scan_done_group = xEventGroupCreate();
 
     // Standard lwip + event loop initialisation.
     // esp_wifi_remote intercepts esp_wifi_init() and brings up the
@@ -178,19 +184,16 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
     *count = 0;
     ESP_LOGI(TAG, "cop_wifi_scan: entered, max=%d", max);
 
-    // Use non-blocking scan so we can apply a hard timeout.
-    // A version-matched slave (esp_hosted 2.12.12 on both sides) responds
-    // within a few seconds; blocking mode (true) has no escape hatch if it stalls.
-    s_scan_done_group = xEventGroupCreate();
-    if (!s_scan_done_group) return ESP_ERR_NO_MEM;
+    // s_scan_done_group was created once in coprocessor_init() while
+    // internal RAM was healthy.  Clear any stale bit from a prior scan
+    // before starting, so WaitBits below doesn't fire immediately.
+    xEventGroupClearBits(s_scan_done_group, SCAN_DONE_BIT);
 
     wifi_scan_config_t scan_cfg = {};
     scan_cfg.show_hidden = false;
     esp_err_t err = esp_wifi_scan_start(&scan_cfg, false);   // non-blocking
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Scan start failed: %s", esp_err_to_name(err));
-        vEventGroupDelete(s_scan_done_group);
-        s_scan_done_group = NULL;
         return err;
     }
 
@@ -201,9 +204,6 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
         s_scan_done_group, SCAN_DONE_BIT,
         pdFALSE, pdFALSE,
         pdMS_TO_TICKS(WIFI_SCAN_TIMEOUT_MS));
-
-    vEventGroupDelete(s_scan_done_group);
-    s_scan_done_group = NULL;
 
     if (!(bits & SCAN_DONE_BIT)) {
         ESP_LOGW(TAG, "Scan timed out after %d s — "
