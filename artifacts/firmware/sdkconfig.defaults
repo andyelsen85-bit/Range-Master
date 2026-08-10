@@ -28,10 +28,15 @@ CONFIG_SPIRAM_SPEED_200M=y
 # (CAPS_ALLOC only exposes PSRAM via heap_caps_malloc — plain malloc()
 # would stay in internal DRAM, exhausting it as LVGL allocates widgets.)
 CONFIG_SPIRAM_USE_MALLOC=y
-# Allocations <= 512 B prefer internal SRAM (fast); anything larger
-# falls to PSRAM.  Keeps small structs/pointers in fast RAM while
-# large LVGL buffers and widget trees land in the 32 MB PSRAM.
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+# ALWAYSINTERNAL=0: all plain malloc()/free() calls prefer PSRAM.
+# Without this, any allocation ≤512 B goes to internal RAM first.
+# lv_obj_t (52 B), LVGL styles, FreeRTOS primitives, and esp_hosted
+# RPC semaphores are all ≤512 B — they consumed the entire ~93 KB
+# internal RAM budget before the WiFi scan could allocate its sync
+# semaphore, causing "sem create failed" + assert in hosted_destroy_semaphore.
+# DMA/ISR buffers use heap_caps_malloc(MALLOC_CAP_DMA) explicitly and
+# are unaffected by this setting.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 
 # ── MIPI DSI ──────────────────────────────────────────────────────────────
 CONFIG_LCD_ENABLE_DEBUG_LOG=n
