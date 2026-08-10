@@ -176,6 +176,7 @@ esp_err_t cop_wifi_get_ip(char *buf, size_t len)
 esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
 {
     *count = 0;
+    ESP_LOGI(TAG, "cop_wifi_scan: entered, max=%d", max);
 
     // Use non-blocking scan so we can apply a hard timeout.
     // A version-matched slave (esp_hosted 2.12.12 on both sides) responds

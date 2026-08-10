@@ -35,10 +35,14 @@ static void scan_cb(lv_event_t *e)
     lv_obj_clean(s_list_networks);
 
     // Run scan in background task (cop_wifi_scan blocks up to 30 s then times out)
-    xTaskCreate([](void *arg) {
+    ESP_LOGI("wifi_screen", "scan_cb: creating wifi_scan task");
+    BaseType_t task_ok = xTaskCreate([](void *arg) {
+        ESP_LOGI("wifi_screen", "wifi_scan task: started, calling cop_wifi_scan");
         char names[20][33];
         int count = 0;
         esp_err_t err = cop_wifi_scan(names, 20, &count);
+        ESP_LOGI("wifi_screen", "wifi_scan task: cop_wifi_scan returned %s count=%d",
+                 esp_err_to_name(err), count);
         // LVGL update must happen in LVGL context; use lv_async_call.
         // Stash results in static file-scope buffers first.
         memcpy(s_scan_names, names, sizeof(s_scan_names));
@@ -79,6 +83,15 @@ static void scan_cb(lv_event_t *e)
 
         vTaskDelete(NULL);
     }, "wifi_scan", 8192, NULL, 5, NULL);
+
+    if (task_ok != pdPASS) {
+        ESP_LOGE("wifi_screen", "scan_cb: xTaskCreate FAILED (pdFAIL) — heap full?");
+        lv_label_set_text(s_lbl_status,
+            LV_SYMBOL_WARNING " INTERN FEELER: Task erstellen gescheitert");
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+    } else {
+        ESP_LOGI("wifi_screen", "scan_cb: wifi_scan task created OK");
+    }
 }
 
 // ── Connect ───────────────────────────────────────────────────
