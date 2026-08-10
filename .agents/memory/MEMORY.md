@@ -1,5 +1,6 @@
 - [ADC init order vs SDIO](adc-before-sdio-kills-wifi.md) — adc_oneshot_new_unit() releases pad holds set by esp_hosted; init ADC only after coprocessor_init()
 - [SPIRAM internal RAM exhaustion](spiram-internal-ram-exhaustion.md) — ALWAYSINTERNAL=512 drains internal RAM via small LVGL/FreeRTOS/esp_hosted mallocs; fix: set to 0
+- [PPA rotation for LVGL](ppa-rotation.md) — esp_driver_ppa exists in IDF 5.3.x; rotation_angle is CCW (CW-90 ⇒ ANGLE_270); driver does cache sync itself
 - [JD9365 working display config](jd9365-working-config.md) — confirmed-working DPI timing, lane rate, init sequence, GPIO for Guition JC8012P4A1C on ESP32-P4 IDF 5.3.5
 - [Zod in monorepo routes](zod-monorepo-routes.md) — backend route files must list zod as a direct dep; workspace catalog zod is not auto-resolved by esbuild
 - [ESP32-P4 hex PSRAM speed](psram-hex-speed.md) — IDF 5.3.5 only has 20M/200M; 200M needs IDF_EXPERIMENTAL_FEATURES; SPIRAM_SPEED_80M silently ignored

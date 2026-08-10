@@ -24,6 +24,7 @@
 #include "esp_heap_caps.h"
 #include "esp_cache.h"           // esp_cache_msync — write-back CPU cache before DMA reads
 #include "esp_lcd_panel_ops.h"   // esp_lcd_panel_draw_bitmap
+#include "driver/ppa.h"          // PPA SRM — hardware rotate (ESP32-P4 Pixel Processing Accelerator)
 
 #include "lvgl.h"
 
@@ -74,6 +75,10 @@ static void backlight_init(void)
 static uint16_t *s_rot_buf = nullptr;
 static size_t    s_rot_buf_bytes = 0;
 
+// PPA client — registered once in lvgl_task, used every flush to rotate
+// each dirty tile in hardware instead of the old CPU transpose loop.
+static ppa_client_handle_t s_ppa_srm = nullptr;
+
 static void lvgl_flush_cb(lv_display_t *disp,
                            const lv_area_t *area,
                            uint8_t *px_map)
@@ -92,51 +97,58 @@ static void lvgl_flush_cb(lv_display_t *disp,
         s_flush_count++;
     }
 
-    // ── Pixel rotation + coordinate transform ─────────────────
+    // ── Pixel rotation + coordinate transform (PPA hardware) ──
     // LVGL 9 SW rotation passes LOGICAL (1280×800) coordinates to
     // flush_cb, with px_map in logical row-major order.
     // Physical panel: 800×1280 portrait.
-    // Rotation: 90° CCW (portrait tilt-left → landscape user view).
+    //
+    // Desired mapping (identical to the old CPU transpose):
     //   Logical (lx, ly) → Physical (DISPLAY_H_RES-1-ly, lx)
+    //   i.e. input top-left ends up at output top-right — a visually
+    //   CLOCKWISE 90° rotation.  The PPA rotation_angle is specified in
+    //   the COUNTERclockwise direction, so CW-90 == PPA_SRM_ROTATION_ANGLE_270.
+    //   (If the image ever appears flipped 180°, swap to ANGLE_90.)
     //
     // Physical region for this logical strip:
     //   phys_x1 = DISPLAY_H_RES-1 - area->y2
     //   phys_x2 = DISPLAY_H_RES-1 - area->y1
     //   phys_y1 = area->x1,  phys_y2 = area->x2
-    //
-    // Pixel mapping into s_rot_buf[py * phys_w + px]:
-    //   py = lx,  px = (log_h-1) - ly
-    //   → s_rot_buf[lx * phys_w + (log_h-1-ly)] = src[ly * log_w + lx]
 
-    int32_t log_w  = area->x2 - area->x1 + 1;   // 1280
-    int32_t log_h  = area->y2 - area->y1 + 1;   // 80
-    int32_t phys_w = log_h;                      // 80  (physical strip width)
+    int32_t log_w  = area->x2 - area->x1 + 1;   // e.g. 1280
+    int32_t log_h  = area->y2 - area->y1 + 1;   // e.g. 128
+    int32_t phys_w = log_h;                      // physical strip width
 
-    // Rotate 90° CCW into s_rot_buf.
-    // Iterate destination-row-major so every write is to a consecutive address —
-    // this is critical for PSRAM throughput: column-stride writes (the naive loop)
-    // hit a different cache-line per write (160-byte stride @ phys_w=80 px),
-    // stalling the bus.  Row-major writes burst an entire 80-px row in one pass.
-    uint16_t *src = (uint16_t *)px_map;
-    for (int32_t lx = 0; lx < log_w; lx++) {
-        uint16_t *dp = &s_rot_buf[lx * phys_w];   // destination row — sequential
-        for (int32_t px = 0; px < phys_w; px++) { // forward = contiguous writes
-            dp[px] = src[(phys_w - 1 - px) * log_w + lx];
-        }
-    }
+    // Rotate on the PPA SRM engine (blocking — completes before we return).
+    // The PPA driver performs the required cache write-back on the input
+    // buffer and cache invalidation on the output buffer itself, so no
+    // manual esp_cache_msync is needed: DMA2D sees freshly-rotated pixels.
+    ppa_srm_oper_config_t srm = {};
+    srm.in.buffer         = px_map;
+    srm.in.pic_w          = (uint32_t)log_w;
+    srm.in.pic_h          = (uint32_t)log_h;
+    srm.in.block_w        = (uint32_t)log_w;
+    srm.in.block_h        = (uint32_t)log_h;
+    srm.in.block_offset_x = 0;
+    srm.in.block_offset_y = 0;
+    srm.in.srm_cm         = PPA_SRM_COLOR_MODE_RGB565;
+    srm.out.buffer        = s_rot_buf;
+    srm.out.buffer_size   = s_rot_buf_bytes;
+    srm.out.pic_w         = (uint32_t)phys_w;   // rotated: w/h swap
+    srm.out.pic_h         = (uint32_t)log_w;
+    srm.out.block_offset_x = 0;
+    srm.out.block_offset_y = 0;
+    srm.out.srm_cm        = PPA_SRM_COLOR_MODE_RGB565;
+    srm.rotation_angle    = PPA_SRM_ROTATION_ANGLE_270; // CCW 270 == CW 90
+    srm.scale_x           = 1.0f;
+    srm.scale_y           = 1.0f;
+    srm.mode              = PPA_TRANS_MODE_BLOCKING;
+    ESP_ERROR_CHECK(ppa_do_scale_rotate_mirror(s_ppa_srm, &srm));
 
     // Physical area for draw_bitmap
     int32_t phys_x1 = DISPLAY_H_RES - 1 - area->y2;
     int32_t phys_x2 = DISPLAY_H_RES - 1 - area->y1;
     int32_t phys_y1 = area->x1;
     int32_t phys_y2 = area->x2;
-
-    // Write-back s_rot_buf from CPU cache to physical PSRAM so
-    // DMA2D sees the freshly-rotated pixels (not stale cache lines).
-    // s_rot_buf is 64-byte aligned (heap_caps_aligned_alloc) and
-    // s_rot_buf_bytes is a multiple of 64 — msync will succeed.
-    esp_cache_msync(s_rot_buf, s_rot_buf_bytes,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
     esp_lcd_panel_draw_bitmap(panel,
         phys_x1, phys_y1,
@@ -166,6 +178,13 @@ static void lvgl_task(void *arg)
                                              LVGL_TICK_PERIOD_MS * 1000ULL));
 
     // ── 3. LVGL display — physical 800×1280, SW-rotated to 1280×800 ──
+    // Register the PPA SRM client once — reused by every flush.
+    ppa_client_config_t ppa_cfg = {};
+    ppa_cfg.oper_type = PPA_OPERATION_SRM;
+    ppa_cfg.max_pending_trans_num = 1;   // flush_cb is blocking — one at a time
+    ESP_ERROR_CHECK(ppa_register_client(&ppa_cfg, &s_ppa_srm));
+    ESP_LOGI(TAG, "PPA SRM client registered — display rotation offloaded to hardware");
+
     lv_display_t *disp = lv_display_create(DISPLAY_H_RES, DISPLAY_V_RES);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
 
@@ -174,11 +193,9 @@ static void lvgl_task(void *arg)
     lv_display_set_rotation(disp, DISPLAY_ROTATION);
 
     // Partial render mode — the proven pattern for MIPI DSI panels in IDF.
-    // RENDER_MODE_FULL with SW rotation does NOT transpose the pixel data
-    // before the flush callback; it relies on hardware rotation support which
-    // the JD9365 DPI path doesn't expose.  With PARTIAL mode LVGL correctly
-    // rotates each dirty tile before calling flush, so draw_bitmap receives
-    // already-rotated data in physical (800×1280) coordinates.
+    // flush_cb receives each dirty tile in LOGICAL (1280×800) coordinates and
+    // rotates it to physical (800×1280) orientation on the PPA hardware block
+    // before draw_bitmap — no CPU pixel transpose anywhere in the pipeline.
     //
     // Two buffers of 1/10 screen area (~200 KB each) allow LVGL to prepare
     // the next tile in buf2 while DMA2D is still copying buf1 to the panel FB.

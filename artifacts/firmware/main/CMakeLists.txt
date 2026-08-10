@@ -28,6 +28,7 @@ idf_component_register(
         "lora_stub"
     REQUIRES
         esp_lcd
+        esp_driver_ppa
         esp_lvgl_port
         lvgl
         driver
