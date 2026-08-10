@@ -66,6 +66,7 @@
 
 // ── Portal API ──────────────────────────────────────────────
 #define DEFAULT_API_URL         "https://rangemaster.hostzone.lu"
+#define DEFAULT_API_KEY         "dcf29da936f9756c0d11bbbb58b3bdc610b384a5ba3841a692eb4b6c351c966a"
 
 // ── Misc ────────────────────────────────────────────────────
 #define APP_VERSION             "1.0.0-phase1"

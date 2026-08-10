@@ -480,6 +480,7 @@ void game_store_init(void)
 
     // Defaults
     snprintf(g_store.apiUrl, MAX_URL_LEN, "%s", DEFAULT_API_URL);
+    snprintf(g_store.apiKey, MAX_KEY_LEN, "%s", DEFAULT_API_KEY);
     for (int m = 0; m < MASCHINE_COUNT; m++) g_store.maschinenAktiv[m] = true;
     g_store.customLaeufe[0] = g_store.customLaeufe[1] =
     g_store.customLaeufe[2] = g_store.customLaeufe[3] = 2;
