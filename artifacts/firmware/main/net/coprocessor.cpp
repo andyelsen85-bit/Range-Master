@@ -18,6 +18,7 @@
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
 #include "coprocessor.h"
+#include "web_config.h"
 #include "app_config.h"
 
 static const char *TAG = "coprocessor";
@@ -66,6 +67,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
                 ESP_LOGW(TAG, "WiFi disconnected (reason %d)", disc->reason);
                 s_wifi_connected = false;
                 s_ip_addr[0]     = '\0';
+                web_config_stop();
                 // Signal failure so cop_wifi_connect() unblocks
                 xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
                 break;
@@ -81,6 +83,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         s_retry_count    = 0;
         ESP_LOGI(TAG, "WiFi got IP: %s", s_ip_addr);
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        // Start the config web server so operators can set API URL / key
+        // from any browser on the same network without using the on-screen
+        // keyboard.  Open http://<ip>/ in any browser.
+        web_config_start();
     }
 }
 
@@ -252,14 +258,19 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
     ESP_LOGI(TAG, "esp_wifi_scan_get_ap_records: err=%s fetched=%u",
              esp_err_to_name(err), (unsigned)fetched);
     if (err == ESP_OK) {
+        int idx = 0;
         for (int i = 0; i < fetched; i++) {
-            strncpy(names[i], (char *)records[i].ssid, 32);
-            names[i][32] = '\0';
+            // Skip hidden networks (empty SSID)
+            if (records[i].ssid[0] == '\0') continue;
+            strncpy(names[idx], (char *)records[i].ssid, 32);
+            names[idx][32] = '\0';
             ESP_LOGI(TAG, "  AP[%d]: ssid=\"%s\" rssi=%d ch=%d",
-                     i, names[i], records[i].rssi, records[i].primary);
+                     idx, names[idx], records[i].rssi, records[i].primary);
+            idx++;
         }
-        *count = (int)fetched;
-        ESP_LOGI(TAG, "Scan complete: %d networks found", *count);
+        *count = idx;
+        ESP_LOGI(TAG, "Scan complete: %d networks found (%u raw, hidden filtered)",
+                 *count, (unsigned)fetched);
     }
     free(records);
     return err;

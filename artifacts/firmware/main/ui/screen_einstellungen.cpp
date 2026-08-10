@@ -552,9 +552,26 @@ lv_obj_t *screen_einstellungen_create(void)
     // ── On-screen keyboard ────────────────────────────────────────
     // Created last (after all tabs) so it renders on top.
     s_kb = lv_keyboard_create(s_scr);
-    lv_obj_set_size(s_kb, DISPLAY_LOGICAL_W, LV_SIZE_CONTENT);
+    // Explicit height — LV_SIZE_CONTENT computes oversized on 1280×800
+    lv_obj_set_size(s_kb, DISPLAY_LOGICAL_W, 320);
     lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+
+    // Dark theme styling (default theme renders white-on-white)
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_kb, 0, 0);
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_BORDER), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(CLR_TEXT), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_kb, &lv_font_montserrat_16, LV_PART_ITEMS);
+    lv_obj_set_style_radius(s_kb, 6, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(s_kb, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(s_kb, lv_color_hex(CLR_BG), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_PRIMARY),
+                              LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(0xFFFFFF),
+                                LV_PART_ITEMS | LV_STATE_PRESSED);
 
     lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
         lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);

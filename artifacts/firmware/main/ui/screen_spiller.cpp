@@ -13,6 +13,7 @@ static lv_obj_t *s_scr;
 static lv_obj_t *s_list;
 static lv_obj_t *s_ta_new_name;
 static lv_obj_t *s_lbl_status;
+static lv_obj_t *s_kb;
 
 // ── Add local player ──────────────────────────────────────────
 static void add_local_cb(lv_event_t *e)
@@ -204,6 +205,44 @@ lv_obj_t *screen_spiller_create(void)
     lv_label_set_text(s_lbl_status, "");
     lv_obj_align(s_lbl_status, LV_ALIGN_TOP_MID, 0, 148);
     lv_obj_set_style_text_font(s_lbl_status, &lv_font_montserrat_14, 0);
+
+    // ── On-screen keyboard ────────────────────────────────────────
+    // Created last so it renders on top of all other widgets.
+    s_kb = lv_keyboard_create(s_scr);
+    lv_obj_set_size(s_kb, DISPLAY_LOGICAL_W, 320);
+    lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+
+    // Dark theme styling
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_kb, 0, 0);
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_BORDER), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(CLR_TEXT), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_kb, &lv_font_montserrat_16, LV_PART_ITEMS);
+    lv_obj_set_style_radius(s_kb, 6, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(s_kb, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(s_kb, lv_color_hex(CLR_BG), LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_PRIMARY),
+                              LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(0xFFFFFF),
+                                LV_PART_ITEMS | LV_STATE_PRESSED);
+
+    lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
+        lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(s_kb, NULL);
+    }, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
+        lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(s_kb, NULL);
+    }, LV_EVENT_CANCEL, NULL);
+
+    // Tapping the name textarea shows the keyboard
+    lv_obj_add_event_cb(s_ta_new_name, [](lv_event_t *e) {
+        lv_keyboard_set_textarea(s_kb, s_ta_new_name);
+        lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_FOCUSED, NULL);
 
     // Scrollable player list
     s_list = lv_obj_create(s_scr);

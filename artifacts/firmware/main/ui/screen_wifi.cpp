@@ -71,8 +71,14 @@ void screen_wifi_create_workers(void)
                 for (int i = 0; i < s_scan_count; i++) {
                     lv_obj_t *btn = lv_list_add_btn(s_list_networks,
                                                     LV_SYMBOL_WIFI, s_scan_names[i]);
+                    // Dark background so text is visible regardless of theme
+                    lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_CARD), 0);
+                    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
                     lv_obj_set_style_text_font(btn, &lv_font_montserrat_14, 0);
                     lv_obj_set_style_text_color(btn, lv_color_hex(CLR_TEXT), 0);
+                    // Pressed highlight
+                    lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_PRIMARY),
+                                              LV_STATE_PRESSED);
                     lv_obj_add_event_cb(btn, [](lv_event_t *ev) {
                         lv_obj_t *b = lv_event_get_target_obj(ev);
                         const char *net = lv_list_get_btn_text(s_list_networks, b);
@@ -105,14 +111,21 @@ void screen_wifi_create_workers(void)
                     char ip[16];
                     cop_wifi_get_ip(ip, sizeof(ip));
                     snprintf(g_store.wifiIp, sizeof(g_store.wifiIp), "%s", ip);
-                    char buf[48];
+                    char buf[64];
                     snprintf(buf, sizeof(buf), "VERBONNEN! IP: %s", ip);
                     if (s_lbl_status) {
                         lv_label_set_text(s_lbl_status, buf);
                         lv_obj_set_style_text_color(s_lbl_status,
                             lv_color_hex(CLR_SUCCESS), 0);
                     }
-                    if (s_lbl_ip) lv_label_set_text(s_lbl_ip, buf);
+                    // Show config URL so operator knows where to go
+                    char url_buf[48];
+                    snprintf(url_buf, sizeof(url_buf), "http://%s/", ip);
+                    if (s_lbl_ip) {
+                        lv_label_set_text(s_lbl_ip, url_buf);
+                        lv_obj_set_style_text_color(s_lbl_ip,
+                            lv_color_hex(CLR_PRIMARY), 0);
+                    }
                 } else {
                     if (s_lbl_status) {
                         lv_label_set_text(s_lbl_status,
@@ -364,10 +377,10 @@ void screen_wifi_refresh(void)
     lv_textarea_set_text(s_ta_ssid, g_store.wifiSsid);
     lv_textarea_set_text(s_ta_pass, g_store.wifiPass);
     if (g_store.wifiConnected) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "IP: %s", g_store.wifiIp);
+        char buf[48];
+        snprintf(buf, sizeof(buf), "http://%s/", g_store.wifiIp);
         lv_label_set_text(s_lbl_ip, buf);
-        lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_SUCCESS), 0);
+        lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_PRIMARY), 0);
     } else {
         lv_label_set_text(s_lbl_ip, "NET VERBONNEN");
         lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_MUTED), 0);
