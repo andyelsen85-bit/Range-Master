@@ -290,14 +290,20 @@ void coprocessor_autoconnect(void)
     }
     ESP_LOGI(TAG, "autoconnect: connecting to stored SSID '%s'", g_store.wifiSsid);
 
-    // One-shot task — connects and deletes itself.
+    // One-shot task — tries up to 3 times, then deletes itself.
     // Stack in SPIRAM; TCB needs internal RAM (always the case with xTaskCreate).
     xTaskCreateWithCaps([](void *arg) {
-        esp_err_t err = cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
-        if (err == ESP_OK) {
-            ESP_LOGI("autoconnect", "Connected. IP: %s", g_store.wifiIp);
-        } else {
-            ESP_LOGW("autoconnect", "Failed to connect to '%s'", g_store.wifiSsid);
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            ESP_LOGI("autoconnect", "Attempt %d/3: SSID='%s'", attempt, g_store.wifiSsid);
+            esp_err_t err = cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
+            if (err == ESP_OK) {
+                ESP_LOGI("autoconnect", "Connected. IP: %s", g_store.wifiIp);
+                vTaskDelete(NULL);
+                return;
+            }
+            ESP_LOGW("autoconnect", "Attempt %d/3 failed — %s",
+                     attempt, attempt < 3 ? "retrying in 5 s" : "giving up");
+            if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(5000));
         }
         vTaskDelete(NULL);
     }, "autoconn", 4096, NULL, 4, NULL,
