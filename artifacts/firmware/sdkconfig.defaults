@@ -85,11 +85,6 @@ CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
 # To change any pin: add CONFIG_<symbol_name>=<gpio> here.
 # SDIO clock — default 40 MHz; 20 MHz conservative start, raise once link stable
 CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=20000
-# ── C6 reset GPIO — set to -1 to disable P4→C6 reset during C6 flash ─────
-# Restore to 54 after C6 slave firmware is flashed (see INSTALL.md §4).
-# With -1 esp_hosted skips the GPIO reset pulse entirely; the C6 still
-# initialises correctly if it is already running matching slave firmware.
-CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=-1
 # ── SDIO queue depth — reduce to recover internal DMA RAM ────────────────
 # Default is TX=20, RX=20. At ~1600 bytes/entry (max WiFi frame, DMA-capable
 # internal RAM only), that's ~64 KB of internal SRAM consumed before main_task
