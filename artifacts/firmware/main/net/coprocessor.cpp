@@ -1,229 +1,203 @@
 // ============================================================
-// ESP32-C6 co-processor UART AT bridge (WiFi + BLE HID)
+// ESP32-C6 co-processor WiFi bridge — ESP-Hosted SDIO transport
+//
+// The P4↔C6 link is SDIO (GPIO14-19 + reset GPIO54 + wakeup GPIO6).
+// espressif/esp_wifi_remote intercepts all esp_wifi_* calls and
+// routes them over esp_hosted (SDIO) to the C6 slave firmware.
+// Application code is identical to a native WiFi chip — no AT commands.
+//
+// C6 must be flashed with ESP-Hosted-MCU slave firmware (SDIO mode).
 // ============================================================
 #include <string.h>
-#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
-#include "driver/uart.h"
+#include "freertos/event_groups.h"
 #include "esp_log.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_netif.h"
 #include "coprocessor.h"
 #include "app_config.h"
 
 static const char *TAG = "coprocessor";
 
-static QueueHandle_t s_uart_queue;
-static TaskHandle_t  s_event_task    = NULL;   // handle for suspend/resume
-static char          s_rx_buf[C6_UART_RX_BUF];
-static volatile bool s_wifi_connected = false;
-static volatile bool s_ble_connected  = false;
-static volatile char s_last_key       = 0;
+// ── WiFi state ───────────────────────────────────────────────
+static EventGroupHandle_t  s_wifi_event_group;
+static volatile bool       s_wifi_connected = false;
+static char                s_ip_addr[16]    = {0};
+static int                 s_retry_count    = 0;
 
-// ── Low-level AT send / wait for response ─────────────────────
-static esp_err_t at_send(const char *cmd, const char *expect,
-                         char *resp, size_t resp_len, uint32_t timeout_ms)
+#define WIFI_CONNECTED_BIT  BIT0
+#define WIFI_FAIL_BIT       BIT1
+#define WIFI_CONNECT_TIMEOUT_MS  20000   // 20 s — DHCP can be slow
+
+// ── WiFi event handler ───────────────────────────────────────
+static void wifi_event_handler(void *arg, esp_event_base_t base,
+                               int32_t event_id, void *event_data)
 {
-    // Suspend the event task so it cannot consume RX bytes that belong to
-    // this synchronous request/response exchange.
-    if (s_event_task) vTaskSuspend(s_event_task);
+    if (base == WIFI_EVENT) {
+        switch (event_id) {
+            case WIFI_EVENT_STA_START:
+                ESP_LOGI(TAG, "WiFi STA started");
+                break;
 
-    uart_flush_input(C6_UART_PORT);   // discard any stale RX bytes
-    uart_write_bytes(C6_UART_PORT, cmd, strlen(cmd));
-    uart_write_bytes(C6_UART_PORT, "\r\n", 2);
+            case WIFI_EVENT_STA_CONNECTED:
+                ESP_LOGI(TAG, "WiFi associated");
+                break;
 
-    uint32_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
-    int total = 0;
-    memset(s_rx_buf, 0, sizeof(s_rx_buf));
-
-    while (xTaskGetTickCount() < deadline) {
-        int n = uart_read_bytes(C6_UART_PORT, (uint8_t *)s_rx_buf + total,
-                                sizeof(s_rx_buf) - total - 1,
-                                pdMS_TO_TICKS(50));
-        if (n > 0) {
-            total += n;
-            s_rx_buf[total] = '\0';
-            if (strstr(s_rx_buf, expect)) {
-                if (resp && resp_len) {
-                    strncpy(resp, s_rx_buf, resp_len - 1);
-                    resp[resp_len - 1] = '\0';
-                }
-                if (s_event_task) vTaskResume(s_event_task);
-                return ESP_OK;
+            case WIFI_EVENT_STA_DISCONNECTED: {
+                wifi_event_sta_disconnected_t *disc =
+                    (wifi_event_sta_disconnected_t *)event_data;
+                ESP_LOGW(TAG, "WiFi disconnected (reason %d)", disc->reason);
+                s_wifi_connected = false;
+                s_ip_addr[0]     = '\0';
+                // Signal failure so cop_wifi_connect() unblocks
+                xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+                break;
             }
-            if (strstr(s_rx_buf, "ERROR")) {
-                if (s_event_task) vTaskResume(s_event_task);
-                return ESP_FAIL;
-            }
+
+            default:
+                break;
         }
-    }
-    ESP_LOGW(TAG, "AT timeout waiting for '%s'. Got: %.80s", expect, s_rx_buf);
-    if (s_event_task) vTaskResume(s_event_task);
-    return ESP_ERR_TIMEOUT;
-}
-
-// ── UART event task (handles unsolicited C6 events) ──────────
-static void uart_event_task(void *arg)
-{
-    uart_event_t event;
-    uint8_t buf[256];
-    while (true) {
-        if (xQueueReceive(s_uart_queue, &event, portMAX_DELAY)) {
-            if (event.type == UART_DATA) {
-                int n = uart_read_bytes(C6_UART_PORT, buf,
-                                        sizeof(buf) - 1,
-                                        pdMS_TO_TICKS(20));
-                if (n > 0) {
-                    buf[n] = '\0';
-                    // Handle unsolicited events from Espressif ESP-AT firmware.
-                    // Standard strings (no '+' prefix, no colon):
-                    //   "WIFI CONNECTED"  "WIFI GOT IP"  "WIFI DISCONNECT"
-                    //   "+BLE_CONN:"  "+BLE_DISCONN:"  (BLE varies by version)
-                    if (strstr((char *)buf, "WIFI GOT IP"))
-                        s_wifi_connected = true;
-                    if (strstr((char *)buf, "WIFI DISCONNECT"))
-                        s_wifi_connected = false;
-                    if (strstr((char *)buf, "+BLE_CONN:") ||
-                        strstr((char *)buf, "+BLE:CONNECTED"))
-                        s_ble_connected = true;
-                    if (strstr((char *)buf, "+BLE_DISCONN:") ||
-                        strstr((char *)buf, "+BLE:DISCONNECTED"))
-                        s_ble_connected = false;
-                    // BLE HID key event: "+KEY:A"
-                    const char *kp = strstr((char *)buf, "+KEY:");
-                    if (kp && strlen(kp) >= 6) {
-                        s_last_key = kp[5];
-                    }
-                }
-            }
-        }
+    } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *ev = (ip_event_got_ip_t *)event_data;
+        snprintf(s_ip_addr, sizeof(s_ip_addr), IPSTR, IP2STR(&ev->ip_info.ip));
+        s_wifi_connected = true;
+        s_retry_count    = 0;
+        ESP_LOGI(TAG, "WiFi got IP: %s", s_ip_addr);
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
 
 // ── Public init ───────────────────────────────────────────────
 void coprocessor_init(void)
 {
-    ESP_LOGI(TAG, "Init UART%d to ESP32-C6 TX=%d RX=%d @%d baud",
-             C6_UART_PORT, C6_UART_TX, C6_UART_RX, C6_UART_BAUD);
+    ESP_LOGI(TAG, "ESP-Hosted SDIO init: CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d RST=%d",
+             C6_SDIO_CLK, C6_SDIO_CMD,
+             C6_SDIO_D0, C6_SDIO_D1, C6_SDIO_D2, C6_SDIO_D3,
+             C6_RESET_PIN);
 
-    uart_config_t cfg = {};
-    cfg.baud_rate  = C6_UART_BAUD;
-    cfg.data_bits  = UART_DATA_8_BITS;
-    cfg.parity     = UART_PARITY_DISABLE;
-    cfg.stop_bits  = UART_STOP_BITS_1;
-    cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
-    cfg.source_clk = UART_SCLK_DEFAULT;
-    ESP_ERROR_CHECK(uart_driver_install(C6_UART_PORT, C6_UART_RX_BUF * 2,
-                                        0, 20, &s_uart_queue, 0));
-    ESP_ERROR_CHECK(uart_param_config(C6_UART_PORT, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(C6_UART_PORT, C6_UART_TX, C6_UART_RX,
-                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    s_wifi_event_group = xEventGroupCreate();
 
-    xTaskCreate(uart_event_task, "cop_uart", 4096, NULL, 10, &s_event_task);
+    // Standard lwip + event loop initialisation.
+    // esp_wifi_remote intercepts esp_wifi_init() and brings up the
+    // SDIO transport to the C6 slave automatically (Kconfig-configured).
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
 
-    // Probe the C6 — retry up to 5× with increasing delay.
-    // The factory Guition board has Espressif ESP-AT pre-loaded; no flash needed.
-    // The C6 AT firmware can take 1-2 s to boot, so we retry rather than give up.
-    bool c6_ok = false;
-    for (int attempt = 0; attempt < 5; attempt++) {
-        vTaskDelay(pdMS_TO_TICKS(attempt == 0 ? 500 : 1000));
-        if (at_send("AT", "OK", NULL, 0, 2000) == ESP_OK) {
-            ESP_LOGI(TAG, "C6 responsive (attempt %d/5)", attempt + 1);
-            c6_ok = true;
-            break;
-        }
-        ESP_LOGW(TAG, "C6 AT probe %d/5 — no response yet", attempt + 1);
-    }
-    if (c6_ok) {
-        at_send("ATE0",       "OK", NULL, 0, 1000);  // disable echo
-        at_send("AT+CWMODE=1","OK", NULL, 0, 2000);  // STA mode — required before CWJAP
-    } else {
-        ESP_LOGE(TAG, "C6 not responding after 5 attempts — check GPIO4/5 wiring");
-    }
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(
+        WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(
+        IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL));
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "WiFi stack started (ESP-Hosted SDIO)");
 }
 
 // ── WiFi ─────────────────────────────────────────────────────
 esp_err_t cop_wifi_connect(const char *ssid, const char *pass)
 {
-    // Always ensure STA mode before connecting — handles the case where
-    // the init-time probe timed out and CWMODE was never set.
-    at_send("AT+CWMODE=1", "OK", NULL, 0, 3000);
-    char cmd[128];
-    snprintf(cmd, sizeof(cmd), "AT+CWJAP=\"%s\",\"%s\"", ssid, pass);
-    // 15 s: AT+CWJAP can take up to ~10 s for association + DHCP; 8 s was too tight.
-    return at_send(cmd, "WIFI GOT IP", NULL, 0, 15000);
+    if (!ssid || strlen(ssid) == 0) return ESP_ERR_INVALID_ARG;
+
+    wifi_config_t wifi_cfg = {};
+    strncpy((char *)wifi_cfg.sta.ssid,     ssid, sizeof(wifi_cfg.sta.ssid) - 1);
+    strncpy((char *)wifi_cfg.sta.password, pass, sizeof(wifi_cfg.sta.password) - 1);
+    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+
+    // Disconnect first if already connected
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // Clear both bits so WaitBits below starts fresh
+    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    s_retry_count = 0;
+
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
+    ESP_ERROR_CHECK(esp_wifi_connect());
+
+    ESP_LOGI(TAG, "Connecting to SSID: %s ...", ssid);
+
+    EventBits_t bits = xEventGroupWaitBits(
+        s_wifi_event_group,
+        WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+        pdFALSE,   // don't clear on exit
+        pdFALSE,   // wait for any bit
+        pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
+
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "Connected. IP: %s", s_ip_addr);
+        return ESP_OK;
+    }
+    ESP_LOGW(TAG, "Connection failed or timed out");
+    return ESP_FAIL;
 }
 
 esp_err_t cop_wifi_disconnect(void)
 {
-    return at_send("AT+CWQAP", "OK", NULL, 0, 3000);
+    s_wifi_connected = false;
+    return esp_wifi_disconnect();
 }
 
 esp_err_t cop_wifi_get_ip(char *buf, size_t len)
 {
-    char resp[256] = {0};
-    esp_err_t err = at_send("AT+CIPSTA?", "OK", resp, sizeof(resp), 3000);
-    if (err != ESP_OK) return err;
-    // Parse +CIPSTA:ip:"x.x.x.x"
-    const char *p = strstr(resp, "ip:\"");
-    if (!p) return ESP_ERR_NOT_FOUND;
-    p += 4;
-    const char *end = strchr(p, '"');
-    if (!end) return ESP_ERR_NOT_FOUND;
-    size_t iplen = (size_t)(end - p);
-    if (iplen >= len) iplen = len - 1;
-    strncpy(buf, p, iplen);
-    buf[iplen] = '\0';
+    if (!s_wifi_connected || s_ip_addr[0] == '\0') return ESP_ERR_NOT_FOUND;
+    strncpy(buf, s_ip_addr, len - 1);
+    buf[len - 1] = '\0';
     return ESP_OK;
 }
 
 esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
 {
-    char resp[1024] = {0};
-    esp_err_t err = at_send("AT+CWLAP", "OK", resp, sizeof(resp), 10000);
     *count = 0;
-    if (err != ESP_OK) return err;
-    // Each line: +CWLAP:(ecn,"ssid",rssi,...)
-    char *p = resp;
-    while ((p = strstr(p, "+CWLAP:")) && *count < max) {
-        p += 8; // skip +CWLAP:(
-        const char *sq = strchr(p, '"');
-        if (!sq) break;
-        sq++;
-        const char *eq = strchr(sq, '"');
-        if (!eq) break;
-        size_t nlen = (size_t)(eq - sq);
-        if (nlen >= 33) nlen = 32;
-        strncpy(names[*count], sq, nlen);
-        names[*count][nlen] = '\0';
-        (*count)++;
-        p = (char *)eq + 1;
+
+    wifi_scan_config_t scan_cfg = {};
+    scan_cfg.show_hidden = false;
+    esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);  // blocking
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Scan failed: %s", esp_err_to_name(err));
+        return err;
     }
-    return ESP_OK;
+
+    uint16_t ap_num = (uint16_t)max;
+    wifi_ap_record_t *records =
+        (wifi_ap_record_t *)malloc(ap_num * sizeof(wifi_ap_record_t));
+    if (!records) return ESP_ERR_NO_MEM;
+
+    err = esp_wifi_scan_get_ap_records(&ap_num, records);
+    if (err == ESP_OK) {
+        for (int i = 0; i < ap_num; i++) {
+            strncpy(names[i], (char *)records[i].ssid, 32);
+            names[i][32] = '\0';
+        }
+        *count = (int)ap_num;
+        ESP_LOGI(TAG, "Scan found %d networks", *count);
+    }
+    free(records);
+    return err;
 }
 
 bool cop_wifi_is_connected(void) { return s_wifi_connected; }
 
-// ── BLE HID ───────────────────────────────────────────────────
+// ── BLE HID — future work via ESP-Hosted BLE transport ───────
+// BLE through esp_hosted requires additional hosted BLE configuration
+// on both the C6 slave and P4 host. Stubbed for phase 1/2.
 esp_err_t cop_ble_start(void)
 {
-    // Set device name and start BLE HID keyboard mode
-    at_send("AT+BLEINIT=2", "OK", NULL, 0, 3000);
-    at_send("AT+BLENAME=\"TrapMaster KB\"", "OK", NULL, 0, 3000);
-    return at_send("AT+BLEADVSTART", "OK", NULL, 0, 3000);
+    ESP_LOGW(TAG, "BLE HID not yet implemented (esp_hosted BLE — phase 3)");
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 esp_err_t cop_ble_stop(void)
 {
-    at_send("AT+BLEADVSTOP", "OK", NULL, 0, 3000);
-    return at_send("AT+BLEINIT=0", "OK", NULL, 0, 3000);
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
-bool cop_ble_is_connected(void) { return s_ble_connected; }
+bool cop_ble_is_connected(void) { return false; }
 
-char cop_ble_pop_key(void)
-{
-    char k = s_last_key;
-    s_last_key = 0;
-    return k;
-}
+char cop_ble_pop_key(void)       { return 0; }

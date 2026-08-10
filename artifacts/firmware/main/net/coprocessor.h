@@ -1,6 +1,7 @@
 #pragma once
 // ============================================================
-// ESP32-C6 co-processor bridge (WiFi + BLE HID) via UART AT
+// ESP32-C6 co-processor bridge — ESP-Hosted SDIO transport
+// WiFi via esp_wifi_remote → esp_hosted → C6 SDIO slave
 // ============================================================
 #include <stdbool.h>
 #include "esp_err.h"

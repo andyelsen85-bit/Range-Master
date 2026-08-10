@@ -33,18 +33,27 @@
 #define LCD_BL_LEDC_TIMER       LEDC_TIMER_0
 #define LCD_BL_DUTY_MAX         1023
 
-// ── UART to ESP32-C6 co-processor ───────────────────────────
-#define C6_UART_PORT            UART_NUM_1
-#define C6_UART_TX              GPIO_NUM_4   // P4 TX → C6 GPIO5 (C6 RX); trying crossed-trace assumption
-#define C6_UART_RX              GPIO_NUM_5   // P4 RX ← C6 GPIO4 (C6 TX)
-#define C6_UART_BAUD            115200
-#define C6_UART_RX_BUF         4096
-#define C6_AT_TIMEOUT_MS        8000
+// ── ESP32-C6 co-processor — SDIO interface ──────────────────
+// Source: profi-max/JC8012P4A1_BSP_ESP32P4 BSP documentation
+// P4 is SDIO master; C6 is SDIO slave (ESP-Hosted-MCU firmware).
+// SDIO pin config is also declared in sdkconfig.defaults for Kconfig.
+#define C6_SDIO_CLK             GPIO_NUM_19
+#define C6_SDIO_CMD             GPIO_NUM_18
+#define C6_SDIO_D0              GPIO_NUM_14
+#define C6_SDIO_D1              GPIO_NUM_15
+#define C6_SDIO_D2              GPIO_NUM_16
+#define C6_SDIO_D3              GPIO_NUM_17
+#define C6_RESET_PIN            GPIO_NUM_54
+#define C6_WAKEUP_PIN           GPIO_NUM_6
 
-// ── UART for LoRa module (phase 2) ──────────────────────────
+// ── UART for LoRa module (phase 3) ──────────────────────────
+// NOTE: GPIO17 and GPIO18 are shared with C6 SDIO (D3/CMD).
+// LoRa UART must NOT be initialised until SDIO is no longer needed,
+// or dedicated LoRa pins are rerouted on a future board revision.
+// Phase 3 will resolve this (separate header board or pin remap).
 #define LORA_UART_PORT          UART_NUM_2
-#define LORA_UART_TX            GPIO_NUM_17
-#define LORA_UART_RX            GPIO_NUM_18
+#define LORA_UART_TX            GPIO_NUM_17  // conflicts with C6_SDIO_D3 — phase 3 only
+#define LORA_UART_RX            GPIO_NUM_18  // conflicts with C6_SDIO_CMD — phase 3 only
 #define LORA_UART_BAUD          9600
 
 // ── LVGL ────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
 // Boot sequence
 //   1. NVS + game store init
 //   2. Backlight on
-//   3. Coprocessor UART bridge
+//   3. Coprocessor: ESP-Hosted SDIO init + WiFi stack start
 //   4. MIPI DSI display hardware init (jd9365_panel_init)
 //   5. LVGL v9 init — full-screen PSRAM double-buffer
 //   6. GSL3680 touch init + LVGL indev registration
@@ -250,7 +250,7 @@ extern "C" void app_main(void)
     // ── Backlight ─────────────────────────────────────────────
     backlight_init();
 
-    // ── Co-processor UART bridge ──────────────────────────────
+    // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
     coprocessor_init();
 
     // ── LoRa stub (phase 3 placeholder) ───────────────────────
