@@ -64,6 +64,7 @@ void screen_wifi_create_workers(void)
                         LV_SYMBOL_WARNING " TIMEOUT — SDIO Verbindung pruefen");
                     lv_obj_set_style_text_color(s_lbl_status,
                         lv_color_hex(CLR_DANGER), 0);
+                    s_scan_busy = false;
                     return;
                 }
                 for (int i = 0; i < s_scan_count; i++) {
@@ -84,6 +85,7 @@ void screen_wifi_create_workers(void)
                     lv_obj_set_style_text_color(s_lbl_status,
                         lv_color_hex(CLR_SUCCESS), 0);
                 }
+                s_scan_busy = false;   // allow next tap
             }, NULL);
         }
     }, "wifi_scan_w", 8192, NULL, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -127,9 +129,13 @@ void screen_wifi_create_workers(void)
 }
 
 // ── Scan button — just triggers the persistent worker ─────────
+static volatile bool s_scan_busy = false;
+
 static void scan_cb(lv_event_t *e)
 {
     if (!s_scan_queue) return;
+    if (s_scan_busy) return;   // ignore taps while scan is in progress
+    s_scan_busy = true;
     lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " SCANNT...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
     lv_obj_clean(s_list_networks);
