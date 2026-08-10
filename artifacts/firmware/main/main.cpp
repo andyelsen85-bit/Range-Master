@@ -251,13 +251,15 @@ extern "C" void app_main(void)
     // ── Backlight ─────────────────────────────────────────────
     backlight_init();
 
-    // ── Battery ADC (GPIO52 voltage divider, IP5306 board) ───
-    // Init early — before LVGL task — so battery_get_percent()
-    // is ready the moment the dashboard screen is built.
-    battery_init();
-
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
     coprocessor_init();
+
+    // ── Battery ADC (GPIO52 voltage divider, IP5306 board) ───
+    // Initialised AFTER coprocessor_init() because adc_oneshot_new_unit()
+    // acquires the ADC1 power domain and releases GPIO pad holds, which
+    // clears the pullup on GPIO19 (SDIO CMD) set by esp_hosted — causing
+    // the C6 SDIO link to fail if called before WiFi is up.
+    battery_init();
 
     // ── LoRa stub (phase 3 placeholder) ───────────────────────
     lora_stub_init();
