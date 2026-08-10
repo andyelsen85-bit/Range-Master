@@ -248,6 +248,7 @@ void web_config_start(void)
     cfg.server_port      = 80;
     cfg.stack_size       = 6144;
     cfg.max_uri_handlers = 4;
+    cfg.max_open_sockets = 1;   // config page: one client at a time is enough
 
     esp_err_t err = httpd_start(&s_server, &cfg);
     if (err != ESP_OK) {
