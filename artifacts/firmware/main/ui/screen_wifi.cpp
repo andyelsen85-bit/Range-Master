@@ -33,8 +33,9 @@ static lv_obj_t *s_kb;
 // internal RAM regardless of where the stack lives.
 // Pattern: create ONE long-lived task per operation at boot; scan_cb /
 // connect_cb just queue-send (queue send costs no allocations).
-static QueueHandle_t s_scan_queue = NULL;
-static QueueHandle_t s_conn_queue = NULL;
+static QueueHandle_t     s_scan_queue = NULL;
+static QueueHandle_t     s_conn_queue = NULL;
+static volatile bool     s_scan_busy  = false;
 
 // Shared scan result buffers (written by worker, read by lv_async_call).
 static char      s_scan_names[20][33];
@@ -129,8 +130,6 @@ void screen_wifi_create_workers(void)
 }
 
 // ── Scan button — just triggers the persistent worker ─────────
-static volatile bool s_scan_busy = false;
-
 static void scan_cb(lv_event_t *e)
 {
     if (!s_scan_queue) return;
