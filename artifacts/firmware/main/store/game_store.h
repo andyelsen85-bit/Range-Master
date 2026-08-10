@@ -13,7 +13,7 @@
 #define MAX_ERGEBNISSE      200
 #define MAX_NAME_LEN        64
 #define MAX_URL_LEN         128
-#define MAX_KEY_LEN         64
+#define MAX_KEY_LEN         65
 #define MAX_SSID_LEN        33
 #define MAX_PASS_LEN        64
 
