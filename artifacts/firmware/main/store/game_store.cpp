@@ -355,10 +355,9 @@ static void _store_finish_game(void)
         struct tm tmi;
         gmtime_r(&now, &tmi);
         strftime(fg.base.datum, sizeof(fg.base.datum), "%Y-%m-%d", &tmi);
-        snprintf(fg.finishedAt, sizeof(fg.finishedAt),
-                 "%04d-%02d-%02dT%02d:%02d:%02d.000Z",
-                 tmi.tm_year + 1900, tmi.tm_mon + 1, tmi.tm_mday,
-                 tmi.tm_hour, tmi.tm_min, tmi.tm_sec);
+        // Use strftime — sidesteps -Werror=format-truncation on int arithmetic
+        strftime(fg.finishedAt, sizeof(fg.finishedAt),
+                 "%Y-%m-%dT%H:%M:%S.000Z", &tmi);
     }
     strncpy(fg.base.externalId, s->spielId, sizeof(fg.base.externalId) - 1);
     fg.base.externalId[sizeof(fg.base.externalId) - 1] = '\0';

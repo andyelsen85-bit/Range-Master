@@ -343,7 +343,7 @@ void screen_dashboard_refresh(void)
                                   LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
             lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
-            char ts[24]; snprintf(ts, sizeof(ts), "%s", fg->finishedAt);
+            char ts[32]; snprintf(ts, sizeof(ts), "%s", fg->finishedAt);
             lv_obj_t *ts_lbl = lv_label_create(row);
             lv_label_set_text(ts_lbl, ts);
             lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_14, 0);
