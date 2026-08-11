@@ -13,7 +13,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-#include "click_sound.h"
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -199,13 +198,8 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
                     : LV_INDEV_STATE_RELEASED;
     xSemaphoreGive(s_touch_mux);
 
-    // Fire click sound on the first frame of each new finger-down event.
-    static lv_indev_state_t s_prev = LV_INDEV_STATE_RELEASED;
-    if (data->state == LV_INDEV_STATE_PRESSED && s_prev == LV_INDEV_STATE_RELEASED) {
-        ESP_LOGI(TAG, "touch DOWN → queuing click");
-        click_sound_play_if_enabled();
-    }
-    s_prev = data->state;
+    // Click sound is now triggered by the LVGL button-press hook installed
+    // in click_sound_setup_lvgl_hook() — no raw-touch detection here.
 }
 
 // ── Public init ──────────────────────────────────────────────

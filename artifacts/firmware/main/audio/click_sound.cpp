@@ -18,7 +18,7 @@
 //   2. Check that ES8311_I2C_ADDR (0x18 or 0x19) matches the ADDR pin tie.
 //   3. If the board has a PA-enable GPIO (amp shutdown pin), set I2S_PA_PIN.
 // ============================================================
-#include "click_sound.h"
+#include "click_sound.h"    // pulls in lvgl.h for lv_display_t
 #include "app_config.h"
 #include "game_store.h"
 
@@ -125,6 +125,13 @@ static esp_err_t es8311_dac_init(void)
     es8311_write(0x16, 0x24);                   // ADC digital power off
     es8311_write(0x17, 0x00);                   // ADC analogue off
 
+    // ── Explicit unmute ───────────────────────────────────────
+    // Reg 0x09 (SDP): bit6 = SDP_IN_MUTE (0=unmute, 1=mute).
+    // The datasheet default is 0 (unmuted), but hardware does not
+    // reliably honour the documented power-on default — writing 0x00
+    // explicitly avoids silent-but-error-free output at boot.
+    es8311_write(0x09, 0x00);
+
     // ── DAC: enable ───────────────────────────────────────────
     es8311_write(0x37, 0x08);                   // DAC OSR = 128
     es8311_write(0x32, 0x00);                   // DAC digital volume  = 0 dB
@@ -178,14 +185,9 @@ static void click_task(void *arg)
     uint8_t cmd;
     while (1) {
         if (xQueueReceive(s_play_q, &cmd, portMAX_DELAY) == pdTRUE && s_ready) {
-            ESP_LOGI(TAG, "click_task: writing %u bytes to I2S", (unsigned)sizeof(s_pcm));
             size_t written = 0;
-            esp_err_t err = i2s_channel_write(s_tx_chan,
-                              s_pcm, sizeof(s_pcm),
-                              &written,
-                              pdMS_TO_TICKS(200));
-            ESP_LOGI(TAG, "click_task: done — err=%d written=%u/%u",
-                     err, (unsigned)written, (unsigned)sizeof(s_pcm));
+            i2s_channel_write(s_tx_chan, s_pcm, sizeof(s_pcm),
+                              &written, pdMS_TO_TICKS(200));
         }
     }
 }
@@ -255,11 +257,40 @@ void click_sound_init(void)
 
 void click_sound_play_if_enabled(void)
 {
-    ESP_LOGI(TAG, "play_if_enabled: ready=%d enabled=%d",
-             (int)s_ready, (int)g_store.clickSoundEnabled);
     if (!s_ready || !g_store.clickSoundEnabled) return;
     uint8_t cmd = 1;
-    // xQueueOverwrite: if a click is already queued, replace it
-    // (don't stack up clicks faster than they can play).
     xQueueOverwrite(s_play_q, &cmd);
+}
+
+// ── LVGL button-press hook ────────────────────────────────────
+// Applied via a thin theme wrapper so every new clickable-but-not-
+// scrollable object (buttons, toggles) gets a PRESSED handler
+// automatically — no per-screen wiring needed.
+
+static void click_theme_apply(lv_theme_t *th, lv_obj_t *obj)
+{
+    // Chain to the parent theme first (preserve any existing styling)
+    lv_theme_t *parent = th->parent;
+    if (parent && parent->apply_cb) parent->apply_cb(parent, obj);
+
+    // Attach only to proper buttons: clickable AND not a scroll container.
+    // lv_btn_create() → clickable=true,  scrollable=false  → sound fires.
+    // lv_obj_create() → clickable=true,  scrollable=true   → scroll panels, no sound.
+    if (lv_obj_has_flag(obj, LV_OBJ_FLAG_CLICKABLE) &&
+        !lv_obj_has_flag(obj, LV_OBJ_FLAG_SCROLLABLE)) {
+        lv_obj_add_event_cb(obj, [](lv_event_t *) {
+            click_sound_play_if_enabled();
+        }, LV_EVENT_PRESSED, NULL);
+    }
+}
+
+static lv_theme_t s_click_theme;
+
+void click_sound_setup_lvgl_hook(lv_display_t *disp)
+{
+    lv_memzero(&s_click_theme, sizeof(s_click_theme));
+    s_click_theme.apply_cb = click_theme_apply;
+    s_click_theme.parent   = lv_display_get_theme(disp); // preserve any existing theme
+    lv_display_set_theme(disp, &s_click_theme);
+    ESP_LOGI(TAG, "LVGL button-press hook installed");
 }

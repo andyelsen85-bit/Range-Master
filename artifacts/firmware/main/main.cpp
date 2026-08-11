@@ -234,6 +234,9 @@ static void lvgl_task(void *arg)
 
     // ── 4b. Click-sound — must come after touch (I²C already set up) ──
     click_sound_init();
+    // Install LVGL theme hook BEFORE ui_manager_init so every button
+    // created during screen construction gets the PRESSED handler.
+    click_sound_setup_lvgl_hook(disp);
 
     // ── 5. UI screens ─────────────────────────────────────────
     ui_manager_init();   // builds all screens, shows SCREEN_DASHBOARD
