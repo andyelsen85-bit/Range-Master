@@ -37,6 +37,11 @@ CONFIG_SPIRAM_USE_MALLOC=y
 # DMA/ISR buffers use heap_caps_malloc(MALLOC_CAP_DMA) explicitly and
 # are unaffected by this setting.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
+# Allow EXT_RAM_BSS_ATTR to place global BSS variables in PSRAM.
+# Without this, EXT_RAM_BSS_ATTR is silently ignored and the annotated
+# globals stay in internal DRAM — causing the .sbss overflow seen when
+# g_store (~40 KB) was marked EXT_RAM_BSS_ATTR.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
 # ── MIPI DSI ──────────────────────────────────────────────────────────────
 CONFIG_LCD_ENABLE_DEBUG_LOG=n
