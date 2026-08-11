@@ -237,18 +237,20 @@ void gsl3680_touch_init(lv_display_t *disp)
     s_touch_mux = xSemaphoreCreateMutex();
     configASSERT(s_touch_mux);
 
-    // Touch polling task — higher priority than LVGL so it can preempt
-    // the render task during blocking PPA operations
-    xTaskCreatePinnedToCore(
+    // Touch polling task — stack in SPIRAM (matches all other runtime workers).
+    // Priority 6 > lvgl_task priority 5 so it runs during any blocking wait
+    // inside lv_timer_handler (e.g. PPA DMA semaphore).
+    // No core pin needed: cache+mutex keeps read_cb safe from either core.
+    xTaskCreateWithCaps(
         touch_task,
         "touch_poll",
         2048,    // 2 KB stack — only I²C reads and a mutex
         NULL,
-        6,       // priority 6 > lvgl_task priority 5
+        6,       // priority 6
         NULL,
-        1        // core 1 — same as lvgl_task; preempts during PPA waits
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
     );
-    ESP_LOGI(TAG, "touch_poll task started (100 Hz, prio 6, core 1)");
+    ESP_LOGI(TAG, "touch_poll task started (100 Hz, prio 6, SPIRAM stack)");
 
     // Register LVGL indev — read_cb now reads cache, not hardware
     lv_indev_t *indev = lv_indev_create();
