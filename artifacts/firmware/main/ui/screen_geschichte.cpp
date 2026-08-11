@@ -9,6 +9,29 @@
 #include "game_store.h"
 #include "screen_geschichte.h"
 
+// Portable UTC struct tm → time_t (timegm equivalent).
+// timegm is not in ESP-IDF newlib, so we compute it manually.
+static time_t utc_mktime(int year, int mon, int mday, int hour, int min, int sec)
+{
+    static const int mdays[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    // Days from 1970-01-01 to start of requested year
+    int y = year - 1970;
+    time_t t = (time_t)y * 365 * 86400;
+    // Leap days between 1970 and year-1
+    int ly = year - 1;
+    int leaps = (ly/4 - ly/100 + ly/400) - (1969/4 - 1969/100 + 1969/400);
+    t += (time_t)leaps * 86400;
+    // Days for full months this year
+    int is_leap = ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0);
+    for (int m = 0; m < mon - 1; m++) {
+        t += (time_t)mdays[m] * 86400;
+        if (m == 1 && is_leap) t += 86400;
+    }
+    t += (time_t)(mday - 1) * 86400;
+    t += (time_t)hour * 3600 + min * 60 + sec;
+    return t;
+}
+
 // Convert a UTC ISO timestamp "YYYY-MM-DDTHH:MM:SS.000Z" to a
 // local-time display string "DD.MM.YYYY HH:MM" using the TZ
 // environment variable already set by coprocessor (CET-1CEST).
@@ -17,16 +40,9 @@ static void fmt_local_time(const char *iso_utc, char *dst, size_t dst_len)
 {
     dst[0] = '\0';
     if (!iso_utc || !iso_utc[0]) return;
-    struct tm tmu = {};
-    int sc = 0;
-    if (sscanf(iso_utc, "%d-%d-%dT%d:%d:%d",
-               &tmu.tm_year, &tmu.tm_mon, &tmu.tm_mday,
-               &tmu.tm_hour, &tmu.tm_min, &sc) < 5) return;
-    tmu.tm_year -= 1900;
-    tmu.tm_mon  -= 1;
-    tmu.tm_sec   = sc;
-    tmu.tm_isdst = 0;
-    time_t t = timegm(&tmu);          // UTC components → time_t
+    int yr, mo, dy, hr, mn, sc = 0;
+    if (sscanf(iso_utc, "%d-%d-%dT%d:%d:%d", &yr, &mo, &dy, &hr, &mn, &sc) < 5) return;
+    time_t t = utc_mktime(yr, mo, dy, hr, mn, sc);
     struct tm tml;
     localtime_r(&t, &tml);            // time_t → local (CET/CEST via TZ env)
     snprintf(dst, dst_len, "%02d.%02d.%04d %02d:%02d",
