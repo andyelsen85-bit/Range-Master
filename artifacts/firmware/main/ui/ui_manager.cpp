@@ -166,7 +166,7 @@ void ui_manager_show(Screen s)
         default: break;
     }
 
-    lv_scr_load_anim(s_screens[s], LV_SCR_LOAD_ANIM_FADE_IN, 150, 0, false);
+    lv_scr_load_anim(s_screens[s], LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
     s_current = s;
     g_store.screen = s;
     ESP_LOGI(TAG, "Showing screen %d", (int)s);
