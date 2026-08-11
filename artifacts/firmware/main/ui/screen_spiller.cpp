@@ -171,6 +171,9 @@ static void update_pending_badge(void)
 }
 
 // ── Build / refresh player list ───────────────────────────────
+// Kept as lean as possible — called on search change, save, and initial load only.
+// open_edit() / close_edit() do NOT call this to avoid a full widget rebuild
+// while the screen is live (causes the visible "building up" artifact).
 static void build_list(void)
 {
     lv_obj_clean(s_list);
@@ -181,33 +184,30 @@ static void build_list(void)
     for (int i = 0; i < g_store.portalSpielerCount; i++) {
         PortalSpieler *ps = &g_store.portalSpieler[i];
 
-        // Apply search filter
-        if (has_search) {
-            if (!str_icontains(ps->name, s_search_buf) &&
-                !str_icontains(ps->mitgliedNr, s_search_buf)) continue;
-        }
+        if (has_search &&
+            !str_icontains(ps->name,       s_search_buf) &&
+            !str_icontains(ps->mitgliedNr, s_search_buf)) continue;
 
         int kredit = store_kredite_verfuegbar(ps->id);
 
-        // Row container
+        // ── Row: flat flex-row, NO nested containers ──────────
+        // Eliminates 2 levels of nested flex → much less layout work per scroll frame.
         lv_obj_t *row = lv_obj_create(s_list);
-        lv_obj_set_size(row, LV_PCT(100), 68);
+        lv_obj_set_size(row, LV_PCT(100), 64);
         lv_obj_add_style(row, &g_style_card, 0);
-        lv_obj_set_style_pad_all(row, 10, 0);
+        lv_obj_set_style_pad_hor(row, 12, 0);
+        lv_obj_set_style_pad_ver(row, 0, 0);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_add_event_cb(row, player_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_set_style_pad_column(row, 10, 0);
+        // SHORT_CLICKED fires as soon as the finger lifts without a scroll gesture;
+        // avoids the ~100 ms scroll-detection hold that ate the first tap.
+        lv_obj_add_event_cb(row, player_tap_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)i);
 
-        // Highlight currently selected row
-        if (i == s_selected_pidx) {
-            lv_obj_set_style_border_color(row, lv_color_hex(CLR_PRIMARY), 0);
-            lv_obj_set_style_border_width(row, 2, 0);
-        }
-
-        // Info column (name + member nr)
+        // ── Info column (one nested container — unavoidable for two text lines) ──
         lv_obj_t *info = lv_obj_create(row);
         lv_obj_set_flex_grow(info, 1);
         lv_obj_set_height(info, LV_SIZE_CONTENT);
@@ -215,76 +215,51 @@ static void build_list(void)
         lv_obj_set_style_border_width(info, 0, 0);
         lv_obj_set_style_pad_all(info, 0, 0);
         lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_row(info, 3, 0);
+        lv_obj_set_style_pad_row(info, 2, 0);
         lv_obj_clear_flag(info, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_clear_flag(info, LV_OBJ_FLAG_CLICKABLE);
 
-        // Name row (with optional LOKAL badge)
-        lv_obj_t *name_row = lv_obj_create(info);
-        lv_obj_set_size(name_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_style_bg_opa(name_row, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(name_row, 0, 0);
-        lv_obj_set_style_pad_all(name_row, 0, 0);
-        lv_obj_set_flex_flow(name_row, LV_FLEX_FLOW_ROW);
-        lv_obj_set_style_pad_column(name_row, 6, 0);
-        lv_obj_clear_flag(name_row, LV_OBJ_FLAG_CLICKABLE);
-
-        lv_obj_t *name_lbl = lv_label_create(name_row);
-        lv_label_set_text(name_lbl, ps->name);
-        lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_TEXT), 0);
-
+        // Name label — "NAME [L]" suffix replaces the old LOKAL badge widget
+        lv_obj_t *name_lbl = lv_label_create(info);
         if (ps->lokal) {
-            lv_obj_t *badge = lv_label_create(name_row);
-            lv_label_set_text(badge, "LOKAL");
-            lv_obj_set_style_text_font(badge, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(badge, lv_color_hex(CLR_WARN), 0);
-            lv_obj_set_style_bg_color(badge, lv_color_hex(0x78350F), 0);
-            lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-            lv_obj_set_style_radius(badge, 4, 0);
-            lv_obj_set_style_pad_hor(badge, 5, 0);
-            lv_obj_set_style_pad_ver(badge, 2, 0);
+            char nb[MAX_NAME_LEN + 6];
+            snprintf(nb, sizeof(nb), "%s [L]", ps->name);
+            lv_label_set_text(name_lbl, nb);
+            lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_WARN), 0);
+        } else {
+            lv_label_set_text(name_lbl, ps->name);
+            lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_TEXT), 0);
         }
+        lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
+        lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(name_lbl, LV_PCT(100));
 
-        if (strlen(ps->mitgliedNr) > 0) {
+        // Member number (optional second line)
+        if (ps->mitgliedNr[0]) {
             lv_obj_t *nr_lbl = lv_label_create(info);
-            char nr_buf[40];
-            snprintf(nr_buf, sizeof(nr_buf), "Nr: %s", ps->mitgliedNr);
+            char nr_buf[36];
+            snprintf(nr_buf, sizeof(nr_buf), "Nr. %s", ps->mitgliedNr);
             lv_label_set_text(nr_lbl, nr_buf);
             lv_obj_set_style_text_font(nr_lbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(nr_lbl, lv_color_hex(CLR_MUTED), 0);
         }
 
-        // Right side: kredit + portal aktiv indicator + chevron
-        lv_obj_t *right = lv_obj_create(row);
-        lv_obj_set_size(right, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_style_bg_opa(right, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(right, 0, 0);
-        lv_obj_set_style_pad_all(right, 0, 0);
-        lv_obj_set_flex_flow(right, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(right, LV_FLEX_ALIGN_END,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(right, 14, 0);
-        lv_obj_clear_flag(right, LV_OBJ_FLAG_CLICKABLE);
-
-        // Credit count
-        lv_obj_t *kred_lbl = lv_label_create(right);
-        char kred_buf[12];
-        snprintf(kred_buf, sizeof(kred_buf), "%d Kr.", kredit);
+        // ── Right-side labels — directly in row (no wrapper container) ──
+        lv_obj_t *kred_lbl = lv_label_create(row);
+        char kred_buf[10];
+        snprintf(kred_buf, sizeof(kred_buf), "%dKr", kredit);
         lv_label_set_text(kred_lbl, kred_buf);
         lv_obj_set_style_text_font(kred_lbl, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(kred_lbl,
             kredit > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_MUTED), 0);
 
-        // Portal aktiv indicator
-        lv_obj_t *aktiv_lbl = lv_label_create(right);
+        lv_obj_t *aktiv_lbl = lv_label_create(row);
         lv_label_set_text(aktiv_lbl, ps->portalAktiv ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE);
         lv_obj_set_style_text_font(aktiv_lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(aktiv_lbl,
             ps->portalAktiv ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_MUTED), 0);
 
-        // Edit chevron
-        lv_obj_t *chev = lv_label_create(right);
+        lv_obj_t *chev = lv_label_create(row);
         lv_label_set_text(chev, LV_SYMBOL_RIGHT);
         lv_obj_set_style_text_font(chev, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(chev, lv_color_hex(CLR_MUTED), 0);
@@ -294,13 +269,13 @@ static void build_list(void)
 
     if (shown == 0) {
         lv_obj_t *empty = lv_label_create(s_list);
-        lv_label_set_text(empty,
-            has_search ? "KENG RESULTATER" : "KENG SPILLER.\nPORTAL SYNC ODER LOKAL DOBAISETZEN.");
+        lv_label_set_text(empty, has_search
+            ? "KENG RESULTATER"
+            : "KENG SPILLER.\nPORTAL SYNC ODER LOKAL DOBAISETZEN.");
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
         lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(empty, LV_PCT(100));
-        lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 40);
     }
 }
 
@@ -312,15 +287,14 @@ static void open_edit(int pidx)
     PortalSpieler *ps = &g_store.portalSpieler[pidx];
 
     lv_textarea_set_text(s_ta_name,  ps->name);
-    lv_textarea_set_text(s_ta_email, "");   // email not cached locally; user types to change
+    lv_textarea_set_text(s_ta_email, ps->email);   // populated after sync
     s_edit_aktiv = ps->portalAktiv;
     update_aktiv_btn();
     lv_label_set_text(s_lbl_edit_status, "");
 
     lv_obj_add_flag(s_placeholder, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_edit_form,  LV_OBJ_FLAG_HIDDEN);
-
-    build_list();   // redraw to highlight selected row
+    // do NOT call build_list() here — rebuilding all rows on every tap is slow
 }
 
 static void close_edit(void)
@@ -330,7 +304,7 @@ static void close_edit(void)
     lv_obj_add_flag(s_edit_form, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_keyboard_set_textarea(s_kb, NULL);
-    build_list();
+    // do NOT call build_list() here — it's a full widget rebuild visible to the user
 }
 
 // ── screen_spiller_create ─────────────────────────────────────
@@ -513,7 +487,7 @@ lv_obj_t *screen_spiller_create(void)
 
     // Email field
     lv_obj_t *email_hdr = lv_label_create(s_edit_form);
-    lv_label_set_text(email_hdr, "EMAIL (eidel loossen = onverändert)");
+    lv_label_set_text(email_hdr, "EMAIL");
     lv_obj_set_style_text_font(email_hdr, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(email_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -622,6 +596,8 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_style_pad_all(s_list, 0, 0);
     lv_obj_set_flex_flow(s_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(s_list, 6, 0);
+    // Disable scroll-throw (momentum) animation — makes scrolling feel direct and crisp.
+    lv_obj_set_style_anim_duration(s_list, 0, 0);
 
     // ── On-screen keyboard — created LAST so it renders on top ─
     s_kb = lv_keyboard_create(s_scr);

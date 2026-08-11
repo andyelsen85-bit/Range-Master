@@ -247,10 +247,11 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
         PortalSpieler *ps = &out[(*count)++];
         memset(ps, 0, sizeof(*ps));
 
-        cJSON *jid   = cJSON_GetObjectItem(item, "id");
-        cJSON *jname = cJSON_GetObjectItem(item, "name");
-        cJSON *jnr   = cJSON_GetObjectItem(item, "mitgliedNr");
-        cJSON *jaktiv= cJSON_GetObjectItem(item, "portalAktiv");
+        cJSON *jid    = cJSON_GetObjectItem(item, "id");
+        cJSON *jname  = cJSON_GetObjectItem(item, "name");
+        cJSON *jnr    = cJSON_GetObjectItem(item, "mitgliedNr");
+        cJSON *jaktiv = cJSON_GetObjectItem(item, "portalAktiv");
+        cJSON *jemail = cJSON_GetObjectItem(item, "email");
 
         if (jid   && cJSON_IsNumber(jid))   ps->id = (int)jid->valuedouble;
         if (jname && cJSON_IsString(jname)) {
@@ -262,6 +263,10 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
             ps->mitgliedNr[sizeof(ps->mitgliedNr) - 1] = '\0';
         }
         if (jaktiv && cJSON_IsBool(jaktiv)) ps->portalAktiv = cJSON_IsTrue(jaktiv);
+        if (jemail && cJSON_IsString(jemail)) {
+            strncpy(ps->email, jemail->valuestring, MAX_EMAIL_LEN - 1);
+            ps->email[MAX_EMAIL_LEN - 1] = '\0';
+        }
     }
 
     cJSON_Delete(root);
