@@ -470,7 +470,7 @@ static lv_obj_t *build_bt_tab(lv_obj_t *parent)
 // Toggle callback for click-sound switch
 static void click_sound_sw_cb(lv_event_t *e)
 {
-    lv_obj_t *sw = lv_event_get_target(e);
+    lv_obj_t *sw = (lv_obj_t *)lv_event_get_target(e);
     g_store.clickSoundEnabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
     game_store_save();
 }

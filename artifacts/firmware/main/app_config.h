@@ -88,9 +88,9 @@
 //    or to the GPIO number if it does.
 #define I2S_MCLK_PIN            GPIO_NUM_13
 #define I2S_BCLK_PIN            GPIO_NUM_12
-#define I2S_WS_PIN              GPIO_NUM_11
-#define I2S_DOUT_PIN            GPIO_NUM_5
-#define I2S_PA_PIN              (-1)    // set to GPIO number if amp has EN pin
+#define I2S_WS_PIN              GPIO_NUM_10  // BSP-verified (was 11). NOTE: shared with TOUCH_INT_PIN — I2S driver reconfigures it as output after touch init.
+#define I2S_DOUT_PIN            GPIO_NUM_9   // BSP-verified (was 5). NOTE: shared with TOUCH_RESET_PIN — reset is idle-high after init, safe to repurpose as I2S output.
+#define I2S_PA_PIN              GPIO_NUM_20  // BSP-verified: PA (amplifier) enable — must be high to get audio output
 
 // ── Misc ────────────────────────────────────────────────────
 #define APP_VERSION             "1.0.0-phase1"

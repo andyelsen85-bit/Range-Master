@@ -292,8 +292,21 @@ void store_eintragen(int punkte)
     // ── Advance state ────────────────────────────────────────
     auto finish_lauf_or_game = [&]() -> bool {
         if (s->lauf < 2) {
+            // Advance each player's startPosten by the number of logical
+            // position advances in lauf 1.  Each H2 entry (isDoublette=true)
+            // shares the same physical position as its H1 partner, so it does
+            // NOT count as an independent position step.
+            int h2_total = 0;
+            for (int k = 0; k < s->sequenzLen; k++)
+                if (s->sequenz[k].isDoublette) h2_total++;
+            int advances = s->sequenzLen - h2_total;
+            for (int i = 0; i < s->spielerCount; i++) {
+                s->spieler[i].startPosten =
+                    ((s->spieler[i].startPosten - 1 + advances) % 5) + 1;
+            }
             s->lauf++;
-            s->taubeIndex = 0;
+            s->taubeIndex   = 0;
+            s->spielerIndex = 0;
             return false;
         }
         _store_finish_game();
@@ -353,7 +366,7 @@ static void _store_finish_game(void)
     {
         time_t now = tv.tv_sec;
         struct tm tmi;
-        gmtime_r(&now, &tmi);
+        localtime_r(&now, &tmi);  // localtime_r applies the TZ (CET/CEST); gmtime_r would give UTC
         strftime(fg.base.datum, sizeof(fg.base.datum), "%Y-%m-%d", &tmi);
         // Use strftime — sidesteps -Werror=format-truncation on int arithmetic
         strftime(fg.finishedAt, sizeof(fg.finishedAt),
@@ -528,7 +541,7 @@ void store_queue_kredit_event(int spieler_id, const char *typ, int anzahl)
     ev->typ[sizeof(ev->typ) - 1] = '\0';
     struct timeval tv; gettimeofday(&tv, NULL);
     time_t now = tv.tv_sec;
-    struct tm tmi; gmtime_r(&now, &tmi);
+    struct tm tmi; localtime_r(&now, &tmi);  // use local TZ (CET/CEST)
     strftime(ev->datum, sizeof(ev->datum), "%Y-%m-%d", &tmi);
 }
 

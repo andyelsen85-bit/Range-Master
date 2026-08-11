@@ -495,6 +495,9 @@ esp_err_t http_push_kredit_events(void)
 
     for (int i = 0; i < g_store.pendingKreditEventCount; i++) {
         KreditEvent *ev = &g_store.pendingKreditEvents[i];
+        // Local-only players have negative IDs — the portal schema requires
+        // a positive spielerId, so skip events for players not yet synced.
+        if (ev->spielerId <= 0) continue;
         cJSON *item = cJSON_CreateObject();
         cJSON_AddStringToObject(item, "externalId", ev->externalId);
         cJSON_AddNumberToObject(item, "spielerId",  (double)ev->spielerId);
@@ -533,7 +536,7 @@ esp_err_t http_push_kredit_events(void)
 esp_err_t http_pull_kredite(void)
 {
     struct timeval tv; gettimeofday(&tv, NULL);
-    time_t now = tv.tv_sec; struct tm tmi; gmtime_r(&now, &tmi);
+    time_t now = tv.tv_sec; struct tm tmi; localtime_r(&now, &tmi);  // local TZ (CET/CEST)
     char datum[11]; strftime(datum, sizeof(datum), "%Y-%m-%d", &tmi);
 
     char path[64];

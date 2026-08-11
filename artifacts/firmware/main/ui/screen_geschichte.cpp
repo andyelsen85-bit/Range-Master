@@ -31,7 +31,12 @@ static void show_detail(int idx)
     snprintf(hdr, sizeof(hdr), "%s  |  %d SPILLER",
              modus_label(fg->base.modus), fg->spieler_count);
     lv_label_set_text(s_detail_hdr, hdr);
-    lv_label_set_text(s_detail_date, fg->finishedAt);
+    {   // Format "YYYY-MM-DDTHH:MM:SS.000Z" → "YYYY-MM-DD HH:MM"
+        char ts_disp[18] = {};
+        strncpy(ts_disp, fg->finishedAt, 16);
+        if (ts_disp[10] == 'T') ts_disp[10] = ' ';
+        lv_label_set_text(s_detail_date, ts_disp[0] ? ts_disp : "-");
+    }
 
     // Fill player table (row 0 = header)
     lv_table_set_row_cnt(s_detail_table, fg->spieler_count + 1);
@@ -107,7 +112,12 @@ static void build_history_rows(void)
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         lv_obj_t *ts_lbl = lv_label_create(btn);
-        lv_label_set_text(ts_lbl, fg->finishedAt);
+        {   // Format "YYYY-MM-DDTHH:MM:SS.000Z" → "YYYY-MM-DD HH:MM"
+            char ts_disp[18] = {};
+            strncpy(ts_disp, fg->finishedAt, 16);
+            if (ts_disp[10] == 'T') ts_disp[10] = ' ';
+            lv_label_set_text(ts_lbl, ts_disp[0] ? ts_disp : "-");
+        }
         lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(ts_lbl, lv_color_hex(CLR_MUTED), 0);
         lv_obj_set_width(ts_lbl, 170);
