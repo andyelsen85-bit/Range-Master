@@ -188,12 +188,17 @@ static const char *modus_api_str(Modus m)
 static cJSON *pending_game_to_json(const PendingGame *g)
 {
     cJSON *obj = cJSON_CreateObject();
-    cJSON_AddStringToObject(obj, "externalId",     g->externalId);
-    // API requires z.string().uuid() — externalId must be UUID format (set by store_start_spiel)
-    // API requires z.string().datetime() — base.datum is YYYY-MM-DD; extend with time
-    char datum_iso[25] = "1970-01-01T00:00:00.000Z";
-    if (g->datum[0]) snprintf(datum_iso, sizeof(datum_iso), "%sT00:00:00.000Z", g->datum);
-    cJSON_AddStringToObject(obj, "datum", datum_iso);
+    cJSON_AddStringToObject(obj, "externalId", g->externalId);
+    // API requires z.string().datetime() — use finishedAt (real UTC) so the
+    // portal shows the actual game completion time, not midnight.
+    // Fall back to datum+T00:00:00.000Z if finishedAt is somehow empty.
+    if (g->finishedAt[0]) {
+        cJSON_AddStringToObject(obj, "datum", g->finishedAt);
+    } else {
+        char datum_iso[25] = "1970-01-01T00:00:00.000Z";
+        if (g->datum[0]) snprintf(datum_iso, sizeof(datum_iso), "%sT00:00:00.000Z", g->datum);
+        cJSON_AddStringToObject(obj, "datum", datum_iso);
+    }
     cJSON_AddStringToObject(obj, "modus", modus_api_str(g->modus));
     cJSON_AddNumberToObject(obj, "lauf",           g->lauf);
     cJSON_AddNumberToObject(obj, "taubenProLauf",  g->taubenProLauf);

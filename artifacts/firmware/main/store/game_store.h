@@ -122,7 +122,8 @@ typedef struct {
 
 typedef struct {
     char     externalId[40];
-    char     datum[11];      // YYYY-MM-DD
+    char     datum[11];        // YYYY-MM-DD (local date, for terminal display)
+    char     finishedAt[32];   // ISO datetime UTC "YYYY-MM-DDTHH:MM:SS.000Z" sent as API datum
     Modus    modus;
     int      lauf;
     int      taubenProLauf;

@@ -365,12 +365,12 @@ static void _store_finish_game(void)
     struct timeval tv; gettimeofday(&tv, NULL);
     {
         time_t now = tv.tv_sec;
-        struct tm tmi;
-        localtime_r(&now, &tmi);  // localtime_r applies the TZ (CET/CEST); gmtime_r would give UTC
-        strftime(fg.base.datum, sizeof(fg.base.datum), "%Y-%m-%d", &tmi);
-        // Use strftime — sidesteps -Werror=format-truncation on int arithmetic
+        struct tm tmi_local, tmi_utc;
+        localtime_r(&now, &tmi_local); // local time (CET/CEST) — for date display on terminal
+        gmtime_r(&now,    &tmi_utc);   // UTC — for API timestamp (Z suffix must mean UTC)
+        strftime(fg.base.datum, sizeof(fg.base.datum), "%Y-%m-%d", &tmi_local);
         strftime(fg.finishedAt, sizeof(fg.finishedAt),
-                 "%Y-%m-%dT%H:%M:%S.000Z", &tmi);
+                 "%Y-%m-%dT%H:%M:%S.000Z", &tmi_utc);
     }
     strncpy(fg.base.externalId, s->spielId, sizeof(fg.base.externalId) - 1);
     fg.base.externalId[sizeof(fg.base.externalId) - 1] = '\0';
@@ -398,8 +398,11 @@ static void _store_finish_game(void)
         s->history[MAX_HISTORY - 1] = fg;
     }
 
-    // Add to pending queue for sync
+    // Add to pending queue for sync — copy finishedAt into base so
+    // pending_game_to_json can send the real UTC timestamp (not midnight).
     if (s->pendingGamesCount < MAX_PENDING_GAMES) {
+        fg.base.finishedAt[0] = '\0';
+        strncpy(fg.base.finishedAt, fg.finishedAt, sizeof(fg.base.finishedAt) - 1);
         s->pendingGames[s->pendingGamesCount++] = fg.base;
     }
 
