@@ -86,7 +86,8 @@ typedef struct {
     int   id;
     char  name[MAX_NAME_LEN];
     char  mitgliedNr[32];
-    bool  lokal;          // created on terminal, not yet pushed
+    char  email[MAX_EMAIL_LEN];   // populated from portal sync
+    bool  lokal;                  // created on terminal, not yet pushed
     bool  portalAktiv;
 } PortalSpieler;
 
