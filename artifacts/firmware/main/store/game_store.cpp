@@ -529,6 +529,21 @@ void store_add_lokal_spieler(const char *name, int *out_id)
     ps->name[MAX_NAME_LEN - 1] = '\0';
     g_store.portalSpielerCount++;
     if (out_id) *out_id = ps->id;
+
+    // Queue a CREATE entry so the next sync pushes this player to the portal.
+    if (g_store.spielerUpdateCount < MAX_SPIELER_UPDATES) {
+        SpielerUpdateEntry *e = &g_store.spielerUpdates[g_store.spielerUpdateCount++];
+        e->used      = true;
+        e->spielerId = ps->id;   // negative local ID; sync replaces with portal ID
+        e->typ       = SPIELER_CREATE;
+        snprintf(e->externalId, sizeof(e->externalId), "new-%08x", (unsigned)esp_random());
+        strncpy(e->name, name, MAX_NAME_LEN - 1);
+        e->name[MAX_NAME_LEN - 1] = '\0';
+        e->email[0]    = '\0';
+        e->portalAktiv = false;
+        ESP_LOGI(TAG, "Queued CREATE for local spieler '%s' (localId=%d)", name, ps->id);
+    }
+
     game_store_save();
 }
 
@@ -555,6 +570,23 @@ void store_queue_kredit_event(int spieler_id, const char *typ, int anzahl)
 
 void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv)
 {
+    if (spieler_id < 0) {
+        // Local player — a SPIELER_CREATE entry is already in the queue.
+        // Update that entry's name/email in-place so the next sync uses the
+        // latest values; do not queue a separate UPDATE (portal doesn't know
+        // this player yet so it has no spielerId to update).
+        for (int i = 0; i < g_store.spielerUpdateCount; i++) {
+            SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
+            if (e->used && e->spielerId == spieler_id && e->typ == SPIELER_CREATE) {
+                if (name)  { strncpy(e->name, name, MAX_NAME_LEN - 1); e->name[MAX_NAME_LEN - 1] = '\0'; }
+                if (email) { strncpy(e->email, email, MAX_EMAIL_LEN - 1); e->email[MAX_EMAIL_LEN - 1] = '\0'; }
+                ESP_LOGI(TAG, "Updated pending CREATE for local spieler %d (name='%s')", spieler_id, e->name);
+                return;
+            }
+        }
+        ESP_LOGW(TAG, "No pending CREATE found for local spieler %d — ignoring UPDATE", spieler_id);
+        return;
+    }
     if (g_store.spielerUpdateCount >= MAX_SPIELER_UPDATES) {
         ESP_LOGW(TAG, "spielerUpdates queue full");
         return;

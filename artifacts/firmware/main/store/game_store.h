@@ -95,6 +95,7 @@ typedef struct {
 typedef enum {
     SPIELER_UPDATE_PROFILE = 0,
     SPIELER_UPDATE_PASSWORT_RESET,
+    SPIELER_CREATE,        // terminal-local player; must be synced before updates
 } SpielerUpdateTyp;
 
 typedef struct {

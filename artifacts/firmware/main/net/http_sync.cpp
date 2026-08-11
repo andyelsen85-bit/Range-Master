@@ -438,55 +438,128 @@ esp_err_t http_fetch_spielhistorie(void)
 esp_err_t http_push_spieler_updates(void)
 {
     if (g_store.spielerUpdateCount == 0) return ESP_OK;
+    esp_err_t overall = ESP_OK;
 
-    cJSON *root = cJSON_CreateObject();
-    cJSON *arr  = cJSON_CreateArray();
-    cJSON_AddItemToObject(root, "updates", arr);
-
+    // ── Pass 1: create terminal-local players in the portal (one per request) ─
+    // SPIELER_CREATE entries hold a negative local spielerId.  The API returns
+    // the real portal ID which we patch into the local player record so
+    // subsequent game syncs and UPDATE entries use the correct positive ID.
     for (int i = 0; i < g_store.spielerUpdateCount; i++) {
         SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
-        if (!e->used) continue;
+        if (!e->used || e->typ != SPIELER_CREATE) continue;
 
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "externalId", e->externalId);
-        cJSON_AddNumberToObject(item, "spielerId", (double)e->spielerId);
+        cJSON *req_obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(req_obj, "externalId", e->externalId);
+        cJSON_AddStringToObject(req_obj, "name",       e->name);
+        if (e->email[0]) cJSON_AddStringToObject(req_obj, "email", e->email);
+        char *body = cJSON_PrintUnformatted(req_obj);
+        cJSON_Delete(req_obj);
+        if (!body) continue;
 
-        if (e->typ == SPIELER_UPDATE_PASSWORT_RESET) {
-            cJSON_AddStringToObject(item, "typ", "PASSWORT_RESET");
-        } else {
-            cJSON_AddStringToObject(item, "typ", "UPDATE");
-            cJSON_AddStringToObject(item, "name", e->name);
-            if (e->email[0]) {
-                cJSON_AddStringToObject(item, "email", e->email);
+        char *resp = (char *)malloc(256);
+        if (resp) {
+            esp_err_t cerr = http_post_json("/api/sync/spieler-neu", body, resp, 256);
+            if (cerr == ESP_OK) {
+                // Parse { "id": <portal_id>, "name": "...", "externalId": "..." }
+                int new_id = 0;
+                cJSON *j = cJSON_Parse(resp);
+                if (j) {
+                    cJSON *id_item = cJSON_GetObjectItem(j, "id");
+                    if (cJSON_IsNumber(id_item)) new_id = (int)id_item->valuedouble;
+                    cJSON_Delete(j);
+                }
+                if (new_id > 0) {
+                    int old_id = e->spielerId;          // negative local ID
+                    for (int k = 0; k < g_store.portalSpielerCount; k++) {
+                        if (g_store.portalSpieler[k].id == old_id) {
+                            g_store.portalSpieler[k].id    = new_id;
+                            g_store.portalSpieler[k].lokal = false;
+                            break;
+                        }
+                    }
+                    ESP_LOGI(TAG, "Spieler '%s' created in portal → id=%d (was local %d)",
+                             e->name, new_id, old_id);
+                    e->used = false;    // mark done — compacted below
+                } else {
+                    ESP_LOGW(TAG, "spieler-neu: bad response for '%s' — retaining", e->name);
+                    overall = ESP_FAIL;
+                }
             } else {
-                cJSON_AddNullToObject(item, "email");
+                ESP_LOGW(TAG, "spieler-neu: HTTP error for '%s': %s", e->name, esp_err_to_name(cerr));
+                overall = cerr;
             }
-            cJSON_AddBoolToObject(item, "portalAktiv", e->portalAktiv);
+            free(resp);
         }
-        cJSON_AddItemToArray(arr, item);
+        free(body);
     }
 
-    char *body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!body) return ESP_ERR_NO_MEM;
-
-    char *resp = (char *)malloc(512);
-    esp_err_t err = ESP_ERR_NO_MEM;
-    if (resp) {
-        err = http_post_json("/api/sync/spieler-updates", body, resp, 512);
-        free(resp);
+    // ── Pass 2: push profile updates and password resets for portal players ───
+    int update_count = 0;
+    for (int i = 0; i < g_store.spielerUpdateCount; i++) {
+        SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
+        if (e->used && e->typ != SPIELER_CREATE) update_count++;
     }
-    free(body);
 
-    if (err == ESP_OK) {
-        int pushed = g_store.spielerUpdateCount;
-        memset(g_store.spielerUpdates, 0, sizeof(g_store.spielerUpdates));
-        g_store.spielerUpdateCount = 0;
-        ESP_LOGI(TAG, "Pushed %d spieler update(s) — queue cleared", pushed);
-    } else {
-        ESP_LOGW(TAG, "Spieler updates push failed (%s) — queue retained", esp_err_to_name(err));
+    if (update_count > 0) {
+        cJSON *root = cJSON_CreateObject();
+        cJSON *arr  = cJSON_CreateArray();
+        cJSON_AddItemToObject(root, "updates", arr);
+
+        for (int i = 0; i < g_store.spielerUpdateCount; i++) {
+            SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
+            if (!e->used || e->typ == SPIELER_CREATE) continue;
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "externalId", e->externalId);
+            cJSON_AddNumberToObject(item, "spielerId",  (double)e->spielerId);
+            if (e->typ == SPIELER_UPDATE_PASSWORT_RESET) {
+                cJSON_AddStringToObject(item, "typ", "PASSWORT_RESET");
+            } else {
+                cJSON_AddStringToObject(item, "typ", "UPDATE");
+                cJSON_AddStringToObject(item, "name", e->name);
+                if (e->email[0]) cJSON_AddStringToObject(item, "email", e->email);
+                else             cJSON_AddNullToObject  (item, "email");
+                cJSON_AddBoolToObject(item, "portalAktiv", e->portalAktiv);
+            }
+            cJSON_AddItemToArray(arr, item);
+        }
+
+        char *body = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+        if (body) {
+            char *resp = (char *)malloc(512);
+            if (resp) {
+                esp_err_t uerr = http_post_json("/api/sync/spieler-updates", body, resp, 512);
+                if (uerr == ESP_OK) {
+                    for (int i = 0; i < g_store.spielerUpdateCount; i++) {
+                        SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
+                        if (e->used && e->typ != SPIELER_CREATE) e->used = false;
+                    }
+                    ESP_LOGI(TAG, "Pushed %d spieler update(s)", update_count);
+                } else {
+                    ESP_LOGW(TAG, "Spieler updates push failed (%s) — queue retained", esp_err_to_name(uerr));
+                    if (overall == ESP_OK) overall = uerr;
+                }
+                free(resp);
+            }
+            free(body);
+        }
     }
-    return err;
+
+    // ── Compact the queue — remove entries cleared above ──────────────────────
+    {
+        int nc = 0;
+        for (int i = 0; i < g_store.spielerUpdateCount; i++) {
+            if (g_store.spielerUpdates[i].used) {
+                if (nc != i) g_store.spielerUpdates[nc] = g_store.spielerUpdates[i];
+                nc++;
+            }
+        }
+        for (int i = nc; i < g_store.spielerUpdateCount; i++)
+            memset(&g_store.spielerUpdates[i], 0, sizeof(SpielerUpdateEntry));
+        g_store.spielerUpdateCount = nc;
+    }
+
+    return overall;
 }
 
 // ── http_push_kredit_events ───────────────────────────────────
