@@ -29,11 +29,15 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Root-level liveness / readiness probe — must be outside /api so K8s
-// probes (which hit /healthz directly) get a 200 without an API key.
+// Root-level liveness / readiness probe.
+// K8s probes hit the pod directly (bypasses the ingress), so this must
+// live at "/" on Express, not under a sub-path.
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 
-app.use("/api", router);
+// The nginx ingress rewrites /api(/|$)(.*) → /$2 before forwarding here,
+// so Express receives paths WITHOUT the /api prefix (e.g. /sync/spiele,
+// /auth/login).  Mount the router at root so those paths match.
+app.use(router);
 
 // ── Global error handler ───────────────────────────────────────────────────────
 // Catches Zod parse errors (thrown by .parse() in route handlers) and any other
