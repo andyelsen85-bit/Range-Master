@@ -38,6 +38,7 @@ idf_component_register(
         nvs_flash
         json
         esp_timer
+        lwip
         freertos
         log
         spi_flash

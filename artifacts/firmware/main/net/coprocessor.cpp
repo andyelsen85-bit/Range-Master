@@ -19,6 +19,7 @@
 #include "esp_heap_caps.h"
 #include "coprocessor.h"
 #include "game_store.h"
+#include "esp_sntp.h"
 #include "web_config.h"
 #include "app_config.h"
 
@@ -90,6 +91,17 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         // from any browser on the same network without using the on-screen
         // keyboard.  Open http://<ip>/ in any browser.
         web_config_start();
+        // Start NTP after DHCP so game timestamps use real wall time.
+        // Luxembourg timezone: CET (UTC+1) in winter, CEST (UTC+2) in summer.
+        if (!esp_sntp_enabled()) {
+            setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+            tzset();
+            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+            esp_sntp_setservername(0, "pool.ntp.org");
+            esp_sntp_setservername(1, "0.europe.pool.ntp.org");
+            esp_sntp_init();
+            ESP_LOGI(TAG, "SNTP started — pool.ntp.org  TZ=CET-1CEST (Luxembourg)");
+        }
     }
 }
 

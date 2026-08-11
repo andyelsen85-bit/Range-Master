@@ -30,9 +30,44 @@ static void build_player_opts(char *buf, size_t len)
     buf[len-1] = '\0';
     s_options_count = 1;  // option 0 = "Kee SPILLER"
 
-    for (int i = 0; i < g_store.portalSpielerCount; i++) {
+    // ── 1. Collect eligible players (credit > 0) ──────────────
+    int eligible[MAX_PORTAL_SPIELER];
+    int eligible_count = 0;
+    for (int i = 0; i < g_store.portalSpielerCount && eligible_count < MAX_PORTAL_SPIELER; i++) {
         if (store_kredite_verfuegbar(g_store.portalSpieler[i].id) <= 0) continue;
+        eligible[eligible_count++] = i;
+    }
+
+    // ── 2. Count appearances in local history per player ──────
+    // Most frequent players float to the top for faster selection.
+    int game_counts[MAX_PORTAL_SPIELER] = {};
+    for (int e = 0; e < eligible_count; e++) {
+        int pid = g_store.portalSpieler[eligible[e]].id;
+        int cnt = 0;
+        for (int h = 0; h < g_store.historyCount; h++) {
+            for (int s = 0; s < MAX_SPIELER; s++) {
+                if (g_store.history[h].spielerIds[s] == pid) { cnt++; break; }
+            }
+        }
+        game_counts[e] = cnt;
+    }
+
+    // ── 3. Insertion sort: descending by game count ───────────
+    for (int i = 1; i < eligible_count; i++) {
+        int ki = eligible[i], kc = game_counts[i], j = i - 1;
+        while (j >= 0 && game_counts[j] < kc) {
+            eligible[j + 1]    = eligible[j];
+            game_counts[j + 1] = game_counts[j];
+            j--;
+        }
+        eligible[j + 1]    = ki;
+        game_counts[j + 1] = kc;
+    }
+
+    // ── 4. Build dropdown string in sorted order ──────────────
+    for (int e = 0; e < eligible_count; e++) {
         if (s_options_count > MAX_PORTAL_SPIELER) break;
+        int i = eligible[e];
         s_option_to_pidx[s_options_count] = i;
         s_options_count++;
         strncat(buf, "\n", len - strlen(buf) - 1);
