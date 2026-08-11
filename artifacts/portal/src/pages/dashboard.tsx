@@ -32,7 +32,13 @@ export default function Dashboard({ spielerId, playerName }: DashboardProps = {}
 
   const trendData = verlaufData?.verlauf?.slice().reverse().map(v => ({
     ...v,
-    date: new Date(v.datum).toLocaleDateString('lb-LU', { day: '2-digit', month: '2-digit' })
+    // Short label for the X-axis ticks (DD.MM keeps the axis readable)
+    date: new Date(v.datum).toLocaleDateString('lb-LU', { day: '2-digit', month: '2-digit' }),
+    // Full label used by the tooltip so hovering shows the complete date+time
+    fullDate: new Date(v.datum).toLocaleString('lb-LU', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    }),
   })) || [];
 
   const trendYMax = trendData.length > 0
@@ -112,7 +118,10 @@ export default function Dashboard({ spielerId, playerName }: DashboardProps = {}
                   </defs>
                   <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} fontFamily="var(--font-mono)" />
                   <YAxis domain={[0, trendYMax]} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} fontFamily="var(--font-mono)" />
-                  <Tooltip 
+                  <Tooltip
+                    labelFormatter={(_label, payload) =>
+                      (payload?.[0]?.payload as { fullDate?: string })?.fullDate ?? _label
+                    }
                     contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '8px', fontFamily: 'var(--font-sans)', fontWeight: 600 }}
                   />
                   <Area type="monotone" dataKey="punkte" stroke="hsl(var(--primary))" strokeWidth={3} fillOpacity={1} fill="url(#colorPunkte)" />

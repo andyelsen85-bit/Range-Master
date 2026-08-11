@@ -283,6 +283,30 @@ router.post("/kredite", requireApiKey, async (req, res) => {
   return res.json({ synced, skipped: body.events.length - synced });
 });
 
+// ─── New player created on terminal ──────────────────────────────────────────
+
+// POST /api/sync/spieler-neu — create a brand-new player from the terminal.
+// Called when the operator adds a player locally who has no portal account yet.
+// Returns the new portal ID so the terminal can replace its local negative ID.
+router.post("/spieler-neu", requireApiKey, async (req, res) => {
+  const body = z.object({
+    externalId: z.string().min(8),
+    name: z.string().min(1).max(100),
+    email: z.string().email().nullable().optional(),
+  }).parse(req.body);
+
+  const [row] = await db
+    .insert(spielerTable)
+    .values({
+      name: body.name,
+      email: body.email ?? null,
+      portalAktiv: false,
+    })
+    .returning({ id: spielerTable.id, name: spielerTable.name });
+
+  return res.status(201).json({ id: row.id, name: row.name, externalId: body.externalId });
+});
+
 // ─── Player updates from the terminal ────────────────────────────────────────
 
 const SpielerUpdateSchema = z.object({
