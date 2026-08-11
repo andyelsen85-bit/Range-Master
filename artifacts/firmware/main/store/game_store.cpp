@@ -12,6 +12,7 @@
 #include "freertos/idf_additions.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -25,7 +26,9 @@ static const char *TAG = "game_store";
 // Forward declaration (defined later in this file)
 static void _store_finish_game(void);
 
-GameStore g_store;
+// g_store is large (~40 KB with email fields) — place in SPIRAM to keep
+// internal DRAM free for IDF's small BSS sections (FreeRTOS, panic, etc.)
+EXT_RAM_BSS_ATTR GameStore g_store;
 
 // ── NVS helpers ──────────────────────────────────────────────
 static nvs_handle_t s_nvs;
