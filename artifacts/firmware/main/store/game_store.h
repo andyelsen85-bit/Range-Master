@@ -14,6 +14,7 @@
 #define MAX_NAME_LEN        64
 #define MAX_EMAIL_LEN       64
 #define MAX_SPIELER_UPDATES 10
+#define MAX_KREDIT_EVENTS   50   // pending grant/use events queued for portal sync
 #define MAX_URL_LEN         128
 #define MAX_KEY_LEN         65
 #define TM_MAX_SSID_LEN     33
@@ -107,6 +108,14 @@ typedef struct {
 } SpielerUpdateEntry;
 
 typedef struct {
+    char externalId[40]; // unique event ID for idempotent portal push
+    int  spielerId;
+    char datum[11];      // YYYY-MM-DD
+    char typ[8];         // "GRANT" or "USE"
+    int  anzahl;
+} KreditEvent;
+
+typedef struct {
     int   gewaehrt;
     int   verbraucht;
 } KreditStand;
@@ -193,6 +202,10 @@ typedef struct {
     SpielerUpdateEntry spielerUpdates[MAX_SPIELER_UPDATES];
     int                spielerUpdateCount;
 
+    // Queued credit events (GRANT / USE) — pushed on next sync
+    KreditEvent pendingKreditEvents[MAX_KREDIT_EVENTS];
+    int         pendingKreditEventCount;
+
     // WiFi state
     bool    wifiConnected;
     char    wifiIp[16];
@@ -229,6 +242,7 @@ void store_sync(void);   // pushes pending games + pulls history
 
 // ── Player updates ───────────────────────────────────────────
 void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv);
+void store_queue_kredit_event(int spieler_id, const char *typ, int anzahl);
 void store_queue_passwort_reset(int spieler_id);
 int  store_pending_update_count(void);
 

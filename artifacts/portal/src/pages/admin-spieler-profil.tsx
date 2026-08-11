@@ -3,7 +3,6 @@ import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useToast } from "@/hooks/use-toast";
-import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronLeft, Activity, Target, Trophy, Pencil, Check, X } from "lucide-react";
@@ -30,7 +29,6 @@ export default function AdminSpielrProfil() {
   const token = useAuthStore((s) => s.token);
   const { toast } = useToast();
   const qc = useQueryClient();
-  const vk = useVirtualKeyboard();
   const spielerId = parseInt(id ?? "0", 10);
 
   const [editing, setEditing] = useState(false);
@@ -134,9 +132,7 @@ export default function AdminSpielrProfil() {
                       type="email"
                       value={editEmail}
                       onChange={(e) => setEditEmail(e.target.value)}
-                      onFocus={() =>
-                        vk.open({ getValue: () => editEmail, setValue: setEditEmail })
-                      }
+
                       placeholder="max@beispill.lu"
                       className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
                     />

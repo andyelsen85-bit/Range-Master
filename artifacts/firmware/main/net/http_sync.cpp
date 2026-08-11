@@ -171,13 +171,30 @@ static esp_err_t http_get_json(const char *path,
     return err;
 }
 
+// ── Map Modus enum to the API-expected string ─────────────────
+static const char *modus_api_str(Modus m)
+{
+    switch (m) {
+        case MODUS_NORMAL:   return "NORMAL";
+        case MODUS_CUSTOM_1: return "CUSTOM_1";
+        case MODUS_CUSTOM_2: return "CUSTOM_2";
+        case MODUS_CUSTOM_3: return "CUSTOM_3";
+        case MODUS_CUSTOM_4: return "CUSTOM_4";
+        default:             return "NORMAL";
+    }
+}
+
 // ── Build JSON for a PendingGame ──────────────────────────────
 static cJSON *pending_game_to_json(const PendingGame *g)
 {
     cJSON *obj = cJSON_CreateObject();
     cJSON_AddStringToObject(obj, "externalId",     g->externalId);
-    cJSON_AddStringToObject(obj, "datum",          g->datum);
-    cJSON_AddStringToObject(obj, "modus",          modus_label(g->modus));
+    // API requires z.string().uuid() — externalId must be UUID format (set by store_start_spiel)
+    // API requires z.string().datetime() — base.datum is YYYY-MM-DD; extend with time
+    char datum_iso[25] = "1970-01-01T00:00:00.000Z";
+    if (g->datum[0]) snprintf(datum_iso, sizeof(datum_iso), "%sT00:00:00.000Z", g->datum);
+    cJSON_AddStringToObject(obj, "datum", datum_iso);
+    cJSON_AddStringToObject(obj, "modus", modus_api_str(g->modus));
     cJSON_AddNumberToObject(obj, "lauf",           g->lauf);
     cJSON_AddNumberToObject(obj, "taubenProLauf",  g->taubenProLauf);
     cJSON_AddBoolToObject  (obj, "abgeschlossen",  g->abgeschlossen);
@@ -467,6 +484,107 @@ esp_err_t http_push_spieler_updates(void)
     return err;
 }
 
+// ── http_push_kredit_events ───────────────────────────────────
+esp_err_t http_push_kredit_events(void)
+{
+    if (g_store.pendingKreditEventCount == 0) return ESP_OK;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr  = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "events", arr);
+
+    for (int i = 0; i < g_store.pendingKreditEventCount; i++) {
+        KreditEvent *ev = &g_store.pendingKreditEvents[i];
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "externalId", ev->externalId);
+        cJSON_AddNumberToObject(item, "spielerId",  (double)ev->spielerId);
+        cJSON_AddStringToObject(item, "datum",      ev->datum);
+        cJSON_AddStringToObject(item, "typ",        ev->typ);
+        cJSON_AddNumberToObject(item, "anzahl",     (double)ev->anzahl);
+        cJSON_AddItemToArray(arr, item);
+    }
+
+    char *body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!body) return ESP_ERR_NO_MEM;
+
+    char *resp = (char *)malloc(512);
+    esp_err_t err = ESP_ERR_NO_MEM;
+    if (resp) {
+        err = http_post_json("/api/sync/kredite", body, resp, 512);
+        free(resp);
+    }
+    free(body);
+
+    if (err == ESP_OK) {
+        int pushed = g_store.pendingKreditEventCount;
+        memset(g_store.pendingKreditEvents, 0, sizeof(g_store.pendingKreditEvents));
+        g_store.pendingKreditEventCount = 0;
+        ESP_LOGI(TAG, "Pushed %d kredit event(s)", pushed);
+    } else {
+        ESP_LOGW(TAG, "Kredit push failed (%s) — queue retained", esp_err_to_name(err));
+    }
+    return err;
+}
+
+// ── http_pull_kredite ─────────────────────────────────────────
+// Pulls today's credit totals from the portal and merges them into
+// g_store.kredite[], reconciling any grants made via the web admin.
+esp_err_t http_pull_kredite(void)
+{
+    struct timeval tv; gettimeofday(&tv, NULL);
+    time_t now = tv.tv_sec; struct tm tmi; gmtime_r(&now, &tmi);
+    char datum[11]; strftime(datum, sizeof(datum), "%Y-%m-%d", &tmi);
+
+    char path[64];
+    snprintf(path, sizeof(path), "/api/sync/kredite?datum=%s", datum);
+
+    char *resp = (char *)malloc(8192);
+    if (!resp) return ESP_ERR_NO_MEM;
+
+    esp_err_t err = http_get_json(path, resp, 8192);
+    if (err != ESP_OK) { free(resp); return err; }
+
+    cJSON *root = cJSON_Parse(resp);
+    free(resp);
+    if (!root) return ESP_ERR_INVALID_RESPONSE;
+
+    cJSON *arr = cJSON_GetObjectItem(root, "kredite");
+    if (arr && cJSON_IsArray(arr)) {
+        cJSON *item;
+        cJSON_ArrayForEach(item, arr) {
+            cJSON *jsid = cJSON_GetObjectItem(item, "spielerId");
+            cJSON *jgew = cJSON_GetObjectItem(item, "gewaehrt");
+            cJSON *jver = cJSON_GetObjectItem(item, "verbraucht");
+            if (!jsid || !cJSON_IsNumber(jsid)) continue;
+            int sid = (int)jsid->valuedouble;
+            int gew = jgew && cJSON_IsNumber(jgew) ? (int)jgew->valuedouble : 0;
+            int ver = jver && cJSON_IsNumber(jver) ? (int)jver->valuedouble : 0;
+            bool found = false;
+            for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
+                if (g_store.kreditPlayerIds[i] == sid) {
+                    g_store.kredite[i].gewaehrt   = gew;
+                    g_store.kredite[i].verbraucht  = ver;
+                    found = true; break;
+                }
+            }
+            if (!found) {
+                for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
+                    if (g_store.kreditPlayerIds[i] == 0) {
+                        g_store.kreditPlayerIds[i]    = sid;
+                        g_store.kredite[i].gewaehrt   = gew;
+                        g_store.kredite[i].verbraucht  = ver;
+                        break;
+                    }
+                }
+            }
+        }
+        ESP_LOGI(TAG, "Pulled credits for %s", datum);
+    }
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 // ── http_sync_all ─────────────────────────────────────────────
 esp_err_t http_sync_all(void)
 {
@@ -479,17 +597,23 @@ esp_err_t http_sync_all(void)
     ESP_LOGI(TAG, "  internal free=%u B  largest block=%u B",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-    // Push queued player edits first (non-critical — don't abort sync on failure)
+    // Push queued player edits (non-critical)
     esp_err_t pue = http_push_spieler_updates();
-    if (pue != ESP_OK) {
-        ESP_LOGW(TAG, "Spieler updates push failed — continuing sync");
-    }
+    if (pue != ESP_OK) ESP_LOGW(TAG, "Spieler updates push failed — continuing sync");
+
+    // Push queued credit events (non-critical)
+    esp_err_t pke = http_push_kredit_events();
+    if (pke != ESP_OK) ESP_LOGW(TAG, "Kredit events push failed — continuing sync");
 
     esp_err_t err = http_push_pending_games();
     if (err != ESP_OK) return err;
 
     err = http_fetch_spielhistorie();
     if (err != ESP_OK) return err;
+
+    // Pull today's credit totals (non-critical — portal grants appear on terminal)
+    esp_err_t pck = http_pull_kredite();
+    if (pck != ESP_OK) ESP_LOGW(TAG, "Credit pull failed — continuing");
 
     // Refresh player list — heap-allocated: 200×~104 B = ~20 KB would overflow
     // the 12 KB sync_task stack if declared as a local array.

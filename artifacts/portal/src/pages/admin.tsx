@@ -8,7 +8,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
 import { Plus, Pencil, Trash2, KeyRound, Shield, CheckCircle2, XCircle, Eye, Search } from "lucide-react";
-import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,8 +37,9 @@ function useAdminFetch() {
         ...options?.headers,
       },
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const ct = res.headers.get("content-type") ?? "";
+    const data = ct.includes("application/json") ? await res.json() : null;
+    if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
     return data;
   };
 }
@@ -56,8 +56,6 @@ export default function Admin() {
   const apiFetch = useAdminFetch();
   const { toast } = useToast();
   const [, navigate] = useLocation();
-  const vk = useVirtualKeyboard();
-
   const [addOpen, setAddOpen] = useState(false);
   const [editPlayer, setEditPlayer] = useState<AdminPlayer | null>(null);
   const [deletePlayer, setDeletePlayer] = useState<AdminPlayer | null>(null);
@@ -146,7 +144,7 @@ export default function Admin() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          onFocus={() => vk.open({ getValue: () => search, setValue: setSearch })}
+
           placeholder="Spiller sichen… (Numm, Email, Mitglied Nr)"
           className="w-full bg-card border border-border/60 rounded-lg pl-9 pr-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
         />
@@ -301,17 +299,15 @@ export default function Admin() {
   );
 }
 
-// ─── Password field (isolated so it can access VK context) ───────────────────
+// ─── Password field ───────────────────────────────────────────────────────────
 
 function PwdField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const vk = useVirtualKeyboard();
   return (
     <div className="space-y-1.5 py-2">
       <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Neit Passwuert</label>
       <input
         type="password" autoComplete="new-password"
         value={value} onChange={(e) => onChange(e.target.value)}
-        onFocus={() => vk.open({ getValue: () => value, setValue: onChange })}
         className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
         placeholder="Min. 6 Zeechen"
       />
@@ -330,13 +326,11 @@ function PlayerFormFields({
   isEdit?: boolean;
 }) {
   const set = (k: string, v: any) => onChange((f: any) => ({ ...f, [k]: v }));
-  const vk = useVirtualKeyboard();
   return (
     <div className="space-y-4 py-2">
       <FormField label="Numm *" id="name">
         <input
           id="name" value={form.name} onChange={(e) => set("name", e.target.value)} required
-          onFocus={() => vk.open({ getValue: () => form.name, setValue: (v) => set("name", v) })}
           className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
           placeholder="Max Mustermann"
         />
@@ -344,7 +338,6 @@ function PlayerFormFields({
       <FormField label="Email" id="email">
         <input
           id="email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)}
-          onFocus={() => vk.open({ getValue: () => form.email, setValue: (v) => set("email", v) })}
           className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
           placeholder="max@beispill.lu"
         />
@@ -366,7 +359,6 @@ function PlayerFormFields({
           <input
             id="pwd" type="password" autoComplete="new-password" value={form.passwort}
             onChange={(e) => set("passwort", e.target.value)}
-            onFocus={() => vk.open({ getValue: () => form.passwort, setValue: (v) => set("passwort", v) })}
             className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
             placeholder="Min. 6 Zeechen"
           />

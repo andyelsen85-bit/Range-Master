@@ -1,7 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuthStore } from "@/store/use-auth-store";
-import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import { LogOut, LayoutDashboard, List, Trophy, BarChart3, Target, Shield, User, KeyRound, Coins, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -9,7 +8,6 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
-  const { isOpen: vkOpen } = useVirtualKeyboard();
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -83,7 +81,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           </button>
         </div>
       </aside>
-      <main className={cn("flex-1 overflow-auto p-4 md:p-8 bg-background relative", vkOpen && "pb-80")}>
+      <main className="flex-1 overflow-auto p-4 md:p-8 bg-background relative">
         <div className="max-w-5xl mx-auto relative z-10">
           {children}
         </div>

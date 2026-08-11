@@ -17,6 +17,8 @@ esp_err_t http_fetch_spielhistorie(void);
 
 /** POST /api/sync/spieler-updates — push queued player edits and password resets. */
 esp_err_t http_push_spieler_updates(void);
+esp_err_t http_push_kredit_events(void);
+esp_err_t http_pull_kredite(void);
 
 /** Run the full sync sequence (push + pull). */
 esp_err_t http_sync_all(void);

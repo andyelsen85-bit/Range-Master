@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
+#include "esp_random.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -153,12 +154,14 @@ void store_add_kredite(int spieler_id, int anzahl)
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
         if (g_store.kreditPlayerIds[i] == spieler_id) {
             g_store.kredite[i].gewaehrt += anzahl;
+            store_queue_kredit_event(spieler_id, "GRANT", anzahl);
             game_store_save();
             return;
         }
         if (g_store.kreditPlayerIds[i] == 0) {
             g_store.kreditPlayerIds[i] = spieler_id;
             g_store.kredite[i] = (KreditStand){anzahl, 0};
+            store_queue_kredit_event(spieler_id, "GRANT", anzahl);
             game_store_save();
             return;
         }
@@ -178,11 +181,12 @@ bool store_start_spiel(void)
         }
     }
 
-    // Deduct one credit per player
+    // Deduct one credit per player and queue USE event for portal sync
     for (int i = 0; i < s->spielerCount; i++) {
         for (int j = 0; j < MAX_PORTAL_SPIELER; j++) {
             if (s->kreditPlayerIds[j] == s->spieler[i].id) {
                 s->kredite[j].verbraucht++;
+                store_queue_kredit_event(s->spieler[i].id, "USE", 1);
                 break;
             }
         }
@@ -206,9 +210,15 @@ bool store_start_spiel(void)
     s->ergebnisseCount = 0;
     for (int i = 0; i < s->spielerCount; i++) s->spieler[i].punkte = 0;
 
-    // Generate game ID (timestamp-based)
-    struct timeval tv; gettimeofday(&tv, NULL);
-    snprintf(s->spielId, sizeof(s->spielId), "%lld", (long long)tv.tv_sec);
+    // Generate game UUID — random, globally unique, idempotent for portal sync
+    {
+        uint32_t r1 = esp_random(), r2 = esp_random(),
+                 r3 = esp_random(), r4 = esp_random();
+        snprintf(s->spielId, sizeof(s->spielId),
+                 "%08x-%04x-%04x-%04x-%04x%08x",
+                 (unsigned)r1, (unsigned)(r2 >> 16), (unsigned)(r2 & 0xFFFFu),
+                 (unsigned)(r3 >> 16), (unsigned)(r3 & 0xFFFFu), (unsigned)r4);
+    }
 
     s->screen = SCREEN_SPIEL;
     game_store_save();
@@ -340,7 +350,16 @@ static void _store_finish_game(void)
     fg.spieler_count = s->spielerCount;
 
     struct timeval tv; gettimeofday(&tv, NULL);
-    snprintf(fg.finishedAt, sizeof(fg.finishedAt), "%lld", (long long)tv.tv_sec);
+    {
+        time_t now = tv.tv_sec;
+        struct tm tmi;
+        gmtime_r(&now, &tmi);
+        strftime(fg.base.datum, sizeof(fg.base.datum), "%Y-%m-%d", &tmi);
+        snprintf(fg.finishedAt, sizeof(fg.finishedAt),
+                 "%04d-%02d-%02dT%02d:%02d:%02d.000Z",
+                 tmi.tm_year + 1900, tmi.tm_mon + 1, tmi.tm_mday,
+                 tmi.tm_hour, tmi.tm_min, tmi.tm_sec);
+    }
     strncpy(fg.base.externalId, s->spielId, sizeof(fg.base.externalId) - 1);
     fg.base.externalId[sizeof(fg.base.externalId) - 1] = '\0';
 
@@ -494,6 +513,26 @@ void store_add_lokal_spieler(const char *name, int *out_id)
 }
 
 // ── Player update queue ──────────────────────────────────────
+void store_queue_kredit_event(int spieler_id, const char *typ, int anzahl)
+{
+    if (anzahl == 0) return;
+    if (g_store.pendingKreditEventCount >= MAX_KREDIT_EVENTS) {
+        ESP_LOGW(TAG, "Kredit event queue full — dropping event for player %d", spieler_id);
+        return;
+    }
+    KreditEvent *ev = &g_store.pendingKreditEvents[g_store.pendingKreditEventCount++];
+    snprintf(ev->externalId, sizeof(ev->externalId),
+             "kre-%d-%08x", spieler_id, (unsigned)esp_random());
+    ev->spielerId = spieler_id;
+    ev->anzahl    = anzahl;
+    strncpy(ev->typ, typ, sizeof(ev->typ) - 1);
+    ev->typ[sizeof(ev->typ) - 1] = '\0';
+    struct timeval tv; gettimeofday(&tv, NULL);
+    time_t now = tv.tv_sec;
+    struct tm tmi; gmtime_r(&now, &tmi);
+    strftime(ev->datum, sizeof(ev->datum), "%Y-%m-%d", &tmi);
+}
+
 void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv)
 {
     if (g_store.spielerUpdateCount >= MAX_SPIELER_UPDATES) {
