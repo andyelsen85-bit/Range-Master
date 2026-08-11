@@ -124,8 +124,12 @@ static esp_err_t es8311_dac_init(void)
     // ── PA enable (if wired) ──────────────────────────────────
 #if defined(I2S_PA_PIN) && I2S_PA_PIN >= 0
     gpio_config_t pa = {
-        .pin_bit_mask = (1ULL << I2S_PA_PIN),
-        .mode         = GPIO_MODE_OUTPUT,
+        .pin_bit_mask  = (1ULL << I2S_PA_PIN),
+        .mode          = GPIO_MODE_OUTPUT,
+        .pull_up_en    = GPIO_PULLUP_DISABLE,
+        .pull_down_en  = GPIO_PULLDOWN_DISABLE,
+        .intr_type     = GPIO_INTR_DISABLE,
+        .hys_ctrl_mode = GPIO_HYS_SOFT_ENABLE,
     };
     gpio_config(&pa);
     gpio_set_level((gpio_num_t)I2S_PA_PIN, 1);
