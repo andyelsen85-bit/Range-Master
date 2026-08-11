@@ -140,7 +140,7 @@ typedef struct {
 
 typedef struct {
     PendingGame base;
-    char        finishedAt[24];  // ISO timestamp
+    char        finishedAt[32];  // ISO datetime "YYYY-MM-DDTHH:MM:SS.000Z\0" + headroom
     char        spielerNamen[MAX_SPIELER][MAX_NAME_LEN];
     int         spielerIds[MAX_SPIELER]; // to map Namen
     int         spieler_count;
