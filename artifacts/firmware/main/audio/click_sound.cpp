@@ -49,26 +49,41 @@ static int16_t           s_pcm[CLICK_SAMPLES * 2];
 static bool              s_ready    = false;
 
 // ── ES8311 I²C helpers ────────────────────────────────────────
+// Resolved at probe time; ES8311 ADDR pin low → 0x18, high → 0x19.
+static uint8_t s_es8311_addr = ES8311_I2C_ADDR;
+
 // Write one ES8311 register; uses the legacy I²C driver already
 // initialised by gsl3680_touch_init().
 static esp_err_t es8311_write(uint8_t reg, uint8_t val)
 {
     uint8_t buf[2] = { reg, val };
     return i2c_master_write_to_device(
-               TOUCH_I2C_PORT, ES8311_I2C_ADDR,
+               TOUCH_I2C_PORT, s_es8311_addr,
                buf, sizeof(buf),
                pdMS_TO_TICKS(100));
 }
 
-// Probe ES8311 by attempting a zero-byte write.
+// Probe ES8311 by reading one byte from candidate addresses.
+// A zero-byte write is unreliable with the legacy I²C driver (some IDF
+// versions do not place the address on the bus when data_len == 0).
+// A 1-byte read forces a full start + address + read cycle.
+// Try 0x18 (ADDR pin low) then 0x19 (ADDR pin high).
 static bool es8311_probe(void)
 {
-    uint8_t dummy = 0x00;
-    esp_err_t r = i2c_master_write_to_device(
-                      TOUCH_I2C_PORT, ES8311_I2C_ADDR,
-                      &dummy, 0,
-                      pdMS_TO_TICKS(50));
-    return (r == ESP_OK);
+    static const uint8_t candidates[] = { 0x18, 0x19 };
+    for (uint8_t addr : candidates) {
+        uint8_t dummy;
+        esp_err_t r = i2c_master_read_from_device(
+                          TOUCH_I2C_PORT, addr,
+                          &dummy, 1,
+                          pdMS_TO_TICKS(50));
+        if (r == ESP_OK) {
+            s_es8311_addr = addr;
+            ESP_LOGI("click", "ES8311 found at I²C addr 0x%02X", addr);
+            return true;
+        }
+    }
+    return false;
 }
 
 // ── ES8311 DAC initialisation ────────────────────────────────

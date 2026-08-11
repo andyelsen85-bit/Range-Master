@@ -481,7 +481,12 @@ void store_create_workers(void)
     }, "load_spieler_w", 8192, NULL, 5, NULL,
        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
-    // Sync worker
+    // Sync worker — stack MUST be in internal RAM.
+    // NVS (called from game_store_save inside the sync path) writes to SPI
+    // flash, which requires disabling the cache.  If the task stack is in
+    // PSRAM the cache-disable assert fires immediately (esp_task_stack_is_sane_
+    // cache_disabled).  Use MALLOC_CAP_INTERNAL so the stack survives the
+    // cache-off window.
     s_sync_queue = xQueueCreate(1, sizeof(uint32_t));
     xTaskCreateWithCaps([](void *arg) {
         uint32_t dummy;
@@ -494,8 +499,8 @@ void store_create_workers(void)
                          "HTTP sync failed: %s", esp_err_to_name(err));
             }
         }
-    }, "sync_w", 12288, NULL, 5, NULL,
-       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }, "sync_w", 16384, NULL, 5, NULL,
+       MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 
     ESP_LOGI(TAG, "Store workers created. Internal RAM remaining: %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
