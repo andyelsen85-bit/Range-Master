@@ -31,10 +31,13 @@ static void show_detail(int idx)
     snprintf(hdr, sizeof(hdr), "%s  |  %d SPILLER",
              modus_label(fg->base.modus), fg->spieler_count);
     lv_label_set_text(s_detail_hdr, hdr);
-    {   // Format "YYYY-MM-DDTHH:MM:SS.000Z" → "YYYY-MM-DD HH:MM"
+    {   // Format "YYYY-MM-DDTHH:MM:SS.000Z" → "DD.MM.YYYY HH:MM"
         char ts_disp[18] = {};
-        strncpy(ts_disp, fg->finishedAt, 16);
-        if (ts_disp[10] == 'T') ts_disp[10] = ' ';
+        int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0;
+        if (fg->finishedAt[0] &&
+            sscanf(fg->finishedAt, "%d-%d-%dT%d:%d", &yr, &mo, &dy, &hr, &mn) == 5)
+            snprintf(ts_disp, sizeof(ts_disp), "%02d.%02d.%04d %02d:%02d",
+                     dy, mo, yr, hr, mn);
         lv_label_set_text(s_detail_date, ts_disp[0] ? ts_disp : "-");
     }
 
@@ -112,10 +115,13 @@ static void build_history_rows(void)
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         lv_obj_t *ts_lbl = lv_label_create(btn);
-        {   // Format "YYYY-MM-DDTHH:MM:SS.000Z" → "YYYY-MM-DD HH:MM"
+        {   // Format "YYYY-MM-DDTHH:MM:SS.000Z" → "DD.MM.YYYY HH:MM"
             char ts_disp[18] = {};
-            strncpy(ts_disp, fg->finishedAt, 16);
-            if (ts_disp[10] == 'T') ts_disp[10] = ' ';
+            int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0;
+            if (fg->finishedAt[0] &&
+                sscanf(fg->finishedAt, "%d-%d-%dT%d:%d", &yr, &mo, &dy, &hr, &mn) == 5)
+                snprintf(ts_disp, sizeof(ts_disp), "%02d.%02d.%04d %02d:%02d",
+                         dy, mo, yr, hr, mn);
             lv_label_set_text(ts_lbl, ts_disp[0] ? ts_disp : "-");
         }
         lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_12, 0);
