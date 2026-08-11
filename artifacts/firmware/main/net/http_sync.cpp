@@ -21,6 +21,55 @@ static const char *TAG = "http_sync";
 
 #define HTTP_BUF_SIZE  (32 * 1024)
 
+// ── UTF-8 → display-safe ASCII ────────────────────────────────
+// Replaces accented / umlaut characters (ä ö ü é à è …) with
+// uppercase ASCII equivalents the Montserrat font can render.
+// German umlauts follow the standard ae/oe/ue expansion.
+static void utf8_to_display(char *dst, const char *src, size_t dst_max)
+{
+    size_t di = 0;
+    const unsigned char *s = (const unsigned char *)src;
+    while (*s && di + 1 < dst_max) {
+        unsigned char c = *s;
+        if (c < 0x80) {
+            // Plain ASCII — pass through as-is
+            dst[di++] = (char)c;
+            s++;
+        } else if (c == 0xC3 && s[1]) {
+            // Latin-1 Supplement block (U+00C0–U+00FF)
+            unsigned char n = s[1];
+            const char *rep = NULL;
+            if      (n == 0x84 || n == 0xA4) rep = "AE"; // Ä / ä
+            else if (n == 0x96 || n == 0xB6) rep = "OE"; // Ö / ö
+            else if (n == 0x9C || n == 0xBC) rep = "UE"; // Ü / ü
+            else if (n == 0x9F)              rep = "SS"; // ß
+            else if (n==0x80||n==0xA0||n==0x81||n==0xA1||
+                     n==0x82||n==0xA2||n==0x83||n==0xA3) rep = "A"; // À Á Â Ã
+            else if (n == 0x87 || n == 0xA7)             rep = "C"; // Ç / ç
+            else if (n==0x88||n==0xA8||n==0x89||n==0xA9||
+                     n==0x8A||n==0xAA||n==0x8B||n==0xAB) rep = "E"; // È É Ê Ë
+            else if (n==0x8C||n==0xAC||n==0x8D||n==0xAD||
+                     n==0x8E||n==0xAE||n==0x8F||n==0xAF) rep = "I"; // Ì Í Î Ï
+            else if (n == 0x91 || n == 0xB1)             rep = "N"; // Ñ / ñ
+            else if (n==0x92||n==0xB2||n==0x93||n==0xB3||
+                     n==0x94||n==0xB4||n==0x95||n==0xB5) rep = "O"; // Ò Ó Ô Õ
+            else if (n==0x99||n==0xB9||n==0x9A||n==0xBA||
+                     n==0x9B||n==0xBB)                   rep = "U"; // Ù Ú Û
+            s += 2;
+            if (rep) {
+                for (int i = 0; rep[i] && di + 1 < dst_max; i++)
+                    dst[di++] = rep[i];
+            }
+        } else {
+            // Skip any other multibyte sequence
+            if      (c < 0xE0) s += 2;
+            else if (c < 0xF0) s += 3;
+            else               s += 4;
+        }
+    }
+    dst[di] = '\0';
+}
+
 // ── HTTP response accumulator ─────────────────────────────────
 typedef struct {
     char  *buf;
@@ -255,8 +304,7 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
 
         if (jid   && cJSON_IsNumber(jid))   ps->id = (int)jid->valuedouble;
         if (jname && cJSON_IsString(jname)) {
-            strncpy(ps->name, jname->valuestring, MAX_NAME_LEN - 1);
-            ps->name[MAX_NAME_LEN - 1] = '\0';
+            utf8_to_display(ps->name, jname->valuestring, MAX_NAME_LEN);
         }
         if (jnr && cJSON_IsString(jnr)) {
             strncpy(ps->mitgliedNr, jnr->valuestring, sizeof(ps->mitgliedNr) - 1);
@@ -280,21 +328,87 @@ esp_err_t http_fetch_spielhistorie(void)
     char *resp = (char *)malloc(HTTP_BUF_SIZE);
     if (!resp) return ESP_ERR_NO_MEM;
 
-    char path[80];
-    snprintf(path, sizeof(path), "/api/sync/spiele?limit=50");
-    esp_err_t err = http_get_json(path, resp, HTTP_BUF_SIZE);
+    esp_err_t err = http_get_json("/api/sync/spiele?limit=20", resp, HTTP_BUF_SIZE);
     if (err != ESP_OK) { free(resp); return err; }
 
-    // Parse and update history (simplified: log count)
     cJSON *root = cJSON_Parse(resp);
     free(resp);
     if (!root) return ESP_ERR_INVALID_RESPONSE;
 
     cJSON *arr = cJSON_GetObjectItem(root, "spiele");
-    if (!arr) arr = root;
-    int n = cJSON_GetArraySize(arr);
-    ESP_LOGI(TAG, "Fetched %d games from portal", n);
+    if (!arr || !cJSON_IsArray(arr)) arr = root;
+
+    int count = 0;
+    cJSON *item;
+    cJSON_ArrayForEach(item, arr) {
+        if (count >= MAX_HISTORY) break;
+        FinishedGame *fg = &g_store.history[count];
+        memset(fg, 0, sizeof(*fg));
+
+        cJSON *jext   = cJSON_GetObjectItem(item, "externalId");
+        cJSON *jdatum = cJSON_GetObjectItem(item, "datum");
+        cJSON *jmodus = cJSON_GetObjectItem(item, "modus");
+        cJSON *jlauf  = cJSON_GetObjectItem(item, "lauf");
+        cJSON *jtpl   = cJSON_GetObjectItem(item, "taubenProLauf");
+        cJSON *jdone  = cJSON_GetObjectItem(item, "abgeschlossen");
+
+        if (jext   && cJSON_IsString(jext))
+            strncpy(fg->base.externalId, jext->valuestring, sizeof(fg->base.externalId) - 1);
+        if (jdatum && cJSON_IsString(jdatum)) {
+            // Full ISO timestamp for finishedAt; date-only prefix for base.datum
+            strncpy(fg->finishedAt, jdatum->valuestring, sizeof(fg->finishedAt) - 1);
+            strncpy(fg->base.datum, jdatum->valuestring, 10);
+            fg->base.datum[10] = '\0';
+        }
+        if (jmodus && cJSON_IsString(jmodus)) {
+            const char *ms = jmodus->valuestring;
+            if      (strcmp(ms, "NORMAL")   == 0) fg->base.modus = MODUS_NORMAL;
+            else if (strcmp(ms, "CUSTOM_1") == 0) fg->base.modus = MODUS_CUSTOM_1;
+            else if (strcmp(ms, "CUSTOM_2") == 0) fg->base.modus = MODUS_CUSTOM_2;
+            else if (strcmp(ms, "CUSTOM_3") == 0) fg->base.modus = MODUS_CUSTOM_3;
+            else if (strcmp(ms, "CUSTOM_4") == 0) fg->base.modus = MODUS_CUSTOM_4;
+        }
+        if (jlauf && cJSON_IsNumber(jlauf))  fg->base.lauf          = (int)jlauf->valuedouble;
+        if (jtpl  && cJSON_IsNumber(jtpl))   fg->base.taubenProLauf = (int)jtpl->valuedouble;
+        if (jdone && cJSON_IsBool(jdone))    fg->base.abgeschlossen = cJSON_IsTrue(jdone);
+
+        // Teilnahmen array
+        cJSON *jt = cJSON_GetObjectItem(item, "teilnahmen");
+        if (jt && cJSON_IsArray(jt)) {
+            cJSON *t;
+            cJSON_ArrayForEach(t, jt) {
+                if (fg->base.teilnahmen_count >= MAX_SPIELER) break;
+                int ti = fg->base.teilnahmen_count++;
+                cJSON *jsid = cJSON_GetObjectItem(t, "spielerId");
+                cJSON *jsp  = cJSON_GetObjectItem(t, "startPosten");
+                cJSON *jpkt = cJSON_GetObjectItem(t, "punkte");
+                cJSON *jla  = cJSON_GetObjectItem(t, "lauf");
+                if (jsid) fg->base.teilnahmen[ti].spielerId   = (int)jsid->valuedouble;
+                if (jsp)  fg->base.teilnahmen[ti].startPosten = (int)jsp->valuedouble;
+                if (jpkt) fg->base.teilnahmen[ti].punkte      = (int)jpkt->valuedouble;
+                if (jla)  fg->base.teilnahmen[ti].lauf        = (int)jla->valuedouble;
+            }
+        }
+
+        // spielerNamen: { "123": "Max Mustermann", ... }  (keys = spielerId strings)
+        cJSON *jnamen = cJSON_GetObjectItem(item, "spielerNamen");
+        if (jnamen && cJSON_IsObject(jnamen)) {
+            cJSON *entry = jnamen->child;
+            while (entry && fg->spieler_count < MAX_SPIELER) {
+                int si = fg->spieler_count++;
+                fg->spielerIds[si] = atoi(entry->string);
+                if (cJSON_IsString(entry))
+                    utf8_to_display(fg->spielerNamen[si], entry->valuestring, MAX_NAME_LEN);
+                entry = entry->next;
+            }
+        }
+
+        count++;
+    }
+
+    g_store.historyCount = count;
     cJSON_Delete(root);
+    ESP_LOGI(TAG, "Fetched %d games from portal into history", count);
     return ESP_OK;
 }
 

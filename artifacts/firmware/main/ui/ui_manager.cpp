@@ -182,6 +182,7 @@ void ui_manager_tick(void)
     switch (s_current) {
         case SCREEN_SPIEL:      screen_spiel_tick();      break;
         case SCREEN_DASHBOARD:  screen_dashboard_tick();  break;
+        case SCREEN_SPILLER:    screen_spiller_tick();    break;
         default: break;
     }
 }

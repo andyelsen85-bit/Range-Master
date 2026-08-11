@@ -297,6 +297,8 @@ void coprocessor_autoconnect(void)
             ESP_LOGI("autoconnect", "Attempt %d/3: SSID='%s'", attempt, g_store.wifiSsid);
             esp_err_t err = cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
             if (err == ESP_OK) {
+                // Mark connected in the store so the dashboard tick picks it up
+                g_store.wifiConnected = true;
                 ESP_LOGI("autoconnect", "Connected. IP: %s", g_store.wifiIp);
                 vTaskDelete(NULL);
                 return;

@@ -647,3 +647,32 @@ void screen_spiller_refresh(void)
     build_list();
     update_pending_badge();
 }
+
+void screen_spiller_tick(void)
+{
+    if (!s_lbl_status) return;
+    // Mirror g_store.syncStatus into the header label; only repaint on change
+    static SyncStatus s_last = (SyncStatus)-1;
+    SyncStatus cur = g_store.syncStatus;
+    if (cur == s_last) return;
+    s_last = cur;
+
+    switch (cur) {
+        case SYNC_RUNNING:
+            lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH "  SYNC LUEFT...");
+            lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
+            break;
+        case SYNC_SUCCESS:
+            lv_label_set_text(s_lbl_status, LV_SYMBOL_OK "  SYNC OK");
+            lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
+            build_list();   // refresh player list with updated portal data
+            break;
+        case SYNC_ERROR:
+            lv_label_set_text(s_lbl_status, LV_SYMBOL_WARNING "  SYNC FEELER");
+            lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+            break;
+        default:
+            lv_label_set_text(s_lbl_status, "");
+            break;
+    }
+}
