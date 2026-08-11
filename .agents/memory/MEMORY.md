@@ -1,3 +1,4 @@
+- [ES8311 audio codec](es8311-audio.md) — board has ES8311 on I2C 0x18/I2C_NUM_0; I2S pins GPIO13/12/11/5 (unconfirmed); legacy I2C driver shared with touch
 - [ADC init order vs SDIO](adc-before-sdio-kills-wifi.md) — adc_oneshot_new_unit() releases pad holds set by esp_hosted; init ADC only after coprocessor_init()
 - [SPIRAM internal RAM exhaustion](spiram-internal-ram-exhaustion.md) — ALWAYSINTERNAL=512 drains internal RAM via small LVGL/FreeRTOS/esp_hosted mallocs; fix: set to 0
 - [PPA rotation for LVGL](ppa-rotation.md) — esp_driver_ppa exists in IDF 5.3.x; rotation_angle is CCW (CW-90 ⇒ ANGLE_270); driver does cache sync itself
