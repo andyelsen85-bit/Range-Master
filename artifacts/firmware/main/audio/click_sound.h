@@ -20,11 +20,11 @@ extern "C" {
 // Call once after gsl3680_touch_init() (I2C already up).
 void click_sound_init(void);
 
-// Install a thin LVGL theme wrapper that fires click_sound_play_if_enabled()
-// on LV_EVENT_PRESSED for every new clickable-but-not-scrollable object
-// (buttons, toggles — not scroll containers).
+// Attach an LV_EVENT_PRESSED handler to the touch indev so
+// click_sound_play_if_enabled() is called whenever LVGL registers a
+// press on any object (buttons, toggles, etc.).
 // Must be called AFTER click_sound_init() and BEFORE ui_manager_init().
-void click_sound_setup_lvgl_hook(lv_display_t *disp);
+void click_sound_setup_lvgl_hook(lv_indev_t *indev);
 
 // Queue a single click beep if g_store.clickSoundEnabled is true.
 // Non-blocking; safe to call from any task or LVGL callback.

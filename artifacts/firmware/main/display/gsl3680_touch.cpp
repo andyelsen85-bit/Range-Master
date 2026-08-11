@@ -260,4 +260,5 @@ void gsl3680_touch_init(lv_display_t *disp)
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, gsl3680_read_cb);
     lv_indev_set_display(indev, disp);
+    return indev;   // caller can attach event hooks (e.g. click sound)
 }

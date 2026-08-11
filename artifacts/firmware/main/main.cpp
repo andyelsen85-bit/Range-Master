@@ -230,13 +230,13 @@ static void lvgl_task(void *arg)
              DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
 
     // ── 4. Touch ──────────────────────────────────────────────
-    gsl3680_touch_init(disp);
+    lv_indev_t *touch_indev = gsl3680_touch_init(disp);
 
     // ── 4b. Click-sound — must come after touch (I²C already set up) ──
     click_sound_init();
-    // Install LVGL theme hook BEFORE ui_manager_init so every button
-    // created during screen construction gets the PRESSED handler.
-    click_sound_setup_lvgl_hook(disp);
+    // Attach PRESSED hook to the touch indev so the click plays on
+    // real LVGL button presses, not on every raw touch sample.
+    click_sound_setup_lvgl_hook(touch_indev);
 
     // ── 5. UI screens ─────────────────────────────────────────
     ui_manager_init();   // builds all screens, shows SCREEN_DASHBOARD

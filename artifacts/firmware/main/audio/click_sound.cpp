@@ -263,34 +263,15 @@ void click_sound_play_if_enabled(void)
 }
 
 // ── LVGL button-press hook ────────────────────────────────────
-// Applied via a thin theme wrapper so every new clickable-but-not-
-// scrollable object (buttons, toggles) gets a PRESSED handler
-// automatically — no per-screen wiring needed.
+// Registers an LV_EVENT_PRESSED callback on the touch indev.
+// LVGL fires this event on the indev whenever it registers a press
+// on an active object — buttons, toggles, etc. — so the click plays
+// on real UI interactions rather than on every raw touch sample.
 
-static void click_theme_apply(lv_theme_t *th, lv_obj_t *obj)
+void click_sound_setup_lvgl_hook(lv_indev_t *indev)
 {
-    // Chain to the parent theme first (preserve any existing styling)
-    lv_theme_t *parent = th->parent;
-    if (parent && parent->apply_cb) parent->apply_cb(parent, obj);
-
-    // Attach only to proper buttons: clickable AND not a scroll container.
-    // lv_btn_create() → clickable=true,  scrollable=false  → sound fires.
-    // lv_obj_create() → clickable=true,  scrollable=true   → scroll panels, no sound.
-    if (lv_obj_has_flag(obj, LV_OBJ_FLAG_CLICKABLE) &&
-        !lv_obj_has_flag(obj, LV_OBJ_FLAG_SCROLLABLE)) {
-        lv_obj_add_event_cb(obj, [](lv_event_t *) {
-            click_sound_play_if_enabled();
-        }, LV_EVENT_PRESSED, NULL);
-    }
-}
-
-static lv_theme_t s_click_theme;
-
-void click_sound_setup_lvgl_hook(lv_display_t *disp)
-{
-    lv_memzero(&s_click_theme, sizeof(s_click_theme));
-    s_click_theme.apply_cb = click_theme_apply;
-    s_click_theme.parent   = lv_display_get_theme(disp); // preserve any existing theme
-    lv_display_set_theme(disp, &s_click_theme);
-    ESP_LOGI(TAG, "LVGL button-press hook installed");
+    lv_indev_add_event_cb(indev, [](lv_event_t *) {
+        click_sound_play_if_enabled();
+    }, LV_EVENT_PRESSED, NULL);
+    ESP_LOGI(TAG, "LVGL indev PRESSED hook installed");
 }
