@@ -9,6 +9,7 @@
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_einstellungen.h"
+#include "click_sound.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_tab_view;
@@ -466,12 +467,40 @@ static lv_obj_t *build_bt_tab(lv_obj_t *parent)
 }
 
 // ── Tab: System ───────────────────────────────────────────────
+// Toggle callback for click-sound switch
+static void click_sound_sw_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    g_store.clickSoundEnabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    game_store_save();
+}
+
 static lv_obj_t *build_system_tab(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 16, 0);
     lv_obj_set_style_pad_row(parent, 8, 0);
 
+    // ── Click-sound toggle ────────────────────────────────────
+    lv_obj_t *snd_row = lv_obj_create(parent);
+    lv_obj_set_size(snd_row, LV_PCT(100), 48);
+    lv_obj_set_style_bg_color(snd_row, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_border_width(snd_row, 0, 0);
+    lv_obj_set_style_radius(snd_row, 8, 0);
+    lv_obj_set_style_pad_hor(snd_row, 12, 0);
+    lv_obj_set_flex_flow(snd_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(snd_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *snd_lbl = lv_label_create(snd_row);
+    lv_label_set_text(snd_lbl, LV_SYMBOL_VOLUME_MAX "  KLICK-SOUND");
+    lv_obj_set_style_text_font(snd_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(snd_lbl, lv_color_hex(CLR_TEXT), 0);
+
+    lv_obj_t *snd_sw = lv_switch_create(snd_row);
+    if (g_store.clickSoundEnabled) lv_obj_add_state(snd_sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(snd_sw, click_sound_sw_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // ── Firmware / board info ─────────────────────────────────
     static const char *info_rows[] = {
         "FIRMWARE: " APP_VERSION,
         "BOARD: GUITION JC8012P4A1C-I-W-Y",

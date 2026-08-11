@@ -209,6 +209,9 @@ typedef struct {
     // WiFi state
     bool    wifiConnected;
     char    wifiIp[16];
+
+    // UI preferences
+    bool    clickSoundEnabled;   // touch-feedback beep via ES8311
 } GameStore;
 
 // ── Global store instance ────────────────────────────────────

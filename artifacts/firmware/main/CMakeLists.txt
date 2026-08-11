@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.cpp"
+        "audio/click_sound.cpp"
         "display/jd9365_panel.cpp"
         "display/gsl3680_touch.cpp"
         "store/game_store.cpp"
@@ -21,6 +22,7 @@ idf_component_register(
         "net/web_config.cpp"
     INCLUDE_DIRS
         "."
+        "audio"
         "display"
         "store"
         "net"
@@ -29,6 +31,7 @@ idf_component_register(
     REQUIRES
         esp_lcd
         esp_driver_ppa
+        esp_driver_i2s
         esp_lvgl_port
         lvgl
         driver

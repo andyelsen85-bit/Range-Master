@@ -18,6 +18,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "click_sound.h"
 #include "nvs_flash.h"
 #include "driver/ledc.h"
 #include "driver/gpio.h"
@@ -230,6 +231,9 @@ static void lvgl_task(void *arg)
 
     // ── 4. Touch ──────────────────────────────────────────────
     gsl3680_touch_init(disp);
+
+    // ── 4b. Click-sound — must come after touch (I²C already set up) ──
+    click_sound_init();
 
     // ── 5. UI screens ─────────────────────────────────────────
     ui_manager_init();   // builds all screens, shows SCREEN_DASHBOARD

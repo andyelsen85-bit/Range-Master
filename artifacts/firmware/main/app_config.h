@@ -68,6 +68,30 @@
 #define DEFAULT_API_URL         "https://rangemaster.hostzone.lu"
 #define DEFAULT_API_KEY         "dcf29da936f9756c0d11bbbb58b3bdc610b384a5ba3841a692eb4b6c351c966a"
 
+// ── ES8311 Audio Codec ──────────────────────────────────────
+// The ES8311 shares the GSL3680 I²C bus (I2C_NUM_0 / GPIO7 / GPIO8).
+// I²C address: 0x18 when ADDR pin is LOW (most boards), 0x19 when HIGH.
+#define ES8311_I2C_ADDR         0x18
+
+// ⚠  VERIFY these I²S GPIO numbers against your board schematic!
+//    They are best-guess values for the JC8012P4A1C.
+//    If you get no sound, check the PCB silkscreen near the ES8311 chip
+//    and connector CN3, or compare with the Guition schematic PDF.
+//
+//    Currently assigned (none conflict with display/touch/SDIO/BL pins):
+//      GPIO13 — I²S MCLK  (master clock to ES8311)
+//      GPIO12 — I²S BCLK  (bit clock)
+//      GPIO11 — I²S WS    (word-select / LRCLK)
+//      GPIO5  — I²S DOUT  (data out from ESP32 → ES8311 DAC input)
+//
+//    PA enable pin: set to -1 if the amplifier has no shutdown GPIO,
+//    or to the GPIO number if it does.
+#define I2S_MCLK_PIN            GPIO_NUM_13
+#define I2S_BCLK_PIN            GPIO_NUM_12
+#define I2S_WS_PIN              GPIO_NUM_11
+#define I2S_DOUT_PIN            GPIO_NUM_5
+#define I2S_PA_PIN              (-1)    // set to GPIO number if amp has EN pin
+
 // ── Misc ────────────────────────────────────────────────────
 #define APP_VERSION             "1.0.0-phase1"
 #define CLUB_NAME               "F.S.H.C.L. SEKTIOUN WOLZ"

@@ -602,6 +602,7 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "wifi_ssid", g_store.wifiSsid);
     nvs_set_str(s_nvs, "wifi_pass", g_store.wifiPass);
     nvs_set_i32(s_nvs, "modus", (int32_t)g_store.modus);
+    nvs_set_i32(s_nvs, "click_snd", g_store.clickSoundEnabled ? 1 : 0);
     nvs_commit(s_nvs);
 }
 
@@ -633,6 +634,12 @@ void game_store_init(void)
     int32_t modus = 0;
     if (nvs_get_i32(s_nvs, "modus", &modus) == ESP_OK)
         g_store.modus = (Modus)modus;
+
+    int32_t click_snd = 1;  // default ON
+    if (nvs_get_i32(s_nvs, "click_snd", &click_snd) == ESP_OK)
+        g_store.clickSoundEnabled = (click_snd != 0);
+    else
+        g_store.clickSoundEnabled = true;  // first boot — enable by default
 
     ESP_LOGI(TAG, "Store initialised. API: %s modus: %s",
              g_store.apiUrl, modus_label(g_store.modus));
