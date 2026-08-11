@@ -3,10 +3,36 @@
 // ============================================================
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "lvgl.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_geschichte.h"
+
+// Convert a UTC ISO timestamp "YYYY-MM-DDTHH:MM:SS.000Z" to a
+// local-time display string "DD.MM.YYYY HH:MM" using the TZ
+// environment variable already set by coprocessor (CET-1CEST).
+// dst must be at least 18 bytes; written as "" on parse failure.
+static void fmt_local_time(const char *iso_utc, char *dst, size_t dst_len)
+{
+    dst[0] = '\0';
+    if (!iso_utc || !iso_utc[0]) return;
+    struct tm tmu = {};
+    int sc = 0;
+    if (sscanf(iso_utc, "%d-%d-%dT%d:%d:%d",
+               &tmu.tm_year, &tmu.tm_mon, &tmu.tm_mday,
+               &tmu.tm_hour, &tmu.tm_min, &sc) < 5) return;
+    tmu.tm_year -= 1900;
+    tmu.tm_mon  -= 1;
+    tmu.tm_sec   = sc;
+    tmu.tm_isdst = 0;
+    time_t t = timegm(&tmu);          // UTC components → time_t
+    struct tm tml;
+    localtime_r(&t, &tml);            // time_t → local (CET/CEST via TZ env)
+    snprintf(dst, dst_len, "%02d.%02d.%04d %02d:%02d",
+             tml.tm_mday, tml.tm_mon + 1, tml.tm_year + 1900,
+             tml.tm_hour, tml.tm_min);
+}
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_list;
@@ -31,13 +57,9 @@ static void show_detail(int idx)
     snprintf(hdr, sizeof(hdr), "%s  |  %d SPILLER",
              modus_label(fg->base.modus), fg->spieler_count);
     lv_label_set_text(s_detail_hdr, hdr);
-    {   // Format "YYYY-MM-DDTHH:MM:SS.000Z" → "DD.MM.YYYY HH:MM"
-        char ts_disp[18] = {};
-        int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0;
-        if (fg->finishedAt[0] &&
-            sscanf(fg->finishedAt, "%d-%d-%dT%d:%d", &yr, &mo, &dy, &hr, &mn) == 5)
-            snprintf(ts_disp, sizeof(ts_disp), "%02d.%02d.%04d %02d:%02d",
-                     dy, mo, yr, hr, mn);
+    {   // UTC → local time (CET/CEST), formatted as "DD.MM.YYYY HH:MM"
+        char ts_disp[18];
+        fmt_local_time(fg->finishedAt, ts_disp, sizeof(ts_disp));
         lv_label_set_text(s_detail_date, ts_disp[0] ? ts_disp : "-");
     }
 
@@ -115,13 +137,9 @@ static void build_history_rows(void)
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         lv_obj_t *ts_lbl = lv_label_create(btn);
-        {   // Format "YYYY-MM-DDTHH:MM:SS.000Z" → "DD.MM.YYYY HH:MM"
-            char ts_disp[18] = {};
-            int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0;
-            if (fg->finishedAt[0] &&
-                sscanf(fg->finishedAt, "%d-%d-%dT%d:%d", &yr, &mo, &dy, &hr, &mn) == 5)
-                snprintf(ts_disp, sizeof(ts_disp), "%02d.%02d.%04d %02d:%02d",
-                         dy, mo, yr, hr, mn);
+        {   // UTC → local time (CET/CEST), formatted as "DD.MM.YYYY HH:MM"
+            char ts_disp[18];
+            fmt_local_time(fg->finishedAt, ts_disp, sizeof(ts_disp));
             lv_label_set_text(ts_lbl, ts_disp[0] ? ts_disp : "-");
         }
         lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_12, 0);
