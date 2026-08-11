@@ -203,7 +203,7 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 }
 
 // ── Public init ──────────────────────────────────────────────
-void gsl3680_touch_init(lv_display_t *disp)
+lv_indev_t *gsl3680_touch_init(lv_display_t *disp)
 {
     ESP_LOGI(TAG, "Initialising GSL3680 touch on I²C%d SCL=%d SDA=%d",
              TOUCH_I2C_PORT, TOUCH_I2C_SCL, TOUCH_I2C_SDA);
