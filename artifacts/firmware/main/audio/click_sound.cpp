@@ -178,11 +178,14 @@ static void click_task(void *arg)
     uint8_t cmd;
     while (1) {
         if (xQueueReceive(s_play_q, &cmd, portMAX_DELAY) == pdTRUE && s_ready) {
+            ESP_LOGI(TAG, "click_task: writing %u bytes to I2S", (unsigned)sizeof(s_pcm));
             size_t written = 0;
-            i2s_channel_write(s_tx_chan,
+            esp_err_t err = i2s_channel_write(s_tx_chan,
                               s_pcm, sizeof(s_pcm),
                               &written,
                               pdMS_TO_TICKS(200));
+            ESP_LOGI(TAG, "click_task: done — err=%d written=%u/%u",
+                     err, (unsigned)written, (unsigned)sizeof(s_pcm));
         }
     }
 }
@@ -252,6 +255,8 @@ void click_sound_init(void)
 
 void click_sound_play_if_enabled(void)
 {
+    ESP_LOGI(TAG, "play_if_enabled: ready=%d enabled=%d",
+             (int)s_ready, (int)g_store.clickSoundEnabled);
     if (!s_ready || !g_store.clickSoundEnabled) return;
     uint8_t cmd = 1;
     // xQueueOverwrite: if a click is already queued, replace it

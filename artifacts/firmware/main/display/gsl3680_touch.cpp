@@ -202,6 +202,7 @@ static void gsl3680_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     // Fire click sound on the first frame of each new finger-down event.
     static lv_indev_state_t s_prev = LV_INDEV_STATE_RELEASED;
     if (data->state == LV_INDEV_STATE_PRESSED && s_prev == LV_INDEV_STATE_RELEASED) {
+        ESP_LOGI(TAG, "touch DOWN → queuing click");
         click_sound_play_if_enabled();
     }
     s_prev = data->state;
