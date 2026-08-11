@@ -7,6 +7,7 @@
 // ============================================================
 #include <stdio.h>
 #include <string.h>
+#include "ui_time_fmt.h"
 #include "lvgl.h"
 #include "esp_log.h"
 #include "ui_manager.h"
@@ -311,10 +312,21 @@ void screen_dashboard_refresh(void)
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
     } else {
-        int start = g_store.historyCount - 5;
-        if (start < 0) start = 0;
-        for (int i = g_store.historyCount - 1; i >= start; i--) {
-            const FinishedGame *fg = &g_store.history[i];
+        // Sort indices newest-first by finishedAt (ISO strings compare chronologically)
+        int idx[MAX_HISTORY];
+        int n = g_store.historyCount;
+        for (int i = 0; i < n; i++) idx[i] = i;
+        for (int i = 1; i < n; i++) {
+            int key = idx[i], j = i - 1;
+            while (j >= 0 && strcmp(g_store.history[idx[j]].finishedAt,
+                                     g_store.history[key].finishedAt) < 0) {
+                idx[j + 1] = idx[j]; j--;
+            }
+            idx[j + 1] = key;
+        }
+        int show = n < 5 ? n : 5;
+        for (int ii = 0; ii < show; ii++) {
+            const FinishedGame *fg = &g_store.history[idx[ii]];
 
             // Find winner name
             int best_pts = -1, best_id = -1;
@@ -343,9 +355,10 @@ void screen_dashboard_refresh(void)
                                   LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
             lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
-            char ts[32]; snprintf(ts, sizeof(ts), "%s", fg->finishedAt);
+            char ts[18];
+            fmt_local_time(fg->finishedAt, ts, sizeof(ts));
             lv_obj_t *ts_lbl = lv_label_create(row);
-            lv_label_set_text(ts_lbl, ts);
+            lv_label_set_text(ts_lbl, ts[0] ? ts : "-");
             lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_14, 0);
             lv_obj_set_style_text_color(ts_lbl, lv_color_hex(CLR_MUTED), 0);
             lv_obj_set_width(ts_lbl, 180);

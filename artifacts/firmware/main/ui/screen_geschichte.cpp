@@ -3,52 +3,11 @@
 // ============================================================
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 #include "lvgl.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_geschichte.h"
-
-// Portable UTC struct tm → time_t (timegm equivalent).
-// timegm is not in ESP-IDF newlib, so we compute it manually.
-static time_t utc_mktime(int year, int mon, int mday, int hour, int min, int sec)
-{
-    static const int mdays[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
-    // Days from 1970-01-01 to start of requested year
-    int y = year - 1970;
-    time_t t = (time_t)y * 365 * 86400;
-    // Leap days between 1970 and year-1
-    int ly = year - 1;
-    int leaps = (ly/4 - ly/100 + ly/400) - (1969/4 - 1969/100 + 1969/400);
-    t += (time_t)leaps * 86400;
-    // Days for full months this year
-    int is_leap = ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0);
-    for (int m = 0; m < mon - 1; m++) {
-        t += (time_t)mdays[m] * 86400;
-        if (m == 1 && is_leap) t += 86400;
-    }
-    t += (time_t)(mday - 1) * 86400;
-    t += (time_t)hour * 3600 + min * 60 + sec;
-    return t;
-}
-
-// Convert a UTC ISO timestamp "YYYY-MM-DDTHH:MM:SS.000Z" to a
-// local-time display string "DD.MM.YYYY HH:MM" using the TZ
-// environment variable already set by coprocessor (CET-1CEST).
-// dst must be at least 18 bytes; written as "" on parse failure.
-static void fmt_local_time(const char *iso_utc, char *dst, size_t dst_len)
-{
-    dst[0] = '\0';
-    if (!iso_utc || !iso_utc[0]) return;
-    int yr, mo, dy, hr, mn, sc = 0;
-    if (sscanf(iso_utc, "%d-%d-%dT%d:%d:%d", &yr, &mo, &dy, &hr, &mn, &sc) < 5) return;
-    time_t t = utc_mktime(yr, mo, dy, hr, mn, sc);
-    struct tm tml;
-    localtime_r(&t, &tml);            // time_t → local (CET/CEST via TZ env)
-    snprintf(dst, dst_len, "%02d.%02d.%04d %02d:%02d",
-             tml.tm_mday, tml.tm_mon + 1, tml.tm_year + 1900,
-             tml.tm_hour, tml.tm_min);
-}
+#include "ui_time_fmt.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_list;
@@ -119,8 +78,21 @@ static void build_history_rows(void)
         return;
     }
 
-    for (int i = g_store.historyCount - 1; i >= 0; i--) {
-        const FinishedGame *fg = &g_store.history[i];
+    // Sort indices newest-first by finishedAt (ISO strings compare chronologically)
+    int idx[MAX_HISTORY];
+    int n = g_store.historyCount;
+    for (int i = 0; i < n; i++) idx[i] = i;
+    for (int i = 1; i < n; i++) {
+        int key = idx[i], j = i - 1;
+        while (j >= 0 && strcmp(g_store.history[idx[j]].finishedAt,
+                                 g_store.history[key].finishedAt) < 0) {
+            idx[j + 1] = idx[j]; j--;
+        }
+        idx[j + 1] = key;
+    }
+
+    for (int ii = 0; ii < n; ii++) {
+        const FinishedGame *fg = &g_store.history[idx[ii]];
 
         // Find winner
         int best_pts = -1, best_id = -1;
@@ -183,11 +155,11 @@ static void build_history_rows(void)
         lv_obj_set_style_text_font(p_lbl, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(p_lbl, lv_color_hex(CLR_MUTED), 0);
 
-        // Click handler — pass game index (absolute index in history array)
+        // Click handler — pass absolute history index so show_detail() finds the right game
         lv_obj_add_event_cb(btn, [](lv_event_t *ev) {
             int hist_idx = (int)(intptr_t)lv_event_get_user_data(ev);
             show_detail(hist_idx);
-        }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+        }, LV_EVENT_CLICKED, (void*)(intptr_t)idx[ii]);
     }
 }
 
