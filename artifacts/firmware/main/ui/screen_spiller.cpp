@@ -22,6 +22,8 @@ static lv_obj_t *s_placeholder;
 static lv_obj_t *s_edit_form;
 static lv_obj_t *s_aktiv_btn;
 static lv_obj_t *s_lbl_aktiv;
+static lv_obj_t *s_day_btn;
+static lv_obj_t *s_lbl_day;
 static lv_obj_t *s_lbl_status;
 static lv_obj_t *s_lbl_edit_status;
 static lv_obj_t *s_lbl_pending;
@@ -36,6 +38,7 @@ static void build_list(void);
 static void open_edit(int pidx);
 static void close_edit(void);
 static void update_aktiv_btn(void);
+static void update_day_btn(void);
 static void update_pending_badge(void);
 
 // ── Case-insensitive substring search ────────────────────────
@@ -56,6 +59,14 @@ static bool str_icontains(const char *hay, const char *needle)
             if (h != n) { match = false; break; }
         }
         if (match) return true;
+    }
+    return false;
+}
+
+static bool player_is_registered_for_day(int spieler_id)
+{
+    for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
+        if (g_store.kreditPlayerIds[i] == spieler_id) return true;
     }
     return false;
 }
@@ -117,6 +128,32 @@ static void aktiv_toggle_cb(lv_event_t *e)
     update_aktiv_btn();
 }
 
+static void add_day_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_selected_pidx < 0 ||
+        s_selected_pidx >= g_store.portalSpielerCount) return;
+
+    PortalSpieler *ps = &g_store.portalSpieler[s_selected_pidx];
+    if (player_is_registered_for_day(ps->id)) {
+        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  SCHON SPILLER VUM DAAG");
+        lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_MUTED), 0);
+        update_day_btn();
+        return;
+    }
+
+    store_register_spieler_fuer_tag(ps->id);
+    if (player_is_registered_for_day(ps->id)) {
+        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  SPILLER VUM DAAG DOBÄIGESAT");
+        lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_SUCCESS), 0);
+    } else {
+        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_WARNING "  SPILLER-VUM-DAAG-LËSCHT ASS VOLL");
+        lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_DANGER), 0);
+    }
+    update_day_btn();
+    build_list();
+}
+
 static void reload_cb(lv_event_t *e)
 {
     store_sync();
@@ -153,6 +190,25 @@ static void update_aktiv_btn(void)
     lv_obj_set_style_bg_opa(s_aktiv_btn, LV_OPA_COVER, 0);
     lv_label_set_text(s_lbl_aktiv,
         s_edit_aktiv ? LV_SYMBOL_OK "  PORTAL AKTIV" : "PORTAL INAKTIV");
+}
+
+static void update_day_btn(void)
+{
+    if (!s_day_btn || !s_lbl_day) return;
+
+    bool registered = false;
+    if (s_selected_pidx >= 0 &&
+        s_selected_pidx < g_store.portalSpielerCount) {
+        registered = player_is_registered_for_day(
+            g_store.portalSpieler[s_selected_pidx].id);
+    }
+
+    lv_obj_set_style_bg_color(s_day_btn,
+        registered ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_PRIMARY), 0);
+    lv_obj_set_style_bg_opa(s_day_btn, LV_OPA_COVER, 0);
+    lv_label_set_text(s_lbl_day,
+        registered ? LV_SYMBOL_OK "  SPILLER VUM DAAG" :
+                     "+  SPILLER VUM DAAG");
 }
 
 // ── Helper: update pending badge in header ────────────────────
@@ -234,6 +290,13 @@ static void build_list(void)
         lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(name_lbl, LV_PCT(100));
 
+        if (player_is_registered_for_day(ps->id)) {
+            lv_obj_t *day_lbl = lv_label_create(info);
+            lv_label_set_text(day_lbl, LV_SYMBOL_OK "  SPILLER VUM DAAG");
+            lv_obj_set_style_text_font(day_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(day_lbl, lv_color_hex(CLR_SUCCESS), 0);
+        }
+
         // Member number (optional second line)
         if (ps->mitgliedNr[0]) {
             lv_obj_t *nr_lbl = lv_label_create(info);
@@ -290,6 +353,7 @@ static void open_edit(int pidx)
     lv_textarea_set_text(s_ta_email, ps->email);   // populated after sync
     s_edit_aktiv = ps->portalAktiv;
     update_aktiv_btn();
+    update_day_btn();
     lv_label_set_text(s_lbl_edit_status, "");
 
     lv_obj_add_flag(s_placeholder, LV_OBJ_FLAG_HIDDEN);
@@ -300,6 +364,7 @@ static void open_edit(int pidx)
 static void close_edit(void)
 {
     s_selected_pidx = -1;
+    update_day_btn();
     lv_obj_clear_flag(s_placeholder, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_edit_form, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
@@ -511,6 +576,18 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_center(s_lbl_aktiv);
     update_aktiv_btn();
 
+    // Add to today's player list (credits are granted separately on Kreditter)
+    s_day_btn = lv_btn_create(s_edit_form);
+    lv_obj_set_size(s_day_btn, LV_PCT(100), 44);
+    lv_obj_set_style_radius(s_day_btn, 8, 0);
+    lv_obj_set_style_border_width(s_day_btn, 0, 0);
+    lv_obj_add_event_cb(s_day_btn, add_day_cb, LV_EVENT_CLICKED, NULL);
+    s_lbl_day = lv_label_create(s_day_btn);
+    lv_obj_set_style_text_font(s_lbl_day, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_lbl_day, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(s_lbl_day);
+    update_day_btn();
+
     // Action buttons row (Save + Pwd Reset)
     lv_obj_t *act_row = lv_obj_create(s_edit_form);
     lv_obj_set_size(act_row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -577,7 +654,8 @@ lv_obj_t *screen_spiller_create(void)
     // Search textarea
     s_ta_search = lv_textarea_create(right_panel);
     lv_obj_set_size(s_ta_search, LV_PCT(100), 50);
-    lv_textarea_set_placeholder_text(s_ta_search, LV_SYMBOL_LIST "  Spiller sichen...");
+    lv_textarea_set_placeholder_text(s_ta_search,
+        LV_SYMBOL_LIST "  Spiller sichen (Numm oder Member-Nr.)...");
     lv_textarea_set_one_line(s_ta_search, true);
     lv_obj_set_style_text_font(s_ta_search, &lv_font_montserrat_16, 0);
     lv_obj_set_style_bg_color(s_ta_search, lv_color_hex(CLR_CARD), 0);
