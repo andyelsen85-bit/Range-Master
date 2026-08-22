@@ -16,8 +16,15 @@
 #if __has_include("TrapMasterGateway.local.h")
 #include "TrapMasterGateway.local.h"
 #endif
+#if __has_include("../lora-common/trapmaster_protocol.h")
 #include "../lora-common/trapmaster_protocol.h"
 #include "../lora-common/trapmaster_auth.h"
+#elif __has_include("../../lora-common/trapmaster_protocol.h")
+#include "../../lora-common/trapmaster_protocol.h"
+#include "../../lora-common/trapmaster_auth.h"
+#else
+#error "Could not locate the shared TrapMaster LoRa headers"
+#endif
 
 #ifndef TM_GATEWAY_AUTH_KEY
 #error "Define TM_GATEWAY_AUTH_KEY to a private terminal-to-gateway HMAC key before compiling"

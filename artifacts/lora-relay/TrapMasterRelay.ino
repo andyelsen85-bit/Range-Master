@@ -10,7 +10,15 @@
 #if __has_include("TrapMasterRelay.local.h")
 #include "TrapMasterRelay.local.h"
 #endif
+#if __has_include("../lora-common/trapmaster_protocol.h")
 #include "../lora-common/trapmaster_protocol.h"
+#include "../lora-common/trapmaster_auth.h"
+#elif __has_include("../../lora-common/trapmaster_protocol.h")
+#include "../../lora-common/trapmaster_protocol.h"
+#include "../../lora-common/trapmaster_auth.h"
+#else
+#error "Could not locate the shared TrapMaster LoRa headers"
+#endif
 
 #define RF_FREQUENCY               433000000
 #define TX_OUTPUT_POWER            14
