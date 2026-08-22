@@ -48,8 +48,8 @@ static bool bench_interlock_asserted()
 }
 #endif
 
-// Uses OLED constants supplied by the selected Heltec board package.
-SSD1306Wire display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_64_32, RST_OLED);
+// The Heltec library owns the board's global `display` object. Reuse it here;
+// defining another object with the same name causes a linker collision.
 WebServer server(80);
 WiFiManager wifiManager;
 Preferences preferences;
