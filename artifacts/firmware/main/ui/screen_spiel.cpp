@@ -20,6 +20,7 @@ static lv_obj_t *s_lbl_active_post;   // active shooter: current post  "P3"
 static lv_obj_t *s_lbl_active_pts;    // active shooter: points
 static lv_obj_t *s_btn_wiederhole;
 static lv_obj_t *s_lbl_modus;
+static lv_obj_t *s_lbl_fire_status;
 static lv_obj_t *s_score_table;
 
 // ── Score button callbacks ────────────────────────────────────
@@ -224,6 +225,11 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_text_font(s_lbl_active_pts, &lv_font_montserrat_36, 0);
     lv_obj_set_style_text_color(s_lbl_active_pts, lv_color_hex(CLR_PRIMARY), 0);
 
+    s_lbl_fire_status = lv_label_create(right);
+    lv_label_set_text(s_lbl_fire_status, "Gateway: -");
+    lv_obj_set_style_text_font(s_lbl_fire_status, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_lbl_fire_status, lv_color_hex(CLR_MUTED), 0);
+
     // ── 4. Score table header
     lv_obj_t *sc_hdr = lv_label_create(right);
     lv_label_set_text(sc_hdr, "PUNKTESTAND");
@@ -253,6 +259,11 @@ void screen_spiel_refresh(void)
 {
     if (!s_lbl_maschine) return;
     GameStore *s = &g_store;
+    if (s_lbl_fire_status) {
+        char fire_status[112];
+        snprintf(fire_status, sizeof(fire_status), "Gateway: %s", lora_status_text());
+        lv_label_set_text(s_lbl_fire_status, fire_status);
+    }
 
     // ── Compute current sequenz entry state ───────────────
     bool isHMaschine = false;
@@ -399,5 +410,11 @@ void screen_spiel_refresh(void)
 
 void screen_spiel_tick(void)
 {
-    // Nothing needed - score buttons call refresh directly
+    // The gateway worker completes asynchronously. Refresh periodically so the
+    // operator sees the final success/failure rather than only "Sending...".
+    static uint32_t last = 0;
+    if (lv_tick_get() - last > 250) {
+        last = lv_tick_get();
+        screen_spiel_refresh();
+    }
 }

@@ -166,8 +166,6 @@ static esp_err_t save_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
     body[received] = '\0';
-    ESP_LOGI(TAG, "POST /save body: %s", body);
-
     char new_url[MAX_URL_LEN] = {};
     char new_key[MAX_KEY_LEN] = {};
     extract_field(body, "apiUrl=", new_url, sizeof(new_url));
@@ -189,7 +187,6 @@ static esp_err_t save_post_handler(httpd_req_t *req)
         changed = true;
         ESP_LOGI(TAG, "API Key updated (length %d)", (int)strlen(g_store.apiKey));
     }
-
     if (changed) game_store_save();
 
     // Redirect back to GET / with a success banner injected via query param.

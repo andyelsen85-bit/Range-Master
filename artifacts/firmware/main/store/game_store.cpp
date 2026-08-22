@@ -652,6 +652,9 @@ void game_store_save(void)
     // For phase 1 we store the essentials.
     nvs_set_str(s_nvs, "api_url", g_store.apiUrl);
     nvs_set_str(s_nvs, "api_key", g_store.apiKey);
+    nvs_set_str(s_nvs, "gateway_url", g_store.gatewayUrl);
+    nvs_set_str(s_nvs, "gateway_token", g_store.gatewayToken);
+    nvs_set_u32(s_nvs, "gateway_seq", g_store.gatewaySequence);
     nvs_set_str(s_nvs, "wifi_ssid", g_store.wifiSsid);
     nvs_set_str(s_nvs, "wifi_pass", g_store.wifiPass);
     nvs_set_i32(s_nvs, "modus", (int32_t)g_store.modus);
@@ -676,6 +679,9 @@ void game_store_init(void)
     // Load persisted values
     nvs_load_str("api_url",   g_store.apiUrl,   MAX_URL_LEN);
     nvs_load_str("api_key",   g_store.apiKey,   MAX_KEY_LEN);
+    nvs_load_str("gateway_url", g_store.gatewayUrl, MAX_URL_LEN);
+    nvs_load_str("gateway_token", g_store.gatewayToken, MAX_KEY_LEN);
+    nvs_get_u32(s_nvs, "gateway_seq", &g_store.gatewaySequence);
     // NVS may have stored an empty string from a previous flash — restore default
     if (g_store.apiKey[0] == '\0')
         snprintf(g_store.apiKey, MAX_KEY_LEN, "%s", DEFAULT_API_KEY);

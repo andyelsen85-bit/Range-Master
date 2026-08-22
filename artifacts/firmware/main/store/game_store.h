@@ -154,6 +154,9 @@ typedef struct {
     bool    maschinenAktiv[MASCHINE_COUNT];
     char    apiUrl[MAX_URL_LEN];
     char    apiKey[MAX_KEY_LEN];
+    char    gatewayUrl[MAX_URL_LEN]; // local TrapMaster gateway, e.g. http://192.168.1.50
+    char    gatewayToken[MAX_KEY_LEN]; // private HMAC key for the local gateway
+    uint32_t gatewaySequence; // persisted, strictly increasing gateway command sequence
     char    wifiSsid[TM_MAX_SSID_LEN];
     char    wifiPass[MAX_PASS_LEN];
     Maschine customSequenzen[4][16]; // CUSTOM_1..4 up to 16 machines each

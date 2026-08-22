@@ -66,9 +66,30 @@ main/
     screen_wifi.c/h
     screen_bluetooth.c/h
   lora_stub/
-    lora_stub.c/h       — UART placeholder for phase-2 LoRa module
+    lora_stub.c/h       — persistent HTTP worker for the local LoRa gateway
 ```
 
-## Phase 2 (task #49)
-Add LoRa machine control — replace the stub in `lora_stub/` with real
-SX1276/RFM95 driver to fire clay machines A–H wirelessly.
+## Local LoRa gateway
+
+The terminal does **not** contain or wire a LoRa radio. When a machine fires, the
+game screen queues a short HTTP request to the configured local gateway URL. The
+persistent worker keeps all network I/O off the LVGL task and retries at most twice.
+
+Set **TrapMaster Gateway URL** in Einstellungen to the IP shown on the gateway OLED,
+for example `http://192.168.1.50`, and set **TrapMaster Gateway Auth Key** to the matching
+private HMAC key used to build the gateway. The key is never sent over HTTP. An empty or
+invalid URL/key shows an explicit gateway error on the active game screen instead of
+silently doing nothing. Each fire uses a persisted, authenticated sequence, so captured
+requests are rejected and a WiFi retry never creates a second trap pulse.
+
+For safety, the gateway URL and authentication key are intentionally available only on
+the terminal's physical Einstellungen screen; they are never displayed or accepted by
+the terminal's LAN configuration page.
+
+The corresponding Heltec Wireless Stick V3 sketches are in:
+
+- `artifacts/lora-gateway/` — WiFiManager setup, HTTP API, SX1262 TX, OLED status
+- `artifacts/lora-relay/` — WiFi-free authenticated receiver and relay pulse
+- `artifacts/lora-common/` — AES-128-GCM frame, authentication, nonce, and replay format
+
+Read their hardware and safety checklists before connecting a relay to a trap.

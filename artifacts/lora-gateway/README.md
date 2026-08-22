@@ -1,0 +1,70 @@
+# TrapMaster LoRa Gateway
+
+Firmware for a **Heltec Wireless Stick V3** acting as the WiFi-to-LoRa gateway.
+It is intentionally separate from the ESP32-P4 terminal: the terminal sends local
+HTTP requests and the gateway owns the SX1262 radio.
+
+## Before first flash
+
+1. Install the official **Heltec ESP32 Dev-Boards** Arduino package/library and select
+   **Wireless Stick V3**. The sketches use `LoRaWan_APP.h`, which supplies the board's
+   built-in SX1262 pin mapping. Do not add manually guessed radio SPI/DIO pins.
+2. Define `TM_PROTOCOL_KEY_BYTES` as the same unique 16-byte AES key for the gateway
+   and every relay. A normal build deliberately fails until this value is provided.
+   `TM_ALLOW_INSECURE_BENCH_KEY` is available only for a disconnected bench test.
+3. Define `TM_GATEWAY_AUTH_KEY` as a long, unique HMAC key (at least 16 characters).
+   Set the identical value in the terminal's **TrapMaster Gateway Auth Key** setting.
+   The key is never sent over HTTP; the gateway deliberately fails to compile without it.
+4. Confirm that 433 MHz operation, chosen channel, output power, duty cycle, and
+   antenna use are permitted at the installation location.
+5. Connect the board over USB-C and flash `TrapMasterGateway.ino`.
+
+## Setup and use
+
+- First boot opens `TrapMaster-Gateway-Setup`; use a phone to select venue WiFi.
+- Hold the USER button during boot for about 1.5 seconds to erase saved WiFi and open
+  setup again.
+- The OLED shows the connected IP, last machine, and radio result.
+- Set the terminal's **TrapMaster Gateway URL** to `http://<OLED-IP>`.
+- Set the terminal's **TrapMaster Gateway Auth Key** to the exact private
+  `TM_GATEWAY_AUTH_KEY` value used to build this sketch.
+
+Endpoints:
+
+```text
+GET /fire?machine=A&seq=0123ABCD  # X-TrapMaster-Auth HMAC header required
+GET /status             # uptime, IP/RSSI, last result, ACK state
+```
+
+`/fire` returns `200` only after an authenticated relay ACK, or `202` when the packet
+was transmitted but no ACK arrived. It returns an error when the request is invalid,
+the radio cannot transmit, the gateway is busy, or the HMAC is invalid. The terminal
+persists a strictly increasing command sequence, and each sequence is HMAC-authenticated
+with its target machine. The gateway stores the sequence before radio transmission:
+retries return the recorded result, old/captured requests are rejected, and a WiFi retry
+never pulses a trap a second time. If power was lost while a request was in progress,
+the gateway fails closed with `409` rather than re-sending it.
+
+## Staged hardware checklist
+
+1. Flash gateway only and confirm WiFi captive setup, OLED IP, `/status`, and that
+    malformed, stale, or incorrectly authenticated `/fire` requests are rejected.
+2. For the **radio-only bench stage**, compile both sketches with
+   `TM_ENABLE_UNENCRYPTED_BENCH_TEST` and define `TM_BENCH_INTERLOCK_GPIO` as a
+   verified local test-enable input on the gateway and relay. Keep the relay disconnected
+   from the trap. `/bench-fire?machine=A` only transmits while the gateway's physical
+   interlock is held low, and the relay only pulses while its own interlock is held low.
+   Rebuild both sketches *without* that flag before connecting a real trap.
+3. Flash one normal relay and, while disconnected from any trap, verify that a valid request
+   produces a serial `FIRE` line and an ACK on the gateway.
+4. Verify an altered ciphertext/tag and a repeated captured frame do not operate the
+   relay.
+5. Only then wire the relay's COM/NO dry contact to a verified trap trigger.
+
+## Counter recovery
+
+The gateway persists its transmit counter and each relay persists its last accepted
+counter. Never reset either counter while retaining the same AES key: doing so is
+intentionally fail-closed at the relay. For a coordinated device replacement or NVS
+reset, disconnect every trap, install a new AES key on the gateway and all relays,
+then perform the staged checklist again.

@@ -18,14 +18,20 @@ static lv_obj_t *s_kb;
 // ── Tab: Portal API ───────────────────────────────────────────
 static lv_obj_t *s_ta_url;
 static lv_obj_t *s_ta_key;
+static lv_obj_t *s_ta_gateway;
+static lv_obj_t *s_ta_gateway_token;
 static lv_obj_t *s_lbl_api_status;
 
 static void save_api_cb(lv_event_t *e)
 {
     const char *url = lv_textarea_get_text(s_ta_url);
     const char *key = lv_textarea_get_text(s_ta_key);
+    const char *gateway = lv_textarea_get_text(s_ta_gateway);
+    const char *gateway_token = lv_textarea_get_text(s_ta_gateway_token);
     strncpy(g_store.apiUrl, url, MAX_URL_LEN - 1); g_store.apiUrl[MAX_URL_LEN - 1] = '\0';
     strncpy(g_store.apiKey, key, MAX_KEY_LEN - 1); g_store.apiKey[MAX_KEY_LEN - 1] = '\0';
+    strncpy(g_store.gatewayUrl, gateway, MAX_URL_LEN - 1); g_store.gatewayUrl[MAX_URL_LEN - 1] = '\0';
+    strncpy(g_store.gatewayToken, gateway_token, MAX_KEY_LEN - 1); g_store.gatewayToken[MAX_KEY_LEN - 1] = '\0';
     game_store_save();
     lv_label_set_text(s_lbl_api_status, LV_SYMBOL_OK " GESPEICHERT");
     lv_obj_set_style_text_color(s_lbl_api_status, lv_color_hex(CLR_SUCCESS), 0);
@@ -63,6 +69,33 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_text_font(s_ta_key, &lv_font_montserrat_14, 0);
     lv_obj_set_style_bg_color(s_ta_key, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_key, lv_color_hex(CLR_TEXT), 0);
+
+    lv_obj_t *gateway_lbl = lv_label_create(parent);
+    lv_label_set_text(gateway_lbl, "TRAPMASTER GATEWAY URL");
+    lv_obj_set_style_text_font(gateway_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(gateway_lbl, lv_color_hex(CLR_TEXT), 0);
+
+    s_ta_gateway = lv_textarea_create(parent);
+    lv_obj_set_size(s_ta_gateway, LV_PCT(100), 50);
+    lv_textarea_set_text(s_ta_gateway, g_store.gatewayUrl);
+    lv_textarea_set_one_line(s_ta_gateway, true);
+    lv_obj_set_style_text_font(s_ta_gateway, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_bg_color(s_ta_gateway, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_text_color(s_ta_gateway, lv_color_hex(CLR_TEXT), 0);
+
+    lv_obj_t *gateway_token_lbl = lv_label_create(parent);
+    lv_label_set_text(gateway_token_lbl, "TRAPMASTER GATEWAY AUTH KEY");
+    lv_obj_set_style_text_font(gateway_token_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(gateway_token_lbl, lv_color_hex(CLR_TEXT), 0);
+
+    s_ta_gateway_token = lv_textarea_create(parent);
+    lv_obj_set_size(s_ta_gateway_token, LV_PCT(100), 50);
+    lv_textarea_set_text(s_ta_gateway_token, g_store.gatewayToken);
+    lv_textarea_set_one_line(s_ta_gateway_token, true);
+    lv_textarea_set_password_mode(s_ta_gateway_token, true);
+    lv_obj_set_style_text_font(s_ta_gateway_token, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_bg_color(s_ta_gateway_token, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_text_color(s_ta_gateway_token, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *save_btn = lv_btn_create(parent);
     lv_obj_add_style(save_btn, &g_style_btn_primary, 0);
@@ -620,6 +653,14 @@ lv_obj_t *screen_einstellungen_create(void)
         lv_keyboard_set_textarea(s_kb, s_ta_key);
         lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     }, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(s_ta_gateway, [](lv_event_t *e) {
+        lv_keyboard_set_textarea(s_kb, s_ta_gateway);
+        lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(s_ta_gateway_token, [](lv_event_t *e) {
+        lv_keyboard_set_textarea(s_kb, s_ta_gateway_token);
+        lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_FOCUSED, NULL);
 
     return s_scr;
 }
@@ -628,6 +669,8 @@ void screen_einstellungen_refresh(void)
 {
     if (s_ta_url) lv_textarea_set_text(s_ta_url, g_store.apiUrl);
     if (s_ta_key) lv_textarea_set_text(s_ta_key, g_store.apiKey);
+    if (s_ta_gateway) lv_textarea_set_text(s_ta_gateway, g_store.gatewayUrl);
+    if (s_ta_gateway_token) lv_textarea_set_text(s_ta_gateway_token, g_store.gatewayToken);
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         if (!s_mach_sw[m]) continue;
         if (g_store.maschinenAktiv[m])

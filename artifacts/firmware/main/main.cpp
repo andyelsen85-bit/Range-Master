@@ -280,7 +280,7 @@ extern "C" void app_main(void)
     // ── Auto-connect to last known WiFi (non-blocking task) ──
     coprocessor_autoconnect();
 
-    // ── LoRa stub (phase 3 placeholder) ───────────────────────
+    // ── Gateway fire worker (HTTP → local LoRa gateway) ───────
     lora_stub_init();
 
     // ── Display hardware init ─────────────────────────────────
