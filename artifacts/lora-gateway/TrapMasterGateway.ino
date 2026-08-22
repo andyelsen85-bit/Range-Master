@@ -55,8 +55,10 @@ static bool bench_interlock_asserted()
 }
 #endif
 
-// The Heltec library owns the board's global `display` object. Reuse it here;
-// defining another object with the same name causes a linker collision.
+// The installed Heltec package defines its own internal `display` symbol but
+// does not expose it in every board-header variant. Use a uniquely named
+// gateway object so both the library and this sketch link cleanly.
+SSD1306Wire gatewayDisplay(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_64_32, RST_OLED);
 WebServer server(80);
 WiFiManager wifiManager;
 Preferences preferences;
@@ -123,13 +125,13 @@ static bool persist_request(uint32_t sequence, char machine, RequestState state,
 
 static void renderStatus()
 {
-    display.clear();
-    display.setTextAlignment(TEXT_ALIGN_LEFT);
-    display.setFont(ArialMT_Plain_10);
-    display.drawString(0, 0, WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "WiFi setup");
-    display.drawString(0, 10, "FIRE " + lastMachine);
-    display.drawString(0, 20, lastResult);
-    display.display();
+    gatewayDisplay.clear();
+    gatewayDisplay.setTextAlignment(TEXT_ALIGN_LEFT);
+    gatewayDisplay.setFont(ArialMT_Plain_10);
+    gatewayDisplay.drawString(0, 0, WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "WiFi setup");
+    gatewayDisplay.drawString(0, 10, "FIRE " + lastMachine);
+    gatewayDisplay.drawString(0, 20, lastResult);
+    gatewayDisplay.display();
 }
 
 static void onTxDone()
@@ -360,7 +362,7 @@ void setup()
     pinMode(Vext, OUTPUT);
     digitalWrite(Vext, LOW); // OLED rail on (official Heltec behavior)
     delay(100);
-    display.init();
+    gatewayDisplay.init();
     renderStatus();
 
     if (shouldResetWifi()) wifiManager.resetSettings();
