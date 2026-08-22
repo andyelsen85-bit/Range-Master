@@ -28,9 +28,9 @@
 #define TM_MACHINE_ID 'A'
 #endif
 
-// Verified installation mapping: every relay module currently uses GPIO4.
-// Recheck the wiring before connecting a real trap; change this local setting
-// if the physical relay input is moved.
+// Planned test mapping: every relay module currently uses GPIO4. Verify the
+// actual wiring before connecting a real trap; change this local setting if
+// the physical relay input is moved.
 #ifndef TM_RELAY_GPIO
 #define TM_RELAY_GPIO 4
 #endif

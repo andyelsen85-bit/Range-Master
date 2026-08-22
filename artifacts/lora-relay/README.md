@@ -13,7 +13,8 @@ Copy `TrapMasterRelay.config.example.h` to `TrapMasterRelay.local.h` beside the
 sketch. The sketch automatically loads that local file when present. It is ignored by
 Git and must never be committed or shared.
 
-For the current installation, every relay uses the same verified output configuration:
+For the current test setup, every relay is configured with the same planned output
+mapping. Confirm the physical wiring before field use:
 
 ```cpp
 #define TM_RELAY_GPIO 4

@@ -15,6 +15,6 @@
 // A, B, C, D, E, F, G, or H.
 #define TM_MACHINE_ID 'A'
 
-// Current verified wiring for all machines.
+// Current planned test wiring for all machines. Verify before field use.
 #define TM_RELAY_GPIO 4
 #define TM_RELAY_ACTIVE_LEVEL LOW
