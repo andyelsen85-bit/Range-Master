@@ -7,6 +7,9 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include "LoRaWan_APP.h"
+#if __has_include("TrapMasterRelay.local.h")
+#include "TrapMasterRelay.local.h"
+#endif
 #include "../lora-common/trapmaster_protocol.h"
 
 #define RF_FREQUENCY               433000000
@@ -19,19 +22,21 @@
 #define LORA_FIX_LENGTH_PAYLOAD_ON false
 #define LORA_IQ_INVERSION_ON       false
 
-// Change this per flashed relay. Keep ASCII A through H.
+// Change this per flashed relay. Keep ASCII A through H. The same sketch is
+// flashed eight times with IDs A, B, C, D, E, F, G, and H.
 #ifndef TM_MACHINE_ID
 #define TM_MACHINE_ID 'A'
 #endif
 
-// Required hardware setting. Example build flag: -DTM_RELAY_GPIO=4
-// Do NOT add a default here: actual free output and relay wiring must be verified.
+// Verified installation mapping: every relay module currently uses GPIO4.
+// Recheck the wiring before connecting a real trap; change this local setting
+// if the physical relay input is moved.
 #ifndef TM_RELAY_GPIO
-#error "Define TM_RELAY_GPIO to the verified relay-control GPIO before building"
+#define TM_RELAY_GPIO 4
 #endif
 
 #ifndef TM_RELAY_ACTIVE_LEVEL
-#define TM_RELAY_ACTIVE_LEVEL LOW // standard low-level-trigger relay boards
+#define TM_RELAY_ACTIVE_LEVEL LOW // verified active-low relay modules
 #endif
 
 #ifndef TM_RELAY_PULSE_MS

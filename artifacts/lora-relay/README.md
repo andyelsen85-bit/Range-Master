@@ -7,6 +7,27 @@ WiFi code and never contacts the portal or internet.
 
 Before compiling `TrapMasterRelay.ino`:
 
+### Private configuration and machine assignment
+
+Copy `TrapMasterRelay.config.example.h` to `TrapMasterRelay.local.h` beside the
+sketch. The sketch automatically loads that local file when present. It is ignored by
+Git and must never be committed or shared.
+
+For the current installation, every relay uses the same verified output configuration:
+
+```cpp
+#define TM_RELAY_GPIO 4
+#define TM_RELAY_ACTIVE_LEVEL LOW
+```
+
+Flash the same sketch once for each receiver. Change only `TM_MACHINE_ID` in the local
+file before each upload:
+
+```text
+Machine A → 'A'    Machine B → 'B'    Machine C → 'C'    Machine D → 'D'
+Machine E → 'E'    Machine F → 'F'    Machine G → 'G'    Machine H → 'H'
+```
+
 1. Set `TM_MACHINE_ID` to the machine letter (`A` through `H`) for this relay.
 2. Define `TM_RELAY_GPIO` to the **verified** output pin used by your relay board.
    There is no default deliberately: the Wireless Stick V3 pinout and actual wiring

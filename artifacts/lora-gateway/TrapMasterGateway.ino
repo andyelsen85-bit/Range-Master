@@ -13,6 +13,9 @@
 #include <stdlib.h>
 #include "LoRaWan_APP.h"
 #include "HT_SSD1306Wire.h"
+#if __has_include("TrapMasterGateway.local.h")
+#include "TrapMasterGateway.local.h"
+#endif
 #include "../lora-common/trapmaster_protocol.h"
 #include "../lora-common/trapmaster_auth.h"
 
