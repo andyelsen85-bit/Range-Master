@@ -14,3 +14,4 @@
 - [esp-hosted Kconfig structure](esp-hosted-kconfig.md) — 2.12.12 pin symbols are nested (grep "^config" misses them); P4 Slot 1 defaults match this board; no pin overrides needed
 - [Nested Arduino include resolution](nested-arduino-includes.md) — Arduino resolves shared-header paths from the nested sketch directory when a wrapper includes a parent `.ino`
 - [Gateway worker concurrency](gateway-worker-concurrency.md) — terminal HTTP requests must snapshot settings at action time and synchronize worker results before LVGL reads them
+- [Gateway ACK validation](gateway-ack-validation.md) — authenticated terminal-to-relay FIRE/ACK path confirmed working on hardware
