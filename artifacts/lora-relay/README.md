@@ -5,13 +5,14 @@ WiFi code and never contacts the portal or internet.
 
 ## Required configuration
 
-Before compiling `TrapMasterRelay.ino`:
+Before compiling `TrapMasterRelay/TrapMasterRelay.ino`:
 
 ### Private configuration and machine assignment
 
-Copy `TrapMasterRelay.config.example.h` to `TrapMasterRelay.local.h` beside the
-sketch. The sketch automatically loads that local file when present. It is ignored by
-Git and must never be committed or shared.
+Copy `TrapMasterRelay/TrapMasterRelay.config.example.h` to
+`TrapMasterRelay/TrapMasterRelay.local.h` beside the sketch. The sketch automatically
+loads that local file when present. It is ignored by Git and must never be committed
+or shared.
 
 For a fresh setup from a GitHub clone, run this from the repository root instead:
 
@@ -32,8 +33,8 @@ mapping. Confirm the physical wiring before field use:
 #define TM_RELAY_ACTIVE_LEVEL LOW
 ```
 
-Flash the same sketch once for each receiver. Change only `TM_MACHINE_ID` in the local
-file before each upload:
+Flash the same sketch once for each receiver. Change only `TM_MACHINE_ID` in the
+nested local file before each upload:
 
 ```text
 Machine A → 'A'    Machine B → 'B'    Machine C → 'C'    Machine D → 'D'

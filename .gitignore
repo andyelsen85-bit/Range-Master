@@ -54,3 +54,5 @@ attached_assets/
 # Local TrapMaster provisioning values; never commit radio/authentication keys.
 /artifacts/lora-gateway/TrapMasterGateway.local.h
 /artifacts/lora-relay/TrapMasterRelay.local.h
+/artifacts/lora-gateway/TrapMasterGateway/TrapMasterGateway.local.h
+/artifacts/lora-relay/TrapMasterRelay/TrapMasterRelay.local.h

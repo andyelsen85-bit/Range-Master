@@ -6,8 +6,10 @@ set -euo pipefail
 
 umask 077
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-relay_config="$repo_root/artifacts/lora-relay/TrapMasterRelay.local.h"
-gateway_config="$repo_root/artifacts/lora-gateway/TrapMasterGateway.local.h"
+relay_dir="$repo_root/artifacts/lora-relay/TrapMasterRelay"
+gateway_dir="$repo_root/artifacts/lora-gateway/TrapMasterGateway"
+relay_config="$relay_dir/TrapMasterRelay.local.h"
+gateway_config="$gateway_dir/TrapMasterGateway.local.h"
 
 command -v openssl >/dev/null 2>&1 || {
     echo "Error: openssl is required to generate provisioning keys." >&2
@@ -20,6 +22,7 @@ if [[ -e "$relay_config" || -e "$gateway_config" ]]; then
     exit 1
 fi
 
+mkdir -p "$relay_dir" "$gateway_dir"
 aes_hex="$(openssl rand -hex 16)"
 hmac_key="$(openssl rand -hex 32)"
 aes_bytes="$(printf '%s' "$aes_hex" | sed 's/../0x&, /g; s/, $//')"

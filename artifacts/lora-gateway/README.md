@@ -8,10 +8,13 @@ HTTP requests and the gateway owns the SX1262 radio.
 
 ### Private configuration
 
-Copy `TrapMasterGateway.config.example.h` to `TrapMasterGateway.local.h` beside the
-sketch, then enter the private AES and terminal-to-gateway HMAC keys in that local
-file. The sketch automatically loads it when present. Local configuration files are
-ignored by Git and must never be committed or shared.
+The Arduino sketch is in the nested folder
+`TrapMasterGateway/TrapMasterGateway.ino`. Copy
+`TrapMasterGateway/TrapMasterGateway.config.example.h` to
+`TrapMasterGateway/TrapMasterGateway.local.h` beside the sketch, then enter the
+private AES and terminal-to-gateway HMAC keys in that local file. The sketch
+automatically loads it when present. Local configuration files are ignored by Git
+and must never be committed or shared.
 
 1. Install the official **Heltec ESP32 Dev-Boards** Arduino package/library and select
    **Wireless Stick V3**. The sketches use `LoRaWan_APP.h`, which supplies the board's
@@ -24,7 +27,8 @@ ignored by Git and must never be committed or shared.
    The key is never sent over HTTP; the gateway deliberately fails to compile without it.
 4. Confirm that 433 MHz operation, chosen channel, output power, duty cycle, and
    antenna use are permitted at the installation location.
-5. Connect the board over USB-C and flash `TrapMasterGateway.ino`.
+5. Connect the board over USB-C and flash
+   `TrapMasterGateway/TrapMasterGateway.ino`.
 
 ## Setup and use
 
