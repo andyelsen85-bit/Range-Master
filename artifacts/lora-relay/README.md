@@ -13,6 +13,17 @@ Copy `TrapMasterRelay.config.example.h` to `TrapMasterRelay.local.h` beside the
 sketch. The sketch automatically loads that local file when present. It is ignored by
 Git and must never be committed or shared.
 
+For a fresh setup from a GitHub clone, run this from the repository root instead:
+
+```bash
+bash artifacts/lora-relay/create-local-config.sh
+```
+
+The script uses OpenSSL to generate a new AES key and HMAC key locally, creates both
+ignored configuration files, and does not print the key values. Run it only once per
+gateway/relay group. The HMAC value can be read from the local gateway file and
+entered into the terminal's physical settings screen.
+
 For the current test setup, every relay is configured with the same planned output
 mapping. Confirm the physical wiring before field use:
 
