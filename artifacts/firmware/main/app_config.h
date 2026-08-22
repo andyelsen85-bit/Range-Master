@@ -93,5 +93,5 @@
 #define I2S_PA_PIN              GPIO_NUM_20  // BSP-verified: PA (amplifier) enable — must be high to get audio output
 
 // ── Misc ────────────────────────────────────────────────────
-#define APP_VERSION             "1.0.0-phase1"
+#define APP_VERSION             "1.1.0-lora-gateway"
 #define CLUB_NAME               "F.S.H.C.L. SEKTIOUN WOLZ"

@@ -1,6 +1,6 @@
 # TrapMaster ESP32-P4 Firmware
 
-ESP-IDF 5.4 + LVGL v9 firmware for the **Guition JC8012P4A1C-I-W-Y** clay-shooting terminal.
+ESP-IDF 5.3.x + LVGL v9 firmware for the **Guition JC8012P4A1C-I-W-Y** clay-shooting terminal.
 
 ## Hardware
 
@@ -30,7 +30,7 @@ ESP-IDF 5.4 + LVGL v9 firmware for the **Guition JC8012P4A1C-I-W-Y** clay-shooti
 ## Build
 
 ```bash
-# install ESP-IDF 5.4+
+# install ESP-IDF 5.3.x (5.3.5 recommended for this board)
 . $IDF_PATH/export.sh
 cd artifacts/firmware
 idf.py set-target esp32p4

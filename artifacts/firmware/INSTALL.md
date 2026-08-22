@@ -1,7 +1,7 @@
 # TrapMaster Terminal — Installatiounsguide
 
 **Hardware:** Guition JC8012P4A1C-I-W-Y (ESP32-P4 + ESP32-C6, 10.1″ 1280×800)  
-**Software:** ESP-IDF 5.3.x + LVGL v9
+**Software:** ESP-IDF 5.3.x (5.3.5 recommended) + LVGL v9
 
 ---
 
@@ -47,14 +47,14 @@ D'Guition-Board benotzt en **CP2102N** USB-Chip.
 
 ---
 
-### 1.3 ESP-IDF 5.4 installéieren
+### 1.3 ESP-IDF 5.3.5 installéieren
 
 #### Windows (einfachst Wee — Offline Installer)
 
-> ⚠️ **Wichteg:** Nëmmen **IDF 5.3.x** benotzen. IDF 5.4.x hänkt am MIPI-DSI-Init (bekannte Bug fir ECO2-Chips). IDF 5.5.x/6.x refuséiert ECO2 ganz.
+> ⚠️ **Wichteg:** Nëmmen **IDF 5.3.x** benotzen, idealerweis 5.3.5. IDF 5.4.x hänkt am MIPI-DSI-Init (bekannte Bug fir ECO2-Chips). IDF 5.5.x/6.x refuséiert ECO2 ganz.
 
 1. Öffne: https://dl.espressif.com/dl/esp-idf/
-2. Lued `ESP-IDF v5.3.x Windows Installer` erof (Sektioun **Previous Releases** falls néideg)
+2. Lued `ESP-IDF v5.3.5 Windows Installer` erof (Sektioun **Previous Releases** falls néideg)
 3. Installer starten → all Standardoptioune bäibehalen → **Finish**
 4. Um Desktop erschéngt `ESP-IDF 5.3 CMD` — benotze **dësen** fir all weider Commanden
 
@@ -62,7 +62,7 @@ D'Guition-Board benotzt en **CP2102N** USB-Chip.
 
 ```bash
 mkdir -p ~/esp && cd ~/esp
-git clone --branch v5.4 --depth 1 https://github.com/espressif/esp-idf.git
+git clone --branch v5.3.5 --depth 1 https://github.com/espressif/esp-idf.git
 cd esp-idf
 ./install.sh esp32p4
 . ./export.sh
@@ -78,7 +78,7 @@ cd esp-idf
 cd C:\Users\<Äre-Numm>        # Windows
 # oder:  cd ~                  # Mac/Linux
 
-git clone https://github.com/fshcl-sektioun-wolz/Range-Master.git
+git clone https://github.com/andyelsen85-bit/Range-Master.git
 cd Range-Master
 ```
 
@@ -88,7 +88,7 @@ cd Range-Master
 
 ## Deel 2 — Firmware bauen
 
-**Windows:** Öffne `ESP-IDF 5.4 CMD` (net de normalen CMD).  
+**Windows:** Öffne `ESP-IDF 5.3 CMD` (net de normalen CMD).
 **Mac/Linux:** Stell sécher datt `. ~/esp/esp-idf/export.sh` gelaf ass.
 
 ```bash
@@ -163,7 +163,7 @@ idf.py -p /dev/ttyUSB0 monitor   # Linux
 
 Dir sollt am Terminal gesinn:
 ```
-I (350) trapmaster: TrapMaster v1.0.0-phase1 — F.S.H.C.L. SEKTIOUN WOLZ
+I (350) trapmaster: TrapMaster v1.1.0-lora-gateway — F.S.H.C.L. SEKTIOUN WOLZ
 I (380) jd9365: MIPI-DSI panel init OK  (800x1280)
 I (410) gsl3680: Touch firmware uploaded, 26 fingers ready
 I (440) ui_manager: Showing DASHBOARD
