@@ -2,7 +2,7 @@
 // web_config — tiny HTTP config server (esp_http_server)
 //
 // Serves http://<terminal-ip>/ — a small dark-themed form
-// that lets an operator set the API URL and API key from any
+// that lets an operator set the API URL/key and gateway URL/key from any
 // browser on the local network.  No keyboard on the terminal
 // required.
 //
@@ -119,6 +119,14 @@ static const char HTML_FORM_MID[] =
     "<label>API Key</label>"
     "<input name=apiKey type=password value='";
 
+static const char HTML_FORM_GATEWAY[] =
+    "'>"
+    "<label>TrapMaster Gateway URL</label>"
+    "<input name=gatewayUrl type=text value='"
+    "' placeholder='http://192.168.1.50'>"
+    "<label>TrapMaster Gateway Key</label>"
+    "<input name=gatewayKey type=password value='";
+
 static const char HTML_FORM_END[] =
     "'>"
     "<button>&#128190;&nbsp; Speichern</button>"
@@ -142,6 +150,8 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, g_store.apiUrl);
     httpd_resp_sendstr_chunk(req, HTML_FORM_MID);
     httpd_resp_sendstr_chunk(req, g_store.apiKey);
+    httpd_resp_sendstr_chunk(req, HTML_FORM_GATEWAY);
+    httpd_resp_sendstr_chunk(req, g_store.gatewayUrl);
     httpd_resp_sendstr_chunk(req, HTML_FORM_END);
 
     httpd_resp_sendstr_chunk(req, NULL);  // end chunked response
@@ -168,8 +178,12 @@ static esp_err_t save_post_handler(httpd_req_t *req)
     body[received] = '\0';
     char new_url[MAX_URL_LEN] = {};
     char new_key[MAX_KEY_LEN] = {};
+    char new_gateway_url[MAX_URL_LEN] = {};
+    char new_gateway_key[MAX_KEY_LEN] = {};
     extract_field(body, "apiUrl=", new_url, sizeof(new_url));
     extract_field(body, "apiKey=", new_key, sizeof(new_key));
+    extract_field(body, "gatewayUrl=", new_gateway_url, sizeof(new_gateway_url));
+    extract_field(body, "gatewayKey=", new_gateway_key, sizeof(new_gateway_key));
 
     bool changed = false;
     if (new_url[0] != '\0' &&
@@ -186,6 +200,19 @@ static esp_err_t save_post_handler(httpd_req_t *req)
         g_store.apiKey[MAX_KEY_LEN - 1] = '\0';
         changed = true;
         ESP_LOGI(TAG, "API Key updated (length %d)", (int)strlen(g_store.apiKey));
+    }
+    if (strncmp(new_gateway_url, g_store.gatewayUrl, MAX_URL_LEN) != 0) {
+        strncpy(g_store.gatewayUrl, new_gateway_url, MAX_URL_LEN - 1);
+        g_store.gatewayUrl[MAX_URL_LEN - 1] = '\0';
+        changed = true;
+        ESP_LOGI(TAG, "Gateway URL updated: %s", g_store.gatewayUrl);
+    }
+    if (strncmp(new_gateway_key, g_store.gatewayToken, MAX_KEY_LEN) != 0) {
+        strncpy(g_store.gatewayToken, new_gateway_key, MAX_KEY_LEN - 1);
+        g_store.gatewayToken[MAX_KEY_LEN - 1] = '\0';
+        changed = true;
+        ESP_LOGI(TAG, "Gateway key updated (length %d)",
+                 (int)strlen(g_store.gatewayToken));
     }
     if (changed) game_store_save();
 

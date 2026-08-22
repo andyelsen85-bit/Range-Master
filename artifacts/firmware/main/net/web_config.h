@@ -3,7 +3,7 @@
 // web_config — tiny HTTP config server
 //
 // Serves a single-page form at http://<terminal-ip>/
-// so operators can set the API URL and API key from any
+// so operators can set the API URL/key and gateway URL/key from any
 // browser on the same network, without using the on-screen
 // keyboard.  Starts automatically when WiFi gets an IP;
 // stops on disconnect.
