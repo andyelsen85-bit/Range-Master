@@ -10,6 +10,7 @@
 #include "game_store.h"
 #include "screen_einstellungen.h"
 #include "click_sound.h"
+#include "lora_stub.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_tab_view;
@@ -21,8 +22,9 @@ static lv_obj_t *s_ta_key;
 static lv_obj_t *s_ta_gateway;
 static lv_obj_t *s_ta_gateway_token;
 static lv_obj_t *s_lbl_api_status;
+static bool s_gateway_check_pending;
 
-static void save_api_cb(lv_event_t *e)
+static void save_api_settings(void)
 {
     const char *url = lv_textarea_get_text(s_ta_url);
     const char *key = lv_textarea_get_text(s_ta_key);
@@ -33,8 +35,34 @@ static void save_api_cb(lv_event_t *e)
     strncpy(g_store.gatewayUrl, gateway, MAX_URL_LEN - 1); g_store.gatewayUrl[MAX_URL_LEN - 1] = '\0';
     strncpy(g_store.gatewayToken, gateway_token, MAX_KEY_LEN - 1); g_store.gatewayToken[MAX_KEY_LEN - 1] = '\0';
     game_store_save();
+}
+
+static void set_api_status(const char *text, uint32_t color)
+{
+    if (!s_lbl_api_status) return;
+    lv_label_set_text(s_lbl_api_status, text);
+    lv_obj_set_style_text_color(s_lbl_api_status, lv_color_hex(color), 0);
+}
+
+static void save_api_cb(lv_event_t *e)
+{
+    save_api_settings();
     lv_label_set_text(s_lbl_api_status, LV_SYMBOL_OK " GESPEICHERT");
     lv_obj_set_style_text_color(s_lbl_api_status, lv_color_hex(CLR_SUCCESS), 0);
+}
+
+static void gateway_test_cb(lv_event_t *e)
+{
+    // Test the values currently visible to the operator, not stale saved data.
+    save_api_settings();
+    if (lora_gateway_check()) {
+        s_gateway_check_pending = true;
+        set_api_status("GATEWAY GËTT GEPRÉIFT...", CLR_WARN);
+    } else {
+        char status[96];
+        lora_copy_status_text(status, sizeof(status));
+        set_api_status(status, CLR_DANGER);
+    }
 }
 
 static lv_obj_t *build_api_tab(lv_obj_t *parent)
@@ -97,14 +125,32 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_bg_color(s_ta_gateway_token, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_gateway_token, lv_color_hex(CLR_TEXT), 0);
 
-    lv_obj_t *save_btn = lv_btn_create(parent);
+    lv_obj_t *action_row = lv_obj_create(parent);
+    lv_obj_set_size(action_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(action_row, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(action_row, 0, 0);
+    lv_obj_set_style_pad_all(action_row, 0, 0);
+    lv_obj_set_style_pad_column(action_row, 12, 0);
+    lv_obj_set_flex_flow(action_row, LV_FLEX_FLOW_ROW);
+    lv_obj_clear_flag(action_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *save_btn = lv_btn_create(action_row);
     lv_obj_add_style(save_btn, &g_style_btn_primary, 0);
-    lv_obj_set_size(save_btn, 160, 44);
+    lv_obj_set_size(save_btn, 180, 44);
     lv_obj_add_event_cb(save_btn, save_api_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *sl = lv_label_create(save_btn);
     lv_label_set_text(sl, LV_SYMBOL_SAVE " SPEICHERN");
     lv_obj_set_style_text_color(sl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sl);
+
+    lv_obj_t *test_btn = lv_btn_create(action_row);
+    lv_obj_add_style(test_btn, &g_style_btn_secondary, 0);
+    lv_obj_set_size(test_btn, 240, 44);
+    lv_obj_add_event_cb(test_btn, gateway_test_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *tl = lv_label_create(test_btn);
+    lv_label_set_text(tl, LV_SYMBOL_OK " GATEWAY TESTEN");
+    lv_obj_set_style_text_color(tl, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(tl);
 
     s_lbl_api_status = lv_label_create(parent);
     lv_label_set_text(s_lbl_api_status, "");
@@ -678,5 +724,22 @@ void screen_einstellungen_refresh(void)
         else
             lv_obj_clear_state(s_mach_sw[m], LV_STATE_CHECKED);
     }
+    s_gateway_check_pending = false;
     if (s_lbl_api_status) lv_label_set_text(s_lbl_api_status, "");
+}
+
+void screen_einstellungen_tick(void)
+{
+    if (!s_gateway_check_pending || !s_lbl_api_status) return;
+    char status[96];
+    lora_copy_status_text(status, sizeof(status));
+    uint32_t color = CLR_WARN;
+    if (strstr(status, "key accepted")) {
+        color = CLR_SUCCESS;
+    } else if (strstr(status, "key rejected") || strstr(status, "unreachable") ||
+               strstr(status, "rejected") || strstr(status, "invalid")) {
+        color = CLR_DANGER;
+    }
+    set_api_status(status, color);
+    if (!lora_request_busy()) s_gateway_check_pending = false;
 }

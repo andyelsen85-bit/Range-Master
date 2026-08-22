@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/idf_additions.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -19,23 +20,61 @@
 #include "../../../lora-common/trapmaster_auth.h"
 
 static const char *TAG = "lora_stub";
-static QueueHandle_t s_fire_queue;
+static QueueHandle_t s_gateway_queue;
+static SemaphoreHandle_t s_state_mutex;
 static char s_status[96] = "Gateway not configured";
+static bool s_request_busy = false;
+
+typedef enum : uint8_t {
+    GATEWAY_REQUEST_FIRE,
+    GATEWAY_REQUEST_HEALTH,
+} GatewayRequestKind;
 
 typedef struct {
+    GatewayRequestKind kind;
     Maschine machine;
     uint32_t sequence;
-} FireRequest;
+    char gateway_url[MAX_URL_LEN];
+    char gateway_token[MAX_KEY_LEN];
+} GatewayRequest;
 
 static void set_status(const char *text)
 {
+    char log_text[sizeof(s_status)];
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     snprintf(s_status, sizeof(s_status), "%s", text);
-    ESP_LOGI(TAG, "%s", s_status);
+    snprintf(log_text, sizeof(log_text), "%s", s_status);
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+    ESP_LOGI(TAG, "%s", log_text);
 }
 
-static bool build_fire_url(char *url, size_t url_len, const FireRequest *request)
+static void set_request_busy(bool busy)
 {
-    const char *base = g_store.gatewayUrl;
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_request_busy = busy;
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+}
+
+static bool begin_request(void)
+{
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool ready = !s_request_busy;
+    if (ready) s_request_busy = true;
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+    return ready;
+}
+
+static bool copy_gateway_config(GatewayRequest *request)
+{
+    if (!request) return false;
+    snprintf(request->gateway_url, sizeof(request->gateway_url), "%s", g_store.gatewayUrl);
+    snprintf(request->gateway_token, sizeof(request->gateway_token), "%s", g_store.gatewayToken);
+    return true;
+}
+
+static bool build_fire_url(char *url, size_t url_len, const GatewayRequest *request)
+{
+    const char *base = request->gateway_url;
     if (!base[0]) {
         set_status("Gateway not configured");
         return false;
@@ -44,11 +83,11 @@ static bool build_fire_url(char *url, size_t url_len, const FireRequest *request
         set_status("Gateway URL must use http://");
         return false;
     }
-    if (!g_store.gatewayToken[0]) {
+    if (!request->gateway_token[0]) {
         set_status("Gateway auth key not configured");
         return false;
     }
-    if (strlen(g_store.gatewayToken) < 16) {
+    if (strlen(request->gateway_token) < 16) {
         set_status("Gateway auth key too short");
         return false;
     }
@@ -65,47 +104,115 @@ static bool build_fire_url(char *url, size_t url_len, const FireRequest *request
     return true;
 }
 
-static void fire_worker(void *arg)
+static bool build_health_url(char *url, size_t url_len, const GatewayRequest *request)
 {
-    FireRequest request;
+    const char *base = request->gateway_url;
+    if (!base[0]) {
+        set_status("Gateway not configured");
+        return false;
+    }
+    if (strncmp(base, "http://", 7) != 0) {
+        set_status("Gateway URL must use http://");
+        return false;
+    }
+    if (!request->gateway_token[0]) {
+        set_status("Gateway auth key not configured");
+        return false;
+    }
+    if (strlen(request->gateway_token) < 16) {
+        set_status("Gateway auth key too short");
+        return false;
+    }
+    size_t len = strlen(base);
+    const char *suffix = (len > 0 && base[len - 1] == '/') ? "health" : "/health";
+    int written = snprintf(url, url_len, "%s%s", base, suffix);
+    if (written < 0 || (size_t)written >= url_len) {
+        set_status("Gateway URL is too long");
+        return false;
+    }
+    return true;
+}
+
+static bool perform_authenticated_get(const char *url, const char *mac_hex, int *last_http)
+{
+    bool success = false;
+    *last_http = 0;
+    for (int attempt = 0; attempt < 3 && !success; attempt++) {
+        esp_http_client_config_t cfg = {};
+        cfg.url = url;
+        cfg.timeout_ms = 1500;
+        cfg.disable_auto_redirect = true;
+        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        if (!client) {
+            set_status("Gateway client unavailable");
+            break;
+        }
+        esp_http_client_set_header(client, "X-TrapMaster-Auth", mac_hex);
+        esp_err_t err = esp_http_client_perform(client);
+        *last_http = esp_http_client_get_status_code(client);
+        if (err == ESP_OK && *last_http >= 200 && *last_http < 300) {
+            success = true;
+        }
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        if (!success && attempt < 2)
+            vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return success;
+}
+
+static void gateway_worker(void *arg)
+{
+    GatewayRequest request;
     char url[MAX_URL_LEN + 32];
     for (;;) {
-        if (xQueueReceive(s_fire_queue, &request, portMAX_DELAY) != pdTRUE) continue;
-        if (!build_fire_url(url, sizeof(url), &request)) continue;
+        if (xQueueReceive(s_gateway_queue, &request, portMAX_DELAY) != pdTRUE) continue;
 
-        bool success = false;
-        int last_http = 0;
         uint8_t mac[tm_auth::MAC_LEN];
         char mac_hex[tm_auth::MAC_HEX_LEN + 1];
-        if (!tm_auth::make_request_mac((const uint8_t *)g_store.gatewayToken,
-                                       strlen(g_store.gatewayToken),
-                                       (uint8_t)('A' + (int)request.machine),
-                                       request.sequence, mac)) {
-            set_status("Gateway auth key invalid");
+        int last_http = 0;
+        bool success = false;
+
+        if (request.kind == GATEWAY_REQUEST_HEALTH) {
+            bool request_ready = false;
+            if (build_health_url(url, sizeof(url), &request) &&
+                tm_auth::make_health_mac((const uint8_t *)request.gateway_token,
+                                         strlen(request.gateway_token), mac)) {
+                request_ready = true;
+                tm_auth::mac_to_hex(mac, mac_hex);
+                success = perform_authenticated_get(url, mac_hex, &last_http);
+            } else if (request.gateway_token[0] && strlen(request.gateway_token) >= 16) {
+                set_status("Gateway auth key invalid");
+            }
+
+            if (success) {
+                set_status("Gateway reachable - key accepted");
+            } else if (last_http == 401 || last_http == 403) {
+                set_status("Gateway key rejected");
+            } else if (last_http >= 400) {
+                char msg[96];
+                snprintf(msg, sizeof(msg), "Gateway check rejected (HTTP %d)", last_http);
+                set_status(msg);
+            } else if (request_ready) {
+                set_status("Gateway unreachable");
+            }
+            set_request_busy(false);
             continue;
         }
-        tm_auth::mac_to_hex(mac, mac_hex);
-        for (int attempt = 0; attempt < 3 && !success; attempt++) {
-            esp_http_client_config_t cfg = {};
-            cfg.url = url;
-            cfg.timeout_ms = 1500;
-            cfg.disable_auto_redirect = true;
-            esp_http_client_handle_t client = esp_http_client_init(&cfg);
-            if (!client) {
-                set_status("Gateway client unavailable");
-                break;
-            }
-            esp_http_client_set_header(client, "X-TrapMaster-Auth", mac_hex);
-            esp_err_t err = esp_http_client_perform(client);
-            last_http = esp_http_client_get_status_code(client);
-            if (err == ESP_OK && last_http >= 200 && last_http < 300) {
-                success = true;
-            }
-            esp_http_client_close(client);
-            esp_http_client_cleanup(client);
-            if (!success && attempt < 2)
-                vTaskDelay(pdMS_TO_TICKS(100));
+
+        bool request_ready = false;
+        if (build_fire_url(url, sizeof(url), &request) &&
+            tm_auth::make_request_mac((const uint8_t *)request.gateway_token,
+                                      strlen(request.gateway_token),
+                                      (uint8_t)('A' + (int)request.machine),
+                                      request.sequence, mac)) {
+            request_ready = true;
+            tm_auth::mac_to_hex(mac, mac_hex);
+            success = perform_authenticated_get(url, mac_hex, &last_http);
+        } else if (request.gateway_token[0] && strlen(request.gateway_token) >= 16) {
+            set_status("Gateway auth key invalid");
         }
+
         if (success) {
             char msg[96];
             if (last_http == 202)
@@ -119,56 +226,110 @@ static void fire_worker(void *arg)
             char msg[96];
             snprintf(msg, sizeof(msg), "Gateway rejected (HTTP %d)", last_http);
             set_status(msg);
-        } else {
+        } else if (request_ready) {
             set_status("Gateway unreachable");
         }
+        set_request_busy(false);
     }
 }
 
 void lora_stub_init(void)
 {
-    if (s_fire_queue) return;
-    s_fire_queue = xQueueCreate(1, sizeof(FireRequest));
-    if (!s_fire_queue) {
-        set_status("Fire queue unavailable");
+    if (s_gateway_queue) return;
+    if (!s_state_mutex) {
+        s_state_mutex = xSemaphoreCreateMutex();
+        if (!s_state_mutex) {
+            set_status("Gateway state unavailable");
+            return;
+        }
+    }
+    s_gateway_queue = xQueueCreate(1, sizeof(GatewayRequest));
+    if (!s_gateway_queue) {
+        set_status("Gateway queue unavailable");
         return;
     }
-    if (xTaskCreateWithCaps(fire_worker, "fire_gateway", 8192, NULL, 5, NULL,
+    if (xTaskCreateWithCaps(gateway_worker, "gateway_http", 8192, NULL, 5, NULL,
                             MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) != pdPASS) {
-        vQueueDelete(s_fire_queue);
-        s_fire_queue = NULL;
+        vQueueDelete(s_gateway_queue);
+        s_gateway_queue = NULL;
         set_status("Gateway worker unavailable");
         return;
     }
     ESP_LOGI(TAG, "Gateway fire worker ready");
 }
 
-void lora_fire_machine(Maschine m)
+bool lora_fire_machine(Maschine m)
 {
-    if (!s_fire_queue || m < MASCHINE_A || m >= MASCHINE_COUNT) {
+    if (!s_gateway_queue || m < MASCHINE_A || m >= MASCHINE_COUNT) {
         set_status("Fire request unavailable");
-        return;
+        return false;
+    }
+    if (!begin_request()) {
+        set_status("Gateway request already in progress");
+        return false;
     }
     char msg[96];
     snprintf(msg, sizeof(msg), "Sending machine %c...", (char)('A' + (int)m));
     set_status(msg);
-    // Replace a stale request rather than allowing a burst to build up.
+    // Persist before enqueueing: a reboot can skip a sequence, but it can
+    // never reuse a MAC-protected FIRE sequence.
     if (g_store.gatewaySequence == UINT32_MAX) {
+        set_request_busy(false);
         set_status("Gateway sequence exhausted");
-        return;
+        return false;
     }
     // Save before the request enters the queue: a reboot can skip a sequence,
     // but it can never reuse a MAC-protected command sequence.
     g_store.gatewaySequence++;
     game_store_save();
-    FireRequest request = {
-        .machine = m,
-        .sequence = g_store.gatewaySequence,
-    };
-    xQueueOverwrite(s_fire_queue, &request);
+    GatewayRequest request = {};
+    request.kind = GATEWAY_REQUEST_FIRE;
+    request.machine = m;
+    request.sequence = g_store.gatewaySequence;
+    copy_gateway_config(&request);
+    if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
+        set_request_busy(false);
+        set_status("Gateway queue unavailable");
+        return false;
+    }
+    return true;
 }
 
-const char *lora_status_text(void)
+bool lora_gateway_check(void)
 {
-    return s_status;
+    if (!s_gateway_queue) {
+        set_status("Gateway request unavailable");
+        return false;
+    }
+    if (!begin_request()) {
+        set_status("Gateway request already in progress");
+        return false;
+    }
+    GatewayRequest request = {};
+    request.kind = GATEWAY_REQUEST_HEALTH;
+    request.machine = MASCHINE_A;
+    copy_gateway_config(&request);
+    set_status("Checking gateway...");
+    if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
+        set_request_busy(false);
+        set_status("Gateway queue unavailable");
+        return false;
+    }
+    return true;
+}
+
+bool lora_request_busy(void)
+{
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool busy = s_request_busy;
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+    return busy;
+}
+
+void lora_copy_status_text(char *out, size_t out_len)
+{
+    if (!out || out_len == 0) return;
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    snprintf(out, out_len, "%s", s_status);
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
 }

@@ -38,6 +38,18 @@ inline bool make_request_mac(const uint8_t *key, size_t key_len,
     return info && mbedtls_md_hmac(info, key, key_len, payload, sizeof(payload), out) == 0;
 }
 
+// Authenticates a non-actuating terminal-to-gateway health check. This uses a
+// separate domain string from FIRE commands, so it cannot be replayed as a
+// machine command or consume a command sequence.
+inline bool make_health_mac(const uint8_t *key, size_t key_len,
+                            uint8_t out[MAC_LEN])
+{
+    if (!key || key_len < 16 || !out) return false;
+    const uint8_t payload[] = { 'T', 'M', 0x01, 'C', 'H', 'E', 'C', 'K' };
+    const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    return info && mbedtls_md_hmac(info, key, key_len, payload, sizeof(payload), out) == 0;
+}
+
 inline char hex_digit(uint8_t value)
 {
     return (value < 10) ? (char)('0' + value) : (char)('a' + value - 10);

@@ -105,6 +105,17 @@ static bool request_is_authentic(char machine, uint32_t sequence)
     return tm_auth::mac_matches_hex(expected, server.header("X-TrapMaster-Auth").c_str());
 }
 
+static bool health_request_is_authentic()
+{
+    if (!server.hasHeader("X-TrapMaster-Auth")) return false;
+    uint8_t expected[tm_auth::MAC_LEN];
+    if (!tm_auth::make_health_mac((const uint8_t *)GATEWAY_AUTH_KEY,
+                                  sizeof(GATEWAY_AUTH_KEY) - 1, expected)) {
+        return false;
+    }
+    return tm_auth::mac_matches_hex(expected, server.header("X-TrapMaster-Auth").c_str());
+}
+
 static bool persist_request(uint32_t sequence, char machine, RequestState state, bool ack)
 {
     // Store the sequence before radio TX. A reset part-way through the
@@ -345,6 +356,20 @@ static void handleStatus()
     server.send(200, "application/json", body);
 }
 
+// This endpoint never transmits LoRa. It lets the terminal prove that the
+// configured local URL is reachable and that both devices have the same HMAC
+// key before an operator can request a machine launch.
+static void handleHealth()
+{
+    if (!health_request_is_authentic()) {
+        server.send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
+        return;
+    }
+    String body = "{\"ok\":true,\"auth\":true,\"ip\":\"" + WiFi.localIP().toString() +
+                  "\",\"uptimeMs\":" + String(millis()) + "}";
+    server.send(200, "application/json", body);
+}
+
 static bool shouldResetWifi()
 {
     pinMode(0, INPUT_PULLUP); // USER button in the official Wireless Stick V3 example
@@ -389,6 +414,7 @@ void setup()
     const char *headerKeys[] = { "X-TrapMaster-Auth" };
     server.collectHeaders(headerKeys, 1);
     server.on("/fire", HTTP_GET, handleFire);
+    server.on("/health", HTTP_GET, handleHealth);
     server.on("/status", HTTP_GET, handleStatus);
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
     server.on("/bench-fire", HTTP_GET, handleBenchFire);

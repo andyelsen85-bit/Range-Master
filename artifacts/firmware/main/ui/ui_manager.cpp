@@ -181,6 +181,7 @@ void ui_manager_tick(void)
     // Let the active screen update live data
     switch (s_current) {
         case SCREEN_SPIEL:      screen_spiel_tick();      break;
+        case SCREEN_EINSTELLUNGEN: screen_einstellungen_tick(); break;
         case SCREEN_DASHBOARD:  screen_dashboard_tick();  break;
         case SCREEN_SPILLER:    screen_spiller_tick();    break;
         default: break;

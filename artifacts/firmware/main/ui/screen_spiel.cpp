@@ -21,15 +21,22 @@ static lv_obj_t *s_lbl_active_pts;    // active shooter: points
 static lv_obj_t *s_btn_wiederhole;
 static lv_obj_t *s_lbl_modus;
 static lv_obj_t *s_lbl_fire_status;
+static lv_obj_t *s_btn_fire;
+static lv_obj_t *s_lbl_fire_button;
 static lv_obj_t *s_score_table;
 
 // ── Score button callbacks ────────────────────────────────────
 static void score_cb(lv_event_t *e)
 {
     int pts = (int)(intptr_t)lv_event_get_user_data(e);
-    if (pts > 0 && g_store.taubeIndex < g_store.sequenzLen)
-        lora_fire_machine(g_store.sequenz[g_store.taubeIndex].maschine);
     store_eintragen(pts);
+    screen_spiel_refresh();
+}
+
+static void fire_cb(lv_event_t *e)
+{
+    if (g_store.taubeIndex >= g_store.sequenzLen) return;
+    lora_fire_machine(g_store.sequenz[g_store.taubeIndex].maschine);
     screen_spiel_refresh();
 }
 
@@ -106,6 +113,19 @@ lv_obj_t *screen_spiel_create(void)
     lv_label_set_text(s_lbl_maschine, "A");
     lv_obj_set_style_text_font(s_lbl_maschine, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
+
+    s_btn_fire = lv_btn_create(left);
+    lv_obj_set_size(s_btn_fire, LV_PCT(100), 64);
+    lv_obj_set_style_bg_color(s_btn_fire, lv_color_hex(CLR_PRIMARY), 0);
+    lv_obj_set_style_bg_opa(s_btn_fire, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_btn_fire, 10, 0);
+    lv_obj_set_style_border_width(s_btn_fire, 0, 0);
+    lv_obj_add_event_cb(s_btn_fire, fire_cb, LV_EVENT_CLICKED, NULL);
+    s_lbl_fire_button = lv_label_create(s_btn_fire);
+    lv_label_set_text(s_lbl_fire_button, LV_SYMBOL_PLAY " FIRE MASCHINN A");
+    lv_obj_set_style_text_font(s_lbl_fire_button, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(s_lbl_fire_button, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(s_lbl_fire_button);
 
     // Score buttons: 2, 1, 0
     static const char *sc_labels[] = {"2", "1", "0"};
@@ -260,8 +280,10 @@ void screen_spiel_refresh(void)
     if (!s_lbl_maschine) return;
     GameStore *s = &g_store;
     if (s_lbl_fire_status) {
+        char status[96];
         char fire_status[112];
-        snprintf(fire_status, sizeof(fire_status), "Gateway: %s", lora_status_text());
+        lora_copy_status_text(status, sizeof(status));
+        snprintf(fire_status, sizeof(fire_status), "Gateway: %s", status);
         lv_label_set_text(s_lbl_fire_status, fire_status);
     }
 
@@ -302,6 +324,21 @@ void screen_spiel_refresh(void)
             lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
         }
         lv_label_set_text(s_lbl_maschine, ml);
+    }
+
+    if (s_btn_fire && s_lbl_fire_button) {
+        bool can_fire = s->taubeIndex < s->sequenzLen && !lora_request_busy();
+        if (can_fire) {
+            char fire_label[32];
+            char machine = (char)('A' + (int)s->sequenz[s->taubeIndex].maschine);
+            snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE MASCHINN %c", machine);
+            lv_label_set_text(s_lbl_fire_button, fire_label);
+            lv_obj_clear_state(s_btn_fire, LV_STATE_DISABLED);
+        } else {
+            lv_label_set_text(s_lbl_fire_button,
+                              s->taubeIndex < s->sequenzLen ? "GATEWAY BESCHAFT" : "KENG MASCHINN");
+            lv_obj_add_state(s_btn_fire, LV_STATE_DISABLED);
+        }
     }
 
     // ── Active shooter's current post ─────────────────────
