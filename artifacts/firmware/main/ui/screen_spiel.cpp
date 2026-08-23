@@ -117,6 +117,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_flex_align(left, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(left, 20, 0);
+    lv_obj_set_style_pad_row(left, 10, 0);
 
     // ── Top controls: Wiederhole + SKIP ────────────────────
     lv_obj_t *ctrl_row = lv_obj_create(left);
