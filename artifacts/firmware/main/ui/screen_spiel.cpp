@@ -155,6 +155,9 @@ lv_obj_t *screen_spiel_create(void)
         lv_obj_t *btn = lv_btn_create(left);
         s_btn_score[i] = btn;
         lv_obj_set_size(btn, LV_PCT(100), 72);
+        // Stretch the point buttons into the available middle area so the
+        // FIRE trigger remains anchored at the bottom of the panel.
+        lv_obj_set_flex_grow(btn, 1);
         lv_obj_set_style_bg_color(btn, lv_color_hex(sc_colors[i]), 0);
         lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(btn, 10, 0);
