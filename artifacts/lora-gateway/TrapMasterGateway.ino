@@ -91,6 +91,128 @@ static volatile bool radioBusy = false;
 static String lastResult = "Starting";
 static String lastMachine = "-";
 static bool lastAck = false;
+static bool networkSettingsSaved = false;
+
+static void renderStatus();
+
+// ── WiFi addressing ────────────────────────────────────────────
+// The gateway uses DHCP unless the operator enables static addressing in the
+// WiFiManager portal. Static mode deliberately uses a conventional /24 subnet
+// and the configured router as DNS; the operator only needs to enter the two
+// addresses that identify the venue network.
+static const IPAddress STATIC_SUBNET(255, 255, 255, 0);
+static bool staticAddressEnabled = false;
+static char staticAddressText[16] = {};
+static char staticGatewayText[16] = {};
+
+static char staticModeAttrs[80] = {};
+static const char IPV4_INPUT_ATTRS[] =
+    "inputmode='decimal' pattern='[0-9]{1,3}(\\.[0-9]{1,3}){3}'";
+static WiFiManagerParameter staticModeParam(
+    "tm_static", "Use fixed IPv4 address (DHCP off)", "", 2,
+    staticModeAttrs, WFM_LABEL_AFTER);
+static WiFiManagerParameter staticAddressParam(
+    "tm_static_ip", "Fixed IPv4 address", "", 15, IPV4_INPUT_ATTRS);
+static WiFiManagerParameter staticGatewayParam(
+    "tm_static_gateway", "Router / gateway IPv4", "", 15, IPV4_INPUT_ATTRS);
+
+static bool parseStaticNetwork(const char *addressText, const char *gatewayText,
+                               IPAddress *address, IPAddress *gateway)
+{
+    if (!addressText || !gatewayText || !address || !gateway ||
+        !address->fromString(addressText) || !gateway->fromString(gatewayText)) {
+        return false;
+    }
+    // The configured /24 requires the device and router on the same subnet.
+    if ((*address)[0] != (*gateway)[0] || (*address)[1] != (*gateway)[1] ||
+        (*address)[2] != (*gateway)[2] || *address == *gateway ||
+        (*address)[3] == 0 || (*address)[3] == 255 ||
+        (*gateway)[3] == 0 || (*gateway)[3] == 255) {
+        return false;
+    }
+    return true;
+}
+
+static void loadNetworkSettings()
+{
+    staticAddressEnabled = preferences.getBool("net_static", false);
+    preferences.getString("net_ip", "").toCharArray(staticAddressText,
+                                                     sizeof(staticAddressText));
+    preferences.getString("net_gw", "").toCharArray(staticGatewayText,
+                                                     sizeof(staticGatewayText));
+}
+
+static void configureNetworkPortal()
+{
+    snprintf(staticModeAttrs, sizeof(staticModeAttrs),
+             "type='checkbox' value='1'%s",
+             staticAddressEnabled ? " checked" : "");
+    staticModeParam.setValue(staticAddressEnabled ? "1" : "", 2);
+    staticAddressParam.setValue(staticAddressText, sizeof(staticAddressText) - 1);
+    staticGatewayParam.setValue(staticGatewayText, sizeof(staticGatewayText) - 1);
+    wifiManager.addParameter(&staticModeParam);
+    wifiManager.addParameter(&staticAddressParam);
+    wifiManager.addParameter(&staticGatewayParam);
+}
+
+static void saveNetworkSettings()
+{
+    // An unchecked HTML checkbox is intentionally absent from the form, making
+    // this test reliable when the operator switches back from static to DHCP.
+    bool useStatic = wifiManager.server &&
+                     wifiManager.server->hasArg("tm_static");
+    String addressValue = staticAddressParam.getValue();
+    String gatewayValue = staticGatewayParam.getValue();
+    IPAddress address;
+    IPAddress gateway;
+
+    if (useStatic && !parseStaticNetwork(addressValue.c_str(), gatewayValue.c_str(),
+                                         &address, &gateway)) {
+        lastResult = "Static IP invalid";
+        Serial.println("Static IPv4 rejected; DHCP setting unchanged");
+        renderStatus();
+        return;
+    }
+
+    size_t savedAddressLength = preferences.putString("net_ip", addressValue);
+    size_t savedGatewayLength = preferences.putString("net_gw", gatewayValue);
+    if (preferences.putBool("net_static", useStatic) != sizeof(bool) ||
+        (addressValue.length() > 0 && savedAddressLength == 0) ||
+        (gatewayValue.length() > 0 && savedGatewayLength == 0)) {
+        lastResult = "Network save failed";
+        Serial.println("Could not save network address settings");
+        renderStatus();
+        return;
+    }
+
+    staticAddressEnabled = useStatic;
+    addressValue.toCharArray(staticAddressText, sizeof(staticAddressText));
+    gatewayValue.toCharArray(staticGatewayText, sizeof(staticGatewayText));
+    networkSettingsSaved = true;
+    Serial.printf("Saved WiFi mode: %s\n", useStatic ? "static" : "DHCP");
+}
+
+static void applyNetworkSettings()
+{
+    if (!staticAddressEnabled) {
+        Serial.println("WiFi address mode: DHCP");
+        return;
+    }
+
+    IPAddress address;
+    IPAddress gateway;
+    if (!parseStaticNetwork(staticAddressText, staticGatewayText, &address, &gateway)) {
+        // Do not let an incomplete persisted value block access to the setup portal.
+        staticAddressEnabled = false;
+        preferences.putBool("net_static", false);
+        Serial.println("Saved static IPv4 invalid; falling back to DHCP");
+        return;
+    }
+
+    wifiManager.setSTAStaticIPConfig(address, gateway, STATIC_SUBNET, gateway);
+    Serial.printf("WiFi address mode: static %s via %s\n",
+                  staticAddressText, staticGatewayText);
+}
 
 static bool parse_sequence(uint32_t *sequence)
 {
@@ -535,6 +657,10 @@ static void handleStatus()
 {
     String body = "{\"ok\":true,\"uptimeMs\":" + String(millis()) +
                   ",\"ip\":\"" + WiFi.localIP().toString() +
+                  "\",\"networkMode\":\"" +
+                  String(staticAddressEnabled ? "static" : "dhcp") +
+                  "\",\"gateway\":\"" +
+                  String(staticAddressEnabled ? staticGatewayText : "") +
                   "\",\"rssi\":" + String(WiFi.RSSI()) +
                   ",\"lastMachine\":\"" + lastMachine +
                   "\",\"lastResult\":\"" + lastResult +
@@ -576,6 +702,16 @@ void setup()
     gatewayDisplay.init();
     renderStatus();
 
+    if (!preferences.begin("trapmaster", false)) {
+        lastResult = "NVS unavailable";
+        renderStatus();
+        while (true) delay(1000); // never run without persistent security state
+    }
+    loadNetworkSettings();
+    applyNetworkSettings();
+    configureNetworkPortal();
+    wifiManager.setSaveParamsCallback(saveNetworkSettings);
+
     if (shouldResetWifi()) wifiManager.resetSettings();
     WiFi.mode(WIFI_STA);
     wifiManager.setConfigPortalTimeout(180);
@@ -585,12 +721,15 @@ void setup()
         delay(3000);
         ESP.restart();
     }
-
-    if (!preferences.begin("trapmaster", false)) {
-        lastResult = "NVS unavailable";
+    // WiFiManager connects immediately after portal save. Restart once so a
+    // changed DHCP/static selection is applied before the gateway starts HTTP.
+    if (networkSettingsSaved) {
+        lastResult = "Network saved - reboot";
         renderStatus();
-        while (true) delay(1000); // never transmit if monotonic state cannot persist
+        delay(1200);
+        ESP.restart();
     }
+
     nextCounter = preferences.getULong("counter", 0);
     lastSequence = preferences.getULong("req_seq", 0);
     lastRequestKind = (RequestKind)preferences.getUChar("req_kind", REQUEST_SINGLE);

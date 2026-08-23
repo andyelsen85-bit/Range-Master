@@ -35,6 +35,11 @@ and must never be committed or shared.
 - First boot opens `TrapMaster-Gateway-Setup`; use a phone to select venue WiFi.
 - Hold the USER button during boot for about 1.5 seconds to erase saved WiFi and open
   setup again.
+- The setup page includes a **Use fixed IPv4 address (DHCP off)** toggle. When enabled,
+  enter the gateway's fixed IPv4 address and the venue router/gateway IPv4 address.
+  The gateway uses a `255.255.255.0` subnet mask and the router for DNS. Both addresses
+  must be on the same `/24` network; leave the toggle off to use DHCP. Saving the setup
+  page restarts the gateway once so the selected address mode takes effect.
 - The OLED shows the connected IP, last machine, and radio result.
 - Set the terminal's **TrapMaster Gateway URL** to `http://<OLED-IP>`.
 - Set the terminal's **TrapMaster Gateway Auth Key** to the exact private
