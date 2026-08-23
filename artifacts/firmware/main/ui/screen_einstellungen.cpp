@@ -23,6 +23,8 @@ static lv_obj_t *s_ta_gateway;
 static lv_obj_t *s_ta_gateway_token;
 static lv_obj_t *s_lbl_api_status;
 static bool s_gateway_check_pending;
+static lv_obj_t *s_lbl_machine_test_status;
+static bool s_machine_test_pending;
 
 static void save_api_settings(void)
 {
@@ -170,6 +172,30 @@ static void mach_sw_cb(lv_event_t *e)
     game_store_save();
 }
 
+static void machine_test_cb(lv_event_t *e)
+{
+    int machine = (int)(intptr_t)lv_event_get_user_data(e);
+    if (machine < MASCHINE_A || machine >= MASCHINE_COUNT) return;
+
+    if (lora_fire_machine((Maschine)machine)) {
+        s_machine_test_pending = true;
+        if (s_lbl_machine_test_status) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "TEST MASCHINN %c GESCHÉCKT...",
+                     (char)('A' + machine));
+            lv_label_set_text(s_lbl_machine_test_status, msg);
+            lv_obj_set_style_text_color(s_lbl_machine_test_status,
+                                        lv_color_hex(CLR_WARN), 0);
+        }
+    } else if (s_lbl_machine_test_status) {
+        char status[96];
+        lora_copy_status_text(status, sizeof(status));
+        lv_label_set_text(s_lbl_machine_test_status, status);
+        lv_obj_set_style_text_color(s_lbl_machine_test_status,
+                                    lv_color_hex(CLR_DANGER), 0);
+    }
+}
+
 static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 {
     static const char *labels[] = {
@@ -187,11 +213,25 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *lbl = lv_label_create(row);
         lv_label_set_text(lbl, labels[m]);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_set_flex_grow(lbl, 1);
+
+        lv_obj_t *test = lv_btn_create(row);
+        lv_obj_add_style(test, &g_style_btn_secondary, 0);
+        lv_obj_set_size(test, 150, 38);
+        lv_obj_set_style_pad_hor(test, 8, 0);
+        lv_obj_add_event_cb(test, machine_test_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)m);
+        lv_obj_t *test_label = lv_label_create(test);
+        lv_label_set_text(test_label, LV_SYMBOL_PLAY " TEST FIRE");
+        lv_obj_set_style_text_font(test_label, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(test_label, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(test_label);
 
         lv_obj_t *sw = lv_switch_create(row);
         s_mach_sw[m] = sw;
@@ -199,6 +239,12 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
         lv_obj_add_event_cb(sw, mach_sw_cb, LV_EVENT_VALUE_CHANGED,
                             (void*)(intptr_t)m);
     }
+
+    s_lbl_machine_test_status = lv_label_create(parent);
+    lv_label_set_text(s_lbl_machine_test_status,
+                      "TEST FIRE löst genau einen Schuss aus — kein Spiel.");
+    lv_obj_set_style_text_font(s_lbl_machine_test_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_lbl_machine_test_status, lv_color_hex(CLR_MUTED), 0);
     return parent;
 }
 
@@ -876,20 +922,44 @@ void screen_einstellungen_refresh(void)
     }
     s_gateway_check_pending = false;
     if (s_lbl_api_status) lv_label_set_text(s_lbl_api_status, "");
+    s_machine_test_pending = false;
+    if (s_lbl_machine_test_status) {
+        lv_label_set_text(s_lbl_machine_test_status,
+                          "TEST FIRE löst genau einen Schuss aus — kein Spiel.");
+        lv_obj_set_style_text_color(s_lbl_machine_test_status,
+                                    lv_color_hex(CLR_MUTED), 0);
+    }
 }
 
 void screen_einstellungen_tick(void)
 {
-    if (!s_gateway_check_pending || !s_lbl_api_status) return;
-    char status[96];
-    lora_copy_status_text(status, sizeof(status));
-    uint32_t color = CLR_WARN;
-    if (strstr(status, "key accepted")) {
-        color = CLR_SUCCESS;
-    } else if (strstr(status, "key rejected") || strstr(status, "unreachable") ||
-               strstr(status, "rejected") || strstr(status, "invalid")) {
-        color = CLR_DANGER;
+    if (s_gateway_check_pending && s_lbl_api_status) {
+        char status[96];
+        lora_copy_status_text(status, sizeof(status));
+        uint32_t color = CLR_WARN;
+        if (strstr(status, "key accepted")) {
+            color = CLR_SUCCESS;
+        } else if (strstr(status, "key rejected") || strstr(status, "unreachable") ||
+                   strstr(status, "rejected") || strstr(status, "invalid")) {
+            color = CLR_DANGER;
+        }
+        set_api_status(status, color);
+        if (!lora_request_busy()) s_gateway_check_pending = false;
     }
-    set_api_status(status, color);
-    if (!lora_request_busy()) s_gateway_check_pending = false;
+
+    if (s_machine_test_pending && s_lbl_machine_test_status) {
+        char status[96];
+        lora_copy_status_text(status, sizeof(status));
+        uint32_t color = CLR_WARN;
+        if (strstr(status, "fired") || strstr(status, "sent")) {
+            color = CLR_SUCCESS;
+        } else if (strstr(status, "unreachable") || strstr(status, "rejected") ||
+                   strstr(status, "invalid") || strstr(status, "unavailable")) {
+            color = CLR_DANGER;
+        }
+        lv_label_set_text(s_lbl_machine_test_status, status);
+        lv_obj_set_style_text_color(s_lbl_machine_test_status,
+                                    lv_color_hex(color), 0);
+        if (!lora_request_busy()) s_machine_test_pending = false;
+    }
 }

@@ -90,6 +90,9 @@ export interface KreditEvent {
   anzahl: number;
 }
 
+const MAX_PENDING_KREDIT_EVENTS = 50;
+const kreditEventsInFlight = new Set<string>();
+
 /** A finished game kept in local history (last 50) */
 export interface FinishedGame extends PendingGame {
   finishedAt: string; // ISO timestamp of completion
@@ -138,6 +141,8 @@ interface GameState extends Settings {
   sequenz: SequenzEintrag[];
   ergebnisse: Ergebnis[];
   spielId: string | null;
+  /** The exact USE events charged when the current game started. */
+  activeGameCreditUses: KreditEvent[];
 
   // Portal player cache
   portalSpieler: PortalSpieler[];
@@ -177,7 +182,7 @@ interface GameState extends Settings {
   eintragenErgebnis: (schuss1: boolean, schuss2: boolean) => void;
   wiederholenTaube: () => void;
   ueberspringenTaube: () => void;
-  ofbriechenSpiel: () => void;
+  ofbriechenSpiel: () => boolean;
   werfenTaube: () => void;
   setApiSettings: (url: string, key: string) => void;
   /** Create a new local player (negative id) and queue them for portal upload on next sync */
@@ -584,6 +589,7 @@ export const useGameStore = create<GameState>((set, get) => {
     sequenz: generateSequenz(modus, maschinenAktiv, customSequenzen),
     ergebnisse: [],
     spielId: null,
+    activeGameCreditUses: [],
     portalSpieler: [],
     portalLaden: false,
     portalFehler: null,
@@ -670,6 +676,12 @@ export const useGameStore = create<GameState>((set, get) => {
     startSpiel: () => set((state) => {
       // ── Deduct one day credit per participating player ────────────────────
       const { kreditDatum, kredite } = rolledKredite(state);
+      if (state.pendingKredite.length + state.spieler.length >
+          MAX_PENDING_KREDIT_EVENTS) {
+        // Match the terminal: do not begin a game unless every USE event can
+        // be kept for a safe retry or a future cancellation refund.
+        return state;
+      }
       const nextKredite = { ...kredite };
       const newEvents: KreditEvent[] = [];
       for (const s of state.spieler) {
@@ -703,6 +715,7 @@ export const useGameStore = create<GameState>((set, get) => {
         kreditDatum,
         kredite: nextKredite,
         pendingKredite,
+        activeGameCreditUses: newEvents,
       };
     }),
 
@@ -825,6 +838,7 @@ export const useGameStore = create<GameState>((set, get) => {
           syncStatus: 'idle',
           gameHistory: newHistory,
           lastFinishedGame: finishedGame,
+          activeGameCreditUses: [],
         };
       }
 
@@ -889,7 +903,70 @@ export const useGameStore = create<GameState>((set, get) => {
 
     dismissResultate: () => set({ screen: 'dashboard', lastFinishedGame: null }),
 
-    ofbriechenSpiel: () => set({ screen: 'dashboard' }),
+    ofbriechenSpiel: () => {
+      let canceled = false;
+      set((state) => {
+        const { kreditDatum, kredite } = rolledKredite(state);
+        const activeUses = state.activeGameCreditUses;
+        const pendingUseIds = new Set(state.pendingKredite.map(event => event.externalId));
+        const removableUseIds = new Set(activeUses
+          .filter(event => pendingUseIds.has(event.externalId) &&
+            !kreditEventsInFlight.has(event.externalId))
+          .map(event => event.externalId));
+        const grantsNeeded = activeUses.filter(event =>
+          !removableUseIds.has(event.externalId)).length;
+
+        // Mirror the terminal's bounded queue. Do not leave the active game
+        // until every required portal correction can be kept durably.
+        if (state.pendingKredite.length - removableUseIds.size + grantsNeeded >
+            MAX_PENDING_KREDIT_EVENTS) {
+          return state;
+        }
+
+        const pendingKredite = state.pendingKredite.filter(
+          event => !removableUseIds.has(event.externalId),
+        );
+        const nextKredite = { ...kredite };
+        for (const use of activeUses) {
+          const stand = nextKredite[use.spielerId] ?? { gewaehrt: 0, verbraucht: 0 };
+          nextKredite[use.spielerId] = {
+            ...stand,
+            verbraucht: Math.max(0, stand.verbraucht - use.anzahl),
+          };
+
+          // A USE in an in-flight POST may already have reached the portal.
+          // Keep it and queue a GRANT so either POST outcome restores balance.
+          if (!removableUseIds.has(use.externalId)) {
+            pendingKredite.push({
+              externalId: generateSpielId(),
+              spielerId: use.spielerId,
+              datum: use.datum,
+              typ: 'GRANT',
+              anzahl: use.anzahl,
+            });
+          }
+        }
+
+        saveKredite(kreditDatum, nextKredite);
+        savePendingKredite(pendingKredite);
+        canceled = true;
+        return {
+          screen: 'dashboard' as Screen,
+          spieler: [],
+          lauf: 1,
+          taubeIndex: 0,
+          spielerIndex: 0,
+          sequenz: [],
+          ergebnisse: [],
+          spielId: null,
+          activeGameCreditUses: [],
+          kreditDatum,
+          kredite: nextKredite,
+          pendingKredite,
+        };
+      });
+      return canceled;
+    },
 
     werfenTaube: () => {
       // ESP32: triggers GPIO relay. Emulator: no-op.
@@ -1193,7 +1270,10 @@ export const useGameStore = create<GameState>((set, get) => {
             ),
           }));
           const remappedSpieler = s2.spieler.map(s => ({ ...s, id: remap(s.id) }));
-          const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
+            const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
+            const remappedActiveCreditUses = s2.activeGameCreditUses.map(e => ({
+              ...e, spielerId: remap(e.spielerId),
+            }));
           const remappedUpdates = s2.spielerUpdates.map(u => ({ ...u, spielerId: remap(u.spielerId) }));
           const remappedKredite = Object.fromEntries(
             Object.entries(s2.kredite).map(([id, stand]) => [remap(Number(id)), stand])
@@ -1218,6 +1298,7 @@ export const useGameStore = create<GameState>((set, get) => {
             portalSpieler: remappedPortal,
             gameHistory: remappedHistory,
             pendingKredite: remappedKreditEvents,
+              activeGameCreditUses: remappedActiveCreditUses,
             kredite: remappedKredite,
             spielerUpdates: remappedUpdates,
           });
@@ -1268,22 +1349,31 @@ export const useGameStore = create<GameState>((set, get) => {
           const allEvents = get().pendingKredite;
           const pushable = allEvents.filter(e => e.spielerId > 0);
           if (pushable.length > 0) {
-            const resK = await fetch(`${state.apiUrl}/api/sync/kredite`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': state.apiKey,
-              },
-              body: JSON.stringify({ events: pushable }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (!resK.ok) throw new Error(`HTTP ${resK.status}`);
-            // Keep only events that could not be pushed (still-local player IDs)
-            const stillPendingKredite = get().pendingKredite.filter(e => e.spielerId <= 0);
-            savePendingKredite(stillPendingKredite);
-            set({ pendingKredite: stillPendingKredite });
-            // Reconcile today's state from the server
-            await get().ladeKredite();
+            const sentIds = new Set(pushable.map(event => event.externalId));
+            for (const event of pushable) kreditEventsInFlight.add(event.externalId);
+            try {
+              const resK = await fetch(`${state.apiUrl}/api/sync/kredite`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': state.apiKey,
+                },
+                body: JSON.stringify({ events: pushable }),
+                signal: AbortSignal.timeout(15000),
+              });
+              if (!resK.ok) throw new Error(`HTTP ${resK.status}`);
+              // Remove only the sent snapshot. A cancel during this request
+              // may add a GRANT that must remain for the next sync.
+              const stillPendingKredite = get().pendingKredite.filter(
+                event => !sentIds.has(event.externalId),
+              );
+              savePendingKredite(stillPendingKredite);
+              set({ pendingKredite: stillPendingKredite });
+              // Reconcile today's state from the server
+              await get().ladeKredite();
+            } finally {
+              for (const event of pushable) kreditEventsInFlight.delete(event.externalId);
+            }
           }
         }
 

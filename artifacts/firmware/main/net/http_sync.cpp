@@ -565,17 +565,20 @@ esp_err_t http_push_spieler_updates(void)
 // ── http_push_kredit_events ───────────────────────────────────
 esp_err_t http_push_kredit_events(void)
 {
-    if (g_store.pendingKreditEventCount == 0) return ESP_OK;
+    KreditEvent *snapshot = (KreditEvent *)malloc(MAX_KREDIT_EVENTS * sizeof(KreditEvent));
+    if (!snapshot) return ESP_ERR_NO_MEM;
+    int snapshotCount = store_begin_kredit_event_sync(snapshot, MAX_KREDIT_EVENTS);
+    if (snapshotCount == 0) {
+        free(snapshot);
+        return ESP_OK;
+    }
 
     cJSON *root = cJSON_CreateObject();
     cJSON *arr  = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "events", arr);
 
-    for (int i = 0; i < g_store.pendingKreditEventCount; i++) {
-        KreditEvent *ev = &g_store.pendingKreditEvents[i];
-        // Local-only players have negative IDs — the portal schema requires
-        // a positive spielerId, so skip events for players not yet synced.
-        if (ev->spielerId <= 0) continue;
+    for (int i = 0; i < snapshotCount; i++) {
+        KreditEvent *ev = &snapshot[i];
         cJSON *item = cJSON_CreateObject();
         cJSON_AddStringToObject(item, "externalId", ev->externalId);
         cJSON_AddNumberToObject(item, "spielerId",  (double)ev->spielerId);
@@ -587,7 +590,11 @@ esp_err_t http_push_kredit_events(void)
 
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    if (!body) return ESP_ERR_NO_MEM;
+    if (!body) {
+        store_finish_kredit_event_sync(snapshot, snapshotCount, false);
+        free(snapshot);
+        return ESP_ERR_NO_MEM;
+    }
 
     char *resp = (char *)malloc(512);
     esp_err_t err = ESP_ERR_NO_MEM;
@@ -597,11 +604,10 @@ esp_err_t http_push_kredit_events(void)
     }
     free(body);
 
+    store_finish_kredit_event_sync(snapshot, snapshotCount, err == ESP_OK);
+    free(snapshot);
     if (err == ESP_OK) {
-        int pushed = g_store.pendingKreditEventCount;
-        memset(g_store.pendingKreditEvents, 0, sizeof(g_store.pendingKreditEvents));
-        g_store.pendingKreditEventCount = 0;
-        ESP_LOGI(TAG, "Pushed %d kredit event(s)", pushed);
+        ESP_LOGI(TAG, "Pushed %d kredit event(s)", snapshotCount);
     } else {
         ESP_LOGW(TAG, "Kredit push failed (%s) — queue retained", esp_err_to_name(err));
     }
@@ -641,24 +647,7 @@ esp_err_t http_pull_kredite(void)
             int sid = (int)jsid->valuedouble;
             int gew = jgew && cJSON_IsNumber(jgew) ? (int)jgew->valuedouble : 0;
             int ver = jver && cJSON_IsNumber(jver) ? (int)jver->valuedouble : 0;
-            bool found = false;
-            for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
-                if (g_store.kreditPlayerIds[i] == sid) {
-                    g_store.kredite[i].gewaehrt   = gew;
-                    g_store.kredite[i].verbraucht  = ver;
-                    found = true; break;
-                }
-            }
-            if (!found) {
-                for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
-                    if (g_store.kreditPlayerIds[i] == 0) {
-                        g_store.kreditPlayerIds[i]    = sid;
-                        g_store.kredite[i].gewaehrt   = gew;
-                        g_store.kredite[i].verbraucht  = ver;
-                        break;
-                    }
-                }
-            }
+            store_apply_portal_kredit(sid, gew, ver);
         }
         ESP_LOGI(TAG, "Pulled credits for %s", datum);
     }

@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/idf_additions.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -33,6 +34,20 @@ EXT_RAM_BSS_ATTR GameStore g_store;
 
 // ── NVS helpers ──────────────────────────────────────────────
 static nvs_handle_t s_nvs;
+static SemaphoreHandle_t s_kredit_events_mutex;
+
+static void kredit_events_lock(void)
+{
+    configASSERT(s_kredit_events_mutex);
+    xSemaphoreTake(s_kredit_events_mutex, portMAX_DELAY);
+}
+
+static void kredit_events_unlock(void)
+{
+    xSemaphoreGive(s_kredit_events_mutex);
+}
+
+static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anzahl);
 
 static void nvs_open(void)
 {
@@ -209,6 +224,43 @@ int store_kredite_verfuegbar(int spieler_id)
     return 0;
 }
 
+static int find_kredit_slot(const GameStore *s, int spieler_id)
+{
+    for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
+        if (s->kreditPlayerIds[i] == spieler_id) return i;
+    }
+    return -1;
+}
+
+static int find_pending_kredit_event(const GameStore *s, const char *external_id)
+{
+    if (!external_id || external_id[0] == '\0') return -1;
+    for (int i = 0; i < s->pendingKreditEventCount; i++) {
+        if (strcmp(s->pendingKreditEvents[i].externalId, external_id) == 0) return i;
+    }
+    return -1;
+}
+
+static void remove_pending_kredit_event(GameStore *s, int index)
+{
+    if (index < 0 || index >= s->pendingKreditEventCount) return;
+    int tail = s->pendingKreditEventCount - index - 1;
+    if (tail > 0) {
+        memmove(&s->pendingKreditEvents[index], &s->pendingKreditEvents[index + 1],
+                tail * sizeof(KreditEvent));
+    }
+    s->pendingKreditEventCount--;
+    memset(&s->pendingKreditEvents[s->pendingKreditEventCount], 0,
+           sizeof(KreditEvent));
+}
+
+static void clear_active_game_credit_tracking(GameStore *s)
+{
+    memset(s->activeGameCreditPlayerIds, 0, sizeof(s->activeGameCreditPlayerIds));
+    memset(s->activeGameCreditUseIds, 0, sizeof(s->activeGameCreditUseIds));
+    s->activeGameCreditCount = 0;
+}
+
 void store_register_spieler_fuer_tag(int spieler_id)
 {
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
@@ -255,15 +307,39 @@ bool store_start_spiel(void)
     }
 
     // Deduct one credit per player and queue USE event for portal sync
-    for (int i = 0; i < s->spielerCount; i++) {
-        for (int j = 0; j < MAX_PORTAL_SPIELER; j++) {
-            if (s->kreditPlayerIds[j] == s->spieler[i].id) {
-                s->kredite[j].verbraucht++;
-                store_queue_kredit_event(s->spieler[i].id, "USE", 1);
-                break;
-            }
-        }
+    kredit_events_lock();
+    // A start must reserve room for every USE event. Otherwise a later quit
+    // could not prove which players were charged or restore them safely.
+    if (s->pendingKreditEventCount + s->spielerCount > MAX_KREDIT_EVENTS) {
+        kredit_events_unlock();
+        ESP_LOGW(TAG, "Not enough room to queue all game credit events");
+        return false;
     }
+    clear_active_game_credit_tracking(s);
+    for (int i = 0; i < s->spielerCount; i++) {
+        int kreditSlot = find_kredit_slot(s, s->spieler[i].id);
+        if (kreditSlot < 0) {
+            kredit_events_unlock();
+            ESP_LOGE(TAG, "Missing credit slot for player %d", s->spieler[i].id);
+            return false;
+        }
+        int eventIndex = s->pendingKreditEventCount;
+        s->kredite[kreditSlot].verbraucht++;
+        if (!queue_kredit_event_unlocked(s->spieler[i].id, "USE", 1)) {
+            // Capacity was checked before charging. This is a defensive
+            // failure path; retain the game setup instead of starting with a
+            // credit that cannot be tracked for a later refund.
+            s->kredite[kreditSlot].verbraucht--;
+            kredit_events_unlock();
+            return false;
+        }
+        s->activeGameCreditPlayerIds[s->activeGameCreditCount] = s->spieler[i].id;
+        strncpy(s->activeGameCreditUseIds[s->activeGameCreditCount],
+                s->pendingKreditEvents[eventIndex].externalId,
+                sizeof(s->activeGameCreditUseIds[0]) - 1);
+        s->activeGameCreditCount++;
+    }
+    kredit_events_unlock();
 
     // Generate sequence
     const CustomSequenzEintrag *cseq = NULL;
@@ -298,6 +374,80 @@ bool store_start_spiel(void)
     game_store_save();
     ESP_LOGI(TAG, "Game started: modus=%s seq_len=%d players=%d",
              modus_label(s->modus), s->sequenzLen, s->spielerCount);
+    return true;
+}
+
+bool store_cancel_spiel(void)
+{
+    GameStore *s = &g_store;
+    if (s->screen != SCREEN_SPIEL) return false;
+
+    // A USE still in the local queue can be removed. If it has already been
+    // synced, reserve one GRANT event to compensate it at the portal. Check
+    // capacity before altering any local balance, so the UI never reports a
+    // completed quit with only some players refunded.
+    kredit_events_lock();
+    int removableUses = 0;
+    int grantsNeeded = 0;
+    for (int i = 0; i < s->activeGameCreditCount; i++) {
+        if (s->activeGameCreditUseIds[i][0] == '\0') continue;
+        int eventIndex = find_pending_kredit_event(s, s->activeGameCreditUseIds[i]);
+        if (eventIndex >= 0 && !s->pendingKreditEvents[eventIndex].inFlight) {
+            removableUses++;
+        } else {
+            // An in-flight request may already have reached the portal. Keep
+            // its USE event for a failed POST retry and queue a durable GRANT.
+            grantsNeeded++;
+        }
+    }
+    if (s->pendingKreditEventCount - removableUses + grantsNeeded > MAX_KREDIT_EVENTS) {
+        kredit_events_unlock();
+        ESP_LOGW(TAG, "Cannot quit game: no room for %d credit refund event(s)",
+                 grantsNeeded);
+        return false;
+    }
+
+    for (int i = 0; i < s->activeGameCreditCount; i++) {
+        const char *useId = s->activeGameCreditUseIds[i];
+        if (useId[0] == '\0') continue; // already refunded during a retry
+
+        int pendingIndex = find_pending_kredit_event(s, useId);
+        if (pendingIndex >= 0 && !s->pendingKreditEvents[pendingIndex].inFlight) {
+            remove_pending_kredit_event(s, pendingIndex);
+        } else if (!queue_kredit_event_unlocked(s->activeGameCreditPlayerIds[i],
+                                                 "GRANT", 1)) {
+            // Keep the dialog open and leave any remaining player entries
+            // intact. The operator can sync/clear capacity and retry.
+            kredit_events_unlock();
+            ESP_LOGE(TAG, "Could not queue credit refund for player %d",
+                     s->activeGameCreditPlayerIds[i]);
+            return false;
+        }
+
+        int kreditSlot = find_kredit_slot(s, s->activeGameCreditPlayerIds[i]);
+        if (kreditSlot >= 0 && s->kredite[kreditSlot].verbraucht > 0)
+            s->kredite[kreditSlot].verbraucht--;
+        s->activeGameCreditUseIds[i][0] = '\0';
+    }
+    kredit_events_unlock();
+
+    // Never call _store_finish_game here: a quit must not create results,
+    // history, a pending game, or a result screen.
+    clear_active_game_credit_tracking(s);
+    memset(s->spieler, 0, sizeof(s->spieler));
+    memset(s->sequenz, 0, sizeof(s->sequenz));
+    memset(s->ergebnisse, 0, sizeof(s->ergebnisse));
+    s->spielerCount = 0;
+    s->sequenzLen = 0;
+    s->ergebnisseCount = 0;
+    s->lauf = 1;
+    s->taubeIndex = 0;
+    s->spielerIndex = 0;
+    s->spielId[0] = '\0';
+    s->currentFireSent = false;
+    s->screen = SCREEN_DASHBOARD;
+    game_store_save();
+    ESP_LOGI(TAG, "Game canceled; all participant credits restored");
     return true;
 }
 
@@ -488,6 +638,7 @@ static void _store_finish_game(void)
 
     s->lastFinished   = fg;
     s->hasLastFinished = true;
+    clear_active_game_credit_tracking(s);
     s->screen         = SCREEN_RESULTATE;
     game_store_save();
     ESP_LOGI(TAG, "Game finished, navigating to resultate");
@@ -629,12 +780,12 @@ void store_add_lokal_spieler(const char *name, int *out_id)
 }
 
 // ── Player update queue ──────────────────────────────────────
-void store_queue_kredit_event(int spieler_id, const char *typ, int anzahl)
+static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anzahl)
 {
-    if (anzahl == 0) return;
+    if (anzahl == 0) return true;
     if (g_store.pendingKreditEventCount >= MAX_KREDIT_EVENTS) {
         ESP_LOGW(TAG, "Kredit event queue full — dropping event for player %d", spieler_id);
-        return;
+        return false;
     }
     KreditEvent *ev = &g_store.pendingKreditEvents[g_store.pendingKreditEventCount++];
     snprintf(ev->externalId, sizeof(ev->externalId),
@@ -647,6 +798,79 @@ void store_queue_kredit_event(int spieler_id, const char *typ, int anzahl)
     time_t now = tv.tv_sec;
     struct tm tmi; localtime_r(&now, &tmi);  // use local TZ (CET/CEST)
     strftime(ev->datum, sizeof(ev->datum), "%Y-%m-%d", &tmi);
+    return true;
+}
+
+bool store_queue_kredit_event(int spieler_id, const char *typ, int anzahl)
+{
+    kredit_events_lock();
+    bool queued = queue_kredit_event_unlocked(spieler_id, typ, anzahl);
+    kredit_events_unlock();
+    return queued;
+}
+
+int store_begin_kredit_event_sync(KreditEvent *snapshot, int capacity)
+{
+    if (!snapshot || capacity <= 0) return 0;
+    kredit_events_lock();
+    int count = 0;
+    for (int i = 0; i < g_store.pendingKreditEventCount && count < capacity; i++) {
+        KreditEvent *event = &g_store.pendingKreditEvents[i];
+        if (event->spielerId <= 0 || event->inFlight) continue;
+        event->inFlight = true;
+        snapshot[count++] = *event;
+    }
+    kredit_events_unlock();
+    return count;
+}
+
+void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
+                                    bool delivered)
+{
+    if (!snapshot || count <= 0) return;
+    kredit_events_lock();
+    for (int i = 0; i < count; i++) {
+        int eventIndex = find_pending_kredit_event(&g_store, snapshot[i].externalId);
+        if (eventIndex < 0) continue;
+        if (delivered) {
+            remove_pending_kredit_event(&g_store, eventIndex);
+        } else {
+            g_store.pendingKreditEvents[eventIndex].inFlight = false;
+        }
+    }
+    kredit_events_unlock();
+}
+
+void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
+{
+    kredit_events_lock();
+    int kreditSlot = find_kredit_slot(&g_store, spieler_id);
+    if (kreditSlot < 0) {
+        for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
+            if (g_store.kreditPlayerIds[i] == 0) {
+                kreditSlot = i;
+                g_store.kreditPlayerIds[i] = spieler_id;
+                break;
+            }
+        }
+    }
+    if (kreditSlot >= 0) {
+        // Portal totals are the baseline. Reapply every local event that is
+        // still queued, including a cancellation GRANT created while a USE
+        // was in-flight, so a pull never hides the locally restored credit.
+        for (int i = 0; i < g_store.pendingKreditEventCount; i++) {
+            const KreditEvent *event = &g_store.pendingKreditEvents[i];
+            if (event->spielerId != spieler_id) continue;
+            if (strcmp(event->typ, "GRANT") == 0) {
+                gewaehrt += event->anzahl;
+            } else if (strcmp(event->typ, "USE") == 0) {
+                verbraucht += event->anzahl;
+            }
+        }
+        g_store.kredite[kreditSlot].gewaehrt = gewaehrt;
+        g_store.kredite[kreditSlot].verbraucht = verbraucht;
+    }
+    kredit_events_unlock();
 }
 
 void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv)
@@ -753,6 +977,8 @@ void game_store_save(void)
 void game_store_init(void)
 {
     memset(&g_store, 0, sizeof(g_store));
+    s_kredit_events_mutex = xSemaphoreCreateMutex();
+    configASSERT(s_kredit_events_mutex);
     nvs_open();
 
     // Defaults

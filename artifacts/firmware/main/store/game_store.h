@@ -125,6 +125,7 @@ typedef struct {
     char datum[11];      // YYYY-MM-DD
     char typ[8];         // "GRANT" or "USE"
     int  anzahl;
+    bool inFlight;       // included in the current portal POST; may be accepted
 } KreditEvent;
 
 typedef struct {
@@ -189,6 +190,11 @@ typedef struct {
     int      ergebnisseCount;
     char     spielId[40];
     bool     currentFireSent; // one physical gateway request per launch unit
+    // Exact USE events charged when this game started. They let a canceled
+    // game safely remove unsynced charges or compensate charges already sent.
+    int      activeGameCreditPlayerIds[MAX_SPIELER];
+    char     activeGameCreditUseIds[MAX_SPIELER][40];
+    int      activeGameCreditCount;
 
     // Portal cache
     PortalSpieler portalSpieler[MAX_PORTAL_SPIELER];
@@ -243,6 +249,7 @@ void store_navigate(Screen s);
 
 // ── Game flow ────────────────────────────────────────────────
 bool store_start_spiel(void);   // deducts credits, builds sequenz
+bool store_cancel_spiel(void);  // refunds this game's credits; no result is saved
 void store_eintragen(int punkte);
 void store_wiederholen(void);
 void store_skip_taube(void);
@@ -262,7 +269,11 @@ void store_sync(void);   // pushes pending games + pulls history
 
 // ── Player updates ───────────────────────────────────────────
 void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv);
-void store_queue_kredit_event(int spieler_id, const char *typ, int anzahl);
+bool store_queue_kredit_event(int spieler_id, const char *typ, int anzahl);
+int  store_begin_kredit_event_sync(KreditEvent *snapshot, int capacity);
+void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
+                                    bool delivered);
+void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht);
 void store_queue_passwort_reset(int spieler_id);
 int  store_pending_update_count(void);
 

@@ -25,6 +25,8 @@ static lv_obj_t *s_btn_fire;
 static lv_obj_t *s_lbl_fire_button;
 static lv_obj_t *s_score_table;
 static lv_obj_t *s_btn_score[3];
+static lv_obj_t *s_quit_modal;
+static lv_obj_t *s_quit_message;
 
 // ── Score button callbacks ────────────────────────────────────
 static void score_cb(lv_event_t *e)
@@ -65,6 +67,95 @@ static void skip_cb(lv_event_t *e)
     screen_spiel_refresh();
 }
 
+static void close_quit_modal(void)
+{
+    if (!s_quit_modal) return;
+    lv_obj_del(s_quit_modal);
+    s_quit_modal = NULL;
+    s_quit_message = NULL;
+}
+
+static void quit_cancel_cb(lv_event_t *e)
+{
+    close_quit_modal();
+}
+
+static void quit_confirm_cb(lv_event_t *e)
+{
+    if (store_cancel_spiel()) {
+        close_quit_modal();
+        return;
+    }
+    if (s_quit_message) {
+        lv_label_set_text(s_quit_message,
+                          "CREDITS COULD NOT BE RESTORED.\n"
+                          "SYNC OR CLEAR QUEUE, THEN TRY AGAIN.");
+        lv_obj_set_style_text_color(s_quit_message, lv_color_hex(CLR_DANGER), 0);
+    }
+}
+
+static void quit_open_cb(lv_event_t *e)
+{
+    if (s_quit_modal) return;
+
+    s_quit_modal = lv_obj_create(s_scr);
+    lv_obj_set_size(s_quit_modal, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
+    lv_obj_align(s_quit_modal, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(s_quit_modal, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_quit_modal, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(s_quit_modal, 0, 0);
+    lv_obj_set_style_pad_all(s_quit_modal, 0, 0);
+    lv_obj_clear_flag(s_quit_modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *dialog = lv_obj_create(s_quit_modal);
+    lv_obj_set_size(dialog, 520, 250);
+    lv_obj_align(dialog, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_style(dialog, &g_style_card, 0);
+    lv_obj_set_style_pad_all(dialog, 24, 0);
+    lv_obj_set_flex_flow(dialog, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(dialog, LV_FLEX_ALIGN_CENTER,
+                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(dialog, 14, 0);
+    lv_obj_clear_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(dialog);
+    lv_label_set_text(title, "QUIT GAME?");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(CLR_DANGER), 0);
+
+    s_quit_message = lv_label_create(dialog);
+    lv_label_set_text(s_quit_message,
+                      "THE GAME WILL NOT BE SAVED.\n"
+                      "ALL PLAYER CREDITS WILL BE RESTORED.");
+    lv_obj_set_style_text_align(s_quit_message, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(s_quit_message, lv_color_hex(CLR_TEXT), 0);
+
+    lv_obj_t *actions = lv_obj_create(dialog);
+    lv_obj_set_size(actions, LV_PCT(100), 54);
+    lv_obj_set_style_bg_opa(actions, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(actions, 0, 0);
+    lv_obj_set_style_pad_all(actions, 0, 0);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(actions, 12, 0);
+    lv_obj_clear_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *confirm = lv_btn_create(actions);
+    lv_obj_add_style(confirm, &g_style_btn_danger, 0);
+    lv_obj_set_size(confirm, 210, 54);
+    lv_obj_add_event_cb(confirm, quit_confirm_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *confirm_label = lv_label_create(confirm);
+    lv_label_set_text(confirm_label, "YES, QUIT");
+    lv_obj_center(confirm_label);
+
+    lv_obj_t *cancel = lv_btn_create(actions);
+    lv_obj_add_style(cancel, &g_style_btn_secondary, 0);
+    lv_obj_set_size(cancel, 210, 54);
+    lv_obj_add_event_cb(cancel, quit_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel_label = lv_label_create(cancel);
+    lv_label_set_text(cancel_label, "KEEP GAME");
+    lv_obj_center(cancel_label);
+}
+
 // ── screen_spiel_create ───────────────────────────────────────
 lv_obj_t *screen_spiel_create(void)
 {
@@ -102,6 +193,14 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_text_font(s_lbl_taube, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_lbl_taube, lv_color_hex(CLR_MUTED), 0);
 
+    lv_obj_t *quit_btn = lv_btn_create(topbar);
+    lv_obj_add_style(quit_btn, &g_style_btn_danger, 0);
+    lv_obj_set_size(quit_btn, 142, 42);
+    lv_obj_add_event_cb(quit_btn, quit_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *quit_label = lv_label_create(quit_btn);
+    lv_label_set_text(quit_label, "QUIT GAME");
+    lv_obj_center(quit_label);
+
     // ── Left panel: game controls (280px) ──────────────────
     lv_obj_t *left = lv_obj_create(s_scr);
     lv_obj_set_size(left, 280, DISPLAY_LOGICAL_H - 70);
@@ -127,10 +226,12 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_pad_all(ctrl_row, 0, 0);
     lv_obj_set_flex_flow(ctrl_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(ctrl_row, 8, 0);
+    lv_obj_clear_flag(ctrl_row, LV_OBJ_FLAG_SCROLLABLE);
 
     s_btn_wiederhole = lv_btn_create(ctrl_row);
     lv_obj_add_style(s_btn_wiederhole, &g_style_btn_secondary, 0);
-    lv_obj_set_size(s_btn_wiederhole, LV_PCT(50), 44);
+    lv_obj_set_size(s_btn_wiederhole, 112, 40);
+    lv_obj_set_style_pad_hor(s_btn_wiederhole, 10, 0);
     lv_obj_add_event_cb(s_btn_wiederhole, wiederhole_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = lv_label_create(s_btn_wiederhole);
     lv_label_set_text(wl, LV_SYMBOL_REFRESH " WDH");
@@ -139,7 +240,8 @@ lv_obj_t *screen_spiel_create(void)
 
     lv_obj_t *skip_btn = lv_btn_create(ctrl_row);
     lv_obj_add_style(skip_btn, &g_style_btn_secondary, 0);
-    lv_obj_set_size(skip_btn, LV_PCT(50), 44);
+    lv_obj_set_size(skip_btn, 112, 40);
+    lv_obj_set_style_pad_hor(skip_btn, 10, 0);
     lv_obj_add_event_cb(skip_btn, skip_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *sl = lv_label_create(skip_btn);
     lv_label_set_text(sl, LV_SYMBOL_NEXT " SKIP");

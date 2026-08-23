@@ -15,3 +15,4 @@
 - [Nested Arduino include resolution](nested-arduino-includes.md) — Arduino resolves shared-header paths from the nested sketch directory when a wrapper includes a parent `.ino`
 - [Gateway worker concurrency](gateway-worker-concurrency.md) — terminal HTTP requests must snapshot settings at action time and synchronize worker results before LVGL reads them
 - [Gateway ACK validation](gateway-ack-validation.md) — authenticated terminal-to-relay FIRE/ACK path confirmed working on hardware
+- [Credit cancellation during sync](credit-cancellation-sync.md) — cancellation must account for in-flight portal posts and replay pending credit events after a pull

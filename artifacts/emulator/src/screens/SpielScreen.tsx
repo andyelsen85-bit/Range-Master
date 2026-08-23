@@ -23,6 +23,7 @@ export function SpielScreen() {
   const aktiverSpieler = store.getAktivenSpieler();
   const harakiri = isHarakiriModus(store.modus);
   const [confirmAbort, setConfirmAbort] = useState(false);
+  const [quitError, setQuitError] = useState(false);
 
   // In Harakiri each post offsets into the sequenz — compute active player's post first,
   // then derive the eintrag from it. In Normal mode eintrag is just sequenz[taubeIndex].
@@ -134,23 +135,38 @@ export function SpielScreen() {
         <div className="mt-auto p-4 border-t-2 border-border">
           {confirmAbort ? (
             <div className="grid grid-cols-2 gap-2">
+              <p className="col-span-2 text-center text-xs font-semibold leading-relaxed text-muted-foreground">
+                Game will not be saved. All player credits will be restored.
+              </p>
               <TouchButton variant="destructive" className="h-14 text-base font-bold"
-                onClick={() => { store.ofbriechenSpiel(); setConfirmAbort(false); }}>
-                JA
+                onClick={() => {
+                  if (store.ofbriechenSpiel()) {
+                    setConfirmAbort(false);
+                    setQuitError(false);
+                  } else {
+                    setQuitError(true);
+                  }
+                }}>
+                YES, QUIT
               </TouchButton>
               <TouchButton className="h-14 text-base font-bold"
                 onClick={() => setConfirmAbort(false)}>
-                NEIN
+                KEEP GAME
               </TouchButton>
+              {quitError && (
+                <p className="col-span-2 text-center text-xs font-semibold text-destructive">
+                  Credits could not be restored. Sync or clear the queue, then try again.
+                </p>
+              )}
             </div>
           ) : (
             <TouchButton
               variant="outline"
               className="h-14 w-full text-destructive border-destructive gap-2"
-              onClick={() => setConfirmAbort(true)}
+              onClick={() => { setQuitError(false); setConfirmAbort(true); }}
             >
               <XOctagon className="w-5 h-5" />
-              Ofbriechen
+              QUIT GAME
             </TouchButton>
           )}
         </div>
