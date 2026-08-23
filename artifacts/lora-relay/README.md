@@ -48,6 +48,11 @@ Machine G → TrapMasterRelayG/TrapMasterRelayG.ino
 Machine H → TrapMasterRelayH/TrapMasterRelayH.ino
 ```
 
+After boot, the Wireless Stick V3 OLED shows the selected machine letter
+(`A` through `H`) centered on the display. The letter is compiled into the
+fixed wrapper project, so it is also a quick visual check that the correct
+relay sketch was uploaded.
+
 1. Define `TM_RELAY_GPIO` to the **verified** output pin used by your relay board.
    There is no default deliberately: the Wireless Stick V3 pinout and actual wiring
    must be checked against Heltec's official diagram before energizing a relay.

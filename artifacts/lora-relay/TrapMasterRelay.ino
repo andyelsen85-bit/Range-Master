@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include "LoRaWan_APP.h"
+#include "HT_SSD1306Wire.h"
 #if __has_include("TrapMasterRelay.local.h")
 #include "TrapMasterRelay.local.h"
 #endif
@@ -65,6 +66,16 @@ Preferences preferences;
 static uint32_t lastAcceptedCounter = 0;
 static volatile bool firePending = false;
 static uint32_t pendingCounter = 0;
+SSD1306Wire relayDisplay(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_64_32, RST_OLED);
+
+static void renderMachineId()
+{
+    relayDisplay.clear();
+    relayDisplay.setTextAlignment(TEXT_ALIGN_CENTER);
+    relayDisplay.setFont(ArialMT_Plain_24);
+    relayDisplay.drawString(32, 3, String(TM_MACHINE_ID));
+    relayDisplay.display();
+}
 
 static void onTxDone()
 {
@@ -162,6 +173,12 @@ static void fireRelayAndAck(uint32_t counter)
 void setup()
 {
     Serial.begin(115200);
+    pinMode(Vext, OUTPUT);
+    digitalWrite(Vext, LOW); // OLED rail on (official Heltec behavior)
+    delay(100);
+    relayDisplay.init();
+    renderMachineId();
+
     pinMode(TM_RELAY_GPIO, OUTPUT);
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
     pinMode(TM_BENCH_INTERLOCK_GPIO, INPUT_PULLUP);
