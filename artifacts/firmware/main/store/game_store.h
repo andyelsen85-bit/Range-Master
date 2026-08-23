@@ -265,7 +265,17 @@ void store_add_kredite(int spieler_id, int anzahl);
 void store_register_spieler_fuer_tag(int spieler_id);
 
 // ── Sync ─────────────────────────────────────────────────────
-void store_sync(void);   // pushes pending games + pulls history
+/**
+ * Queue a full portal sync. Returns false when the persistent sync worker is
+ * unavailable or its queue is busy; the caller must not treat it as a sync.
+ */
+bool store_sync(void);
+
+/**
+ * Request exactly one initial full sync after this boot's stored-WiFi
+ * auto-connect succeeds. Safe to call before the sync worker exists.
+ */
+void store_sync_after_boot_wifi_connected(void);
 
 // ── Player updates ───────────────────────────────────────────
 void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv);

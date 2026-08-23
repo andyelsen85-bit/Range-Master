@@ -687,6 +687,11 @@ void store_navigate(Screen s)
 // just queue-send, which costs no allocations.
 static QueueHandle_t s_load_spieler_queue = NULL;
 static QueueHandle_t s_sync_queue         = NULL;
+static portMUX_TYPE s_sync_request_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_boot_sync_requested = false;
+static bool s_boot_sync_queued = false;
+
+static void queue_boot_sync_if_pending(void);
 
 void store_create_workers(void)
 {
@@ -722,23 +727,52 @@ void store_create_workers(void)
     // PSRAM the cache-disable assert fires immediately (esp_task_stack_is_sane_
     // cache_disabled).  Use MALLOC_CAP_INTERNAL so the stack survives the
     // cache-off window.
-    s_sync_queue = xQueueCreate(1, sizeof(uint32_t));
-    xTaskCreateWithCaps([](void *arg) {
+    QueueHandle_t sync_queue = xQueueCreate(1, sizeof(uint32_t));
+    if (!sync_queue) {
+        ESP_LOGE(TAG, "Sync worker queue allocation failed");
+        g_store.syncStatus = SYNC_ERROR;
+        snprintf(g_store.syncError, sizeof(g_store.syncError),
+                 "Sync worker unavailable");
+        return;
+    }
+
+    // Start the worker with its private queue handle first. Publishing the
+    // handle only after task creation succeeds prevents callers from
+    // accepting a request that no worker can ever consume.
+    BaseType_t task_created = xTaskCreateWithCaps([](void *arg) {
+        QueueHandle_t queue = (QueueHandle_t)arg;
         uint32_t dummy;
         for (;;) {
-            xQueueReceive(s_sync_queue, &dummy, portMAX_DELAY);
+            xQueueReceive(queue, &dummy, portMAX_DELAY);
             esp_err_t err = http_sync_all();
             g_store.syncStatus = (err == ESP_OK) ? SYNC_SUCCESS : SYNC_ERROR;
             if (err != ESP_OK) {
                 snprintf(g_store.syncError, sizeof(g_store.syncError),
                          "HTTP sync failed: %s", esp_err_to_name(err));
             }
+            // If the boot WiFi connection happened while another sync had
+            // filled the queue, retry the one required initial sync now.
+            queue_boot_sync_if_pending();
         }
     }, "sync_w", 16384, NULL, 5, NULL,
        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (task_created != pdPASS) {
+        vQueueDelete(sync_queue);
+        ESP_LOGE(TAG, "Sync worker task creation failed");
+        g_store.syncStatus = SYNC_ERROR;
+        snprintf(g_store.syncError, sizeof(g_store.syncError),
+                 "Sync worker unavailable");
+        return;
+    }
+
+    portENTER_CRITICAL(&s_sync_request_lock);
+    s_sync_queue = sync_queue;
+    portEXIT_CRITICAL(&s_sync_request_lock);
 
     ESP_LOGI(TAG, "Store workers created. Internal RAM remaining: %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+
+    queue_boot_sync_if_pending();
 }
 
 // ── Portal players ───────────────────────────────────────────
@@ -940,13 +974,60 @@ void store_queue_passwort_reset(int spieler_id)
 int store_pending_update_count(void) { return g_store.spielerUpdateCount; }
 
 // ── Sync ─────────────────────────────────────────────────────
-void store_sync(void)
+bool store_sync(void)
 {
     // Just trigger the persistent worker — costs no RAM at call time.
-    if (!s_sync_queue) return;
+    QueueHandle_t sync_queue = NULL;
+    portENTER_CRITICAL(&s_sync_request_lock);
+    sync_queue = s_sync_queue;
+    portEXIT_CRITICAL(&s_sync_request_lock);
+    if (!sync_queue) {
+        g_store.syncStatus = SYNC_ERROR;
+        snprintf(g_store.syncError, sizeof(g_store.syncError),
+                 "Sync worker unavailable");
+        return false;
+    }
+
     g_store.syncStatus = SYNC_RUNNING;
     uint32_t trigger = 1;
-    xQueueSend(s_sync_queue, &trigger, 0);
+    if (xQueueSend(sync_queue, &trigger, 0) != pdTRUE) {
+        g_store.syncStatus = SYNC_ERROR;
+        snprintf(g_store.syncError, sizeof(g_store.syncError),
+                 "Sync request already queued");
+        return false;
+    }
+    return true;
+}
+
+void store_sync_after_boot_wifi_connected(void)
+{
+    portENTER_CRITICAL(&s_sync_request_lock);
+    if (!s_boot_sync_requested) {
+        s_boot_sync_requested = true;
+    }
+    portEXIT_CRITICAL(&s_sync_request_lock);
+
+    queue_boot_sync_if_pending();
+}
+
+static void queue_boot_sync_if_pending(void)
+{
+    bool queue_sync_now = false;
+    portENTER_CRITICAL(&s_sync_request_lock);
+    if (s_boot_sync_requested && !s_boot_sync_queued && s_sync_queue) {
+        // Reserve the one boot-sync slot before queueing so the autoconnect
+        // task and sync worker cannot enqueue it twice.
+        s_boot_sync_queued = true;
+        queue_sync_now = true;
+    }
+    portEXIT_CRITICAL(&s_sync_request_lock);
+
+    if (queue_sync_now && !store_sync()) {
+        portENTER_CRITICAL(&s_sync_request_lock);
+        s_boot_sync_queued = false;
+        portEXIT_CRITICAL(&s_sync_request_lock);
+        ESP_LOGE(TAG, "Initial boot sync could not be queued");
+    }
 }
 
 // ── Persistence (JSON in NVS) ─────────────────────────────────

@@ -312,6 +312,10 @@ void coprocessor_autoconnect(void)
                 // Mark connected in the store so the dashboard tick picks it up
                 g_store.wifiConnected = true;
                 ESP_LOGI("autoconnect", "Connected. IP: %s", g_store.wifiIp);
+                // Sync once per boot after the stored WiFi connection is
+                // confirmed. The store safely waits if its worker is still
+                // being created while the display/UI is booting.
+                store_sync_after_boot_wifi_connected();
                 vTaskDelete(NULL);
                 return;
             }

@@ -10,6 +10,7 @@
 #include "ui_time_fmt.h"
 #include "lvgl.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_dashboard.h"
@@ -21,6 +22,9 @@ static lv_obj_t *s_lbl_sync_status;
 static lv_obj_t *s_lbl_pending;
 static lv_obj_t *s_lbl_wifi;
 static lv_obj_t *s_history_list;
+static lv_obj_t *s_shutdown_modal;
+static lv_obj_t *s_shutdown_message;
+static bool s_shutdown_sync_pending;
 
 #define SIDEBAR_W   320
 #define HEADER_H     80
@@ -88,6 +92,127 @@ static void sync_cb(lv_event_t *e)
 {
     store_sync();
     screen_dashboard_refresh();
+}
+
+// ── Graceful deep-sleep shutdown ───────────────────────────────
+static void close_shutdown_modal(void)
+{
+    if (!s_shutdown_modal) return;
+    lv_obj_del(s_shutdown_modal);
+    s_shutdown_modal = NULL;
+    s_shutdown_message = NULL;
+    s_shutdown_sync_pending = false;
+}
+
+static void set_shutdown_message(const char *text, uint32_t color)
+{
+    if (!s_shutdown_message) return;
+    lv_label_set_text(s_shutdown_message, text);
+    lv_obj_set_style_text_color(s_shutdown_message, lv_color_hex(color), 0);
+}
+
+static void shutdown_cancel_cb(lv_event_t *e)
+{
+    if (s_shutdown_sync_pending) return;
+    close_shutdown_modal();
+}
+
+static void shutdown_confirm_cb(lv_event_t *e)
+{
+    if (s_shutdown_sync_pending) return;
+
+    if (!g_store.wifiConnected) {
+        set_shutdown_message("WIFI IS NOT CONNECTED.\n"
+                             "CONNECT FIRST, THEN TRY AGAIN.", CLR_DANGER);
+        return;
+    }
+
+    // The global sync result does not identify its source. Refuse while a
+    // previous sync is active so the only completion we observe belongs to
+    // this shutdown request.
+    if (g_store.syncStatus == SYNC_RUNNING) {
+        set_shutdown_message("A SYNC IS ALREADY RUNNING.\n"
+                             "WAIT FOR IT, THEN TRY AGAIN.", CLR_WARN);
+        return;
+    }
+
+    if (!store_sync()) {
+        char message[160];
+        snprintf(message, sizeof(message), "SYNC COULD NOT START.\n%.100s",
+                 g_store.syncError[0] ? g_store.syncError : "TRY AGAIN.");
+        set_shutdown_message(message, CLR_DANGER);
+        return;
+    }
+
+    s_shutdown_sync_pending = true;
+    set_shutdown_message("SYNCING BEFORE SHUTDOWN...\n"
+                         "DO NOT SWITCH OFF THE TERMINAL.", CLR_WARN);
+    screen_dashboard_refresh();
+}
+
+static void shutdown_open_cb(lv_event_t *e)
+{
+    if (s_shutdown_modal) return;
+
+    s_shutdown_modal = lv_obj_create(s_scr);
+    lv_obj_set_size(s_shutdown_modal, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
+    lv_obj_align(s_shutdown_modal, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(s_shutdown_modal, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_shutdown_modal, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(s_shutdown_modal, 0, 0);
+    lv_obj_set_style_pad_all(s_shutdown_modal, 0, 0);
+    lv_obj_clear_flag(s_shutdown_modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *dialog = lv_obj_create(s_shutdown_modal);
+    lv_obj_set_size(dialog, 560, 270);
+    lv_obj_align(dialog, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_style(dialog, &g_style_card, 0);
+    lv_obj_set_style_pad_all(dialog, 24, 0);
+    lv_obj_set_flex_flow(dialog, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(dialog, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(dialog, 16, 0);
+    lv_obj_clear_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(dialog);
+    lv_label_set_text(title, "SYNC & SHUT DOWN?");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(CLR_DANGER), 0);
+
+    s_shutdown_message = lv_label_create(dialog);
+    lv_label_set_text(s_shutdown_message,
+                      "THE TERMINAL WILL SYNC FIRST.\n"
+                      "IT WILL ENTER DEEP SLEEP ONLY IF SYNC SUCCEEDS.");
+    lv_obj_set_style_text_align(s_shutdown_message, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(s_shutdown_message, lv_color_hex(CLR_TEXT), 0);
+
+    lv_obj_t *actions = lv_obj_create(dialog);
+    lv_obj_set_size(actions, LV_PCT(100), 54);
+    lv_obj_set_style_bg_opa(actions, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(actions, 0, 0);
+    lv_obj_set_style_pad_all(actions, 0, 0);
+    lv_obj_set_style_pad_column(actions, 12, 0);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *confirm = lv_btn_create(actions);
+    lv_obj_add_style(confirm, &g_style_btn_danger, 0);
+    lv_obj_set_size(confirm, 250, 54);
+    lv_obj_add_event_cb(confirm, shutdown_confirm_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *confirm_label = lv_label_create(confirm);
+    lv_label_set_text(confirm_label, LV_SYMBOL_POWER "  SYNC & SHUT DOWN");
+    lv_obj_set_style_text_font(confirm_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(confirm_label);
+
+    lv_obj_t *cancel = lv_btn_create(actions);
+    lv_obj_add_style(cancel, &g_style_btn_secondary, 0);
+    lv_obj_set_size(cancel, 160, 54);
+    lv_obj_add_event_cb(cancel, shutdown_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel_label = lv_label_create(cancel);
+    lv_label_set_text(cancel_label, "CANCEL");
+    lv_obj_center(cancel_label);
 }
 
 // ── screen_dashboard_create ───────────────────────────────────
@@ -217,7 +342,17 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_font(hist_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(hist_lbl, lv_color_hex(CLR_MUTED), 0);
 
-    // 5. Offline Queue panel - flex-grow fills the remaining space
+    // 5. Graceful shutdown: sync first, then put the ESP32 into deep sleep.
+    lv_obj_t *shutdown_btn = lv_btn_create(sidebar);
+    lv_obj_add_style(shutdown_btn, &g_style_btn_danger, 0);
+    lv_obj_set_size(shutdown_btn, SIDEBAR_W - 32, 50);
+    lv_obj_add_event_cb(shutdown_btn, shutdown_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *shutdown_label = lv_label_create(shutdown_btn);
+    lv_label_set_text(shutdown_label, LV_SYMBOL_POWER "  SHUT DOWN");
+    lv_obj_set_style_text_font(shutdown_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(shutdown_label);
+
+    // 6. Offline Queue panel - flex-grow fills the remaining space
     lv_obj_t *queue = lv_obj_create(sidebar);
     lv_obj_set_flex_grow(queue, 1);
     lv_obj_set_width(queue, SIDEBAR_W - 32);
@@ -389,6 +524,23 @@ void screen_dashboard_refresh(void)
 
 void screen_dashboard_tick(void)
 {
+    if (s_shutdown_sync_pending) {
+        if (g_store.syncStatus == SYNC_SUCCESS) {
+            // The sync worker has reported success; no shutdown path can
+            // reach deep sleep before this point.
+            ESP_LOGI("dashboard", "Sync complete; entering deep sleep");
+            esp_deep_sleep_start();
+        }
+        if (g_store.syncStatus == SYNC_ERROR) {
+            s_shutdown_sync_pending = false;
+            char message[160];
+            snprintf(message, sizeof(message), "SYNC FAILED. TERMINAL STAYS ON.\n%.100s",
+                     g_store.syncError[0] ? g_store.syncError : "TRY AGAIN.");
+            set_shutdown_message(message, CLR_DANGER);
+            screen_dashboard_refresh();
+        }
+    }
+
     static uint32_t last = 0;
     if (lv_tick_get() - last > 2000) {
         last = lv_tick_get();
