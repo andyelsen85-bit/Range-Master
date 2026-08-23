@@ -754,7 +754,7 @@ void store_create_workers(void)
             // filled the queue, retry the one required initial sync now.
             queue_boot_sync_if_pending();
         }
-    }, "sync_w", 16384, NULL, 5, NULL,
+    }, "sync_w", 16384, sync_queue, 5, NULL,
        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (task_created != pdPASS) {
         vQueueDelete(sync_queue);
