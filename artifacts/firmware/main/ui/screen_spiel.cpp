@@ -102,7 +102,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_text_font(s_lbl_taube, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(s_lbl_taube, lv_color_hex(CLR_MUTED), 0);
 
-    // ── Left panel: Machine + score buttons (280px) ───────
+    // ── Left panel: game controls (280px) ──────────────────
     lv_obj_t *left = lv_obj_create(s_scr);
     lv_obj_set_size(left, 280, DISPLAY_LOGICAL_H - 70);
     lv_obj_align(left, LV_ALIGN_TOP_LEFT, 0, 70);
@@ -112,57 +112,13 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_border_width(left, 2, 0);
     lv_obj_set_style_border_color(left, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(left, LV_FLEX_ALIGN_CENTER,
+    // Keep the controls in a predictable top-to-bottom reading order:
+    // WDH/SKIP, score buttons, WERFEN target, then FIRE.
+    lv_obj_set_flex_align(left, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(left, 20, 0);
-    lv_obj_set_style_pad_row(left, 16, 0);
 
-    lv_obj_t *mach_hdr = lv_label_create(left);
-    lv_label_set_text(mach_hdr, "WERFEN");
-    lv_obj_set_style_text_font(mach_hdr, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(mach_hdr, lv_color_hex(CLR_MUTED), 0);
-
-    s_lbl_maschine = lv_label_create(left);
-    lv_label_set_text(s_lbl_maschine, "A");
-    lv_obj_set_style_text_font(s_lbl_maschine, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
-
-    s_btn_fire = lv_btn_create(left);
-    lv_obj_set_size(s_btn_fire, LV_PCT(100), 64);
-    lv_obj_set_style_bg_color(s_btn_fire, lv_color_hex(CLR_PRIMARY), 0);
-    lv_obj_set_style_bg_opa(s_btn_fire, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(s_btn_fire, 10, 0);
-    lv_obj_set_style_border_width(s_btn_fire, 0, 0);
-    lv_obj_add_event_cb(s_btn_fire, fire_cb, LV_EVENT_CLICKED, NULL);
-    s_lbl_fire_button = lv_label_create(s_btn_fire);
-    lv_label_set_text(s_lbl_fire_button, LV_SYMBOL_PLAY " FIRE MASCHINN A");
-    lv_obj_set_style_text_font(s_lbl_fire_button, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(s_lbl_fire_button, lv_color_hex(CLR_TEXT), 0);
-    lv_obj_center(s_lbl_fire_button);
-
-    // Score buttons: 2, 1, 0
-    static const char *sc_labels[] = {"2", "1", "0"};
-    static int sc_pts[]            = {2, 1, 0};
-    static uint32_t sc_colors[]    = {CLR_SUCCESS, CLR_WARN, CLR_DANGER};
-
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *btn = lv_btn_create(left);
-        s_btn_score[i] = btn;
-        lv_obj_set_size(btn, LV_PCT(100), 72);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(sc_colors[i]), 0);
-        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(btn, 10, 0);
-        lv_obj_set_style_border_width(btn, 0, 0);
-        lv_obj_add_event_cb(btn, score_cb, LV_EVENT_CLICKED,
-                            (void*)(intptr_t)sc_pts[i]);
-        lv_obj_t *lbl = lv_label_create(btn);
-        lv_label_set_text(lbl, sc_labels[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_36, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
-        lv_obj_center(lbl);
-    }
-
-    // Wiederhole + SKIP row
+    // ── Top controls: Wiederhole + SKIP ────────────────────
     lv_obj_t *ctrl_row = lv_obj_create(left);
     lv_obj_set_size(ctrl_row, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(ctrl_row, LV_OPA_0, 0);
@@ -188,6 +144,53 @@ lv_obj_t *screen_spiel_create(void)
     lv_label_set_text(sl, LV_SYMBOL_NEXT " SKIP");
     lv_obj_set_style_text_color(sl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sl);
+
+    // ── Score buttons: 0, 1, 2 ─────────────────────────────
+    static const char *sc_labels[] = {"0", "1", "2"};
+    static int sc_pts[]            = {0, 1, 2};
+    static uint32_t sc_colors[]    = {CLR_DANGER, CLR_WARN, CLR_SUCCESS};
+
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *btn = lv_btn_create(left);
+        s_btn_score[i] = btn;
+        lv_obj_set_size(btn, LV_PCT(100), 72);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(sc_colors[i]), 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(btn, 10, 0);
+        lv_obj_set_style_border_width(btn, 0, 0);
+        lv_obj_add_event_cb(btn, score_cb, LV_EVENT_CLICKED,
+                            (void*)(intptr_t)sc_pts[i]);
+        lv_obj_t *lbl = lv_label_create(btn);
+        lv_label_set_text(lbl, sc_labels[i]);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_36, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(lbl);
+    }
+
+    // ── Throw target, directly above the FIRE trigger ──────
+    lv_obj_t *mach_hdr = lv_label_create(left);
+    lv_label_set_text(mach_hdr, "WERFEN");
+    lv_obj_set_style_text_font(mach_hdr, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(mach_hdr, lv_color_hex(CLR_MUTED), 0);
+
+    s_lbl_maschine = lv_label_create(left);
+    lv_label_set_text(s_lbl_maschine, "A");
+    lv_obj_set_style_text_font(s_lbl_maschine, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
+
+    // ── FIRE trigger at the bottom of the control stack ────
+    s_btn_fire = lv_btn_create(left);
+    lv_obj_set_size(s_btn_fire, LV_PCT(100), 64);
+    lv_obj_set_style_bg_color(s_btn_fire, lv_color_hex(CLR_PRIMARY), 0);
+    lv_obj_set_style_bg_opa(s_btn_fire, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_btn_fire, 10, 0);
+    lv_obj_set_style_border_width(s_btn_fire, 0, 0);
+    lv_obj_add_event_cb(s_btn_fire, fire_cb, LV_EVENT_CLICKED, NULL);
+    s_lbl_fire_button = lv_label_create(s_btn_fire);
+    lv_label_set_text(s_lbl_fire_button, LV_SYMBOL_PLAY " FIRE MASCHINN A");
+    lv_obj_set_style_text_font(s_lbl_fire_button, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(s_lbl_fire_button, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(s_lbl_fire_button);
 
     // ── Right panel ───────────────────────────────────────
     lv_obj_t *right = lv_obj_create(s_scr);
