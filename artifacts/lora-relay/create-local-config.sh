@@ -35,9 +35,8 @@ cat > "$relay_config" <<EOF
     ${aes_bytes} \\
 }
 
-// Legacy root-sketch default only. The fixed A-H Arduino projects override this
-// value automatically; do not edit it when flashing those projects.
-#define TM_MACHINE_ID 'A'
+// The fixed TrapMasterRelayA-H Arduino projects define the machine ID in their
+// wrapper sketch. Do not add TM_MACHINE_ID to this shared configuration file.
 #define TM_RELAY_GPIO 4
 #define TM_RELAY_ACTIVE_LEVEL LOW
 EOF

@@ -11,7 +11,7 @@
     0x00, 0x00, 0x00, 0x00  \
 }
 
-// Flash the same sketch once for each machine, changing only this value.
-#define TM_MACHINE_ID 'A'
+// The fixed TrapMasterRelayA–H wrapper projects define the machine ID.
+// Do not define TM_MACHINE_ID in this shared configuration file.
 #define TM_RELAY_GPIO 4
 #define TM_RELAY_ACTIVE_LEVEL LOW
