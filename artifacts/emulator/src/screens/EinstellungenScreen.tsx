@@ -187,7 +187,7 @@ function CustomSequenzEditor({
             H · H1/H2
           </button>
           <span className="text-xs text-muted-foreground">
-            {pairFirst ? `${pairFirst} gewielt — Partner tippen` : 'H brauch kee Partner'}
+            {pairFirst ? `${pairFirst} gewielt — Partner tippen` : 'H: 1 FIRE — d’Maschinn mécht H2'}
           </span>
         </div>
       </div>

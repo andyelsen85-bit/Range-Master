@@ -77,9 +77,9 @@ Example private compile-time settings:
   does not make a captured command replayable.
 - Machines A–G accept a packet, pulse for 300 ms by default, then send an
   authenticated ACK back to the gateway.
-- Machine H accepts exactly one authenticated packet, pulses H1, waits for its
-  system-controlled 1-second interval, pulses H2, then sends one ACK. H2 never
-  has a separate radio command.
+- Machine H accepts exactly one authenticated packet and closes its dry contact
+  once. The connected H machine is responsible for launching H2 after H1; the
+  relay never adds an H2 pulse or timing of its own.
 
 If a relay must be reset or replaced, do not erase its replay state while keeping the
 same AES key. Re-key the gateway and all relays together first, while every trap is

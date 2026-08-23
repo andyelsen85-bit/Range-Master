@@ -532,7 +532,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             add_custom_entry(c, (CustomSequenzEintrag){
                 MASCHINE_H, MASCHINE_H, true, 0
             });
-            set_pair_status(c, "H: 1 FIRE, H1 + H2 (SYSTEM-DELAY)");
+            set_pair_status(c, "H: 1 FIRE - MASCHINN MAACHT H2");
         }, LV_EVENT_CLICKED, (void*)(intptr_t)ci);
         lv_obj_t *hl = lv_label_create(h_pair);
         lv_label_set_text(hl, "H  H1/H2");

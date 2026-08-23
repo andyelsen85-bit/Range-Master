@@ -70,12 +70,15 @@ Use **Gateway testen** in the terminal settings after saving the gateway URL and
   machine, second machine, delay, and sequence together; its delay is limited to
   0–10,000 ms.
 - The gateway writes the pair request to NVS **before** the first radio transmission
-  and writes its progress before the delay. It sends the second machine only after
-  the first relay ACK arrives. A duplicate request returns its cached final outcome;
-  a restart or write failure while the outcome is unknown returns `409` and must not
-  be retried as a new FIRE command.
+  and writes its progress before the delay. With a positive delay, it sends the
+  second machine only after the first relay ACK arrives. With a `0` ms delay, it
+  skips the first ACK wait and transmits the second machine immediately after the
+  first radio transmission completes. A duplicate request returns its cached final
+  outcome; a restart or write failure while the outcome is unknown returns `409` and
+  must not be retried as a new FIRE command.
 - H is deliberately not accepted by `/fire-pair`. A terminal H doublette calls
-  `/fire?machine=H` once; the H relay creates H1 and H2 locally, then acknowledges.
+  `/fire?machine=H` once; the connected H machine creates H2 after H1, and the
+  relay only supplies the single trigger pulse.
 
 ## Staged hardware checklist
 
@@ -92,9 +95,11 @@ Use **Gateway testen** in the terminal settings after saving the gateway URL and
 4. Verify an altered ciphertext/tag and a repeated captured frame do not operate the
    relay.
 5. Only then wire the relay's COM/NO dry contact to a verified trap trigger.
-6. With all traps still disconnected, test one A–G custom pair at a short delay:
-   confirm the first relay ACKs before the second fires, then retry the identical
-   HTTP request and verify that neither relay pulses a second time.
+6. With all traps still disconnected, test one A–G custom pair with a positive
+   delay: confirm the first relay ACKs before the second fires. Then test a `0`
+   delay pair and confirm both commands transmit back-to-back without waiting for
+   the first ACK. Retry each identical HTTP request and verify that neither relay
+   pulses a second time.
 
 ## Counter recovery
 

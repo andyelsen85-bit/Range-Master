@@ -239,7 +239,7 @@ static bool waitForFlag(volatile bool &flag, uint32_t timeoutMs)
     return flag;
 }
 
-static bool sendFire(char machine, bool *ack)
+static bool sendFire(char machine, bool *ack, bool wait_for_ack)
 {
     if (radioBusy || !tm_protocol::valid_machine(machine)) return false;
     radioBusy = true;
@@ -274,6 +274,15 @@ static bool sendFire(char machine, bool *ack)
         lastResult = "LoRa TX failed";
         radioBusy = false;
         return false;
+    }
+
+    if (!wait_for_ack) {
+        lastAck = false;
+        lastMachine = String(machine);
+        lastResult = "sent, ACK skipped";
+        radioBusy = false;
+        renderStatus();
+        return true;
     }
 
     Radio.Rx(ACK_TIMEOUT_MS);
@@ -366,7 +375,7 @@ static void handleFire()
         return;
     }
     bool ack = false;
-    if (!sendFire(machine, &ack)) {
+    if (!sendFire(machine, &ack, true)) {
         server.send(radioBusy ? 503 : 502, "application/json",
                     "{\"ok\":false,\"error\":\"LoRa send failed\"}");
         return;
@@ -447,9 +456,13 @@ static void handleFirePair()
             String body = "{\"ok\":true,\"first\":\"" + String(first) +
                           "\",\"second\":\"" + String(second) +
                           "\",\"firstAck\":" + String(lastRequestAck ? "true" : "false") +
+                           ",\"firstAckWaited\":" + String(delay_ms > 0 ? "true" : "false") +
                           ",\"secondAck\":" + String(lastRequestSecondAck ? "true" : "false") +
                           ",\"cached\":true}";
-            server.send(lastRequestAck && lastRequestSecondAck ? 200 : 202,
+            // A zero-delay pair deliberately skips the first ACK wait, so
+            // the second ACK alone determines whether this completed reply
+            // can be acknowledged as successful.
+            server.send(lastRequestSecondAck ? 200 : 202,
                         "application/json", body);
         } else {
             // The gateway records before each physical action. A reboot or
@@ -467,12 +480,16 @@ static void handleFirePair()
     }
 
     bool first_ack = false;
-    if (!sendFire(first, &first_ack)) {
+    // Zero means launch both machines back-to-back. We wait only for the
+    // first radio transmission to complete, not its ACK, so a valid 0-second
+    // doublette cannot be delayed by the ACK timeout.
+    bool wait_for_first_ack = delay_ms > 0;
+    if (!sendFire(first, &first_ack, wait_for_first_ack)) {
         server.send(502, "application/json",
                     "{\"ok\":false,\"error\":\"first machine send failed; do not retry\"}");
         return;
     }
-    if (!first_ack) {
+    if (wait_for_first_ack && !first_ack) {
         persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
                         REQUEST_COMPLETE, false, false);
         server.send(202, "application/json",
@@ -480,7 +497,7 @@ static void handleFirePair()
         return;
     }
     if (!persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
-                         REQUEST_PAIR_FIRST_COMPLETE, true, false)) {
+                         REQUEST_PAIR_FIRST_COMPLETE, first_ack, false)) {
         server.send(503, "application/json",
                     "{\"ok\":false,\"error\":\"pair progress could not be saved; do not retry\"}");
         return;
@@ -489,22 +506,27 @@ static void handleFirePair()
     if (delay_ms > 0) delay(delay_ms);
 
     bool second_ack = false;
-    if (!sendFire(second, &second_ack)) {
+    if (!sendFire(second, &second_ack, true)) {
         persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
-                        REQUEST_COMPLETE, true, false);
+                        REQUEST_COMPLETE, first_ack, false);
         server.send(502, "application/json",
-                    "{\"ok\":false,\"partial\":true,\"firstAck\":true,\"secondSent\":false}");
+                    String("{\"ok\":false,\"partial\":true,\"firstAck\":") +
+                    String(first_ack ? "true" : "false") +
+                    ",\"firstAckWaited\":" + String(wait_for_first_ack ? "true" : "false") +
+                    ",\"secondSent\":false}");
         return;
     }
     if (!persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
-                         REQUEST_COMPLETE, true, second_ack)) {
+                         REQUEST_COMPLETE, first_ack, second_ack)) {
         server.send(503, "application/json",
                     "{\"ok\":false,\"error\":\"pair result could not be saved; do not retry\"}");
         return;
     }
     String body = "{\"ok\":true,\"first\":\"" + String(first) +
                   "\",\"second\":\"" + String(second) +
-                  "\",\"firstAck\":true,\"secondAck\":" +
+                   "\",\"firstAck\":" + String(first_ack ? "true" : "false") +
+                   ",\"firstAckWaited\":" + String(wait_for_first_ack ? "true" : "false") +
+                   ",\"secondAck\":" +
                   String(second_ack ? "true" : "false") + "}";
     server.send(second_ack ? 200 : 202, "application/json", body);
 }

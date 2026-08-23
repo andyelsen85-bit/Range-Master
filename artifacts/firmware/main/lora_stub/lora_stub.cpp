@@ -263,7 +263,11 @@ static void gateway_worker(void *arg)
             char msg[96];
             if (request.kind == GATEWAY_REQUEST_FIRE_PAIR) {
                 snprintf(msg, sizeof(msg),
-                         last_http == 202 ? "Pair %c+%c sent (ACK missing)" : "Pair %c+%c fired",
+                         last_http == 202
+                             ? (request.delay_ms == 0
+                                 ? "Pair %c+%c sent (0s: first ACK skipped)"
+                                 : "Pair %c+%c sent (ACK missing)")
+                             : "Pair %c+%c fired",
                          (char)('A' + (int)request.machine),
                          (char)('A' + (int)request.second_machine));
             } else if (last_http == 202) {

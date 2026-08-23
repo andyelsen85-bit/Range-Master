@@ -357,7 +357,7 @@ void screen_spiel_refresh(void)
             char fire_label[40];
             SequenzEintrag *se = &s->sequenz[s->taubeIndex];
             if (se->isPair && se->maschine == MASCHINE_H) {
-                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE H DOUBLETTE");
+                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE H (MASCHINN H2)");
             } else if (se->isPair) {
                 snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE %s + %s",
                          maschine_label(se->maschine), maschine_label(se->partner));
