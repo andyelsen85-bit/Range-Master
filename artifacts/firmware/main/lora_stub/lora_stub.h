@@ -16,6 +16,13 @@ void lora_stub_init(void);
 bool lora_fire_machine(Maschine m);
 
 /**
+ * Send one authenticated, ordered A-G custom doublette to the gateway.
+ * The gateway persists and coordinates both radio commands; this function
+ * queues only one HTTP request and never blocks the LVGL task.
+ */
+bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms);
+
+/**
  * Queue a non-actuating authenticated request to verify that the configured
  * gateway is reachable and accepts the configured HMAC key.
  */

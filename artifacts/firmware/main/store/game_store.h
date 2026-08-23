@@ -19,6 +19,7 @@
 #define MAX_KEY_LEN         65
 #define TM_MAX_SSID_LEN     33
 #define MAX_PASS_LEN        64
+#define CUSTOM_SEQ_MAX      16
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -68,8 +69,18 @@ typedef struct {
 
 typedef struct {
     Maschine  maschine;
-    bool      isDoublette;   // true if this entry = the 2nd shot of H
+    bool      isDoublette;   // true if this entry is the second result of a pair
+    bool      isPair;        // H1/H2 or an A-G custom doublette
+    Maschine  partner;       // only meaningful on the first custom-pair entry
+    uint16_t  delayMs;       // only meaningful on the first custom-pair entry
 } SequenzEintrag;
+
+typedef struct {
+    Maschine  maschine;
+    Maschine  partner;       // required for an A-G doublette, ignored for H
+    bool      isDoublette;   // H-only doublette or an ordered A-G pair
+    uint16_t  delayMs;       // A-G pair delay, 0-10000 ms
+} CustomSequenzEintrag;
 
 typedef struct {
     int      spielerId;
@@ -159,7 +170,7 @@ typedef struct {
     uint32_t gatewaySequence; // persisted, strictly increasing gateway command sequence
     char    wifiSsid[TM_MAX_SSID_LEN];
     char    wifiPass[MAX_PASS_LEN];
-    Maschine customSequenzen[4][16]; // CUSTOM_1..4 up to 16 machines each
+    CustomSequenzEintrag customSequenzen[4][CUSTOM_SEQ_MAX];
     int      customSequenzLen[4];
     int      customLaeufe[4];        // 1 or 2
 
@@ -177,6 +188,7 @@ typedef struct {
     Ergebnis ergebnisse[MAX_ERGEBNISSE];
     int      ergebnisseCount;
     char     spielId[40];
+    bool     currentFireSent; // one physical gateway request per launch unit
 
     // Portal cache
     PortalSpieler portalSpieler[MAX_PORTAL_SPIELER];

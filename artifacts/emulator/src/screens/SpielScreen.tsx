@@ -31,8 +31,15 @@ export function SpielScreen() {
     : 1;
   const eintrag = getEintragForPlayer(store.sequenz, store.taubeIndex, rawPosten, store.modus);
   const maschine = eintrag?.maschine ?? 'A';
-  const istDoublette = maschine === 'H';
+  const istHDoublette = eintrag?.pairKind === 'h';
+  const istCustomPair = eintrag?.pairKind === 'custom';
   const doubletteNr = eintrag?.doubletteNr;
+  const isSecondPairResult = doubletteNr === 2;
+  const machineLabel = istHDoublette
+    ? `H${doubletteNr ?? 1}`
+    : istCustomPair && doubletteNr === 1
+      ? `${maschine}+${eintrag?.partner}`
+      : maschine;
 
   // H2 post-stays-same-as-H1 adjustment — Normal mode only; Harakiri advances naturally
   const effectiveTaubeIdx =
@@ -54,9 +61,9 @@ export function SpielScreen() {
         {/* Machine display */}
         <div className={cn(
           "border-b-2 border-border flex flex-col items-center justify-center py-6",
-          istDoublette ? "bg-amber-950/30" : "bg-primary/5",
+          istHDoublette ? "bg-amber-950/30" : "bg-primary/5",
         )}>
-          {istDoublette && (
+          {istHDoublette && (
             <div className="flex items-center gap-1 mb-1">
               <Layers className="w-4 h-4 text-amber-400" />
               <span className="text-sm font-bold text-amber-400 tracking-widest">
@@ -64,14 +71,16 @@ export function SpielScreen() {
               </span>
             </div>
           )}
-          {!istDoublette && (
-            <div className="text-base font-bold text-primary/70 tracking-widest mb-1">SCHANZ</div>
+          {!istHDoublette && (
+            <div className="text-base font-bold text-primary/70 tracking-widest mb-1">
+              {istCustomPair ? `DOUBLETTE ${doubletteNr}/2` : 'SCHANZ'}
+            </div>
           )}
           <div className={cn(
             "font-black leading-none",
-            istDoublette ? "text-[96px] text-amber-400" : "text-[110px] text-primary",
+            istHDoublette ? "text-[96px] text-amber-400" : "text-[96px] text-primary",
           )}>
-            {maschine}
+            {machineLabel}
           </div>
         </div>
 
@@ -94,9 +103,18 @@ export function SpielScreen() {
             className="w-full h-16 gap-3 text-base"
             variant="primary"
             onClick={() => store.werfenTaube()}
+            disabled={isSecondPairResult}
           >
             <Zap className="w-6 h-6" />
-            <span className="font-bold tracking-widest">WERFEN</span>
+            <span className="font-bold tracking-widest">
+              {isSecondPairResult
+                ? '2. RESULTAT'
+                : istHDoublette
+                  ? 'WERFEN H DOUBLETTE'
+                  : istCustomPair
+                    ? `WERFEN ${maschine}+${eintrag?.partner}`
+                    : 'WERFEN'}
+            </span>
           </TouchButton>
         </div>
 
@@ -146,7 +164,7 @@ export function SpielScreen() {
           <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-3">
             {harakiri
               ? `Harakiri — Schritt ${store.taubeIndex + 1} / ${store.sequenz.length} · Lauf ${store.lauf}`
-              : `Posten — Schanz ${maschine} · Lauf ${store.lauf}`}
+              : `Posten — Schanz ${machineLabel} · Lauf ${store.lauf}`}
           </div>
           <div className="grid grid-cols-5 gap-3">
             {[1, 2, 3, 4, 5].map(pos => {
@@ -186,7 +204,11 @@ export function SpielScreen() {
                           ? "bg-amber-500/20 text-amber-400"
                           : "bg-primary/20 text-primary",
                       )}>
-                        {posEintrag.maschine}{posEintrag.doubletteNr ? posEintrag.doubletteNr : ''}
+                        {posEintrag.pairKind === 'h'
+                          ? `H${posEintrag.doubletteNr}`
+                          : posEintrag.pairKind === 'custom' && posEintrag.doubletteNr === 1
+                            ? `${posEintrag.maschine}+${posEintrag.partner}`
+                            : posEintrag.maschine}
                       </span>
                     )}
                   </div>
@@ -244,8 +266,8 @@ export function SpielScreen() {
 
         {/* ── Score Entry Buttons — flex so they stretch to full remaining height ── */}
         <div className="flex-1 p-5 flex gap-5">
-          {doubletteNr ? (
-            /* ── Doublette (H): hit = 2 pts, miss = 0 pts — no 2nd shot ── */
+          {istHDoublette ? (
+            /* ── H doublette: hit = 2 pts, miss = 0 pts — no 2nd shot ── */
             <>
               <TouchButton
                 variant="success"

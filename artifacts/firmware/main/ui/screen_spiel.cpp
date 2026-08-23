@@ -24,6 +24,7 @@ static lv_obj_t *s_lbl_fire_status;
 static lv_obj_t *s_btn_fire;
 static lv_obj_t *s_lbl_fire_button;
 static lv_obj_t *s_score_table;
+static lv_obj_t *s_btn_score[3];
 
 // ── Score button callbacks ────────────────────────────────────
 static void score_cb(lv_event_t *e)
@@ -36,7 +37,19 @@ static void score_cb(lv_event_t *e)
 static void fire_cb(lv_event_t *e)
 {
     if (g_store.taubeIndex >= g_store.sequenzLen) return;
-    lora_fire_machine(g_store.sequenz[g_store.taubeIndex].maschine);
+    SequenzEintrag *se = &g_store.sequenz[g_store.taubeIndex];
+    if (se->isPair && se->isDoublette) return; // second result never sends another FIRE
+    if (g_store.currentFireSent || lora_request_busy()) return;
+
+    bool queued = false;
+    if (se->isPair && se->maschine != MASCHINE_H) {
+        queued = lora_fire_doublette(se->maschine, se->partner, se->delayMs);
+    } else {
+        // H remains one physical relay and one radio command. H2 is generated
+        // locally by the addressed relay after its fixed system delay.
+        queued = lora_fire_machine(se->maschine);
+    }
+    if (queued) g_store.currentFireSent = true;
     screen_spiel_refresh();
 }
 
@@ -134,6 +147,7 @@ lv_obj_t *screen_spiel_create(void)
 
     for (int i = 0; i < 3; i++) {
         lv_obj_t *btn = lv_btn_create(left);
+        s_btn_score[i] = btn;
         lv_obj_set_size(btn, LV_PCT(100), 72);
         lv_obj_set_style_bg_color(btn, lv_color_hex(sc_colors[i]), 0);
         lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -289,19 +303,25 @@ void screen_spiel_refresh(void)
 
     // ── Compute current sequenz entry state ───────────────
     bool isHMaschine = false;
-    bool isH2        = false;   // true = 2nd doublette shot
+    bool isPair = false;
+    bool isPairSecond = false;
     if (s->taubeIndex < s->sequenzLen) {
         SequenzEintrag *se = &s->sequenz[s->taubeIndex];
-        isHMaschine = (se->maschine == MASCHINE_H);
-        isH2        = isHMaschine && se->isDoublette;
+        isHMaschine = (se->maschine == MASCHINE_H && se->isPair);
+        isPair = se->isPair;
+        isPairSecond = se->isPair && se->isDoublette;
     }
-    // H2 players stay at the same post as H1: use taubeIndex-1 for rotation
-    int effIdx = (isH2 && s->taubeIndex > 0) ? s->taubeIndex - 1 : s->taubeIndex;
+    // Every pair's second result stays at the same post as its first result.
+    int effIdx = (isPairSecond && s->taubeIndex > 0) ? s->taubeIndex - 1 : s->taubeIndex;
+    int pairOffset = 0;
+    for (int i = 0; i < effIdx && i < s->sequenzLen; ++i)
+        if (s->sequenz[i].isPair && s->sequenz[i].isDoublette) pairOffset++;
+    int logicalIdx = effIdx - pairOffset;
 
     // Inline post formula: ((startPosten-1 + effIdx) % 5) + 1
     // (mirrors getCurrentPosten in gameStore.ts)
     auto pos_of = [&](int startPosten) -> int {
-        return ((startPosten - 1 + effIdx) % 5) + 1;
+        return ((startPosten - 1 + logicalIdx) % 5) + 1;
     };
 
     // ── Top bar ───────────────────────────────────────────
@@ -312,13 +332,17 @@ void screen_spiel_refresh(void)
     snprintf(buf, sizeof(buf), "TAUBE %d / %d", s->taubeIndex + 1, s->sequenzLen);
     lv_label_set_text(s_lbl_taube, buf);
 
-    // ── Machine label: A-G / H1 / H2 ─────────────────────
+    // ── Machine label: single / A-G pair / H1-H2 ───────────
     if (s->taubeIndex < s->sequenzLen) {
         SequenzEintrag *se = &s->sequenz[s->taubeIndex];
-        char ml[8];
+        char ml[16];
         if (isHMaschine) {
-            snprintf(ml, sizeof(ml), "H%d", isH2 ? 2 : 1);
+            snprintf(ml, sizeof(ml), "H%d", isPairSecond ? 2 : 1);
             lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_WARN), 0);
+        } else if (isPair && !isPairSecond) {
+            snprintf(ml, sizeof(ml), "%s+%s", maschine_label(se->maschine),
+                     maschine_label(se->partner));
+            lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
         } else {
             snprintf(ml, sizeof(ml), "%s", maschine_label(se->maschine));
             lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
@@ -327,18 +351,38 @@ void screen_spiel_refresh(void)
     }
 
     if (s_btn_fire && s_lbl_fire_button) {
-        bool can_fire = s->taubeIndex < s->sequenzLen && !lora_request_busy();
+        bool can_fire = s->taubeIndex < s->sequenzLen && !isPairSecond &&
+                        !s->currentFireSent && !lora_request_busy();
         if (can_fire) {
-            char fire_label[32];
-            char machine = (char)('A' + (int)s->sequenz[s->taubeIndex].maschine);
-            snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE MASCHINN %c", machine);
+            char fire_label[40];
+            SequenzEintrag *se = &s->sequenz[s->taubeIndex];
+            if (se->isPair && se->maschine == MASCHINE_H) {
+                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE H DOUBLETTE");
+            } else if (se->isPair) {
+                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE %s + %s",
+                         maschine_label(se->maschine), maschine_label(se->partner));
+            } else {
+                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE MASCHINN %s",
+                         maschine_label(se->maschine));
+            }
             lv_label_set_text(s_lbl_fire_button, fire_label);
             lv_obj_clear_state(s_btn_fire, LV_STATE_DISABLED);
         } else {
-            lv_label_set_text(s_lbl_fire_button,
-                              s->taubeIndex < s->sequenzLen ? "GATEWAY BESCHAFT" : "KENG MASCHINN");
+            if (isPairSecond)
+                lv_label_set_text(s_lbl_fire_button, "2. RESULTAT - KENG FIRE");
+            else if (s->currentFireSent)
+                lv_label_set_text(s_lbl_fire_button, "SCHON GESTART");
+            else
+                lv_label_set_text(s_lbl_fire_button,
+                                  s->taubeIndex < s->sequenzLen ? "GATEWAY BESCHAFT" : "KENG MASCHINN");
             lv_obj_add_state(s_btn_fire, LV_STATE_DISABLED);
         }
+    }
+    // H1/H2 have one score per clay (hit or miss), never a second-shot point.
+    for (int i = 0; i < 3; ++i) {
+        if (!s_btn_score[i]) continue;
+        if (isHMaschine && i == 1) lv_obj_add_state(s_btn_score[i], LV_STATE_DISABLED);
+        else lv_obj_clear_state(s_btn_score[i], LV_STATE_DISABLED);
     }
 
     // ── Active shooter's current post ─────────────────────

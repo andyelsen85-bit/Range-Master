@@ -5,7 +5,7 @@ WiFi code and never contacts the portal or internet.
 
 ## Required configuration
 
-Before compiling `TrapMasterRelay/TrapMasterRelay.ino`:
+Before compiling a fixed relay project:
 
 ### Private configuration and machine assignment
 
@@ -33,16 +33,22 @@ mapping. Confirm the physical wiring before field use:
 #define TM_RELAY_ACTIVE_LEVEL LOW
 ```
 
-Flash the same sketch once for each receiver. Change only `TM_MACHINE_ID` in the
-nested local file before each upload:
+Open the matching fixed Arduino project and upload it to that relay. The fixed
+project overrides any legacy `TM_MACHINE_ID` in the private file, so no machine
+letter must be edited or copied between uploads:
 
 ```text
-Machine A → 'A'    Machine B → 'B'    Machine C → 'C'    Machine D → 'D'
-Machine E → 'E'    Machine F → 'F'    Machine G → 'G'    Machine H → 'H'
+Machine A → TrapMasterRelayA/TrapMasterRelayA.ino
+Machine B → TrapMasterRelayB/TrapMasterRelayB.ino
+Machine C → TrapMasterRelayC/TrapMasterRelayC.ino
+Machine D → TrapMasterRelayD/TrapMasterRelayD.ino
+Machine E → TrapMasterRelayE/TrapMasterRelayE.ino
+Machine F → TrapMasterRelayF/TrapMasterRelayF.ino
+Machine G → TrapMasterRelayG/TrapMasterRelayG.ino
+Machine H → TrapMasterRelayH/TrapMasterRelayH.ino
 ```
 
-1. Set `TM_MACHINE_ID` to the machine letter (`A` through `H`) for this relay.
-2. Define `TM_RELAY_GPIO` to the **verified** output pin used by your relay board.
+1. Define `TM_RELAY_GPIO` to the **verified** output pin used by your relay board.
    There is no default deliberately: the Wireless Stick V3 pinout and actual wiring
    must be checked against Heltec's official diagram before energizing a relay.
 3. Confirm whether the relay is low-level or high-level triggered. The default
@@ -54,10 +60,9 @@ Machine E → 'E'    Machine F → 'F'    Machine G → 'G'    Machine H → 'H'
    Normal builds deliberately fail without it. `TM_ALLOW_INSECURE_BENCH_KEY` is only
    permitted for a disconnected radio bench test.
 
-Example compile-time settings:
+Example private compile-time settings:
 
 ```cpp
-#define TM_MACHINE_ID 'B'
 #define TM_RELAY_GPIO 4 // only after physical pin verification
 ```
 
@@ -70,8 +75,11 @@ Example compile-time settings:
   pulse the relay.
 - The latest accepted counter is saved in NVS before each pulse, so a relay reboot
   does not make a captured command replayable.
-- The relay accepts a packet, pulses for 300 ms by default, then sends an authenticated
-  ACK back to the gateway.
+- Machines A–G accept a packet, pulse for 300 ms by default, then send an
+  authenticated ACK back to the gateway.
+- Machine H accepts exactly one authenticated packet, pulses H1, waits for its
+  system-controlled 1-second interval, pulses H2, then sends one ACK. H2 never
+  has a separate radio command.
 
 If a relay must be reset or replaced, do not erase its replay state while keeping the
 same AES key. Re-key the gateway and all relays together first, while every trap is

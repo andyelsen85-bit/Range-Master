@@ -27,6 +27,9 @@ export interface Ergebnis {
 export interface SequenzEintrag {
   maschine: Maschine;
   doubletteNr?: 1 | 2;
+  pairKind?: 'h' | 'custom';
+  partner?: Maschine;
+  delayMs?: number;
 }
 
 export interface PortalSpieler {
@@ -62,8 +65,15 @@ export interface PendingSpieler {
   name: string;
 }
 
-// Custom mode machine sequences
-export type CustomSequenz = Maschine[];
+// Custom modes store launch units, not expanded score entries. H is always a
+// local H1/H2 doublette. A-G custom pairs carry their ordered partner and delay.
+export interface CustomSequenzEintrag {
+  maschine: Maschine;
+  partner?: Maschine;
+  isDoublette?: boolean;
+  delaySeconds?: number;
+}
+export type CustomSequenz = CustomSequenzEintrag[];
 
 /** Per-player credit tally for the current day */
 export interface KreditStand {
@@ -209,11 +219,14 @@ const DEFAULT_MASCHINEN_AKTIV: Record<Maschine, boolean> = {
   A: true, B: true, C: true, D: true, E: true, F: true, G: true, H: true,
 };
 
+const normalEntry = (maschine: Maschine): CustomSequenzEintrag =>
+  maschine === 'H' ? { maschine, isDoublette: true } : { maschine };
+
 const DEFAULT_CUSTOM: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', CustomSequenz> = {
-  CUSTOM_1: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'],
-  CUSTOM_2: ['A', 'C', 'E', 'G', 'B', 'D', 'F', 'H'],
-  CUSTOM_3: ['H', 'G', 'F', 'E', 'D', 'C', 'B', 'A'],
-  CUSTOM_4: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'],
+  CUSTOM_1: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(normalEntry),
+  CUSTOM_2: ['A', 'C', 'E', 'G', 'B', 'D', 'F', 'H'].map(normalEntry),
+  CUSTOM_3: ['H', 'G', 'F', 'E', 'D', 'C', 'B', 'A'].map(normalEntry),
+  CUSTOM_4: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(normalEntry),
 };
 
 const DEFAULT_CUSTOM_LAEUFE: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', 1 | 2> = {
@@ -240,26 +253,40 @@ function generateSequenz(
   const single = (['A', 'B', 'C', 'D', 'E', 'F', 'G'] as Maschine[]).filter(m => maschinenAktiv[m]);
   const hAktiv = maschinenAktiv['H'];
 
-  let order: Maschine[];
+  let order: CustomSequenz;
 
   if (modus === 'NORMAL') {
-    order = [...single, ...(hAktiv ? (['H'] as Maschine[]) : [])];
+    order = [...single.map(normalEntry), ...(hAktiv ? [normalEntry('H')] : [])];
   } else if (modus === 'HARAKIRI') {
-    order = [...shuffleArray(single), ...(hAktiv ? (['H'] as Maschine[]) : [])];
+    // H is shuffled as one logical H1/H2 unit, not appended at the end.
+    const units = [...single, ...(hAktiv ? (['H'] as Maschine[]) : [])];
+    order = shuffleArray(units).map(normalEntry);
   } else {
     // CUSTOM modes: use the sequence exactly as defined — ignore maschinenAktiv
     const key = modus as 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4';
     order = customSequenzen[key];
   }
 
-  // Expand: A–G = 1 entry each; H = 2 entries (Doublette, relay fires once)
+  // Expand each launch unit into scoring entries. The terminal/gateway fire
+  // path sends only the pair's first entry; H itself remains one relay command.
   const result: SequenzEintrag[] = [];
-  for (const m of order) {
-    if (m === 'H') {
-      result.push({ maschine: 'H', doubletteNr: 1 });
-      result.push({ maschine: 'H', doubletteNr: 2 });
+  for (const entry of order) {
+    if (entry.maschine === 'H') {
+      result.push({ maschine: 'H', doubletteNr: 1, pairKind: 'h', partner: 'H' });
+      result.push({ maschine: 'H', doubletteNr: 2, pairKind: 'h', partner: 'H' });
+    } else if (entry.isDoublette && entry.partner && entry.partner !== 'H' &&
+               entry.partner !== entry.maschine) {
+      const delayMs = Math.round(Math.min(10, Math.max(0, entry.delaySeconds ?? 1)) * 1000);
+      result.push({
+        maschine: entry.maschine, doubletteNr: 1, pairKind: 'custom',
+        partner: entry.partner, delayMs,
+      });
+      result.push({
+        maschine: entry.partner, doubletteNr: 2, pairKind: 'custom',
+        partner: entry.maschine, delayMs,
+      });
     } else {
-      result.push({ maschine: m });
+      result.push({ maschine: entry.maschine });
     }
   }
   return result;
@@ -491,6 +518,40 @@ function saveCachedSpieler(spieler: PortalSpieler[]) {
   } catch {}
 }
 
+function normalizeCustomEntry(value: unknown): CustomSequenzEintrag | null {
+  if (typeof value === 'string' && MASCHINEN.includes(value as Maschine)) {
+    return normalEntry(value as Maschine);
+  }
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<CustomSequenzEintrag>;
+  if (!raw.maschine || !MASCHINEN.includes(raw.maschine)) return null;
+  if (raw.maschine === 'H') return { maschine: 'H', isDoublette: true };
+  const validPartner = raw.partner && raw.partner !== 'H' &&
+    raw.partner !== raw.maschine && MASCHINEN.includes(raw.partner);
+  if (!raw.isDoublette || !validPartner) return { maschine: raw.maschine };
+  return {
+    maschine: raw.maschine,
+    partner: raw.partner,
+    isDoublette: true,
+    delaySeconds: Math.min(10, Math.max(0, Number(raw.delaySeconds ?? 1) || 1)),
+  };
+}
+
+function normalizeCustomSequenzen(
+  raw: Partial<Settings>['customSequenzen'],
+): Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', CustomSequenz> {
+  const result = { ...DEFAULT_CUSTOM };
+  for (const key of Object.keys(DEFAULT_CUSTOM) as Array<keyof typeof DEFAULT_CUSTOM>) {
+    const source = raw?.[key];
+    if (!Array.isArray(source)) continue;
+    result[key] = source
+      .map(normalizeCustomEntry)
+      .filter((entry): entry is CustomSequenzEintrag => entry !== null)
+      .slice(0, 16);
+  }
+  return result;
+}
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 const saved = loadSettings();
@@ -502,7 +563,7 @@ export const useGameStore = create<GameState>((set, get) => {
   const maschinenAktiv = saved.maschinenAktiv ?? { ...DEFAULT_MASCHINEN_AKTIV };
   const apiUrl: string = saved.apiUrl ?? '';
   const apiKey: string = saved.apiKey ?? '';
-  const customSequenzen = saved.customSequenzen ?? { ...DEFAULT_CUSTOM };
+  const customSequenzen = normalizeCustomSequenzen(saved.customSequenzen);
   const customLaeufe = saved.customLaeufe ?? { ...DEFAULT_CUSTOM_LAEUFE };
 
   return {

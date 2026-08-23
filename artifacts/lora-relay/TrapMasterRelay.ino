@@ -51,6 +51,10 @@
 #define TM_RELAY_PULSE_MS 300
 #endif
 
+#ifndef TM_H_DOUBLE_DELAY_MS
+#define TM_H_DOUBLE_DELAY_MS 1000
+#endif
+
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
 #ifndef TM_BENCH_INTERLOCK_GPIO
 #error "Define TM_BENCH_INTERLOCK_GPIO to a verified physical test-enable input"
@@ -148,6 +152,16 @@ static void fireRelayAndAck(uint32_t counter)
     digitalWrite(TM_RELAY_GPIO, TM_RELAY_ACTIVE_LEVEL);
     delay(TM_RELAY_PULSE_MS);
     digitalWrite(TM_RELAY_GPIO, !TM_RELAY_ACTIVE_LEVEL);
+
+    // H is one physical relay but represents two clays. The command is
+    // accepted once, then the relay produces the two pulses locally. No second
+    // radio command is needed or permitted for H2.
+    if (TM_MACHINE_ID == 'H') {
+        delay(TM_H_DOUBLE_DELAY_MS);
+        digitalWrite(TM_RELAY_GPIO, TM_RELAY_ACTIVE_LEVEL);
+        delay(TM_RELAY_PULSE_MS);
+        digitalWrite(TM_RELAY_GPIO, !TM_RELAY_ACTIVE_LEVEL);
+    }
 
     uint8_t frame[tm_protocol::FRAME_LEN];
     if (tm_protocol::encrypt(TM_MACHINE_ID, tm_protocol::CMD_ACK, counter, frame)) {

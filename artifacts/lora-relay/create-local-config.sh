@@ -35,7 +35,8 @@ cat > "$relay_config" <<EOF
     ${aes_bytes} \\
 }
 
-// Change only this letter before flashing each relay: A through H.
+// Legacy root-sketch default only. The fixed A-H Arduino projects override this
+// value automatically; do not edit it when flashing those projects.
 #define TM_MACHINE_ID 'A'
 #define TM_RELAY_GPIO 4
 #define TM_RELAY_ACTIVE_LEVEL LOW

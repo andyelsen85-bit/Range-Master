@@ -38,6 +38,34 @@ inline bool make_request_mac(const uint8_t *key, size_t key_len,
     return info && mbedtls_md_hmac(info, key, key_len, payload, sizeof(payload), out) == 0;
 }
 
+// Authenticates an ordered two-machine custom doublette. The delay is included
+// in the signed payload so it cannot be changed by an intermediary or replayed
+// with a different timing.
+inline bool make_pair_request_mac(const uint8_t *key, size_t key_len,
+                                  uint8_t first_machine, uint8_t second_machine,
+                                  uint32_t delay_ms, uint32_t sequence,
+                                  uint8_t out[MAC_LEN])
+{
+    if (!key || key_len < 16 || !out ||
+        first_machine < 'A' || first_machine > 'G' ||
+        second_machine < 'A' || second_machine > 'G' ||
+        first_machine == second_machine || delay_ms > 10000 ||
+        sequence == 0) {
+        return false;
+    }
+    const uint8_t payload[17] = {
+        'T', 'M', 0x01, 'P',
+        first_machine, second_machine,
+        (uint8_t)delay_ms, (uint8_t)(delay_ms >> 8),
+        (uint8_t)(delay_ms >> 16), (uint8_t)(delay_ms >> 24),
+        (uint8_t)sequence, (uint8_t)(sequence >> 8),
+        (uint8_t)(sequence >> 16), (uint8_t)(sequence >> 24),
+        'D', 'O', 'U'
+    };
+    const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    return info && mbedtls_md_hmac(info, key, key_len, payload, sizeof(payload), out) == 0;
+}
+
 // Authenticates a non-actuating terminal-to-gateway health check. This uses a
 // separate domain string from FIRE commands, so it cannot be replayed as a
 // machine command or consume a command sequence.

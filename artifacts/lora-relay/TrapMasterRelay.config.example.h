@@ -11,9 +11,8 @@
     0x00, 0x00, 0x00, 0x00  \
 }
 
-// Flash the same sketch once for each machine, changing only this value:
-// A, B, C, D, E, F, G, or H.
-#define TM_MACHINE_ID 'A'
+// The machine identity is selected by the fixed Arduino project wrapper.
+// Do not define TM_MACHINE_ID in this shared configuration file.
 
 // Current planned test wiring for all machines. Verify before field use.
 #define TM_RELAY_GPIO 4

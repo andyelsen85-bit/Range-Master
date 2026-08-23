@@ -203,9 +203,9 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 }
 
 // ── Tab: CUSTOM SEQUENZEN ─────────────────────────────────────
-// Ordered sequence builder: tap A-H to APPEND a machine to the sequence
-// (same machine can appear multiple times, up to 16 total); tap any badge
-// in the sequence strip to REMOVE that slot; pick 1 or 2 Läufe.
+// Ordered sequence builder: A-G may be added as single machines. A-G
+// doublettes require a first machine, a partner, and a seconds delay; H is a
+// special one-relay H1/H2 doublette with no partner selector.
 // Mirrors the emulator's CustomSequenzEditor component.
 static const char *CUSTOM_NAMES[] = {"CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4"};
 static const char *MACH_LBL[]     = {"A","B","C","D","E","F","G","H"};
@@ -217,14 +217,19 @@ static lv_obj_t *s_stat_tauben[4];
 static lv_obj_t *s_stat_pkt_lauf[4];
 static lv_obj_t *s_stat_pkt_spiel[4];
 static lv_obj_t *s_lauf_btn[4][2];
+static lv_obj_t *s_pair_delay_ta[4];
+static lv_obj_t *s_pair_status[4];
+static int s_pending_pair_first[4] = {-1, -1, -1, -1};
 
 // ── Helpers ───────────────────────────────────────────────────
 static void refresh_custom_stats(int ci)
 {
     if (!s_stat_tauben[ci]) return;
     int tauben = 0;
-    for (int i = 0; i < g_store.customSequenzLen[ci]; i++)
-        tauben += (g_store.customSequenzen[ci][i] == MASCHINE_H) ? 2 : 1;
+    for (int i = 0; i < g_store.customSequenzLen[ci]; i++) {
+        CustomSequenzEintrag *entry = &g_store.customSequenzen[ci][i];
+        tauben += (entry->maschine == MASCHINE_H || entry->isDoublette) ? 2 : 1;
+    }
     int pktLauf  = tauben * 2;
     int pktSpiel = pktLauf * g_store.customLaeufe[ci];
     char buf[12];   // int can be up to 11 digits + NUL — was 8, causing -Werror=format-truncation
@@ -248,10 +253,11 @@ static void refresh_custom_seq(int ci)
         return;
     }
     for (int i = 0; i < len; i++) {
-        Maschine m  = g_store.customSequenzen[ci][i];
+        CustomSequenzEintrag *entry = &g_store.customSequenzen[ci][i];
+        Maschine m  = entry->maschine;
         bool    isH = (m == MASCHINE_H);
         lv_obj_t *badge = lv_btn_create(cont);
-        lv_obj_set_size(badge, 46, 46);
+        lv_obj_set_size(badge, entry->isDoublette ? 86 : 46, 48);
         lv_obj_set_style_radius(badge, 8, 0);
         lv_obj_set_style_bg_color(badge,
             isH ? lv_color_hex(0xD97706) : lv_color_hex(CLR_PRIMARY), 0);
@@ -273,11 +279,52 @@ static void refresh_custom_seq(int ci)
             refresh_custom_stats(c);
         }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
         lv_obj_t *lbl = lv_label_create(badge);
-        lv_label_set_text(lbl, MACH_LBL[(int)m]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        char badge_text[16];
+        if (m == MASCHINE_H) {
+            snprintf(badge_text, sizeof(badge_text), "H1/H2");
+        } else if (entry->isDoublette) {
+            snprintf(badge_text, sizeof(badge_text), "%s+%s\n%u.%us",
+                     MACH_LBL[(int)m], MACH_LBL[(int)entry->partner],
+                     (unsigned)(entry->delayMs / 1000),
+                     (unsigned)((entry->delayMs % 1000) / 100));
+        } else {
+            snprintf(badge_text, sizeof(badge_text), "%s", MACH_LBL[(int)m]);
+        }
+        lv_label_set_text(lbl, badge_text);
+        lv_obj_set_style_text_font(lbl,
+            entry->isDoublette && !isH ? &lv_font_montserrat_12 : &lv_font_montserrat_18, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(lbl);
     }
+}
+
+static uint16_t read_pair_delay_ms(int ci)
+{
+    if (!s_pair_delay_ta[ci]) return 1000;
+    const char *text = lv_textarea_get_text(s_pair_delay_ta[ci]);
+    char *end = NULL;
+    float seconds = strtof(text, &end);
+    if (end == text || *end != '\0' || seconds < 0.0f) return 1000;
+    if (seconds > 10.0f) seconds = 10.0f;
+    return (uint16_t)(seconds * 1000.0f + 0.5f);
+}
+
+static void set_pair_status(int ci, const char *text)
+{
+    if (s_pair_status[ci]) lv_label_set_text(s_pair_status[ci], text);
+}
+
+static void add_custom_entry(int ci, CustomSequenzEintrag entry)
+{
+    if (g_store.customSequenzLen[ci] >= CUSTOM_SEQ_MAX) {
+        set_pair_status(ci, "MAXIMAL 16 EINTRAEG");
+        return;
+    }
+    g_store.customSequenzen[ci][g_store.customSequenzLen[ci]++] = entry;
+    game_store_save();
+    refresh_custom_seq(ci);
+    refresh_custom_stats(ci);
 }
 
 // ── Build ─────────────────────────────────────────────────────
@@ -355,13 +402,13 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
 
         refresh_custom_seq(ci);
 
-        // ── Section label: ADD ────────────────────────────────
+        // ── Section label: single A-G entries ─────────────────
         lv_obj_t *add_hdr = lv_label_create(card);
-        lv_label_set_text(add_hdr, "SCHANZ DOBAISETZEN");
+        lv_label_set_text(add_hdr, "EENZEL SCHANZ DOBAISETZEN");
         lv_obj_set_style_text_font(add_hdr, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(add_hdr, lv_color_hex(CLR_MUTED), 0);
 
-        // ── 8 machine add-buttons (A-H) ───────────────────────
+        // ── A-G single-machine add buttons ────────────────────
         lv_obj_t *add_row = lv_obj_create(card);
         lv_obj_set_size(add_row, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(add_row, LV_OPA_0, 0);
@@ -371,29 +418,23 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         lv_obj_set_flex_flow(add_row, LV_FLEX_FLOW_ROW);
         lv_obj_clear_flag(add_row, LV_OBJ_FLAG_SCROLLABLE);
 
-        for (int mi = 0; mi < MASCHINE_COUNT; mi++) {
-            bool isH = (mi == (int)MASCHINE_H);
+        for (int mi = 0; mi < (int)MASCHINE_H; mi++) {
             lv_obj_t *ab = lv_btn_create(add_row);
             lv_obj_set_size(ab, 52, 52);
             lv_obj_set_style_radius(ab, 8, 0);
-            lv_obj_set_style_bg_color(ab,
-                isH ? lv_color_hex(0x78350F) : lv_color_hex(CLR_SIDEBAR), 0);
+            lv_obj_set_style_bg_color(ab, lv_color_hex(CLR_SIDEBAR), 0);
             lv_obj_set_style_bg_opa(ab, LV_OPA_COVER, 0);
             lv_obj_set_style_border_width(ab, 2, 0);
-            lv_obj_set_style_border_color(ab,
-                isH ? lv_color_hex(0xD97706) : lv_color_hex(CLR_PRIMARY), 0);
+            lv_obj_set_style_border_color(ab, lv_color_hex(CLR_PRIMARY), 0);
             // Pack ci (4 bits) and mi (4 bits)
             int packed = (ci << 4) | mi;
             lv_obj_add_event_cb(ab, [](lv_event_t *ev) {
                 int pk = (int)(intptr_t)lv_event_get_user_data(ev);
                 int c  = (pk >> 4) & 0xF;
                 int m  = pk & 0xF;
-                if (g_store.customSequenzLen[c] >= CUSTOM_SEQ_MAX) return;
-                g_store.customSequenzen[c][g_store.customSequenzLen[c]] = (Maschine)m;
-                g_store.customSequenzLen[c]++;
-                game_store_save();
-                refresh_custom_seq(c);
-                refresh_custom_stats(c);
+                add_custom_entry(c, (CustomSequenzEintrag){
+                    (Maschine)m, (Maschine)m, false, 0
+                });
             }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
             lv_obj_t *ml = lv_label_create(ab);
             lv_label_set_text(ml, MACH_LBL[mi]);
@@ -401,6 +442,108 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             lv_obj_set_style_text_color(ml, lv_color_hex(CLR_TEXT), 0);
             lv_obj_center(ml);
         }
+
+        // ── Doublette builder ─────────────────────────────────
+        lv_obj_t *pair_hdr = lv_label_create(card);
+        lv_label_set_text(pair_hdr, "DOUBLETTE: A-G + PARTNER (DELAY A SEKONNEN)");
+        lv_obj_set_style_text_font(pair_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(pair_hdr, lv_color_hex(CLR_MUTED), 0);
+
+        lv_obj_t *pair_cfg = lv_obj_create(card);
+        lv_obj_set_size(pair_cfg, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(pair_cfg, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(pair_cfg, 0, 0);
+        lv_obj_set_style_pad_all(pair_cfg, 0, 0);
+        lv_obj_set_style_pad_column(pair_cfg, 8, 0);
+        lv_obj_set_flex_flow(pair_cfg, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(pair_cfg, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *delay_lbl = lv_label_create(pair_cfg);
+        lv_label_set_text(delay_lbl, "DELAY:");
+        lv_obj_set_style_text_font(delay_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(delay_lbl, lv_color_hex(CLR_TEXT), 0);
+        s_pair_delay_ta[ci] = lv_textarea_create(pair_cfg);
+        lv_obj_set_size(s_pair_delay_ta[ci], 110, 42);
+        lv_textarea_set_one_line(s_pair_delay_ta[ci], true);
+        lv_textarea_set_max_length(s_pair_delay_ta[ci], 5);
+        lv_textarea_set_text(s_pair_delay_ta[ci], "1.0");
+        lv_obj_set_style_bg_color(s_pair_delay_ta[ci], lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_text_color(s_pair_delay_ta[ci], lv_color_hex(CLR_TEXT), 0);
+        lv_obj_t *seconds_lbl = lv_label_create(pair_cfg);
+        lv_label_set_text(seconds_lbl, "SEK.  (0-10)");
+        lv_obj_set_style_text_font(seconds_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(seconds_lbl, lv_color_hex(CLR_MUTED), 0);
+
+        lv_obj_t *pair_row = lv_obj_create(card);
+        lv_obj_set_size(pair_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(pair_row, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(pair_row, 0, 0);
+        lv_obj_set_style_pad_all(pair_row, 0, 0);
+        lv_obj_set_style_pad_column(pair_row, 6, 0);
+        lv_obj_set_flex_flow(pair_row, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(pair_row, LV_OBJ_FLAG_SCROLLABLE);
+        for (int mi = 0; mi < (int)MASCHINE_H; mi++) {
+            lv_obj_t *pb = lv_btn_create(pair_row);
+            lv_obj_set_size(pb, 52, 48);
+            lv_obj_set_style_radius(pb, 8, 0);
+            lv_obj_set_style_bg_color(pb, lv_color_hex(CLR_SIDEBAR), 0);
+            lv_obj_set_style_bg_opa(pb, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(pb, 2, 0);
+            lv_obj_set_style_border_color(pb, lv_color_hex(CLR_PRIMARY), 0);
+            int packed = (ci << 4) | mi;
+            lv_obj_add_event_cb(pb, [](lv_event_t *ev) {
+                int pk = (int)(intptr_t)lv_event_get_user_data(ev);
+                int c = (pk >> 4) & 0xF;
+                int m = pk & 0xF;
+                if (s_pending_pair_first[c] < 0) {
+                    s_pending_pair_first[c] = m;
+                    char msg[48];
+                    snprintf(msg, sizeof(msg), "%s GEWIELT - PARTNER WIELEN",
+                             MACH_LBL[m]);
+                    set_pair_status(c, msg);
+                } else if (s_pending_pair_first[c] == m) {
+                    set_pair_status(c, "ENG ANER PARTNER-MASCHINN WIELEN");
+                } else {
+                    int first = s_pending_pair_first[c];
+                    add_custom_entry(c, (CustomSequenzEintrag){
+                        (Maschine)first, (Maschine)m, true, read_pair_delay_ms(c)
+                    });
+                    s_pending_pair_first[c] = -1;
+                    set_pair_status(c, "DOUBLETTE GESPAECHERT");
+                }
+            }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
+            lv_obj_t *pl = lv_label_create(pb);
+            lv_label_set_text(pl, MACH_LBL[mi]);
+            lv_obj_set_style_text_font(pl, &lv_font_montserrat_18, 0);
+            lv_obj_set_style_text_color(pl, lv_color_hex(CLR_TEXT), 0);
+            lv_obj_center(pl);
+        }
+
+        lv_obj_t *h_pair = lv_btn_create(pair_row);
+        lv_obj_set_size(h_pair, 120, 48);
+        lv_obj_set_style_radius(h_pair, 8, 0);
+        lv_obj_set_style_bg_color(h_pair, lv_color_hex(0x78350F), 0);
+        lv_obj_set_style_bg_opa(h_pair, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(h_pair, 2, 0);
+        lv_obj_set_style_border_color(h_pair, lv_color_hex(0xD97706), 0);
+        lv_obj_add_event_cb(h_pair, [](lv_event_t *ev) {
+            int c = (int)(intptr_t)lv_event_get_user_data(ev);
+            s_pending_pair_first[c] = -1;
+            add_custom_entry(c, (CustomSequenzEintrag){
+                MASCHINE_H, MASCHINE_H, true, 0
+            });
+            set_pair_status(c, "H: 1 FIRE, H1 + H2 (SYSTEM-DELAY)");
+        }, LV_EVENT_CLICKED, (void*)(intptr_t)ci);
+        lv_obj_t *hl = lv_label_create(h_pair);
+        lv_label_set_text(hl, "H  H1/H2");
+        lv_obj_set_style_text_font(hl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(hl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(hl);
+
+        s_pair_status[ci] = lv_label_create(card);
+        lv_label_set_text(s_pair_status[ci], "1. MASCHINN WIELEN - DUERNO PARTNER");
+        lv_obj_set_style_text_font(s_pair_status[ci], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(s_pair_status[ci], lv_color_hex(CLR_MUTED), 0);
 
         // ── Läufe toggle (1 / 2) ─────────────────────────────
         lv_obj_t *lauf_hdr = lv_label_create(card);
@@ -707,6 +850,13 @@ lv_obj_t *screen_einstellungen_create(void)
         lv_keyboard_set_textarea(s_kb, s_ta_gateway_token);
         lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     }, LV_EVENT_FOCUSED, NULL);
+    for (int ci = 0; ci < 4; ++ci) {
+        if (!s_pair_delay_ta[ci]) continue;
+        lv_obj_add_event_cb(s_pair_delay_ta[ci], [](lv_event_t *e) {
+            lv_keyboard_set_textarea(s_kb, (lv_obj_t *)lv_event_get_target(e));
+            lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_FOCUSED, NULL);
+    }
 
     return s_scr;
 }

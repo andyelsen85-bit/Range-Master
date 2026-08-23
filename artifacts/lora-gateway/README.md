@@ -44,6 +44,8 @@ Endpoints:
 
 ```text
 GET /fire?machine=A&seq=0123ABCD  # X-TrapMaster-Auth HMAC header required
+GET /fire-pair?first=D&second=F&delayMs=1000&seq=0123ABCD
+                                  # X-TrapMaster-Auth pair HMAC header required
 GET /health             # X-TrapMaster-Auth health-check HMAC header required; never transmits
 GET /status             # uptime, IP/RSSI, last result, ACK state
 ```
@@ -62,6 +64,19 @@ the terminal. It returns `200` when the gateway is reachable and the configured 
 key matches, returns `401` for an incorrect key, and does not access the LoRa radio.
 Use **Gateway testen** in the terminal settings after saving the gateway URL and key.
 
+## Custom doublettes and H
+
+- `/fire-pair` is only for two different A–G machines. It signs the ordered first
+  machine, second machine, delay, and sequence together; its delay is limited to
+  0–10,000 ms.
+- The gateway writes the pair request to NVS **before** the first radio transmission
+  and writes its progress before the delay. It sends the second machine only after
+  the first relay ACK arrives. A duplicate request returns its cached final outcome;
+  a restart or write failure while the outcome is unknown returns `409` and must not
+  be retried as a new FIRE command.
+- H is deliberately not accepted by `/fire-pair`. A terminal H doublette calls
+  `/fire?machine=H` once; the H relay creates H1 and H2 locally, then acknowledges.
+
 ## Staged hardware checklist
 
 1. Flash gateway only and confirm WiFi captive setup, OLED IP, `/status`, and that
@@ -77,6 +92,9 @@ Use **Gateway testen** in the terminal settings after saving the gateway URL and
 4. Verify an altered ciphertext/tag and a repeated captured frame do not operate the
    relay.
 5. Only then wire the relay's COM/NO dry contact to a verified trap trigger.
+6. With all traps still disconnected, test one A–G custom pair at a short delay:
+   confirm the first relay ACKs before the second fires, then retry the identical
+   HTTP request and verify that neither relay pulses a second time.
 
 ## Counter recovery
 

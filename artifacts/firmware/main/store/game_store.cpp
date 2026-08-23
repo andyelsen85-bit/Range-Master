@@ -39,6 +39,61 @@ static void nvs_open(void)
     ESP_ERROR_CHECK(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &s_nvs));
 }
 
+static void set_default_custom_sequences(void)
+{
+    static const Maschine defaults[4][8] = {
+        {MASCHINE_A, MASCHINE_B, MASCHINE_C, MASCHINE_D,
+         MASCHINE_E, MASCHINE_F, MASCHINE_G, MASCHINE_H},
+        {MASCHINE_A, MASCHINE_C, MASCHINE_E, MASCHINE_G,
+         MASCHINE_B, MASCHINE_D, MASCHINE_F, MASCHINE_H},
+        {MASCHINE_H, MASCHINE_G, MASCHINE_F, MASCHINE_E,
+         MASCHINE_D, MASCHINE_C, MASCHINE_B, MASCHINE_A},
+        {MASCHINE_A, MASCHINE_B, MASCHINE_C, MASCHINE_D,
+         MASCHINE_E, MASCHINE_F, MASCHINE_G, MASCHINE_H},
+    };
+    for (int c = 0; c < 4; ++c) {
+        g_store.customSequenzLen[c] = 8;
+        for (int i = 0; i < 8; ++i) {
+            Maschine m = defaults[c][i];
+            g_store.customSequenzen[c][i] = (CustomSequenzEintrag){
+                .maschine = m,
+                .partner = m,
+                .isDoublette = (m == MASCHINE_H),
+                .delayMs = 0,
+            };
+        }
+    }
+}
+
+static void sanitize_custom_sequences(void)
+{
+    for (int c = 0; c < 4; ++c) {
+        if (g_store.customSequenzLen[c] < 0) g_store.customSequenzLen[c] = 0;
+        if (g_store.customSequenzLen[c] > CUSTOM_SEQ_MAX)
+            g_store.customSequenzLen[c] = CUSTOM_SEQ_MAX;
+        if (g_store.customLaeufe[c] != 1 && g_store.customLaeufe[c] != 2)
+            g_store.customLaeufe[c] = 2;
+        for (int i = 0; i < g_store.customSequenzLen[c]; ++i) {
+            CustomSequenzEintrag *entry = &g_store.customSequenzen[c][i];
+            if (entry->maschine < MASCHINE_A || entry->maschine >= MASCHINE_COUNT)
+                entry->maschine = MASCHINE_A;
+            if (entry->maschine == MASCHINE_H) {
+                entry->isDoublette = true;
+                entry->partner = MASCHINE_H;
+                entry->delayMs = 0;
+            } else if (!entry->isDoublette ||
+                       entry->partner < MASCHINE_A || entry->partner > MASCHINE_G ||
+                       entry->partner == entry->maschine) {
+                entry->isDoublette = false;
+                entry->partner = entry->maschine;
+                entry->delayMs = 0;
+            } else if (entry->delayMs > 10000) {
+                entry->delayMs = 10000;
+            }
+        }
+    }
+}
+
 static void nvs_save_str(const char *key, const char *val) __attribute__((unused));
 static void nvs_save_str(const char *key, const char *val)
 {
@@ -79,45 +134,63 @@ static void shuffle(Maschine *arr, int n)
     }
 }
 
+static bool append_single(SequenzEintrag *out, int *idx, Maschine machine)
+{
+    if (*idx >= MAX_SEQUENZ) return false;
+    out[(*idx)++] = (SequenzEintrag){machine, false, false, machine, 0};
+    return true;
+}
+
+static bool append_pair(SequenzEintrag *out, int *idx, Maschine first,
+                        Maschine second, uint16_t delay_ms)
+{
+    if (*idx + 1 >= MAX_SEQUENZ) return false;
+    out[(*idx)++] = (SequenzEintrag){first, false, true, second, delay_ms};
+    out[(*idx)++] = (SequenzEintrag){second, true, true, first, delay_ms};
+    return true;
+}
+
 static int generate_sequenz(SequenzEintrag *out, Modus modus,
-                             bool *aktiv, const Maschine *custom, int clen)
+                             bool *aktiv, const CustomSequenzEintrag *custom, int clen)
 {
     int idx = 0;
 
     if (modus == MODUS_NORMAL) {
-        // A-G (filtered by aktiv) + H (Doublette = 2 entries)
+        // A-G (filtered by aktiv) + the H doublette unit.
         for (Maschine m = MASCHINE_A; m <= MASCHINE_G; m = (Maschine)((int)m + 1)) {
-            if (aktiv[m]) {
-                out[idx++] = (SequenzEintrag){m, false};
-            }
+            if (aktiv[m]) append_single(out, &idx, m);
         }
         if (aktiv[MASCHINE_H]) {
-            out[idx++] = (SequenzEintrag){MASCHINE_H, false};
-            out[idx++] = (SequenzEintrag){MASCHINE_H, true};
+            append_pair(out, &idx, MASCHINE_H, MASCHINE_H, 0);
         }
     } else if (modus == MODUS_HARAKIRI) {
-        // Shuffle A-G then add H
-        Maschine pool[7]; int pcnt = 0;
+        // Shuffle logical launch units, including the H doublette unit.
+        Maschine pool[MASCHINE_COUNT]; int pcnt = 0;
         for (Maschine m = MASCHINE_A; m <= MASCHINE_G; m = (Maschine)((int)m + 1)) {
             if (aktiv[m]) pool[pcnt++] = m;
         }
+        if (aktiv[MASCHINE_H]) pool[pcnt++] = MASCHINE_H;
         shuffle(pool, pcnt);
         for (int i = 0; i < pcnt; i++) {
-            out[idx++] = (SequenzEintrag){pool[i], false};
-        }
-        if (aktiv[MASCHINE_H]) {
-            out[idx++] = (SequenzEintrag){MASCHINE_H, false};
-            out[idx++] = (SequenzEintrag){MASCHINE_H, true};
+            if (pool[i] == MASCHINE_H)
+                append_pair(out, &idx, MASCHINE_H, MASCHINE_H, 0);
+            else
+                append_single(out, &idx, pool[i]);
         }
     } else {
-        // Custom: use provided sequence, H expands to 2 entries
+        // Custom: singles stay single. H is always an H1/H2 unit. A-G
+        // doublettes expand into their selected ordered machine pair.
         for (int i = 0; i < clen; i++) {
-            Maschine m = custom[i];
-            if (m == MASCHINE_H) {
-                out[idx++] = (SequenzEintrag){MASCHINE_H, false};
-                out[idx++] = (SequenzEintrag){MASCHINE_H, true};
+            const CustomSequenzEintrag *entry = &custom[i];
+            if (entry->maschine == MASCHINE_H) {
+                append_pair(out, &idx, MASCHINE_H, MASCHINE_H, 0);
+            } else if (entry->isDoublette &&
+                       entry->partner >= MASCHINE_A && entry->partner <= MASCHINE_G &&
+                       entry->partner != entry->maschine) {
+                append_pair(out, &idx, entry->maschine, entry->partner,
+                            entry->delayMs > 10000 ? 10000 : entry->delayMs);
             } else {
-                out[idx++] = (SequenzEintrag){m, false};
+                append_single(out, &idx, entry->maschine);
             }
         }
     }
@@ -193,7 +266,7 @@ bool store_start_spiel(void)
     }
 
     // Generate sequence
-    const Maschine *cseq = NULL;
+    const CustomSequenzEintrag *cseq = NULL;
     int clen = 0;
     if (s->modus >= MODUS_CUSTOM_1) {
         int ci = s->modus - MODUS_CUSTOM_1;
@@ -208,6 +281,7 @@ bool store_start_spiel(void)
     s->taubeIndex   = 0;
     s->spielerIndex = 0;
     s->ergebnisseCount = 0;
+    s->currentFireSent = false;
     for (int i = 0; i < s->spielerCount; i++) s->spieler[i].punkte = 0;
 
     // Generate game UUID — random, globally unique, idempotent for portal sync
@@ -227,21 +301,21 @@ bool store_start_spiel(void)
     return true;
 }
 
-// Count isDoublette (H2) entries at indices strictly before `before`.
-// H1 and H2 together occupy one physical position but two taubeIndex slots.
+// Count pair-second entries at indices strictly before `before`.
+// A pair's first and second result share one physical position.
 // Subtracting this count converts a raw taubeIndex into a logical position index.
 static int count_h2_before(const GameStore *s, int before) {
     int n = 0;
     for (int i = 0; i < before && i < s->sequenzLen; i++)
-        if (s->sequenz[i].isDoublette) n++;
+        if (s->sequenz[i].isPair && s->sequenz[i].isDoublette) n++;
     return n;
 }
 
 // ── store_eintragen ──────────────────────────────────────────
-// H-doublette interleaving rule:
-//   H1 entry (isDoublette=false, next entry isDoublette=true):
+// Pair interleaving rule:
+//   Pair first entry:
 //     → record for current player, keep spielerIndex, advance taubeIndex to H2
-//   H2 entry (isDoublette=true):
+//   Pair second entry:
 //     → record for same player, then advance spielerIndex.
 //       If more players remain → step taubeIndex back to H1 so next player
 //       also shoots H1 then H2.
@@ -255,15 +329,13 @@ void store_eintragen(int punkte)
     Spieler *sp = &s->spieler[s->spielerIndex];
 
     // Classify current entry
-    bool isH2 = (se->maschine == MASCHINE_H) && se->isDoublette;
-    bool isH1 = (se->maschine == MASCHINE_H) && !se->isDoublette
-                && (s->taubeIndex + 1 < s->sequenzLen)
-                && s->sequenz[s->taubeIndex + 1].isDoublette;
+    bool isPairSecond = se->isPair && se->isDoublette;
+    bool isPairFirst = se->isPair && !se->isDoublette;
 
     // Logical position index: H1 + H2 together = ONE physical position step.
     // rawIdx: align H2 back to H1's slot; then subtract H2 entries seen before
     // that slot (each one represents a slot that does NOT advance the position).
-    int rawIdx = (isH2 && s->taubeIndex > 0) ? s->taubeIndex - 1 : s->taubeIndex;
+    int rawIdx = (isPairSecond && s->taubeIndex > 0) ? s->taubeIndex - 1 : s->taubeIndex;
     int posIdx = rawIdx - count_h2_before(s, rawIdx);
     int base   = s->spieler[s->spielerIndex].startPosten - 1;
 
@@ -277,7 +349,7 @@ void store_eintragen(int punkte)
     e.wiederholt = false;
 
     // Scoring rules
-    if (se->maschine == MASCHINE_H) {
+    if (se->maschine == MASCHINE_H && se->isPair) {
         e.schuss1 = (punkte >= 1);
         e.schuss2 = false;
     } else {
@@ -291,15 +363,18 @@ void store_eintragen(int punkte)
 
     // ── Advance state ────────────────────────────────────────
     auto finish_lauf_or_game = [&]() -> bool {
-        if (s->lauf < 2) {
+        int max_laeufe = (s->modus >= MODUS_CUSTOM_1)
+                       ? s->customLaeufe[s->modus - MODUS_CUSTOM_1]
+                       : 2;
+        if (s->lauf < max_laeufe) {
             // Advance each player's startPosten by the number of logical
-            // position advances in lauf 1.  Each H2 entry (isDoublette=true)
-            // shares the same physical position as its H1 partner, so it does
+            // position advances in lauf 1. Each pair's second entry shares the
+            // same physical position as its first partner, so it does
             // NOT count as an independent position step.
-            int h2_total = 0;
+            int pair_second_total = 0;
             for (int k = 0; k < s->sequenzLen; k++)
-                if (s->sequenz[k].isDoublette) h2_total++;
-            int advances = s->sequenzLen - h2_total;
+                if (s->sequenz[k].isPair && s->sequenz[k].isDoublette) pair_second_total++;
+            int advances = s->sequenzLen - pair_second_total;
             for (int i = 0; i < s->spielerCount; i++) {
                 s->spieler[i].startPosten =
                     ((s->spieler[i].startPosten - 1 + advances) % 5) + 1;
@@ -307,26 +382,29 @@ void store_eintragen(int punkte)
             s->lauf++;
             s->taubeIndex   = 0;
             s->spielerIndex = 0;
+            s->currentFireSent = false;
             return false;
         }
         _store_finish_game();
         return true;
     };
 
-    if (isH1) {
-        // Same player shoots H2 immediately — only advance taubeIndex
+    if (isPairFirst) {
+        // Same player shoots the second result immediately — only advance index.
         s->taubeIndex++;
 
-    } else if (isH2) {
+    } else if (isPairSecond) {
         // Move to next player
         s->spielerIndex++;
         if (s->spielerIndex < s->spielerCount) {
-            // Step back to H1 so the next player also shoots H1 then H2
+            // Step back to pair first so the next player gets both results.
             s->taubeIndex--;
+            s->currentFireSent = false;
         } else {
-            // All players done with this doublette pair
+            // All players done with this pair.
             s->spielerIndex = 0;
-            s->taubeIndex++;   // advance past H2
+            s->taubeIndex++;   // advance past pair second
+            s->currentFireSent = false;
             if (s->taubeIndex >= s->sequenzLen) {
                 if (finish_lauf_or_game()) return;
             }
@@ -335,6 +413,8 @@ void store_eintragen(int punkte)
     } else {
         // Normal advance: next player; when all done → next taube
         s->spielerIndex++;
+        // A normal single is a new physical launch for every shooter.
+        s->currentFireSent = false;
         if (s->spielerIndex >= s->spielerCount) {
             s->spielerIndex = 0;
             s->taubeIndex++;
@@ -425,6 +505,7 @@ void store_wiederholen(void)
     if (g_store.ergebnisseCount > 0) {
         g_store.ergebnisse[g_store.ergebnisseCount - 1].wiederholt = true;
     }
+    g_store.currentFireSent = false;
     // Back up one step
     if (g_store.spielerIndex > 0) {
         g_store.spielerIndex--;
@@ -659,6 +740,12 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "wifi_pass", g_store.wifiPass);
     nvs_set_i32(s_nvs, "modus", (int32_t)g_store.modus);
     nvs_set_i32(s_nvs, "click_snd", g_store.clickSoundEnabled ? 1 : 0);
+    nvs_set_blob(s_nvs, "custom_seq", g_store.customSequenzen,
+                 sizeof(g_store.customSequenzen));
+    nvs_set_blob(s_nvs, "custom_len", g_store.customSequenzLen,
+                 sizeof(g_store.customSequenzLen));
+    nvs_set_blob(s_nvs, "custom_run", g_store.customLaeufe,
+                 sizeof(g_store.customLaeufe));
     nvs_commit(s_nvs);
 }
 
@@ -674,6 +761,7 @@ void game_store_init(void)
     for (int m = 0; m < MASCHINE_COUNT; m++) g_store.maschinenAktiv[m] = true;
     g_store.customLaeufe[0] = g_store.customLaeufe[1] =
     g_store.customLaeufe[2] = g_store.customLaeufe[3] = 2;
+    set_default_custom_sequences();
     g_store.screen = SCREEN_DASHBOARD;
 
     // Load persisted values
@@ -689,6 +777,19 @@ void game_store_init(void)
         snprintf(g_store.apiUrl, MAX_URL_LEN, "%s", DEFAULT_API_URL);
     nvs_load_str("wifi_ssid", g_store.wifiSsid, TM_MAX_SSID_LEN);
     nvs_load_str("wifi_pass", g_store.wifiPass, MAX_PASS_LEN);
+
+    size_t custom_seq_size = sizeof(g_store.customSequenzen);
+    size_t custom_len_size = sizeof(g_store.customSequenzLen);
+    size_t custom_run_size = sizeof(g_store.customLaeufe);
+    bool custom_loaded =
+        nvs_get_blob(s_nvs, "custom_seq", g_store.customSequenzen, &custom_seq_size) == ESP_OK &&
+        custom_seq_size == sizeof(g_store.customSequenzen) &&
+        nvs_get_blob(s_nvs, "custom_len", g_store.customSequenzLen, &custom_len_size) == ESP_OK &&
+        custom_len_size == sizeof(g_store.customSequenzLen) &&
+        nvs_get_blob(s_nvs, "custom_run", g_store.customLaeufe, &custom_run_size) == ESP_OK &&
+        custom_run_size == sizeof(g_store.customLaeufe);
+    if (!custom_loaded) set_default_custom_sequences();
+    sanitize_custom_sequences();
 
     int32_t modus = 0;
     if (nvs_get_i32(s_nvs, "modus", &modus) == ESP_OK)

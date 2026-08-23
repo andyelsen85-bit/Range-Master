@@ -7,11 +7,10 @@ import { cn } from '@/lib/utils';
 const MODUS_LABEL: Record<Modus, string> = {
   NORMAL: 'Normal',
   HARAKIRI: 'Harakiri',
-  HARAKIRI_DELAYED: 'Harakiri Delayed',
-  HARAKIRI_FULL: 'Harakiri Full',
   CUSTOM_1: 'Custom 1',
   CUSTOM_2: 'Custom 2',
   CUSTOM_3: 'Custom 3',
+  CUSTOM_4: 'Custom 4',
 };
 
 function RankBadge({ rank }: { rank: number }) {

@@ -27,12 +27,15 @@ static bool s_request_busy = false;
 
 typedef enum : uint8_t {
     GATEWAY_REQUEST_FIRE,
+    GATEWAY_REQUEST_FIRE_PAIR,
     GATEWAY_REQUEST_HEALTH,
 } GatewayRequestKind;
 
 typedef struct {
     GatewayRequestKind kind;
     Maschine machine;
+    Maschine second_machine;
+    uint16_t delay_ms;
     uint32_t sequence;
     char gateway_url[MAX_URL_LEN];
     char gateway_token[MAX_KEY_LEN];
@@ -104,6 +107,36 @@ static bool build_fire_url(char *url, size_t url_len, const GatewayRequest *requ
     return true;
 }
 
+static bool build_fire_pair_url(char *url, size_t url_len, const GatewayRequest *request)
+{
+    const char *base = request->gateway_url;
+    if (!base[0]) {
+        set_status("Gateway not configured");
+        return false;
+    }
+    if (strncmp(base, "http://", 7) != 0) {
+        set_status("Gateway URL must use http://");
+        return false;
+    }
+    if (!request->gateway_token[0] || strlen(request->gateway_token) < 16) {
+        set_status("Gateway auth key not configured");
+        return false;
+    }
+    size_t len = strlen(base);
+    const char *suffix = (len > 0 && base[len - 1] == '/')
+                       ? "fire-pair?first=" : "/fire-pair?first=";
+    int written = snprintf(url, url_len, "%s%s%c&second=%c&delayMs=%u&seq=%08lx",
+                           base, suffix, (char)('A' + (int)request->machine),
+                           (char)('A' + (int)request->second_machine),
+                           (unsigned)request->delay_ms,
+                           (unsigned long)request->sequence);
+    if (written < 0 || (size_t)written >= url_len) {
+        set_status("Gateway URL is too long");
+        return false;
+    }
+    return true;
+}
+
 static bool build_health_url(char *url, size_t url_len, const GatewayRequest *request)
 {
     const char *base = request->gateway_url;
@@ -133,14 +166,15 @@ static bool build_health_url(char *url, size_t url_len, const GatewayRequest *re
     return true;
 }
 
-static bool perform_authenticated_get(const char *url, const char *mac_hex, int *last_http)
+static bool perform_authenticated_get(const char *url, const char *mac_hex,
+                                      int *last_http, int timeout_ms)
 {
     bool success = false;
     *last_http = 0;
     for (int attempt = 0; attempt < 3 && !success; attempt++) {
         esp_http_client_config_t cfg = {};
         cfg.url = url;
-        cfg.timeout_ms = 1500;
+        cfg.timeout_ms = timeout_ms;
         cfg.disable_auto_redirect = true;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) {
@@ -164,7 +198,7 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex, int 
 static void gateway_worker(void *arg)
 {
     GatewayRequest request;
-    char url[MAX_URL_LEN + 32];
+    char url[MAX_URL_LEN + 96];
     for (;;) {
         if (xQueueReceive(s_gateway_queue, &request, portMAX_DELAY) != pdTRUE) continue;
 
@@ -180,7 +214,7 @@ static void gateway_worker(void *arg)
                                          strlen(request.gateway_token), mac)) {
                 request_ready = true;
                 tm_auth::mac_to_hex(mac, mac_hex);
-                success = perform_authenticated_get(url, mac_hex, &last_http);
+                success = perform_authenticated_get(url, mac_hex, &last_http, 2000);
             } else if (request.gateway_token[0] && strlen(request.gateway_token) >= 16) {
                 set_status("Gateway auth key invalid");
             }
@@ -201,26 +235,44 @@ static void gateway_worker(void *arg)
         }
 
         bool request_ready = false;
-        if (build_fire_url(url, sizeof(url), &request) &&
-            tm_auth::make_request_mac((const uint8_t *)request.gateway_token,
-                                      strlen(request.gateway_token),
-                                      (uint8_t)('A' + (int)request.machine),
-                                      request.sequence, mac)) {
+        if (request.kind == GATEWAY_REQUEST_FIRE_PAIR) {
+            if (build_fire_pair_url(url, sizeof(url), &request) &&
+                tm_auth::make_pair_request_mac(
+                    (const uint8_t *)request.gateway_token,
+                    strlen(request.gateway_token),
+                    (uint8_t)('A' + (int)request.machine),
+                    (uint8_t)('A' + (int)request.second_machine),
+                    request.delay_ms, request.sequence, mac)) {
+                request_ready = true;
+                tm_auth::mac_to_hex(mac, mac_hex);
+                success = perform_authenticated_get(url, mac_hex, &last_http, 20000);
+            }
+        } else if (build_fire_url(url, sizeof(url), &request) &&
+                   tm_auth::make_request_mac((const uint8_t *)request.gateway_token,
+                                              strlen(request.gateway_token),
+                                              (uint8_t)('A' + (int)request.machine),
+                                              request.sequence, mac)) {
             request_ready = true;
             tm_auth::mac_to_hex(mac, mac_hex);
-            success = perform_authenticated_get(url, mac_hex, &last_http);
+            success = perform_authenticated_get(url, mac_hex, &last_http, 7000);
         } else if (request.gateway_token[0] && strlen(request.gateway_token) >= 16) {
             set_status("Gateway auth key invalid");
         }
 
         if (success) {
             char msg[96];
-            if (last_http == 202)
+            if (request.kind == GATEWAY_REQUEST_FIRE_PAIR) {
+                snprintf(msg, sizeof(msg),
+                         last_http == 202 ? "Pair %c+%c sent (ACK missing)" : "Pair %c+%c fired",
+                         (char)('A' + (int)request.machine),
+                         (char)('A' + (int)request.second_machine));
+            } else if (last_http == 202) {
                 snprintf(msg, sizeof(msg), "Machine %c sent (no ACK)",
                          (char)('A' + (int)request.machine));
-            else
+            } else {
                 snprintf(msg, sizeof(msg), "Machine %c fired",
                          (char)('A' + (int)request.machine));
+            }
             set_status(msg);
         } else if (last_http >= 400) {
             char msg[96];
@@ -287,6 +339,44 @@ bool lora_fire_machine(Maschine m)
     request.machine = m;
     request.sequence = g_store.gatewaySequence;
     copy_gateway_config(&request);
+    if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
+        set_request_busy(false);
+        set_status("Gateway queue unavailable");
+        return false;
+    }
+    return true;
+}
+
+bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms)
+{
+    if (!s_gateway_queue || first < MASCHINE_A || first > MASCHINE_G ||
+        second < MASCHINE_A || second > MASCHINE_G || first == second ||
+        delay_ms > 10000) {
+        set_status("Invalid custom doublette");
+        return false;
+    }
+    if (!begin_request()) {
+        set_status("Gateway request already in progress");
+        return false;
+    }
+    if (g_store.gatewaySequence == UINT32_MAX) {
+        set_request_busy(false);
+        set_status("Gateway sequence exhausted");
+        return false;
+    }
+    g_store.gatewaySequence++;
+    game_store_save();
+    GatewayRequest request = {};
+    request.kind = GATEWAY_REQUEST_FIRE_PAIR;
+    request.machine = first;
+    request.second_machine = second;
+    request.delay_ms = delay_ms;
+    request.sequence = g_store.gatewaySequence;
+    copy_gateway_config(&request);
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Sending pair %c+%c...",
+             (char)('A' + (int)first), (char)('A' + (int)second));
+    set_status(msg);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false);
         set_status("Gateway queue unavailable");
