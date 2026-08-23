@@ -9,4 +9,5 @@
 #undef TM_MACHINE_ID
 #endif
 #define TM_MACHINE_ID 'H'
+// The shared sketch shows this fixed ID on the onboard OLED at boot.
 #include "../TrapMasterRelay.ino"
