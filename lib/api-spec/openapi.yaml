@@ -577,8 +577,10 @@ components:
         skipped: { type: integer }
     DaySalesItem:
       type: object
-      required: [productId, quantity, totalCents]
+      required: [spielerId, productId, quantity, totalCents]
       properties:
+        spielerId: { type: integer }
+        spielerName: { type: string }
         productId: { type: integer }
         productName: { type: string }
         quantity: { type: integer }

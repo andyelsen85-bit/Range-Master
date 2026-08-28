@@ -19,7 +19,7 @@ static void munition_cb(lv_event_t *e)
     intptr_t packed = (intptr_t)lv_event_get_user_data(e);
     int spieler_id = (int)(packed >> 4);
     int code = (int)(packed & 0xF);
-    const char *product = code <= 2 ? "CAL_12" : "CAL_20";
+    const char *product = code <= 2 ? "AMMO_CAL12" : "AMMO_CAL20";
     int qty = code <= 2 ? code : code - 2;
     if (!store_queue_verkauf(spieler_id, product, qty))
         lv_label_set_text(s_lbl_status, "VERKAUF KONNT NET GESPAECHERT GINN");
@@ -87,6 +87,16 @@ static void build_player_list(void)
     lv_obj_clean(s_player_list);
 
     int count = 0;
+    // The canonical sales GET is a day aggregate (not player-attributed), so
+    // expose its reconciled totals once above the locally attributed rows.
+    lv_obj_t *columns = lv_label_create(s_player_list);
+    char columns_text[96];
+    snprintf(columns_text, sizeof(columns_text),
+             "CREDITS                 CAL.12: %d       CAL.20: %d",
+             g_store.verkaufCal12Total, g_store.verkaufCal20Total);
+    lv_label_set_text(columns, columns_text);
+    lv_obj_set_style_text_font(columns, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(columns, lv_color_hex(CLR_MUTED), 0);
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
         if (g_store.kreditPlayerIds[i] == 0) continue;
         int sid = g_store.kreditPlayerIds[i];

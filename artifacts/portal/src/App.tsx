@@ -17,6 +17,7 @@ import Admin from '@/pages/admin';
 import AdminApiKeys from '@/pages/admin-api-keys';
 import AdminKredite from '@/pages/admin-kredite';
 import AdminMail from '@/pages/admin-mail';
+import AdminVerkeef from '@/pages/admin-verkeef';
 import AdminSpielrProfil from '@/pages/admin-spieler-profil';
 import Profil from '@/pages/profil';
 import NotFound from '@/pages/not-found';
@@ -74,6 +75,7 @@ function Router() {
             <Route path="/admin/spieler/:id" component={(props) => <AdminRoute component={AdminSpielrProfil} {...props} />} />
             <Route path="/admin/api-schluesselen" component={() => <AdminRoute component={AdminApiKeys} />} />
             <Route path="/admin/kreditter" component={() => <AdminRoute component={AdminKredite} />} />
+            <Route path="/admin/verkeef" component={() => <AdminRoute component={AdminVerkeef} />} />
             <Route path="/admin/mail" component={() => <AdminRoute component={AdminMail} />} />
             <Route component={NotFound} />
           </Switch>

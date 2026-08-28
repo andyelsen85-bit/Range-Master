@@ -90,18 +90,13 @@ export interface KreditEvent {
   anzahl: number;
 }
 
-/** A price is always represented as integer cents; never use floating point money. */
-export interface PreisRevision {
-  id: string;
-  preisCents: number;
-  gueltigAb: string;
-}
-
 export interface Produkt {
-  id: string;
+  id: number;
+  code: string | null;
+  category: string;
   name: string;
-  typ: 'KREDIT' | 'MUNITION';
-  preisRevisionen: PreisRevision[];
+  active: boolean;
+  currentPrice: { id: number; productId: number; unitPriceCents: number; effectiveFrom: string } | null;
 }
 
 /** Immutable ledger entry. Negative quantities are corrections, never edits. */
@@ -109,21 +104,31 @@ export interface VerkaufEvent {
   externalId: string;
   spielerId: number;
   datum: string;
-  produktId: string;
-  preisId: string;
-  anzahl: number;
+  productId: number;
+  priceRevisionId: number;
+  quantity: number;
+}
+
+/** Authoritative, per-player/day sale row returned by GET /api/sync/sales. */
+export interface VerkaufReportRow {
+  spielerId: number;
+  spielerName?: string;
+  productId: number;
+  productName?: string;
+  quantity: number;
+  totalCents: number;
 }
 
 export const PRODUKT_IDS = {
-  kredit: 'game-credit',
-  cal12: 'cal-12',
-  cal20: 'cal-20',
+  kredit: 'GAME_CREDIT',
+  cal12: 'AMMO_CAL12',
+  cal20: 'AMMO_CAL20',
 } as const;
 
 const DEFAULT_PRODUKTE: Produkt[] = [
-  { id: PRODUKT_IDS.kredit, name: 'Game Credit', typ: 'KREDIT', preisRevisionen: [{ id: 'game-credit-v1', preisCents: 0, gueltigAb: '2025-01-01' }] },
-  { id: PRODUKT_IDS.cal12, name: 'Cal. 12', typ: 'MUNITION', preisRevisionen: [{ id: 'cal-12-v1', preisCents: 0, gueltigAb: '2025-01-01' }] },
-  { id: PRODUKT_IDS.cal20, name: 'Cal. 20', typ: 'MUNITION', preisRevisionen: [{ id: 'cal-20-v1', preisCents: 0, gueltigAb: '2025-01-01' }] },
+  { id: -1, code: 'GAME_CREDIT', category: 'GAME_CREDIT', name: 'Game credit', active: true, currentPrice: null },
+  { id: -2, code: 'AMMO_CAL12', category: 'AMMO_CAL12', name: 'Cal. 12', active: true, currentPrice: null },
+  { id: -3, code: 'AMMO_CAL20', category: 'AMMO_CAL20', name: 'Cal. 20', active: true, currentPrice: null },
 ];
 
 const MAX_PENDING_KREDIT_EVENTS = 50;
@@ -211,6 +216,8 @@ interface GameState extends Settings {
   verkaeufe: VerkaufEvent[];
   pendingVerkaeufe: VerkaufEvent[];
   verkaeufeLaden: boolean;
+  /** Cached authoritative report rows; pending events are layered at read time. */
+  serverVerkaeufe: VerkaufReportRow[];
 
   // Actions
   setScreen: (screen: Screen) => void;
@@ -248,9 +255,8 @@ interface GameState extends Settings {
   getKreditRest: (spielerId: number) => number;
   /** Pull today's credit state from the portal and merge with unsynced local events */
   ladeKredite: () => Promise<void>;
-  setProduktPreis: (produktId: string, preisCents: number) => void;
-  addVerkauf: (spielerId: number, produktId: string, anzahl: number) => void;
-  getProduktAnzahl: (spielerId: number, produktId: string) => number;
+  addVerkauf: (spielerId: number, productId: number, quantity: number) => void;
+  getProduktAnzahl: (spielerId: number, productId: number) => number;
   ladeProdukte: () => Promise<void>;
   ladeVerkaeufe: () => Promise<void>;
 
@@ -415,19 +421,17 @@ const PENDING_KREDITE_KEY = 'rangemaster-pending-kredite';
 const SPIELER_UPDATES_KEY = 'rangemaster-spieler-updates';
 const VERKAEUFE_KEY = 'rangemaster-verkaeufe';
 const PENDING_VERKAEUFE_KEY = 'rangemaster-pending-verkaeufe';
-
-function currentPreis(produkt: Produkt): PreisRevision {
-  return produkt.preisRevisionen[produkt.preisRevisionen.length - 1];
-}
+const SERVER_VERKAEUFE_KEY = 'rangemaster-server-verkaeufe';
 
 function normalizeProdukte(raw: unknown): Produkt[] {
   if (!Array.isArray(raw)) return DEFAULT_PRODUKTE;
   const valid = raw.filter((p): p is Produkt => !!p && typeof p === 'object' &&
-    typeof (p as Produkt).id === 'string' && Array.isArray((p as Produkt).preisRevisionen) &&
-    (p as Produkt).preisRevisionen.length > 0);
+    typeof (p as Produkt).id === 'number' && typeof (p as Produkt).category === 'string');
   // The terminal always exposes these three fixed products, even when a stale
   // local settings file predates the product catalogue.
-  return DEFAULT_PRODUKTE.map(defaultProduct => valid.find(p => p.id === defaultProduct.id) ?? defaultProduct);
+  return DEFAULT_PRODUKTE.map(defaultProduct =>
+    valid.find(p => p.code === defaultProduct.code || p.category === defaultProduct.category) ?? defaultProduct
+  );
 }
 
 function loadVerkaeufe(key: string): VerkaufEvent[] {
@@ -439,6 +443,17 @@ function loadVerkaeufe(key: string): VerkaufEvent[] {
 
 function saveVerkaeufe(key: string, events: VerkaufEvent[]) {
   try { localStorage.setItem(key, JSON.stringify(events)); } catch {}
+}
+
+function loadVerkaufsReport(): { datum: string; rows: VerkaufReportRow[] } {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SERVER_VERKAEUFE_KEY) : null;
+    return raw ? JSON.parse(raw) as { datum: string; rows: VerkaufReportRow[] } : { datum: '', rows: [] };
+  } catch { return { datum: '', rows: [] }; }
+}
+
+function saveVerkaufsReport(datum: string, rows: VerkaufReportRow[]) {
+  try { localStorage.setItem(SERVER_VERKAEUFE_KEY, JSON.stringify({ datum, rows })); } catch {}
 }
 
 function loadSpielerUpdates(): SpielerUpdate[] {
@@ -641,6 +656,7 @@ function normalizeCustomSequenzen(
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 const saved = loadSettings();
+const savedVerkaufsReport = loadVerkaufsReport();
 
 const INIT_SPIELER: Spieler[] = [];
 
@@ -695,6 +711,7 @@ export const useGameStore = create<GameState>((set, get) => {
     verkaeufe: loadVerkaeufe(VERKAEUFE_KEY).filter(e => e.datum === todayStr()),
     pendingVerkaeufe: loadVerkaeufe(PENDING_VERKAEUFE_KEY),
     verkaeufeLaden: false,
+    serverVerkaeufe: savedVerkaufsReport.datum === todayStr() ? savedVerkaufsReport.rows : [],
 
     syncStatus: 'idle',
     lastSync: null,
@@ -1180,58 +1197,43 @@ export const useGameStore = create<GameState>((set, get) => {
       }
     },
 
-    setProduktPreis: (produktId, preisCents) => set((state) => {
-      if (!Number.isSafeInteger(preisCents) || preisCents < 0) return state;
-      const produkte = state.produkte.map(produkt => {
-        if (produkt.id !== produktId || currentPreis(produkt).preisCents === preisCents) return produkt;
-        return {
-          ...produkt,
-          preisRevisionen: [...produkt.preisRevisionen, {
-            id: `${produkt.id}-${generateSpielId()}`,
-            preisCents,
-            gueltigAb: new Date().toISOString(),
-          }],
-        };
-      });
-      saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen, customLaeufe: state.customLaeufe, produkte });
-      return { produkte };
-    }),
-
-    addVerkauf: (spielerId, produktId, anzahl) => set((state) => {
-      if (!Number.isSafeInteger(anzahl) || anzahl === 0) return state;
-      const produkt = state.produkte.find(p => p.id === produktId);
-      if (!produkt) return state;
+    addVerkauf: (spielerId, productId, quantity) => set((state) => {
+      if (!Number.isSafeInteger(quantity) || quantity === 0) return state;
+      const product = state.produkte.find(p => p.id === productId);
+      // Placeholder defaults have no server revision and can never be sold.
+      if (!product?.currentPrice || product.id <= 0) return state;
       const event: VerkaufEvent = {
-        externalId: generateSpielId(), spielerId, datum: todayStr(), produktId,
-        preisId: currentPreis(produkt).id, anzahl,
+        externalId: generateSpielId(), spielerId, datum: todayStr(), productId,
+        priceRevisionId: product.currentPrice.id, quantity,
       };
       const pendingVerkaeufe = [...state.pendingVerkaeufe, event];
       const verkaufDatum = todayStr();
-      const verkaeufe = state.verkaufDatum === verkaufDatum
-        ? [...state.verkaeufe, event] : [event];
       saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
-      saveVerkaeufe(VERKAEUFE_KEY, verkaeufe);
-      return { verkaufDatum, verkaeufe, pendingVerkaeufe };
+      return { verkaufDatum, pendingVerkaeufe };
     }),
 
-    getProduktAnzahl: (spielerId, produktId) => {
+    getProduktAnzahl: (spielerId, productId) => {
       const state = get();
       if (state.verkaufDatum !== todayStr()) return 0;
-      return state.verkaeufe
-        .filter(e => e.spielerId === spielerId && e.produktId === produktId)
-        .reduce((sum, e) => sum + e.anzahl, 0);
+      const serverQuantity = state.serverVerkaeufe
+        .filter(row => row.spielerId === spielerId && row.productId === productId)
+        .reduce((sum, row) => sum + row.quantity, 0);
+      const pendingQuantity = state.pendingVerkaeufe
+        .filter(event => event.datum === state.verkaufDatum && event.spielerId === spielerId && event.productId === productId)
+        .reduce((sum, event) => sum + event.quantity, 0);
+      return serverQuantity + pendingQuantity;
     },
 
     ladeProdukte: async () => {
       const state = get();
       if (!state.apiUrl || !state.apiKey) return;
       try {
-        const res = await fetch(`${state.apiUrl}/api/sync/produkte`, {
+        const res = await fetch(`${state.apiUrl}/api/sync/products`, {
           headers: { 'x-api-key': state.apiKey }, signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as { produkte?: Produkt[] };
-        const produkte = normalizeProdukte(data.produkte);
+        const data = await res.json() as { products?: Produkt[] };
+        const produkte = normalizeProdukte(data.products);
         const s = get();
         saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl: s.apiUrl, apiKey: s.apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe, produkte });
         set({ produkte });
@@ -1244,22 +1246,16 @@ export const useGameStore = create<GameState>((set, get) => {
       const datum = todayStr();
       set({ verkaeufeLaden: true });
       try {
-        const res = await fetch(`${state.apiUrl}/api/sync/verkaeufe?datum=${datum}`, {
+        const res = await fetch(`${state.apiUrl}/api/sync/sales?datum=${datum}`, {
           headers: { 'x-api-key': state.apiKey }, signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as { events?: VerkaufEvent[]; verkaeufe?: VerkaufEvent[] };
-        const serverEvents = data.events ?? data.verkaeufe ?? [];
-        // A pull must not make locally queued sales disappear. Server entries
-        // with an acknowledged externalId replace their local copy once.
-        const pending = get().pendingVerkaeufe;
-        const ids = new Set(serverEvents.map(e => e.externalId));
-        const merged = [
-          ...serverEvents,
-          ...pending.filter(e => e.datum === datum && !ids.has(e.externalId)),
-        ];
-        saveVerkaeufe(VERKAEUFE_KEY, merged);
-        set({ verkaufDatum: datum, verkaeufe: merged, verkaeufeLaden: false });
+        const data = await res.json() as { datum: string; sales: VerkaufReportRow[]; totalCents: number };
+        // Rows are authoritative by player and product. Pending events remain
+        // separate, so each is added exactly once by getProduktAnzahl.
+        const serverVerkaeufe = data.sales;
+        saveVerkaufsReport(datum, serverVerkaeufe);
+        set({ verkaufDatum: datum, serverVerkaeufe, verkaeufeLaden: false });
       } catch { set({ verkaeufeLaden: false }); }
     },
 
@@ -1444,6 +1440,7 @@ export const useGameStore = create<GameState>((set, get) => {
             const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedVerkaufEvents = s2.pendingVerkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedVerkaeufe = s2.verkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
+          const remappedServerVerkaeufe = s2.serverVerkaeufe.map(row => ({ ...row, spielerId: remap(row.spielerId) }));
             const remappedActiveCreditUses = s2.activeGameCreditUses.map(e => ({
               ...e, spielerId: remap(e.spielerId),
             }));
@@ -1464,6 +1461,7 @@ export const useGameStore = create<GameState>((set, get) => {
           savePendingKredite(remappedKreditEvents);
           saveVerkaeufe(PENDING_VERKAEUFE_KEY, remappedVerkaufEvents);
           saveVerkaeufe(VERKAEUFE_KEY, remappedVerkaeufe);
+          saveVerkaufsReport(s2.verkaufDatum, remappedServerVerkaeufe);
           saveKredite(s2.kreditDatum, remappedKredite);
           saveSpielerUpdates(remappedUpdates);
           set({
@@ -1475,6 +1473,7 @@ export const useGameStore = create<GameState>((set, get) => {
             pendingKredite: remappedKreditEvents,
             pendingVerkaeufe: remappedVerkaufEvents,
             verkaeufe: remappedVerkaeufe,
+            serverVerkaeufe: remappedServerVerkaeufe,
               activeGameCreditUses: remappedActiveCreditUses,
             kredite: remappedKredite,
             spielerUpdates: remappedUpdates,
@@ -1559,7 +1558,7 @@ export const useGameStore = create<GameState>((set, get) => {
           const pushable = get().pendingVerkaeufe.filter(e => e.spielerId > 0);
           if (pushable.length) {
             const sentIds = new Set(pushable.map(e => e.externalId));
-            const resV = await fetch(`${state.apiUrl}/api/sync/verkaeufe`, {
+            const resV = await fetch(`${state.apiUrl}/api/sync/sales`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
               body: JSON.stringify({ events: pushable }),

@@ -294,6 +294,7 @@ const SaleEventSchema = z.object({
   priceRevisionId: z.number().int().positive(),
   quantity: z.number().int().refine((value) => value !== 0, "quantity must not be zero"),
 });
+class SaleBatchValidationError extends Error {}
 
 // GET /api/sync/products — only currently sellable products and their price revision.
 router.get("/products", requireApiKey, async (_req, res): Promise<void> => {
@@ -312,31 +313,48 @@ router.get("/sales", requireApiKey, async (req, res): Promise<void> => {
 router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
   const parsed = z.object({ events: z.array(SaleEventSchema).max(500) }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  let synced = 0;
-  let skipped = 0;
-  for (const event of parsed.data.events) {
-    const [alreadyRecorded] = await db.select({ id: saleEventsTable.id }).from(saleEventsTable)
-      .where(eq(saleEventsTable.externalId, event.externalId)).limit(1);
-    if (alreadyRecorded) { skipped++; continue; }
-
-    const [spieler] = await db.select({ id: spielerTable.id }).from(spielerTable)
-      .where(eq(spielerTable.id, event.spielerId)).limit(1);
-    if (!spieler) { res.status(400).json({ error: `Unknown player: ${event.spielerId}` }); return; }
-    const [product] = await db.select({ id: productsTable.id }).from(productsTable)
-      .where(eq(productsTable.id, event.productId)).limit(1);
-    if (!product) { res.status(400).json({ error: `Unknown product: ${event.productId}` }); return; }
-    const [revision] = await db.select().from(productPriceRevisionsTable)
-      .where(eq(productPriceRevisionsTable.id, event.priceRevisionId)).limit(1);
-    if (!revision || revision.productId !== product.id) {
-      res.status(400).json({ error: `Unknown price revision for product: ${event.priceRevisionId}` });
+  try {
+    const result = await db.transaction(async (tx) => {
+      // Validate every event before issuing any insert. This transaction makes
+      // a malformed offline batch all-or-nothing rather than partly accepted.
+      const playerIds = [...new Set(parsed.data.events.map((event) => event.spielerId))];
+      const productIds = [...new Set(parsed.data.events.map((event) => event.productId))];
+      const revisionIds = [...new Set(parsed.data.events.map((event) => event.priceRevisionId))];
+      const players = playerIds.length
+        ? await tx.select({ id: spielerTable.id }).from(spielerTable).where(inArray(spielerTable.id, playerIds))
+        : [];
+      const products = productIds.length
+        ? await tx.select({ id: productsTable.id }).from(productsTable).where(inArray(productsTable.id, productIds))
+        : [];
+      const revisions = revisionIds.length
+        ? await tx.select().from(productPriceRevisionsTable).where(inArray(productPriceRevisionsTable.id, revisionIds))
+        : [];
+      const knownPlayers = new Set(players.map((player) => player.id));
+      const knownProducts = new Set(products.map((product) => product.id));
+      const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
+      for (const event of parsed.data.events) {
+        if (!knownPlayers.has(event.spielerId)) throw new SaleBatchValidationError(`Unknown player: ${event.spielerId}`);
+        if (!knownProducts.has(event.productId)) throw new SaleBatchValidationError(`Unknown product: ${event.productId}`);
+        const revision = revisionById.get(event.priceRevisionId);
+        if (!revision || revision.productId !== event.productId) {
+          throw new SaleBatchValidationError(`Unknown price revision for product: ${event.priceRevisionId}`);
+        }
+      }
+      const inserted = parsed.data.events.length
+        ? await tx.insert(saleEventsTable).values(parsed.data.events.map((event) => ({
+          ...event, unitPriceCents: revisionById.get(event.priceRevisionId)!.unitPriceCents,
+        }))).onConflictDoNothing({ target: saleEventsTable.externalId }).returning({ id: saleEventsTable.id })
+        : [];
+      return { synced: inserted.length, skipped: parsed.data.events.length - inserted.length };
+    });
+    res.json(result);
+  } catch (error) {
+    if (error instanceof SaleBatchValidationError) {
+      res.status(400).json({ error: error.message });
       return;
     }
-    const inserted = await db.insert(saleEventsTable).values({
-      ...event, unitPriceCents: revision.unitPriceCents,
-    }).onConflictDoNothing({ target: saleEventsTable.externalId }).returning({ id: saleEventsTable.id });
-    if (inserted.length) synced++; else skipped++;
+    throw error;
   }
-  res.json({ synced, skipped });
 });
 
 // ─── New player created on terminal ──────────────────────────────────────────

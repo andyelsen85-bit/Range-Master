@@ -99,6 +99,8 @@ export interface SaleSyncResult {
 }
 
 export interface DaySalesItem {
+  spielerId: number;
+  spielerName?: string;
   productId: number;
   productName?: string;
   quantity: number;

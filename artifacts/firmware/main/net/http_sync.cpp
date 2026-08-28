@@ -664,27 +664,38 @@ esp_err_t http_fetch_produkte(void)
 {
     char *resp = (char *)malloc(8192);
     if (!resp) return ESP_ERR_NO_MEM;
-    esp_err_t err = http_get_json("/api/sync/produkte", resp, 8192);
+    esp_err_t err = http_get_json("/api/sync/products", resp, 8192);
     if (err != ESP_OK) { free(resp); return err; }
     cJSON *root = cJSON_Parse(resp); free(resp);
     if (!root) return ESP_ERR_INVALID_RESPONSE;
-    cJSON *arr = cJSON_GetObjectItem(root, "produkte");
-    if (!arr || !cJSON_IsArray(arr)) arr = root;
+    cJSON *arr = cJSON_GetObjectItem(root, "products");
+    if (!arr || !cJSON_IsArray(arr)) { cJSON_Delete(root); return ESP_ERR_INVALID_RESPONSE; }
     Produkt products[MAX_PRODUKTE] = {};
     int count = 0; cJSON *item;
     cJSON_ArrayForEach(item, arr) {
         if (count == MAX_PRODUKTE || !cJSON_IsObject(item)) break;
         cJSON *id = cJSON_GetObjectItem(item, "id");
+        cJSON *code = cJSON_GetObjectItem(item, "code");
+        cJSON *category = cJSON_GetObjectItem(item, "category");
         cJSON *name = cJSON_GetObjectItem(item, "name");
-        cJSON *price = cJSON_GetObjectItem(item, "preisCent");
-        if (!price) price = cJSON_GetObjectItem(item, "priceCents");
-        cJSON *revision = cJSON_GetObjectItem(item, "preisRevision");
-        if (!revision) revision = cJSON_GetObjectItem(item, "priceRevision");
-        if (!cJSON_IsString(id) || !cJSON_IsNumber(price) || !cJSON_IsNumber(revision)) continue;
+        cJSON *active = cJSON_GetObjectItem(item, "active");
+        cJSON *current_price = cJSON_GetObjectItem(item, "currentPrice");
+        cJSON *price = current_price ? cJSON_GetObjectItem(current_price, "unitPriceCents") : NULL;
+        cJSON *revision = current_price ? cJSON_GetObjectItem(current_price, "id") : NULL;
+        if (!cJSON_IsNumber(id) || !cJSON_IsString(category) || !cJSON_IsString(name) ||
+            !cJSON_IsBool(active)) continue;
+        if (current_price && !cJSON_IsNull(current_price) && (!cJSON_IsObject(current_price) ||
+            !cJSON_IsNumber(price) || !cJSON_IsNumber(revision))) continue;
         Produkt *p = &products[count++];
-        strncpy(p->id, id->valuestring, sizeof(p->id) - 1);
-        if (cJSON_IsString(name)) strncpy(p->name, name->valuestring, sizeof(p->name) - 1);
-        p->preisCent = (int)price->valuedouble; p->preisRevision = (int)revision->valuedouble;
+        p->id = (int)id->valuedouble;
+        if (cJSON_IsString(code)) strncpy(p->code, code->valuestring, sizeof(p->code) - 1);
+        strncpy(p->category, category->valuestring, sizeof(p->category) - 1);
+        strncpy(p->name, name->valuestring, sizeof(p->name) - 1);
+        p->active = cJSON_IsTrue(active);
+        if (current_price && !cJSON_IsNull(current_price)) {
+            p->preisCent = (int)price->valuedouble;
+            p->preisRevisionId = (int)revision->valuedouble;
+        }
     }
     if (count) { store_replace_produkte(products, count); game_store_save(); }
     cJSON_Delete(root);
@@ -699,22 +710,25 @@ esp_err_t http_push_verkauf_events(void)
     int count = store_begin_verkauf_sync(snapshot, MAX_PENDING_VERKAEUFE);
     if (!count) { heap_caps_free(snapshot); return ESP_OK; }
     cJSON *root = cJSON_CreateObject(), *arr = cJSON_CreateArray();
-    cJSON_AddItemToObject(root, "verkaeufe", arr);
+    cJSON_AddItemToObject(root, "events", arr);
     for (int i = 0; i < count; ++i) {
         VerkaufEvent *ev = &snapshot[i]; cJSON *item = cJSON_CreateObject();
         cJSON_AddStringToObject(item, "externalId", ev->externalId);
         cJSON_AddNumberToObject(item, "spielerId", ev->spielerId);
         cJSON_AddStringToObject(item, "datum", ev->datum);
-        cJSON_AddStringToObject(item, "produktId", ev->produktId);
-        cJSON_AddNumberToObject(item, "preisRevision", ev->preisRevision);
-        cJSON_AddNumberToObject(item, "menge", ev->menge);
+        cJSON_AddNumberToObject(item, "productId", ev->produktId);
+        cJSON_AddNumberToObject(item, "priceRevisionId", ev->preisRevisionId);
+        cJSON_AddNumberToObject(item, "quantity", ev->quantity);
         cJSON_AddItemToArray(arr, item);
     }
     char *body = cJSON_PrintUnformatted(root); cJSON_Delete(root);
     char *resp = (char *)malloc(512);
     esp_err_t err = (!body || !resp) ? ESP_ERR_NO_MEM :
-        http_post_json("/api/sync/verkaeufe", body, resp, 512);
+        http_post_json("/api/sync/sales", body, resp, 512);
     if (body) free(body); if (resp) free(resp);
+    // /sales accepts a batch atomically. Never partially acknowledge a
+    // snapshot: a non-2xx leaves every externalId in the durable outbox for
+    // an idempotent retry, while a 2xx removes the complete snapshot.
     store_finish_verkauf_sync(snapshot, count, err == ESP_OK);
     heap_caps_free(snapshot);
     return err;
@@ -724,7 +738,7 @@ esp_err_t http_pull_verkaeufe(void)
 {
     time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
     char date[11], path[64]; strftime(date, sizeof(date), "%Y-%m-%d", &tmi);
-    snprintf(path, sizeof(path), "/api/sync/verkaeufe?datum=%s", date);
+    snprintf(path, sizeof(path), "/api/sync/sales?datum=%s", date);
     char *resp = (char *)malloc(8192);
     if (!resp) return ESP_ERR_NO_MEM;
     esp_err_t err = http_get_json(path, resp, 8192);
@@ -733,20 +747,29 @@ esp_err_t http_pull_verkaeufe(void)
     if (!root) return ESP_ERR_INVALID_RESPONSE;
     memset(g_store.munition, 0, sizeof(g_store.munition));
     strncpy(g_store.verkaufDatum, date, sizeof(g_store.verkaufDatum) - 1);
-    cJSON *arr = cJSON_GetObjectItem(root, "verkaeufe");
-    if (!arr || !cJSON_IsArray(arr)) arr = root;
+    g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
+    cJSON *arr = cJSON_GetObjectItem(root, "sales");
+    if (!arr || !cJSON_IsArray(arr)) { cJSON_Delete(root); return ESP_ERR_INVALID_RESPONSE; }
     cJSON *item; cJSON_ArrayForEach(item, arr) {
-        cJSON *sid = cJSON_GetObjectItem(item, "spielerId");
-        cJSON *product = cJSON_GetObjectItem(item, "produktId");
-        cJSON *qty = cJSON_GetObjectItem(item, "menge");
-        if (!qty) qty = cJSON_GetObjectItem(item, "anzahl");
-        if (cJSON_IsNumber(sid) && cJSON_IsString(product) && cJSON_IsNumber(qty))
-            store_apply_portal_verkauf((int)sid->valuedouble, product->valuestring, (int)qty->valuedouble);
+        cJSON *spieler = cJSON_GetObjectItem(item, "spielerId");
+        cJSON *product = cJSON_GetObjectItem(item, "productId");
+        cJSON *qty = cJSON_GetObjectItem(item, "quantity");
+        // Canonical rows are player-attributed. Do not use a synthetic player
+        // zero for aggregate data: it would make a later reboot lose the row.
+        if (cJSON_IsNumber(spieler) && spieler->valuedouble > 0 &&
+            cJSON_IsNumber(product) && cJSON_IsNumber(qty)) {
+            store_apply_portal_verkauf((int)spieler->valuedouble,
+                                       (int)product->valuedouble,
+                                       (int)qty->valuedouble);
+        }
     }
-    // Reapply durable local events; the portal response is the baseline.
+    // Reconciliation order is: clear cache → rebuild portal rows → replay
+    // only today's unsent/in-flight local events. Events from another date
+    // remain in the outbox for delivery but must not inflate this day's view.
     for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i) {
         VerkaufEvent *ev = &g_store.pendingVerkaufEvents[i];
-        store_apply_portal_verkauf(ev->spielerId, ev->produktId, ev->menge);
+        if (strcmp(ev->datum, date) == 0)
+            store_apply_portal_verkauf(ev->spielerId, ev->produktId, ev->quantity);
     }
     cJSON_Delete(root); game_store_save();
     return ESP_OK;

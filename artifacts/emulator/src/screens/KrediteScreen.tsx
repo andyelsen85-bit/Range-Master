@@ -24,6 +24,8 @@ export function KrediteScreen() {
     store.portalSpieler.find(p => p.id === id)?.name ??
     store.spieler.find(s => s.id === id)?.name ??
     `Spiller #${id}`;
+  const cal12 = store.produkte.find(p => p.code === 'AMMO_CAL12' || p.category === 'AMMO_CAL12');
+  const cal20 = store.produkte.find(p => p.code === 'AMMO_CAL20' || p.category === 'AMMO_CAL20');
 
   // Today's players = anyone with a credit entry today
   const eintraege = Object.entries(store.kredite)
@@ -35,8 +37,8 @@ export function KrediteScreen() {
         gewaehrt: stand.gewaehrt,
         verbraucht: stand.verbraucht,
         rest: Math.max(0, stand.gewaehrt - stand.verbraucht),
-        cal12: store.getProduktAnzahl(spielerId, 'cal-12'),
-        cal20: store.getProduktAnzahl(spielerId, 'cal-20'),
+        cal12: store.getProduktAnzahl(spielerId, cal12?.id ?? -2),
+        cal20: store.getProduktAnzahl(spielerId, cal20?.id ?? -3),
         pending: store.pendingVerkaeufe.some(v => v.spielerId === spielerId),
       };
     })
@@ -195,14 +197,14 @@ export function KrediteScreen() {
                 </div>
 
                 {([
-                  { id: 'cal-12', label: 'Cal. 12', quantity: e.cal12 },
-                  { id: 'cal-20', label: 'Cal. 20', quantity: e.cal20 },
+                  { id: cal12?.id ?? -2, label: 'Cal. 12', quantity: e.cal12, available: !!cal12?.currentPrice && cal12.id > 0 },
+                  { id: cal20?.id ?? -3, label: 'Cal. 20', quantity: e.cal20, available: !!cal20?.currentPrice && cal20.id > 0 },
                 ] as const).map(product => (
                   <div key={product.id} className="flex flex-col gap-1 min-w-[210px]">
                     <span className="text-[10px] font-bold uppercase text-foreground">{product.label}: <b data-testid={`text-quantity-${product.id}-${e.spielerId}`}>{product.quantity}</b></span>
                     <div className="flex gap-1">
-                      <TouchButton variant="ghost" className="h-10 w-10 p-0 border border-amber-500/40" onClick={() => store.addVerkauf(e.spielerId, product.id, -1)} data-testid={`button-minus-${product.id}-${e.spielerId}`}>−1</TouchButton>
-                      {ADD_AMOUNTS.map(n => <TouchButton key={n} variant="outline" className="h-10 px-2 font-bold" onClick={() => store.addVerkauf(e.spielerId, product.id, n)} data-testid={`button-add-${product.id}-${n}-${e.spielerId}`}><Plus className="w-3 h-3" />{n}</TouchButton>)}
+                      <TouchButton variant="ghost" disabled={!product.available} className="h-10 w-10 p-0 border border-amber-500/40" onClick={() => store.addVerkauf(e.spielerId, product.id, -1)} data-testid={`button-minus-${product.id}-${e.spielerId}`}>−1</TouchButton>
+                      {ADD_AMOUNTS.map(n => <TouchButton key={n} disabled={!product.available} variant="outline" className="h-10 px-2 font-bold" onClick={() => store.addVerkauf(e.spielerId, product.id, n)} data-testid={`button-add-${product.id}-${n}-${e.spielerId}`}><Plus className="w-3 h-3" />{n}</TouchButton>)}
                     </div>
                   </div>
                 ))}

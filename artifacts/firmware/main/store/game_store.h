@@ -136,10 +136,13 @@ typedef struct {
 } KreditStand;
 
 typedef struct {
-    char id[32];             // stable portal product id, e.g. GAME_CREDIT
+    int  id;                 // canonical portal product ID
+    char code[24];           // optional portal code; empty when API returned null
+    char category[24];       // e.g. AMMUNITION
     char name[32];
-    int  preisCent;          // exact integer cents; never use float for money
-    int  preisRevision;      // portal revision used when a sale was recorded
+    bool active;
+    int  preisCent;          // currentPrice.unitPriceCents
+    int  preisRevisionId;    // currentPrice.id; immutable event reference
 } Produkt;
 
 typedef struct {
@@ -152,9 +155,9 @@ typedef struct {
     char externalId[40];
     int  spielerId;
     char datum[11];
-    char produktId[32];
-    int  preisRevision;
-    int  menge;              // signed (+ sale, - correction)
+    int  produktId;
+    int  preisRevisionId;
+    int  quantity;           // signed (+ sale, - correction)
     bool inFlight;
 } VerkaufEvent;
 
@@ -235,6 +238,8 @@ typedef struct {
     int         kreditPlayerIds[MAX_PORTAL_SPIELER]; // parallel array of ids
     MunitionStand munition[MAX_PORTAL_SPIELER]; // same daily player capacity
     char          verkaufDatum[11];             // date represented by munition[]
+    int           verkaufCal12Total;            // portal aggregate + local pending events
+    int           verkaufCal20Total;
 
     // Cached catalog remains usable while offline. A successful catalog pull
     // replaces it wholesale, making portal prices authoritative.
@@ -322,11 +327,11 @@ void store_queue_passwort_reset(int spieler_id);
 int  store_pending_update_count(void);
 
 // ── Product sales / ammunition ────────────────────────────────
-const Produkt *store_produkt(const char *produkt_id);
-bool store_queue_verkauf(int spieler_id, const char *produkt_id, int menge);
+const Produkt *store_produkt(const char *produkt_code);
+bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity);
 int  store_begin_verkauf_sync(VerkaufEvent *snapshot, int capacity);
 void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool delivered);
-void store_apply_portal_verkauf(int spieler_id, const char *produkt_id, int menge);
+void store_apply_portal_verkauf(int spieler_id, int produkt_id, int quantity);
 void store_replace_produkte(const Produkt *produkte, int count);
 void store_remap_verkauf_spieler(int old_id, int new_id);
 int  store_munition_cal12(int spieler_id);

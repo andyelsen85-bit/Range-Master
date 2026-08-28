@@ -1,5 +1,5 @@
 import { and, desc, eq, lte, sql } from "drizzle-orm";
-import { db, productPriceRevisionsTable, productsTable, saleEventsTable } from "@workspace/db";
+import { db, productPriceRevisionsTable, productsTable, saleEventsTable, spielerTable } from "@workspace/db";
 
 const systemProducts = [
   { code: "GAME_CREDIT", name: "Game credit", category: "GAME_CREDIT" as const },
@@ -33,11 +33,17 @@ export async function catalogue(activeOnly = false) {
 
 export async function daySalesReport(datum: string) {
   const sales = await db.select({
+    spielerId: saleEventsTable.spielerId,
+    spielerName: spielerTable.name,
     productId: saleEventsTable.productId,
     productName: productsTable.name,
     quantity: sql<number>`COALESCE(SUM(${saleEventsTable.quantity}), 0)::int`,
     totalCents: sql<number>`COALESCE(SUM(${saleEventsTable.quantity} * ${saleEventsTable.unitPriceCents}), 0)::int`,
-  }).from(saleEventsTable).innerJoin(productsTable, eq(saleEventsTable.productId, productsTable.id))
-    .where(eq(saleEventsTable.datum, datum)).groupBy(saleEventsTable.productId, productsTable.name).orderBy(productsTable.name);
+  }).from(saleEventsTable)
+    .innerJoin(productsTable, eq(saleEventsTable.productId, productsTable.id))
+    .innerJoin(spielerTable, eq(saleEventsTable.spielerId, spielerTable.id))
+    .where(eq(saleEventsTable.datum, datum))
+    .groupBy(saleEventsTable.spielerId, spielerTable.name, saleEventsTable.productId, productsTable.name)
+    .orderBy(spielerTable.name, productsTable.name);
   return { datum, sales, totalCents: sales.reduce((sum, sale) => sum + Number(sale.totalCents), 0) };
 }

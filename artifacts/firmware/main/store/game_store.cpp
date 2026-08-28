@@ -63,11 +63,12 @@ static int find_munition_slot(int spieler_id)
     return -1;
 }
 
-const Produkt *store_produkt(const char *produkt_id)
+const Produkt *store_produkt(const char *produkt_code)
 {
-    if (!produkt_id) return NULL;
+    if (!produkt_code) return NULL;
     for (int i = 0; i < g_store.produkteCount; ++i)
-        if (strcmp(g_store.produkte[i].id, produkt_id) == 0) return &g_store.produkte[i];
+        if (g_store.produkte[i].active &&
+            strcmp(g_store.produkte[i].code, produkt_code) == 0) return &g_store.produkte[i];
     return NULL;
 }
 
@@ -82,12 +83,30 @@ int store_munition_cal20(int spieler_id) {
     return 0;
 }
 
-void store_apply_portal_verkauf(int spieler_id, const char *produkt_id, int menge)
+static int munition_caliber_for_product(int produkt_id)
 {
+    for (int i = 0; i < g_store.produkteCount; ++i) {
+        const Produkt *p = &g_store.produkte[i];
+        if (p->id != produkt_id) continue;
+        if (strcmp(p->code, "AMMO_CAL12") == 0 ||
+            strcmp(p->category, "AMMO_CAL12") == 0) return 12;
+        if (strcmp(p->code, "AMMO_CAL20") == 0 ||
+            strcmp(p->category, "AMMO_CAL20") == 0) return 20;
+    }
+    return 0;
+}
+
+void store_apply_portal_verkauf(int spieler_id, int produkt_id, int quantity)
+{
+    int caliber = munition_caliber_for_product(produkt_id);
+    if (!caliber) return;
+    if (caliber == 12) g_store.verkaufCal12Total += quantity;
+    else g_store.verkaufCal20Total += quantity;
+    if (spieler_id <= 0) return; // sales aggregate has no player attribution
     int slot = find_munition_slot(spieler_id);
-    if (slot < 0 || !produkt_id) return;
-    if (strcmp(produkt_id, "CAL_12") == 0) g_store.munition[slot].cal12 += menge;
-    else if (strcmp(produkt_id, "CAL_20") == 0) g_store.munition[slot].cal20 += menge;
+    if (slot < 0) return;
+    if (caliber == 12) g_store.munition[slot].cal12 += quantity;
+    else g_store.munition[slot].cal20 += quantity;
 }
 
 void store_replace_produkte(const Produkt *produkte, int count)
@@ -99,15 +118,17 @@ void store_replace_produkte(const Produkt *produkte, int count)
     g_store.produkteCount = count;
 }
 
-bool store_queue_verkauf(int spieler_id, const char *produkt_id, int menge)
+bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
 {
-    const Produkt *produkt = store_produkt(produkt_id);
-    if (!produkt || spieler_id == 0 || menge == 0) return false;
+    const Produkt *produkt = store_produkt(produkt_code);
+    if (!produkt || produkt->id <= 0 || produkt->preisRevisionId <= 0 ||
+        spieler_id == 0 || quantity == 0) return false;
     time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tmi);
     xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
     if (strcmp(g_store.verkaufDatum, today) != 0) {
         memset(g_store.munition, 0, sizeof(g_store.munition));
+        g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
         strncpy(g_store.verkaufDatum, today, sizeof(g_store.verkaufDatum) - 1);
     }
     if (g_store.pendingVerkaufEventCount >= MAX_PENDING_VERKAEUFE) {
@@ -120,11 +141,11 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_id, int menge)
     snprintf(event->externalId, sizeof(event->externalId), "sal-%d-%08x",
              spieler_id, (unsigned)esp_random());
     event->spielerId = spieler_id;
-    strncpy(event->produktId, produkt->id, sizeof(event->produktId) - 1);
-    event->preisRevision = produkt->preisRevision;
-    event->menge = menge;
+    event->produktId = produkt->id;
+    event->preisRevisionId = produkt->preisRevisionId;
+    event->quantity = quantity;
     strftime(event->datum, sizeof(event->datum), "%Y-%m-%d", &tmi);
-    store_apply_portal_verkauf(spieler_id, produkt->id, menge);
+    store_apply_portal_verkauf(spieler_id, produkt->id, quantity);
     xSemaphoreGive(s_verkauf_events_mutex);
     game_store_save();
     return true;
@@ -1193,6 +1214,8 @@ void game_store_save(void)
     nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
     nvs_set_blob(s_nvs, "ammo", g_store.munition, sizeof(g_store.munition));
     nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
+    nvs_set_i32(s_nvs, "sale_12", g_store.verkaufCal12Total);
+    nvs_set_i32(s_nvs, "sale_20", g_store.verkaufCal20Total);
     nvs_commit(s_nvs);
 }
 
@@ -1213,11 +1236,6 @@ void game_store_init(void)
     g_store.customLaeufe[0] = g_store.customLaeufe[1] =
     g_store.customLaeufe[2] = g_store.customLaeufe[3] = 2;
     set_default_custom_sequences();
-    Produkt defaults[] = {
-        {"GAME_CREDIT", "Game Credit", 0, 0},
-        {"CAL_12", "Cal.12", 0, 0}, {"CAL_20", "Cal.20", 0, 0}
-    };
-    store_replace_produkte(defaults, 3);
     g_store.screen = SCREEN_DASHBOARD;
 
     // Load persisted values
@@ -1258,10 +1276,13 @@ void game_store_init(void)
         sale_count >= 0 && sale_count <= MAX_PENDING_VERKAEUFE) g_store.pendingVerkaufEventCount = sale_count;
     nvs_get_blob(s_nvs, "ammo", g_store.munition, &ammo_size);
     nvs_load_str("sale_date", g_store.verkaufDatum, sizeof(g_store.verkaufDatum));
+    nvs_get_i32(s_nvs, "sale_12", &g_store.verkaufCal12Total);
+    nvs_get_i32(s_nvs, "sale_20", &g_store.verkaufCal20Total);
     time_t today_now = time(NULL); struct tm today_tm; localtime_r(&today_now, &today_tm);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &today_tm);
     if (strcmp(g_store.verkaufDatum, today) != 0) {
         memset(g_store.munition, 0, sizeof(g_store.munition));
+        g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
         strncpy(g_store.verkaufDatum, today, sizeof(g_store.verkaufDatum) - 1);
     }
 
