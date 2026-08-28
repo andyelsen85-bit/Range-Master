@@ -214,6 +214,10 @@ typedef struct {
     // In-game
     Spieler spieler[MAX_SPIELER];
     int     spielerCount;
+    // Durable setup slots.  These deliberately contain IDs only: scores and
+    // rotating in-game positions never become the next game's lineup.
+    int     lineupIds[MAX_SPIELER]; // index + 1 is the selected starting post
+    char    lineupWarning[128];     // recoverable setup/roster warning
     int     lauf;
     int     taubeIndex;
     int     spielerIndex;
@@ -302,7 +306,14 @@ void store_dismiss_resultate(void);
 // ── Players ──────────────────────────────────────────────────
 void store_create_workers(void);       // call ONCE at boot (before screens are built)
 void store_load_portal_spieler(void);  // async via HTTP
+void store_apply_portal_roster(const PortalSpieler *spieler, int count);
+void store_remap_spieler_id(int old_id, int new_id);
 void store_add_lokal_spieler(const char *name, int *out_id);
+bool store_set_lineup_post(int post, int spieler_id);
+void store_clear_lineup(void);
+void store_mix_lineup(void);
+void store_move_lineup(int post, int direction);
+void store_remap_lineup_spieler(int old_id, int new_id);
 
 // ── Credits ──────────────────────────────────────────────────
 void store_add_kredite(int spieler_id, int anzahl);

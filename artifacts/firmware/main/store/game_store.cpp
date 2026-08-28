@@ -184,7 +184,6 @@ void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool del
         break;
     }
     xSemaphoreGive(s_verkauf_events_mutex);
-    game_store_save();
 }
 
 void store_remap_verkauf_spieler(int old_id, int new_id)
@@ -422,6 +421,147 @@ static void clear_active_game_credit_tracking(GameStore *s)
     s->activeGameCreditCount = 0;
 }
 
+bool store_set_lineup_post(int post, int spieler_id)
+{
+    if (post < 1 || post > MAX_SPIELER) return false;
+    int slot = post - 1;
+    if (spieler_id != 0) {
+        bool found = false;
+        for (int i = 0; i < g_store.portalSpielerCount; ++i)
+            if (g_store.portalSpieler[i].id == spieler_id) { found = true; break; }
+        if (!found) return false;
+    }
+    if (spieler_id) for (int i = 0; i < MAX_SPIELER; ++i)
+        if (i != slot && g_store.lineupIds[i] == spieler_id) g_store.lineupIds[i] = 0;
+    g_store.lineupIds[slot] = spieler_id;
+    g_store.lineupWarning[0] = '\0';
+    game_store_save();
+    return true;
+}
+
+void store_clear_lineup(void) {
+    memset(g_store.lineupIds, 0, sizeof(g_store.lineupIds));
+    g_store.lineupWarning[0] = '\0';
+    game_store_save();
+}
+
+void store_mix_lineup(void)
+{
+    int ids[MAX_SPIELER], count = 0;
+    for (int i = 0; i < MAX_SPIELER; ++i) if (g_store.lineupIds[i]) ids[count++] = g_store.lineupIds[i];
+    // Fisher-Yates; esp_random avoids modulo bias by rejecting the short tail.
+    for (int i = count - 1; i > 0; --i) {
+        uint64_t range = (uint64_t)(i + 1);
+        uint64_t limit = ((UINT64_C(1) << 32) / range) * range;
+        uint32_t r; do { r = esp_random(); } while ((uint64_t)r >= limit);
+        int j = (int)(r % (uint32_t)(i + 1));
+        int tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp;
+    }
+    memset(g_store.lineupIds, 0, sizeof(g_store.lineupIds));
+    for (int i = 0; i < count; ++i) g_store.lineupIds[i] = ids[i];
+    game_store_save();
+}
+
+void store_move_lineup(int post, int direction)
+{
+    int target = post + direction;
+    if (post < 1 || post > MAX_SPIELER || target < 1 || target > MAX_SPIELER) return;
+    int tmp = g_store.lineupIds[post - 1];
+    g_store.lineupIds[post - 1] = g_store.lineupIds[target - 1];
+    g_store.lineupIds[target - 1] = tmp;
+    game_store_save();
+}
+
+void store_remap_lineup_spieler(int old_id, int new_id)
+{
+    if (old_id == new_id || old_id == 0 || new_id == 0) return;
+    for (int i = 0; i < MAX_SPIELER; ++i)
+        if (g_store.lineupIds[i] == old_id) g_store.lineupIds[i] = new_id;
+}
+
+static void reconcile_lineup_with_roster(void)
+{
+    bool removed = false;
+    for (int post = 0; post < MAX_SPIELER; ++post) {
+        int id = g_store.lineupIds[post];
+        if (!id) continue;
+        bool known = false;
+        for (int i = 0; i < g_store.portalSpielerCount; ++i)
+            if (g_store.portalSpieler[i].id == id) { known = true; break; }
+        if (!known) { g_store.lineupIds[post] = 0; removed = true; }
+    }
+    if (removed)
+        snprintf(g_store.lineupWarning, sizeof(g_store.lineupWarning),
+                 "Net existente Spiller aus Opstellung geläscht.");
+}
+
+void store_apply_portal_roster(const PortalSpieler *spieler, int count)
+{
+    if (!spieler || count < 0) return;
+    if (count > MAX_PORTAL_SPIELER) count = MAX_PORTAL_SPIELER;
+    static EXT_RAM_BSS_ATTR PortalSpieler merged[MAX_PORTAL_SPIELER];
+    memcpy(merged, spieler, (size_t)count * sizeof(PortalSpieler));
+    // A portal GET cannot know terminal-local creates. Keep them by their
+    // stable negative ID until the create response remaps them.
+    for (int old = 0; old < g_store.portalSpielerCount && count < MAX_PORTAL_SPIELER; ++old) {
+        const PortalSpieler *local = &g_store.portalSpieler[old];
+        if (!local->lokal) continue;
+        bool pending = false;
+        for (int u = 0; u < g_store.spielerUpdateCount; ++u)
+            if (g_store.spielerUpdates[u].used &&
+                g_store.spielerUpdates[u].typ == SPIELER_CREATE &&
+                g_store.spielerUpdates[u].spielerId == local->id) pending = true;
+        if (pending) merged[count++] = *local;
+    }
+    memset(g_store.portalSpieler, 0, sizeof(g_store.portalSpieler));
+    memcpy(g_store.portalSpieler, merged, (size_t)count * sizeof(PortalSpieler));
+    g_store.portalSpielerCount = count;
+    reconcile_lineup_with_roster();
+    game_store_save();
+}
+
+void store_remap_spieler_id(int old_id, int new_id)
+{
+    if (old_id == new_id || old_id == 0 || new_id == 0) return;
+    for (int i = 0; i < g_store.portalSpielerCount; ++i)
+        if (g_store.portalSpieler[i].id == old_id) {
+            g_store.portalSpieler[i].id = new_id; g_store.portalSpieler[i].lokal = false;
+        }
+    for (int i = 0; i < g_store.spielerCount; ++i) if (g_store.spieler[i].id == old_id) g_store.spieler[i].id = new_id;
+    for (int i = 0; i < g_store.ergebnisseCount; ++i) if (g_store.ergebnisse[i].spielerId == old_id) g_store.ergebnisse[i].spielerId = new_id;
+    store_remap_lineup_spieler(old_id, new_id);
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i) {
+        if (g_store.kreditPlayerIds[i] != old_id) continue;
+        int target = -1;
+        for (int j = 0; j < MAX_PORTAL_SPIELER; ++j) if (g_store.kreditPlayerIds[j] == new_id) target = j;
+        if (target >= 0) {
+            g_store.kredite[target].gewaehrt += g_store.kredite[i].gewaehrt;
+            g_store.kredite[target].verbraucht += g_store.kredite[i].verbraucht;
+            g_store.kreditPlayerIds[i] = 0; g_store.kredite[i] = {};
+        } else g_store.kreditPlayerIds[i] = new_id;
+    }
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
+        if (g_store.munition[i].spielerId == old_id) g_store.munition[i].spielerId = new_id;
+    for (int i = 0; i < g_store.pendingKreditEventCount; ++i) if (g_store.pendingKreditEvents[i].spielerId == old_id) g_store.pendingKreditEvents[i].spielerId = new_id;
+    for (int i = 0; i < g_store.activeGameCreditCount; ++i) if (g_store.activeGameCreditPlayerIds[i] == old_id) g_store.activeGameCreditPlayerIds[i] = new_id;
+    for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i) if (g_store.pendingVerkaufEvents[i].spielerId == old_id) g_store.pendingVerkaufEvents[i].spielerId = new_id;
+    for (int g = 0; g < g_store.pendingGamesCount; ++g) {
+        for (int t = 0; t < g_store.pendingGames[g].teilnahmen_count; ++t) if (g_store.pendingGames[g].teilnahmen[t].spielerId == old_id) g_store.pendingGames[g].teilnahmen[t].spielerId = new_id;
+        for (int r = 0; r < g_store.pendingGames[g].ergebnisse_count; ++r) if (g_store.pendingGames[g].ergebnisse[r].spielerId == old_id) g_store.pendingGames[g].ergebnisse[r].spielerId = new_id;
+    }
+    for (int h = 0; h < g_store.historyCount; ++h) {
+        for (int p = 0; p < g_store.history[h].spieler_count; ++p) if (g_store.history[h].spielerIds[p] == old_id) g_store.history[h].spielerIds[p] = new_id;
+        for (int t = 0; t < g_store.history[h].base.teilnahmen_count; ++t) if (g_store.history[h].base.teilnahmen[t].spielerId == old_id) g_store.history[h].base.teilnahmen[t].spielerId = new_id;
+        for (int r = 0; r < g_store.history[h].base.ergebnisse_count; ++r) if (g_store.history[h].base.ergebnisse[r].spielerId == old_id) g_store.history[h].base.ergebnisse[r].spielerId = new_id;
+    }
+    if (g_store.hasLastFinished) {
+        for (int p = 0; p < g_store.lastFinished.spieler_count; ++p) if (g_store.lastFinished.spielerIds[p] == old_id) g_store.lastFinished.spielerIds[p] = new_id;
+        for (int t = 0; t < g_store.lastFinished.base.teilnahmen_count; ++t) if (g_store.lastFinished.base.teilnahmen[t].spielerId == old_id) g_store.lastFinished.base.teilnahmen[t].spielerId = new_id;
+        for (int r = 0; r < g_store.lastFinished.base.ergebnisse_count; ++r) if (g_store.lastFinished.base.ergebnisse[r].spielerId == old_id) g_store.lastFinished.base.ergebnisse[r].spielerId = new_id;
+    }
+    for (int u = 0; u < g_store.spielerUpdateCount; ++u) if (g_store.spielerUpdates[u].spielerId == old_id) g_store.spielerUpdates[u].spielerId = new_id;
+}
+
 void store_register_spieler_fuer_tag(int spieler_id)
 {
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
@@ -458,11 +598,35 @@ void store_add_kredite(int spieler_id, int anzahl)
 bool store_start_spiel(void)
 {
     GameStore *s = &g_store;
+    // Snapshot the durable setup in post order. Never persist this active
+    // game's points or second-run rotations back into lineupIds.
+    s->spielerCount = 0;
+    for (int post = 0; post < MAX_SPIELER; ++post) {
+        int id = s->lineupIds[post];
+        if (!id) continue;
+        bool duplicate = false; int pidx = -1;
+        for (int i = 0; i < s->spielerCount; ++i) if (s->spieler[i].id == id) duplicate = true;
+        for (int i = 0; i < s->portalSpielerCount; ++i) if (s->portalSpieler[i].id == id) { pidx = i; break; }
+        if (duplicate || pidx < 0) {
+            snprintf(s->lineupWarning, sizeof(s->lineupWarning),
+                     "Opstellung enthält en onbekannte Spiller.");
+            return false;
+        }
+        Spieler *sp = &s->spieler[s->spielerCount++];
+        sp->id = id; sp->startPosten = post + 1; sp->punkte = 0;
+        snprintf(sp->name, sizeof(sp->name), "%s", s->portalSpieler[pidx].name);
+    }
+    if (s->spielerCount == 0) {
+        snprintf(s->lineupWarning, sizeof(s->lineupWarning), "Mindestens 1 SPILLER auswielen!");
+        return false;
+    }
 
     // Check all players have credits
     for (int i = 0; i < s->spielerCount; i++) {
         if (store_kredite_verfuegbar(s->spieler[i].id) <= 0) {
             ESP_LOGW(TAG, "Player %d has no credits", s->spieler[i].id);
+            snprintf(s->lineupWarning, sizeof(s->lineupWarning),
+                     "%s huet keng Kreditter.", s->spieler[i].name);
             return false;
         }
     }
@@ -532,6 +696,7 @@ bool store_start_spiel(void)
     }
 
     s->screen = SCREEN_SPIEL;
+    s->lineupWarning[0] = '\0';
     game_store_save();
     ESP_LOGI(TAG, "Game started: modus=%s seq_len=%d players=%d",
              modus_label(s->modus), s->sequenzLen, s->spielerCount);
@@ -872,10 +1037,7 @@ void store_create_workers(void)
                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (buf) {
                 if (http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) == ESP_OK) {
-                    memcpy(g_store.portalSpieler, buf,
-                           count * sizeof(PortalSpieler));
-                    g_store.portalSpielerCount = count;
-                    game_store_save();
+                    store_apply_portal_roster(buf, count);
                     ESP_LOGI(TAG, "Loaded %d portal players", count);
                 }
                 heap_caps_free(buf);
@@ -1282,6 +1444,13 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
     nvs_set_i32(s_nvs, "sale_12", g_store.verkaufCal12Total);
     nvs_set_i32(s_nvs, "sale_20", g_store.verkaufCal20Total);
+    nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds, sizeof(g_store.lineupIds));
+    // Cache roster and unsynced creates too: an offline reboot must still be
+    // able to render the saved setup and later complete its create sync.
+    nvs_set_blob(s_nvs, "plrs", g_store.portalSpieler, sizeof(g_store.portalSpieler));
+    nvs_set_i32(s_nvs, "plr_cnt", g_store.portalSpielerCount);
+    nvs_set_blob(s_nvs, "sp_updates", g_store.spielerUpdates, sizeof(g_store.spielerUpdates));
+    nvs_set_i32(s_nvs, "sp_up_cnt", g_store.spielerUpdateCount);
     nvs_commit(s_nvs);
 }
 
@@ -1319,6 +1488,29 @@ void game_store_init(void)
         snprintf(g_store.apiUrl, MAX_URL_LEN, "%s", DEFAULT_API_URL);
     nvs_load_str("wifi_ssid", g_store.wifiSsid, TM_MAX_SSID_LEN);
     nvs_load_str("wifi_pass", g_store.wifiPass, MAX_PASS_LEN);
+    size_t lineup_size = sizeof(g_store.lineupIds);
+    if (nvs_get_blob(s_nvs, "lineup_ids", g_store.lineupIds, &lineup_size) != ESP_OK ||
+        lineup_size != sizeof(g_store.lineupIds))
+        memset(g_store.lineupIds, 0, sizeof(g_store.lineupIds));
+    size_t portal_size = sizeof(g_store.portalSpieler);
+    size_t update_size = sizeof(g_store.spielerUpdates);
+    int32_t portal_count = 0, update_count = 0;
+    if (nvs_get_blob(s_nvs, "plrs", g_store.portalSpieler, &portal_size) != ESP_OK ||
+        portal_size != sizeof(g_store.portalSpieler) ||
+        nvs_get_i32(s_nvs, "plr_cnt", &portal_count) != ESP_OK ||
+        portal_count < 0 || portal_count > MAX_PORTAL_SPIELER) {
+        memset(g_store.portalSpieler, 0, sizeof(g_store.portalSpieler));
+    } else g_store.portalSpielerCount = portal_count;
+    if (nvs_get_blob(s_nvs, "sp_updates", g_store.spielerUpdates, &update_size) == ESP_OK &&
+        update_size == sizeof(g_store.spielerUpdates) &&
+        nvs_get_i32(s_nvs, "sp_up_cnt", &update_count) == ESP_OK &&
+        update_count >= 0 && update_count <= MAX_SPIELER_UPDATES)
+        g_store.spielerUpdateCount = update_count;
+    reconcile_lineup_with_roster();
+    if (g_store.lineupWarning[0]) {
+        nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds, sizeof(g_store.lineupIds));
+        nvs_commit(s_nvs);
+    }
 
     size_t custom_seq_size = sizeof(g_store.customSequenzen);
     size_t custom_len_size = sizeof(g_store.customSequenzLen);

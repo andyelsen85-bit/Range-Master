@@ -19,6 +19,17 @@ static lv_obj_t *s_lbl_error;
 // option-index → portalSpieler[] index (index 0 = "Kee SPILLER" sentinel)
 static int s_option_to_pidx[MAX_PORTAL_SPIELER + 1];
 static int s_options_count = 0;
+static bool s_refreshing_dropdowns;
+
+static int option_for_player_id(int id)
+{
+    for (int o = 1; o < s_options_count; ++o) {
+        int pidx = s_option_to_pidx[o];
+        if (pidx >= 0 && pidx < g_store.portalSpielerCount &&
+            g_store.portalSpieler[pidx].id == id) return o;
+    }
+    return 0;
+}
 
 // ── Build player dropdown options string ──────────────────────
 // Only includes players that have at least 1 day-credit remaining.
@@ -34,7 +45,10 @@ static void build_player_opts(char *buf, size_t len)
     int eligible[MAX_PORTAL_SPIELER];
     int eligible_count = 0;
     for (int i = 0; i < g_store.portalSpielerCount && eligible_count < MAX_PORTAL_SPIELER; i++) {
-        if (store_kredite_verfuegbar(g_store.portalSpieler[i].id) <= 0) continue;
+        bool in_lineup = false;
+        for (int post = 0; post < MAX_SPIELER; ++post)
+            if (g_store.lineupIds[post] == g_store.portalSpieler[i].id) in_lineup = true;
+        if (!in_lineup && store_kredite_verfuegbar(g_store.portalSpieler[i].id) <= 0) continue;
         eligible[eligible_count++] = i;
     }
 
@@ -78,38 +92,49 @@ static void build_player_opts(char *buf, size_t len)
 // ── Start button callback ─────────────────────────────────────
 static void start_cb(lv_event_t *e)
 {
-    // Collect selected players from dropdowns
-    g_store.spielerCount = 0;
-    for (int i = 0; i < MAX_SPIELER; i++) {
-        if (!s_player_dropdowns[i]) continue;
-        uint16_t sel = lv_dropdown_get_selected(s_player_dropdowns[i]);
-        if (sel == 0) continue; // "--- Kee SPILLER ---"
-        if ((int)sel >= s_options_count) continue;
-        int pidx = s_option_to_pidx[sel];
-        if (pidx < 0 || pidx >= g_store.portalSpielerCount) continue;
-        PortalSpieler *ps = &g_store.portalSpieler[pidx];
-
-        Spieler *sp = &g_store.spieler[g_store.spielerCount];
-        sp->id          = ps->id;
-        sp->startPosten = g_store.spielerCount + 1;
-        sp->punkte      = 0;
-        snprintf(sp->name, MAX_NAME_LEN, "%s", ps->name);
-        g_store.spielerCount++;
-    }
-
-    if (g_store.spielerCount == 0) {
+    bool any = false;
+    for (int i = 0; i < MAX_SPIELER; ++i) if (g_store.lineupIds[i]) any = true;
+    if (!any) {
         lv_label_set_text(s_lbl_error, "Mindestens 1 SPILLER auswiele!");
         lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);
         return;
     }
 
     if (!store_start_spiel()) {
-        lv_label_set_text(s_lbl_error, "Fehler: SPILLER hunn keng Kreditter!");
+        lv_label_set_text(s_lbl_error, g_store.lineupWarning[0]
+            ? g_store.lineupWarning : "Fehler: SPILLER hunn keng Kreditter!");
         lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);
         return;
     }
     // store_start_spiel sets g_store.screen = SCREEN_SPIEL
     // ui_manager_tick will pick that up
+}
+
+static void dropdown_changed_cb(lv_event_t *e)
+{
+    if (s_refreshing_dropdowns) return;
+    int post = (int)(intptr_t)lv_event_get_user_data(e);
+    uint16_t selected = lv_dropdown_get_selected(lv_event_get_target_obj(e));
+    int id = 0;
+    if (selected > 0 && selected < s_options_count) {
+        int pidx = s_option_to_pidx[selected];
+        if (pidx >= 0 && pidx < g_store.portalSpielerCount) id = g_store.portalSpieler[pidx].id;
+    }
+    store_set_lineup_post(post, id);
+    screen_start_refresh();
+}
+
+static void lineup_action_cb(lv_event_t *e)
+{
+    intptr_t action = (intptr_t)lv_event_get_user_data(e);
+    if (action == 0) store_clear_lineup();
+    else if (action == 1) store_mix_lineup();
+    else {
+        int post = (int)(action >> 8);
+        int direction = (action & 0xff) == 1 ? -1 : 1;
+        store_move_lineup(post, direction);
+    }
+    screen_start_refresh();
 }
 
 // ── Modus button callback ─────────────────────────────────────
@@ -205,6 +230,22 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_text_font(players_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(players_hdr, lv_color_hex(CLR_TEXT), 0);
 
+    lv_obj_t *tools = lv_obj_create(left);
+    lv_obj_set_size(tools, LV_PCT(100), 42);
+    lv_obj_set_style_bg_opa(tools, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(tools, 0, 0);
+    lv_obj_set_style_pad_all(tools, 0, 0);
+    lv_obj_set_flex_flow(tools, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(tools, 8, 0);
+    const char *tool_names[] = {"CLEAR ALL", "MIX"};
+    for (int t = 0; t < 2; ++t) {
+        lv_obj_t *btn = lv_btn_create(tools);
+        lv_obj_set_size(btn, 150, 38);
+        lv_obj_add_style(btn, t == 0 ? &g_style_btn_secondary : &g_style_btn_primary, 0);
+        lv_obj_add_event_cb(btn, lineup_action_cb, LV_EVENT_CLICKED, (void *)(intptr_t)t);
+        lv_obj_t *lbl = lv_label_create(btn); lv_label_set_text(lbl, tool_names[t]); lv_obj_center(lbl);
+    }
+
     // Heap-allocated: ~13 KB is too large for stack and too large for static BSS
     // (static BSS lands in internal DRAM which is already scarce on ESP32-P4).
     // lv_dropdown_set_options() calls lv_strdup() internally, so free() is safe
@@ -242,11 +283,26 @@ lv_obj_t *screen_start_create(void)
         lv_obj_set_style_text_color(dd, lv_color_hex(CLR_TEXT), 0);
         s_player_dropdowns[i] = dd;
         s_player_rows[i] = row;
+        lv_obj_add_event_cb(dd, dropdown_changed_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)(i + 1));
+        lv_dropdown_set_selected(dd, option_for_player_id(g_store.lineupIds[i]));
+
+        for (int dir = 0; dir < 2; ++dir) {
+            lv_obj_t *move = lv_btn_create(row);
+            lv_obj_set_size(move, 34, 38);
+            lv_obj_add_style(move, &g_style_btn_secondary, 0);
+            intptr_t action = ((intptr_t)(i + 1) << 8) | (dir == 0 ? 1 : 2);
+            lv_obj_add_event_cb(move, lineup_action_cb, LV_EVENT_CLICKED, (void *)action);
+            lv_obj_t *label = lv_label_create(move);
+            lv_label_set_text(label, dir == 0 ? LV_SYMBOL_UP : LV_SYMBOL_DOWN);
+            lv_obj_center(label);
+        }
     }
     free(opts); // lv_dropdown_set_options copies via lv_strdup - safe to free now
 
     s_lbl_error = lv_label_create(left);
-    lv_label_set_text(s_lbl_error, "");
+    lv_label_set_text(s_lbl_error, g_store.lineupWarning);
+    if (g_store.lineupWarning[0])
+        lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);
     lv_obj_set_style_text_font(s_lbl_error, &lv_font_montserrat_14, 0);
 
     // Right column: modus + machines + start button
@@ -341,10 +397,15 @@ void screen_start_refresh(void)
     char *opts = (char *)malloc(opts_sz);
     if (!opts) return;
     build_player_opts(opts, opts_sz);
+    s_refreshing_dropdowns = true;
     for (int i = 0; i < MAX_SPIELER; i++) {
         if (s_player_dropdowns[i])
             lv_dropdown_set_options(s_player_dropdowns[i], opts);
+        if (s_player_dropdowns[i])
+            lv_dropdown_set_selected(s_player_dropdowns[i],
+                option_for_player_id(g_store.lineupIds[i]));
     }
+    s_refreshing_dropdowns = false;
     free(opts);
     // Sync modus button states
     update_modus_styles();

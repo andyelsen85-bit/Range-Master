@@ -545,20 +545,13 @@ esp_err_t http_push_spieler_updates(void)
                 }
                 if (new_id > 0) {
                     int old_id = e->spielerId;          // negative local ID
-                    for (int k = 0; k < g_store.portalSpielerCount; k++) {
-                        if (g_store.portalSpieler[k].id == old_id) {
-                            g_store.portalSpieler[k].id    = new_id;
-                            g_store.portalSpieler[k].lokal = false;
-                            break;
-                        }
-                    }
-                    // Sales recorded before a local player was created must
-                    // use the portal id on their first POST.
-                    store_remap_verkauf_spieler(old_id, new_id);
-                    game_store_save(); // remapped durable outbox must survive power loss
+                    // One coherent remap covers lineup, credit balances and
+                    // every durable outbox before it is saved.
+                    store_remap_spieler_id(old_id, new_id);
                     ESP_LOGI(TAG, "Spieler '%s' created in portal → id=%d (was local %d)",
                              e->name, new_id, old_id);
                     e->used = false;    // mark done — compacted below
+                    game_store_save();
                 } else {
                     ESP_LOGW(TAG, "spieler-neu: bad response for '%s' — retaining", e->name);
                     overall = ESP_FAIL;
@@ -921,8 +914,7 @@ esp_err_t http_sync_all(void)
     }
     err = http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count);
     if (err == ESP_OK) {
-        memcpy(g_store.portalSpieler, buf, count * sizeof(PortalSpieler));
-        g_store.portalSpielerCount = count;
+        store_apply_portal_roster(buf, count);
     }
     free(buf);
     if (err != ESP_OK && overall == ESP_OK) overall = err;

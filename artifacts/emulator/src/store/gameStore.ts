@@ -11,6 +11,11 @@ export interface Spieler {
   punkte: number;
   startPosten: number; // 1–5 starting post position
 }
+/** Durable setup assignment. It intentionally has no score or game cursor. */
+export interface LineupEintrag {
+  spielerId: number;
+  startPosten: number;
+}
 
 export interface Ergebnis {
   spielerId: number;
@@ -175,6 +180,9 @@ interface Settings {
 interface GameState extends Settings {
   screen: Screen;
   spieler: Spieler[];
+  lineup: LineupEintrag[];
+  /** Recoverable setup problem; never represents game results. */
+  lineupWarning: string | null;
 
   // In-game tracking
   lauf: number;
@@ -224,6 +232,9 @@ interface GameState extends Settings {
   dismissResultate: () => void;
   setSpieler: (spieler: Spieler[]) => void;
   setSpielerAufPosten: (post: number, data: { id: number; name: string } | null) => void;
+  clearLineup: () => void;
+  mixLineup: (random?: () => number) => void;
+  moveLineup: (post: number, direction: -1 | 1) => void;
   updateSpielerName: (id: number, name: string) => void;
   setModus: (modus: Modus) => void;
   toggleMaschineAktiv: (m: Maschine) => void;
@@ -422,6 +433,25 @@ const SPIELER_UPDATES_KEY = 'rangemaster-spieler-updates';
 const VERKAEUFE_KEY = 'rangemaster-verkaeufe';
 const PENDING_VERKAEUFE_KEY = 'rangemaster-pending-verkaeufe';
 const SERVER_VERKAEUFE_KEY = 'rangemaster-server-verkaeufe';
+const LINEUP_KEY = 'rangemaster-lineup';
+
+function loadLineup(): LineupEintrag[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(LINEUP_KEY) : null;
+    const entries = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(entries)) return [];
+    const used = new Set<number>(), posts = new Set<number>();
+    return entries.filter((e): e is LineupEintrag =>
+      !!e && Number.isInteger(e.spielerId) && e.spielerId !== 0 &&
+      Number.isInteger(e.startPosten) && e.startPosten >= 1 && e.startPosten <= 6 &&
+      !used.has(e.spielerId) && !posts.has(e.startPosten) &&
+      !!used.add(e.spielerId) && !!posts.add(e.startPosten)
+    ).sort((a, b) => a.startPosten - b.startPosten);
+  } catch { return []; }
+}
+function saveLineup(lineup: LineupEintrag[]) {
+  try { localStorage.setItem(LINEUP_KEY, JSON.stringify(lineup)); } catch {}
+}
 
 function normalizeProdukte(raw: unknown): Produkt[] {
   if (!Array.isArray(raw)) return DEFAULT_PRODUKTE;
@@ -659,6 +689,15 @@ const saved = loadSettings();
 const savedVerkaufsReport = loadVerkaufsReport();
 
 const INIT_SPIELER: Spieler[] = [];
+const INITIAL_LINEUP = loadLineup();
+const INITIAL_PENDING_SPIELER = loadPendingSpieler();
+const INITIAL_CACHED_SPIELER = loadCachedSpieler();
+const INITIAL_PORTAL_SPIELER: PortalSpieler[] = [
+  ...INITIAL_CACHED_SPIELER,
+  ...INITIAL_PENDING_SPIELER
+    .filter(p => !INITIAL_CACHED_SPIELER.some(c => c.id === p.localId))
+    .map(p => ({ id: p.localId, name: p.name, mitgliedNr: null, lokal: true })),
+];
 
 export const useGameStore = create<GameState>((set, get) => {
   const modus: Modus = saved.modus ?? 'NORMAL';
@@ -682,6 +721,8 @@ export const useGameStore = create<GameState>((set, get) => {
     // Volatile
     screen: 'dashboard',
     spieler: INIT_SPIELER,
+    lineup: INITIAL_LINEUP,
+    lineupWarning: null,
     lauf: 1,
     taubeIndex: 0,
     spielerIndex: 0,
@@ -689,14 +730,16 @@ export const useGameStore = create<GameState>((set, get) => {
     ergebnisse: [],
     spielId: null,
     activeGameCreditUses: [],
-    portalSpieler: [],
+    // Render the persisted lineup immediately after a reload; authoritative
+    // fetches still reconcile this cache later.
+    portalSpieler: INITIAL_PORTAL_SPIELER,
     portalLaden: false,
     portalFehler: null,
     spielerAusCache: false,
 
     // Offline queue — restored from localStorage on startup
     pendingGames: loadPendingGames(),
-    pendingSpieler: loadPendingSpieler(),
+    pendingSpieler: INITIAL_PENDING_SPIELER,
     spielerUpdates: loadSpielerUpdates(),
 
     // Local history
@@ -734,14 +777,50 @@ export const useGameStore = create<GameState>((set, get) => {
     setSpieler: (spieler) => set({ spieler }),
 
     setSpielerAufPosten: (post, data) => set((state) => {
+      if (!Number.isInteger(post) || post < 1 || post > 6) return state;
       // Remove any existing occupant at this post
-      let next = state.spieler.filter(s => s.startPosten !== post);
+      let lineup = state.lineup.filter(s => s.startPosten !== post);
       if (data !== null) {
         // Also remove this player from any other post they were assigned to
-        next = next.filter(s => s.id !== data.id);
-        next = [...next, { id: data.id, name: data.name, punkte: 0, startPosten: post }];
+        lineup = lineup.filter(s => s.spielerId !== data.id);
+        lineup = [...lineup, { spielerId: data.id, startPosten: post }];
       }
-      return { spieler: next.sort((a, b) => a.startPosten - b.startPosten) };
+      lineup.sort((a, b) => a.startPosten - b.startPosten);
+      saveLineup(lineup);
+      const playersById = new Map(state.portalSpieler.map(p => [p.id, p.name]));
+      if (data) playersById.set(data.id, data.name);
+      return { lineup, lineupWarning: null, spieler: lineup.map(l => ({
+        id: l.spielerId, name: playersById.get(l.spielerId) ?? 'Onbekannt',
+        punkte: 0, startPosten: l.startPosten,
+      })) };
+    }),
+
+    clearLineup: () => set(() => { saveLineup([]); return { lineup: [], spieler: [], lineupWarning: null }; }),
+
+    mixLineup: (random = Math.random) => set((state) => {
+      const lineup = [...state.lineup].sort((a, b) => a.startPosten - b.startPosten);
+      // Fisher-Yates: inject a source for deterministic unit tests.
+      for (let i = lineup.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [lineup[i], lineup[j]] = [lineup[j], lineup[i]];
+      }
+      const mixed = lineup.map((entry, index) => ({ ...entry, startPosten: index + 1 }));
+      saveLineup(mixed);
+      const names = new Map(state.spieler.map(p => [p.id, p.name]));
+      return { lineup: mixed, spieler: mixed.map(l => ({ id: l.spielerId, name: names.get(l.spielerId) ?? 'Onbekannt', punkte: 0, startPosten: l.startPosten })) };
+    }),
+
+    moveLineup: (post, direction) => set((state) => {
+      const target = post + direction;
+      if (post < 1 || post > 6 || target < 1 || target > 6) return state;
+      const lineup = state.lineup.map(entry => {
+        if (entry.startPosten === post) return { ...entry, startPosten: target };
+        if (entry.startPosten === target) return { ...entry, startPosten: post };
+        return entry;
+      }).sort((a, b) => a.startPosten - b.startPosten);
+      saveLineup(lineup);
+      const names = new Map(state.spieler.map(p => [p.id, p.name]));
+      return { lineup, spieler: lineup.map(l => ({ id: l.spielerId, name: names.get(l.spielerId) ?? 'Onbekannt', punkte: 0, startPosten: l.startPosten })) };
     }),
 
     updateSpielerName: (id, name) => set((state) => ({
@@ -779,9 +858,34 @@ export const useGameStore = create<GameState>((set, get) => {
     },
 
     startSpiel: () => set((state) => {
+      const portalNames = new Map(state.portalSpieler.map(p => [p.id, p.name]));
+      const seenPosts = new Set<number>();
+      const seenIds = new Set<number>();
+      for (const entry of state.lineup) {
+        if (!Number.isInteger(entry.spielerId) || entry.spielerId === 0 ||
+            !Number.isInteger(entry.startPosten) || entry.startPosten < 1 || entry.startPosten > 6 ||
+            seenPosts.has(entry.startPosten) || seenIds.has(entry.spielerId))
+          return { lineupWarning: 'D Opstellung ass ongülteg. Kontrolléiert d Posten.' };
+        seenPosts.add(entry.startPosten); seenIds.add(entry.spielerId);
+        if (!portalNames.has(entry.spielerId))
+          return { lineupWarning: 'E Spiller an der Opstellung ass net méi disponibel. Wielt en nei.' };
+        if (state.getKreditRest(entry.spielerId) <= 0)
+          return { lineupWarning: `${portalNames.get(entry.spielerId)} huet keng Dageskreditter.` };
+      }
+      const lineupSpieler = [...state.lineup]
+        .sort((a, b) => a.startPosten - b.startPosten)
+        .map(entry => ({
+          id: entry.spielerId,
+          name: portalNames.get(entry.spielerId) ??
+            state.spieler.find(s => s.id === entry.spielerId)?.name ?? 'Onbekannt',
+          punkte: 0,
+          startPosten: entry.startPosten,
+        }));
+      if (!lineupSpieler.length)
+        return { lineupWarning: 'Mindestens ee Spiller auswielen.' };
       // ── Deduct one day credit per participating player ────────────────────
       const { kreditDatum, kredite } = rolledKredite(state);
-      if (state.pendingKredite.length + state.spieler.length >
+      if (state.pendingKredite.length + lineupSpieler.length >
           MAX_PENDING_KREDIT_EVENTS) {
         // Match the terminal: do not begin a game unless every USE event can
         // be kept for a safe retry or a future cancellation refund.
@@ -789,7 +893,7 @@ export const useGameStore = create<GameState>((set, get) => {
       }
       const nextKredite = { ...kredite };
       const newEvents: KreditEvent[] = [];
-      for (const s of state.spieler) {
+      for (const s of lineupSpieler) {
         const stand = nextKredite[s.id] ?? { gewaehrt: 0, verbraucht: 0 };
         nextKredite[s.id] = { ...stand, verbraucht: stand.verbraucht + 1 };
         newEvents.push({
@@ -812,15 +916,14 @@ export const useGameStore = create<GameState>((set, get) => {
         ergebnisse: [],
         sequenz: generateSequenz(state.modus, state.maschinenAktiv, state.customSequenzen),
         // Ensure consistent game order by startPosten; reset points
-        spieler: [...state.spieler]
-          .sort((a, b) => a.startPosten - b.startPosten)
-          .map(s => ({ ...s, punkte: 0 })),
+        spieler: lineupSpieler,
         spielId: generateSpielId(),
         syncStatus: 'idle' as SyncStatus,
         kreditDatum,
         kredite: nextKredite,
         pendingKredite,
         activeGameCreditUses: newEvents,
+        lineupWarning: null,
       };
     }),
 
@@ -1344,7 +1447,9 @@ export const useGameStore = create<GameState>((set, get) => {
         // No network config — try cache immediately
         const cached = loadCachedSpieler();
         if (cached.length) {
-          set({ portalSpieler: cached, portalLaden: false, spielerAusCache: true });
+          set(s => ({ portalSpieler: cached, portalLaden: false, spielerAusCache: true,
+            spieler: s.spieler.map(player => ({ ...player,
+              name: cached.find(p => p.id === player.id)?.name ?? player.name })) }));
         } else {
           set({
             portalFehler: 'API URL / Key net konfiguriert (Astellungen)',
@@ -1370,17 +1475,35 @@ export const useGameStore = create<GameState>((set, get) => {
             .map(p => ({ id: p.localId, name: p.name, mitgliedNr: null, lokal: true as const })),
         ].sort((a, b) => a.name.localeCompare(b.name));
         saveCachedSpieler(merged);
-        set({ portalSpieler: merged, portalLaden: false, spielerAusCache: false });
+        set(s => {
+          // This is authoritative for portal IDs, while `pending` above keeps
+          // terminal-local IDs alive until their create mapping arrives.
+          const available = new Set(merged.map(p => p.id));
+          const lineup = s.lineup.filter(entry => available.has(entry.spielerId));
+          const removed = lineup.length !== s.lineup.length;
+          if (removed) saveLineup(lineup);
+          return {
+            portalSpieler: merged, portalLaden: false, spielerAusCache: false,
+            lineup,
+            lineupWarning: removed
+              ? 'Net méi existente Spiller goufen aus der Opstellung geläscht. Wielt se nei.'
+              : s.lineupWarning,
+            spieler: s.spieler.map(player => ({ ...player,
+              name: merged.find(p => p.id === player.id)?.name ?? player.name })),
+          };
+        });
       } catch {
         // Network failed — fall back to cache
         const cached = loadCachedSpieler();
         if (cached.length) {
-          set({
+          set(s => ({
             portalSpieler: cached,
             portalFehler: `Offline – ${cached.length} Spillesch aus Cache gelued`,
             portalLaden: false,
             spielerAusCache: true,
-          });
+            spieler: s.spieler.map(player => ({ ...player,
+              name: cached.find(p => p.id === player.id)?.name ?? player.name })),
+          }));
         } else {
           set({
             portalFehler: 'Verbindung fehlgeschloen. Kee Cache disponibel.',
@@ -1437,6 +1560,9 @@ export const useGameStore = create<GameState>((set, get) => {
             ),
           }));
           const remappedSpieler = s2.spieler.map(s => ({ ...s, id: remap(s.id) }));
+          const remappedLineup = s2.lineup.map(entry => ({
+            ...entry, spielerId: remap(entry.spielerId),
+          }));
             const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedVerkaufEvents = s2.pendingVerkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedVerkaeufe = s2.verkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
@@ -1464,10 +1590,12 @@ export const useGameStore = create<GameState>((set, get) => {
           saveVerkaufsReport(s2.verkaufDatum, remappedServerVerkaeufe);
           saveKredite(s2.kreditDatum, remappedKredite);
           saveSpielerUpdates(remappedUpdates);
+          saveLineup(remappedLineup);
           set({
             pendingGames: remappedPending,
             pendingSpieler: stillPending,
             spieler: remappedSpieler,
+            lineup: remappedLineup,
             portalSpieler: remappedPortal,
             gameHistory: remappedHistory,
             pendingKredite: remappedKreditEvents,

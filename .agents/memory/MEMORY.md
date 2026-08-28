@@ -18,3 +18,4 @@
 - [Credit cancellation during sync](credit-cancellation-sync.md) — cancellation must account for in-flight portal posts and replay pending credit events after a pull
 - [Terminal shutdown behavior](terminal-shutdown-behavior.md) — operator chose deep sleep (reset/power-cycle wake), gated by a successful sync rather than a power-cut GPIO
 - [Orval Zod v3 compatibility](orval-zod-v3.md) — generated Zod v4 primitive helpers must be rewritten after codegen while this workspace remains on Zod v3
+- [Player identity remapping](player-identity-remapping.md) — local→portal ID changes must atomically remap every player-keyed ledger and use one roster-application path

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useGameStore, PortalSpieler } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import { PlayerSearch } from '@/components/PlayerSearch';
-import { ArrowLeft, Coins, Play, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Coins, Dices, Play, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const MODI = [
@@ -25,7 +25,13 @@ export function StartScreen() {
   // ── helpers ────────────────────────────────────────────────────────────────
 
   const playerAtPost = (post: number) =>
-    store.spieler.find(s => s.startPosten === post) ?? null;
+    (() => {
+      const entry = store.lineup.find(s => s.startPosten === post);
+      if (!entry) return null;
+      const portal = store.portalSpieler.find(p => p.id === entry.spielerId);
+      const active = store.spieler.find(p => p.id === entry.spielerId);
+      return { id: entry.spielerId, name: portal?.name ?? active?.name ?? 'Onbekannt', startPosten: post };
+    })();
 
   const openPicker = (post: number) => setActivePost(post);
 
@@ -42,7 +48,7 @@ export function StartScreen() {
     if (activePost === post) closePicker();
   };
 
-  const assignedCount = store.spieler.length;
+  const assignedCount = store.lineup.length;
 
   // ── Day-credit gating ───────────────────────────────────────────────────────
   // Only players with remaining credits today may be placed on a post.
@@ -50,10 +56,13 @@ export function StartScreen() {
     .filter(p => store.getKreditRest(p.id) > 0)
     .map(p => p.id);
   // Assigned players stay visible in the picker (rendered as taken)
-  const allowedIds = [...new Set([...mitKreditIds, ...store.spieler.map(s => s.id)])];
+  const allowedIds = [...new Set([...mitKreditIds, ...store.lineup.map(s => s.spielerId)])];
 
   // Guard: a player could lose their last credit after being assigned
-  const ohneKredit = store.spieler.filter(s => store.getKreditRest(s.id) < 1);
+  const ohneKredit = store.lineup
+    .filter(s => store.getKreditRest(s.spielerId) < 1)
+    .map(s => playerAtPost(s.startPosten))
+    .filter((s): s is { id: number; name: string; startPosten: number } => s !== null);
   const startBlocked = assignedCount === 0 || ohneKredit.length > 0;
 
   return (
@@ -97,6 +106,16 @@ export function StartScreen() {
               <Coins className="w-3.5 h-3.5 shrink-0" />
               Nëmme Spiller mat Dageskreditter · 1 Kredit pro Spill
             </p>
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <TouchButton variant="destructive" className="h-11 font-bold gap-2"
+                onClick={() => { store.clearLineup(); closePicker(); }}>
+                <Trash2 className="w-4 h-4" /> CLEAR ALL
+              </TouchButton>
+              <TouchButton variant="outline" className="h-11 font-bold gap-2"
+                disabled={assignedCount < 2} onClick={() => store.mixLineup()}>
+                <Dices className="w-4 h-4" /> MIX POSTEN
+              </TouchButton>
+            </div>
             {ohneKredit.length > 0 && (
               <div className="mt-2 text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
                 Keng Kreditter méi: {ohneKredit.map(s => s.name).join(', ')} — op
@@ -104,6 +123,11 @@ export function StartScreen() {
                   className="underline ml-1 text-primary"
                   onClick={() => store.setScreen('kredite')}
                 >Spiller vum Dag</button> ophuelen
+              </div>
+            )}
+            {store.lineupWarning && (
+              <div className="mt-2 text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                {store.lineupWarning}
               </div>
             )}
           </div>
@@ -158,13 +182,14 @@ export function StartScreen() {
                     {/* Action buttons */}
                     <div className="flex gap-2 shrink-0">
                       {player ? (
-                        <TouchButton
-                          variant="ghost"
-                          className="w-10 h-10 p-0 text-destructive hover:bg-destructive/10"
-                          onClick={() => clearPost(post)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </TouchButton>
+                        <>
+                          <TouchButton variant="ghost" className="w-9 h-10 p-0" disabled={post === 1}
+                            onClick={() => store.moveLineup(post, -1)}><ArrowUp className="w-4 h-4" /></TouchButton>
+                          <TouchButton variant="ghost" className="w-9 h-10 p-0" disabled={post === 6}
+                            onClick={() => store.moveLineup(post, 1)}><ArrowDown className="w-4 h-4" /></TouchButton>
+                          <TouchButton variant="ghost" className="w-10 h-10 p-0 text-destructive hover:bg-destructive/10"
+                            onClick={() => clearPost(post)}><Trash2 className="w-4 h-4" /></TouchButton>
+                        </>
                       ) : (
                         <TouchButton
                           variant={isActive ? 'primary' : 'outline'}
@@ -182,7 +207,7 @@ export function StartScreen() {
                     <div className="border-2 border-primary/40 border-t-0 rounded-b-xl bg-card/80 overflow-hidden p-3">
                       <PlayerSearch
                         onSelect={assignSpieler}
-                        disabledIds={store.spieler.map(s => s.id)}
+                         disabledIds={store.lineup.map(s => s.spielerId)}
                         allowedIds={allowedIds}
                         emptyAllowedHint='Kee Spiller mat Kreditter fir haut — als éischt op "Spiller vum Dag" Kreditter dobäisetzen'
                       />
