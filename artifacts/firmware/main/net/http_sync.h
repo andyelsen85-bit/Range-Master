@@ -29,3 +29,9 @@ esp_err_t http_sync_all(void);
 
 /** Copy the last bounded, credential-free HTTP diagnostic. */
 void http_sync_copy_last_error(char *out, size_t out_len);
+
+/** Upload only the versioned operational configuration snapshot. */
+esp_err_t http_backup_config(void);
+
+/** Consume a one-time portal approval and atomically apply validated settings. */
+esp_err_t http_restore_config(const char *restore_code);

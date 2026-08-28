@@ -15,6 +15,13 @@
       "when": 1785426408453,
       "tag": "0001_products",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787921000000,
+      "tag": "0002_terminal_config_backups",
+      "breakpoints": true
     }
   ]
 }

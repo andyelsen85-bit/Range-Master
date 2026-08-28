@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuthStore } from "@/store/use-auth-store";
-import { LogOut, LayoutDashboard, List, Trophy, BarChart3, Target, Shield, User, KeyRound, Coins, Mail, ShoppingCart } from "lucide-react";
+import { LogOut, LayoutDashboard, List, Trophy, BarChart3, Target, Shield, User, KeyRound, Coins, Mail, ShoppingCart, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -20,6 +20,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       { href: "/admin/verkeef", label: "Katalog & Verkeef", icon: ShoppingCart },
       { href: "/admin/api-schluesselen", label: "API Schlësselen", icon: KeyRound },
       { href: "/admin/mail", label: "Mail Server", icon: Mail },
+      { href: "/admin/terminal-config", label: "Terminal-Backups", icon: Settings2 },
     ] : []),
   ];
 

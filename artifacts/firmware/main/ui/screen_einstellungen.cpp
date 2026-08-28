@@ -32,6 +32,7 @@ static bool s_machine_test_pending;
 static lv_obj_t *s_auto_sync_switch;
 static lv_obj_t *s_auto_sync_seconds;
 static lv_obj_t *s_auto_sync_feedback;
+static lv_obj_t *s_config_backup_status;
 
 static void save_api_settings(void)
 {
@@ -71,6 +72,20 @@ static void gateway_test_cb(lv_event_t *e)
         char status[96];
         lora_copy_status_text(status, sizeof(status));
         set_api_status(status, CLR_DANGER);
+    }
+}
+
+static void config_backup_cb(lv_event_t *e)
+{
+    (void)e;
+    save_api_settings();
+    if (store_sync()) {
+        if (s_config_backup_status)
+            lv_label_set_text(s_config_backup_status,
+                              "SYNC + BACKUP GËTT AM HANNERGROND GESTART...");
+    } else if (s_config_backup_status) {
+        lv_label_set_text(s_config_backup_status,
+                          "BACKUP NET GESTART: SYNC ASS SCHONN AKTIV");
     }
 }
 
@@ -188,6 +203,26 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     s_lbl_api_status = lv_label_create(parent);
     lv_label_set_text(s_lbl_api_status, "");
     lv_obj_set_style_text_font(s_lbl_api_status, &lv_font_montserrat_14, 0);
+
+    lv_obj_t *backup_btn = lv_btn_create(parent);
+    lv_obj_add_style(backup_btn, &g_style_btn_secondary, 0);
+    lv_obj_set_size(backup_btn, 260, 44);
+    lv_obj_add_event_cb(backup_btn, config_backup_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *backup_label = lv_label_create(backup_btn);
+    lv_label_set_text(backup_label, LV_SYMBOL_UPLOAD " BACKUP ELO");
+    lv_obj_set_style_text_color(backup_label, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(backup_label);
+
+    s_config_backup_status = lv_label_create(parent);
+    char backup_status[192];
+    snprintf(backup_status, sizeof(backup_status), "%s%s%s",
+             g_store.configBackupStatus[0] ? g_store.configBackupStatus
+                                           : "NACH KEE BACKUP",
+             g_store.lastConfigBackupAt[0] ? "\nLESCHT BACKUP: " : "",
+             g_store.lastConfigBackupAt);
+    lv_label_set_text(s_config_backup_status, backup_status);
+    lv_obj_set_style_text_font(s_config_backup_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_config_backup_status, lv_color_hex(CLR_MUTED), 0);
 
     return parent;
 }
@@ -1013,6 +1048,15 @@ void screen_einstellungen_refresh(void)
     if (s_ta_url) lv_textarea_set_text(s_ta_url, g_store.apiUrl);
     if (s_ta_key) lv_textarea_set_text(s_ta_key, g_store.apiKey);
     if (s_ta_gateway) lv_textarea_set_text(s_ta_gateway, g_store.gatewayUrl);
+    if (s_config_backup_status) {
+        char backup_status[192];
+        snprintf(backup_status, sizeof(backup_status), "%s%s%s",
+                 g_store.configBackupStatus[0] ? g_store.configBackupStatus
+                                               : "NACH KEE BACKUP",
+                 g_store.lastConfigBackupAt[0] ? "\nLESCHT BACKUP: " : "",
+                 g_store.lastConfigBackupAt);
+        lv_label_set_text(s_config_backup_status, backup_status);
+    }
     if (s_ta_gateway_token) lv_textarea_set_text(s_ta_gateway_token, g_store.gatewayToken);
     if (s_auto_sync_switch) {
         if (g_store.autoSyncEnabled) lv_obj_add_state(s_auto_sync_switch, LV_STATE_CHECKED);

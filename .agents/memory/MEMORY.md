@@ -19,3 +19,5 @@
 - [Terminal shutdown behavior](terminal-shutdown-behavior.md) — operator chose deep sleep (reset/power-cycle wake), gated by a successful sync rather than a power-cut GPIO
 - [Orval Zod v3 compatibility](orval-zod-v3.md) — generated Zod v4 primitive helpers must be rewritten after codegen while this workspace remains on Zod v3
 - [Player identity remapping](player-identity-remapping.md) — local→portal ID changes must atomically remap every player-keyed ledger and use one roster-application path
+- [Terminal restore trust boundary](terminal-restore-trust-boundary.md) — bind restore approval to the replacement ID/key; never restore the source terminal API key
+- [API route prefixes](api-route-prefixes.md) — accept both `/api/*` and rewritten root paths because development preserves the prefix while production ingress may strip it

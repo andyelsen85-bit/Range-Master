@@ -10,6 +10,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+#include "esp_mac.h"
 #include "cJSON.h"
 
 #include "http_sync.h"
@@ -22,6 +23,40 @@ static const char *TAG = "http_sync";
 #define HTTP_BUF_SIZE  (32 * 1024)
 static portMUX_TYPE s_error_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_last_error[160];
+static esp_err_t http_post_json(const char *path, const char *body,
+                                char *resp_buf, size_t resp_cap);
+static esp_err_t http_get_json(const char *path, char *resp_buf,
+                               size_t resp_cap);
+
+static void redact_query(const char *path, char *out, size_t out_size)
+{
+    if (!out || out_size == 0) return;
+    if (!path) {
+        snprintf(out, out_size, "(null)");
+        return;
+    }
+    size_t len = strcspn(path, "?");
+    snprintf(out, out_size, "%.*s%s", (int)len, path,
+             path[len] == '?' ? "?[redacted]" : "");
+}
+
+#define TERMINAL_CONFIG_SCHEMA_VERSION 1
+
+typedef struct {
+    Modus modus;
+    bool maschinenAktiv[MASCHINE_COUNT];
+    char apiUrl[MAX_URL_LEN];
+    char gatewayUrl[MAX_URL_LEN];
+    char gatewayToken[MAX_KEY_LEN];
+    char wifiSsid[TM_MAX_SSID_LEN];
+    char wifiPass[MAX_PASS_LEN];
+    bool autoSyncEnabled;
+    uint32_t autoSyncSeconds;
+    bool clickSoundEnabled;
+    CustomSequenzEintrag customSequenzen[4][CUSTOM_SEQ_MAX];
+    int customSequenzLen[4];
+    int customLaeufe[4];
+} TerminalConfigSnapshot;
 
 static void set_http_error(const char *operation, const char *path,
                            const char *reason)
@@ -38,6 +73,230 @@ void http_sync_copy_last_error(char *out, size_t out_len)
     portENTER_CRITICAL(&s_error_lock);
     snprintf(out, out_len, "%s", s_last_error);
     portEXIT_CRITICAL(&s_error_lock);
+}
+
+static void terminal_id(char *out, size_t out_len)
+{
+    uint8_t mac[6] = {};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+        snprintf(out, out_len, "ESP32-P4-UNKNOWN");
+        return;
+    }
+    snprintf(out, out_len, "ESP32-P4-%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static cJSON *config_snapshot_to_json(void)
+{
+    cJSON *cfg = cJSON_CreateObject();
+    if (!cfg) return NULL;
+    cJSON_AddNumberToObject(cfg, "modus", (int)g_store.modus);
+    cJSON *machines = cJSON_AddArrayToObject(cfg, "maschinenAktiv");
+    for (int i = 0; i < MASCHINE_COUNT; ++i)
+        cJSON_AddItemToArray(machines, cJSON_CreateBool(g_store.maschinenAktiv[i]));
+    cJSON_AddStringToObject(cfg, "apiUrl", g_store.apiUrl);
+    cJSON_AddStringToObject(cfg, "gatewayUrl", g_store.gatewayUrl);
+    cJSON_AddStringToObject(cfg, "gatewayToken", g_store.gatewayToken);
+    cJSON_AddStringToObject(cfg, "wifiSsid", g_store.wifiSsid);
+    cJSON_AddStringToObject(cfg, "wifiPass", g_store.wifiPass);
+    cJSON_AddBoolToObject(cfg, "autoSyncEnabled", g_store.autoSyncEnabled);
+    cJSON_AddNumberToObject(cfg, "autoSyncSeconds", g_store.autoSyncSeconds);
+    cJSON_AddBoolToObject(cfg, "clickSoundEnabled", g_store.clickSoundEnabled);
+    cJSON *all_custom = cJSON_AddArrayToObject(cfg, "customSequenzen");
+    for (int c = 0; c < 4; ++c) {
+        cJSON *sequence = cJSON_CreateArray();
+        cJSON_AddItemToArray(all_custom, sequence);
+        for (int i = 0; i < g_store.customSequenzLen[c]; ++i) {
+            const CustomSequenzEintrag *entry = &g_store.customSequenzen[c][i];
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddNumberToObject(item, "maschine", (int)entry->maschine);
+            cJSON_AddBoolToObject(item, "isDoublette", entry->isDoublette);
+            cJSON_AddNumberToObject(item, "partner", (int)entry->partner);
+            cJSON_AddNumberToObject(item, "delayMs", entry->delayMs);
+            cJSON_AddItemToArray(sequence, item);
+        }
+    }
+    cJSON *runs = cJSON_AddArrayToObject(cfg, "customLaeufe");
+    for (int c = 0; c < 4; ++c)
+        cJSON_AddItemToArray(runs, cJSON_CreateNumber(g_store.customLaeufe[c]));
+    return cfg;
+}
+
+esp_err_t http_backup_config(void)
+{
+    char id[40];
+    terminal_id(id, sizeof(id));
+    cJSON *root = cJSON_CreateObject();
+    cJSON *cfg = config_snapshot_to_json();
+    if (!root || !cfg) {
+        if (root) cJSON_Delete(root);
+        if (cfg) cJSON_Delete(cfg);
+        snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
+                 "BACKUP FEELER: NET GENUG SPEICHER");
+        return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddStringToObject(root, "terminalId", id);
+    cJSON_AddNumberToObject(root, "schemaVersion", TERMINAL_CONFIG_SCHEMA_VERSION);
+    cJSON_AddStringToObject(root, "firmwareVersion", APP_VERSION);
+    cJSON_AddItemToObject(root, "configuration", cfg);
+    char *body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!body) return ESP_ERR_NO_MEM;
+
+    char response[512];
+    esp_err_t err = http_post_json("/api/sync/config-backup", body,
+                                   response, sizeof(response));
+    cJSON_free(body);
+    if (err != ESP_OK) {
+        snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
+                 "BACKUP FEELER: PORTAL NET ERREECHBAR");
+        game_store_save();
+        return err;
+    }
+    cJSON *response_root = cJSON_Parse(response);
+    cJSON *backup = response_root ? cJSON_GetObjectItem(response_root, "backup") : NULL;
+    cJSON *created = backup ? cJSON_GetObjectItem(backup, "updatedAt") : NULL;
+    if (cJSON_IsString(created)) {
+        snprintf(g_store.lastConfigBackupAt, sizeof(g_store.lastConfigBackupAt),
+                 "%s", created->valuestring);
+    }
+    snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
+             "BACKUP ERFOLLEGRÄICH");
+    if (response_root) cJSON_Delete(response_root);
+    game_store_save();
+    return ESP_OK;
+}
+
+static bool json_string_into(cJSON *obj, const char *key, char *out, size_t cap)
+{
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (!cJSON_IsString(value) || strlen(value->valuestring) >= cap) return false;
+    snprintf(out, cap, "%s", value->valuestring);
+    return true;
+}
+
+static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
+{
+    if (!cJSON_IsObject(cfg) || !out) return false;
+    memset(out, 0, sizeof(*out));
+    cJSON *modus = cJSON_GetObjectItemCaseSensitive(cfg, "modus");
+    cJSON *machines = cJSON_GetObjectItemCaseSensitive(cfg, "maschinenAktiv");
+    cJSON *auto_enabled = cJSON_GetObjectItemCaseSensitive(cfg, "autoSyncEnabled");
+    cJSON *auto_seconds = cJSON_GetObjectItemCaseSensitive(cfg, "autoSyncSeconds");
+    cJSON *sound = cJSON_GetObjectItemCaseSensitive(cfg, "clickSoundEnabled");
+    cJSON *sequences = cJSON_GetObjectItemCaseSensitive(cfg, "customSequenzen");
+    cJSON *runs = cJSON_GetObjectItemCaseSensitive(cfg, "customLaeufe");
+    if (!cJSON_IsNumber(modus) || modus->valueint < 0 || modus->valueint >= MODUS_COUNT ||
+        !cJSON_IsArray(machines) || cJSON_GetArraySize(machines) != MASCHINE_COUNT ||
+        !cJSON_IsBool(auto_enabled) || !cJSON_IsNumber(auto_seconds) ||
+        auto_seconds->valuedouble < AUTO_SYNC_MIN_SECONDS ||
+        auto_seconds->valuedouble > AUTO_SYNC_MAX_SECONDS ||
+        !cJSON_IsBool(sound) || !cJSON_IsArray(sequences) ||
+        cJSON_GetArraySize(sequences) != 4 || !cJSON_IsArray(runs) ||
+        cJSON_GetArraySize(runs) != 4) return false;
+    if (!json_string_into(cfg, "apiUrl", out->apiUrl, sizeof(out->apiUrl)) ||
+        !json_string_into(cfg, "gatewayUrl", out->gatewayUrl, sizeof(out->gatewayUrl)) ||
+        !json_string_into(cfg, "gatewayToken", out->gatewayToken, sizeof(out->gatewayToken)) ||
+        !json_string_into(cfg, "wifiSsid", out->wifiSsid, sizeof(out->wifiSsid)) ||
+        !json_string_into(cfg, "wifiPass", out->wifiPass, sizeof(out->wifiPass))) return false;
+    out->modus = (Modus)modus->valueint;
+    out->autoSyncEnabled = cJSON_IsTrue(auto_enabled);
+    out->autoSyncSeconds = (uint32_t)auto_seconds->valuedouble;
+    out->clickSoundEnabled = cJSON_IsTrue(sound);
+    for (int i = 0; i < MASCHINE_COUNT; ++i) {
+        cJSON *active = cJSON_GetArrayItem(machines, i);
+        if (!cJSON_IsBool(active)) return false;
+        out->maschinenAktiv[i] = cJSON_IsTrue(active);
+    }
+    for (int c = 0; c < 4; ++c) {
+        cJSON *sequence = cJSON_GetArrayItem(sequences, c);
+        cJSON *run = cJSON_GetArrayItem(runs, c);
+        int len = cJSON_IsArray(sequence) ? cJSON_GetArraySize(sequence) : -1;
+        if (len < 0 || len > CUSTOM_SEQ_MAX || !cJSON_IsNumber(run) ||
+            run->valueint < 1 || run->valueint > 2) return false;
+        out->customSequenzLen[c] = len;
+        out->customLaeufe[c] = run->valueint;
+        for (int i = 0; i < len; ++i) {
+            cJSON *item = cJSON_GetArrayItem(sequence, i);
+            cJSON *machine = cJSON_GetObjectItemCaseSensitive(item, "maschine");
+            cJSON *is_double = cJSON_GetObjectItemCaseSensitive(item, "isDoublette");
+            cJSON *partner = cJSON_GetObjectItemCaseSensitive(item, "partner");
+            cJSON *delay = cJSON_GetObjectItemCaseSensitive(item, "delayMs");
+            if (!cJSON_IsObject(item) || !cJSON_IsNumber(machine) ||
+                machine->valueint < 0 || machine->valueint >= MASCHINE_COUNT ||
+                !cJSON_IsBool(is_double) || !cJSON_IsNumber(partner) ||
+                partner->valueint < 0 || partner->valueint >= MASCHINE_COUNT ||
+                !cJSON_IsNumber(delay) || delay->valueint < 0 ||
+                delay->valueint > 10000) return false;
+            out->customSequenzen[c][i] = (CustomSequenzEintrag){
+                .maschine = (Maschine)machine->valueint,
+                .partner = (Maschine)partner->valueint,
+                .isDoublette = cJSON_IsTrue(is_double),
+                .delayMs = (uint16_t)delay->valueint,
+            };
+        }
+    }
+    return true;
+}
+
+static void apply_config_snapshot(const TerminalConfigSnapshot *cfg)
+{
+    g_store.modus = cfg->modus;
+    memcpy(g_store.maschinenAktiv, cfg->maschinenAktiv, sizeof(g_store.maschinenAktiv));
+    snprintf(g_store.apiUrl, sizeof(g_store.apiUrl), "%s", cfg->apiUrl);
+    snprintf(g_store.gatewayUrl, sizeof(g_store.gatewayUrl), "%s", cfg->gatewayUrl);
+    snprintf(g_store.gatewayToken, sizeof(g_store.gatewayToken), "%s", cfg->gatewayToken);
+    snprintf(g_store.wifiSsid, sizeof(g_store.wifiSsid), "%s", cfg->wifiSsid);
+    snprintf(g_store.wifiPass, sizeof(g_store.wifiPass), "%s", cfg->wifiPass);
+    g_store.autoSyncEnabled = cfg->autoSyncEnabled;
+    g_store.autoSyncSeconds = cfg->autoSyncSeconds;
+    g_store.clickSoundEnabled = cfg->clickSoundEnabled;
+    memcpy(g_store.customSequenzen, cfg->customSequenzen, sizeof(g_store.customSequenzen));
+    memcpy(g_store.customSequenzLen, cfg->customSequenzLen, sizeof(g_store.customSequenzLen));
+    memcpy(g_store.customLaeufe, cfg->customLaeufe, sizeof(g_store.customLaeufe));
+}
+
+esp_err_t http_restore_config(const char *restore_code)
+{
+    if (!restore_code || strlen(restore_code) != 12) return ESP_ERR_INVALID_ARG;
+    for (const char *p = restore_code; *p; ++p)
+        if (!( (*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') ||
+               (*p >= 'A' && *p <= 'F') )) return ESP_ERR_INVALID_ARG;
+    char id[40], path[192];
+    terminal_id(id, sizeof(id));
+    snprintf(path, sizeof(path), "/api/sync/config-restore?code=%s&terminalId=%s",
+             restore_code, id);
+    char *response = (char *)heap_caps_malloc(HTTP_BUF_SIZE, MALLOC_CAP_SPIRAM);
+    if (!response) return ESP_ERR_NO_MEM;
+    esp_err_t err = http_get_json(path, response, HTTP_BUF_SIZE);
+    if (err != ESP_OK) {
+        snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
+                 "RESTORE FEELER: CODE ODER PORTAL");
+        free(response);
+        game_store_save();
+        return err;
+    }
+    cJSON *root = cJSON_Parse(response);
+    free(response);
+    cJSON *version = root ? cJSON_GetObjectItemCaseSensitive(root, "schemaVersion") : NULL;
+    cJSON *configuration = root ? cJSON_GetObjectItemCaseSensitive(root, "configuration") : NULL;
+    TerminalConfigSnapshot snapshot;
+    bool valid = cJSON_IsNumber(version) &&
+                 version->valueint == TERMINAL_CONFIG_SCHEMA_VERSION &&
+                 parse_config_snapshot(configuration, &snapshot);
+    if (!valid) {
+        if (root) cJSON_Delete(root);
+        snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
+                 "RESTORE FEELER: BACKUP NET KOMPATIBEL");
+        game_store_save();
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    apply_config_snapshot(&snapshot);
+    snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
+             "RESTORE ERFOLLEGRÄICH - NEISTART EMPFOHL");
+    game_store_save();
+    cJSON_Delete(root);
+    return ESP_OK;
 }
 
 // ── UTF-8 → display-safe ASCII ────────────────────────────────
@@ -119,14 +378,16 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap)
 {
+    char diagnostic_path[160];
+    redact_query(path, diagnostic_path, sizeof(diagnostic_path));
     if (!path || !body || (resp_buf && resp_cap < 2)) {
-        set_http_error("POST", path ? path : "(null)", "invalid arguments");
+        set_http_error("POST", diagnostic_path, "invalid arguments");
         return ESP_ERR_INVALID_ARG;
     }
     char url[256];
     int url_len = snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
     if (url_len < 0 || url_len >= (int)sizeof(url)) {
-        set_http_error("POST", path, "URL too long");
+        set_http_error("POST", diagnostic_path, "URL too long");
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -144,7 +405,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
         cfg.timeout_ms        = 12000;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) {
-            set_http_error("POST", path, "client init failed");
+            set_http_error("POST", diagnostic_path, "client init failed");
             return ESP_ERR_NO_MEM;
         }
         esp_http_client_set_method(client, HTTP_METHOD_POST);
@@ -156,18 +417,18 @@ static esp_err_t http_post_json(const char *path, const char *body,
         if (err == ESP_OK) {
             int status = esp_http_client_get_status_code(client);
             if (status < 200 || status >= 300) {
-                ESP_LOGW(TAG, "POST %s → HTTP %d", path, status);
+                ESP_LOGW(TAG, "POST %s → HTTP %d", diagnostic_path, status);
                 char reason[32];
                 snprintf(reason, sizeof(reason), "HTTP %d", status);
-                set_http_error("POST", path, reason);
+                set_http_error("POST", diagnostic_path, reason);
                 err = ESP_FAIL;
             }
         } else {
-            ESP_LOGW(TAG, "POST %s attempt %d/3 failed: %s", path, attempt, esp_err_to_name(err));
-            set_http_error("POST", path, esp_err_to_name(err));
+            ESP_LOGW(TAG, "POST %s attempt %d/3 failed: %s", diagnostic_path, attempt, esp_err_to_name(err));
+            set_http_error("POST", diagnostic_path, esp_err_to_name(err));
         }
         if (acc.truncated) {
-            set_http_error("POST", path, "response truncated");
+            set_http_error("POST", diagnostic_path, "response truncated");
             err = ESP_ERR_INVALID_SIZE;
         }
         esp_http_client_close(client);
@@ -182,14 +443,16 @@ static esp_err_t http_post_json(const char *path, const char *body,
 static esp_err_t http_get_json(const char *path,
                                char *resp_buf, size_t resp_cap)
 {
+    char diagnostic_path[160];
+    redact_query(path, diagnostic_path, sizeof(diagnostic_path));
     if (!path || !resp_buf || resp_cap < 2) {
-        set_http_error("GET", path ? path : "(null)", "invalid arguments");
+        set_http_error("GET", diagnostic_path, "invalid arguments");
         return ESP_ERR_INVALID_ARG;
     }
     char url[256];
     int url_len = snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
     if (url_len < 0 || url_len >= (int)sizeof(url)) {
-        set_http_error("GET", path, "URL too long");
+        set_http_error("GET", diagnostic_path, "URL too long");
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -207,7 +470,7 @@ static esp_err_t http_get_json(const char *path,
         cfg.timeout_ms        = 12000;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) {
-            set_http_error("GET", path, "client init failed");
+            set_http_error("GET", diagnostic_path, "client init failed");
             return ESP_ERR_NO_MEM;
         }
         esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
@@ -216,18 +479,18 @@ static esp_err_t http_get_json(const char *path,
         if (err == ESP_OK) {
             int status = esp_http_client_get_status_code(client);
             if (status < 200 || status >= 300) {
-                ESP_LOGW(TAG, "GET %s → HTTP %d", path, status);
+                ESP_LOGW(TAG, "GET %s → HTTP %d", diagnostic_path, status);
                 char reason[32];
                 snprintf(reason, sizeof(reason), "HTTP %d", status);
-                set_http_error("GET", path, reason);
+                set_http_error("GET", diagnostic_path, reason);
                 err = ESP_FAIL;
             }
         } else {
-            ESP_LOGW(TAG, "GET %s attempt %d/3 failed: %s", path, attempt, esp_err_to_name(err));
-            set_http_error("GET", path, esp_err_to_name(err));
+            ESP_LOGW(TAG, "GET %s attempt %d/3 failed: %s", diagnostic_path, attempt, esp_err_to_name(err));
+            set_http_error("GET", diagnostic_path, esp_err_to_name(err));
         }
         if (acc.truncated) {
-            set_http_error("GET", path, "response truncated");
+            set_http_error("GET", diagnostic_path, "response truncated");
             err = ESP_ERR_INVALID_SIZE;
         }
         esp_http_client_close(client);
@@ -918,6 +1181,12 @@ esp_err_t http_sync_all(void)
     }
     free(buf);
     if (err != ESP_OK && overall == ESP_OK) overall = err;
+
+    // A configuration backup is deliberately last: operational outboxes are
+    // processed first, and backup failure must never undo successful sync work.
+    esp_err_t backup_err = http_backup_config();
+    if (backup_err != ESP_OK)
+        ESP_LOGW(TAG, "Configuration backup failed — operational sync remains valid");
 
     ESP_LOGI(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
     return overall;

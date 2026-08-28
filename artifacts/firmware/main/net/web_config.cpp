@@ -14,6 +14,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "game_store.h"
+#include "http_sync.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,6 +106,9 @@ static const char HTML_HEAD[] =
     "padding:.7rem 1rem;margin-bottom:1rem;font-size:.9rem}"
     ".err{background:#2c0a0a;border:1px solid #ef4444;color:#ef4444;border-radius:8px;"
     "padding:.7rem 1rem;margin-bottom:1rem;font-size:.9rem}"
+    "hr{border:0;border-top:1px solid #3d4460;margin:1.5rem 0}"
+    ".secondary{background:#334155;margin-top:.75rem}.secondary:hover{background:#475569}"
+    ".status{color:#94a3b8;font-size:.82rem;line-height:1.5;margin-top:1rem}"
     "</style></head><body><div class=card>"
     "<h1>&#127919; TrapMaster</h1>"
     "<p class=sub>Terminal-Konfiguration</p>";
@@ -131,7 +135,15 @@ static const char HTML_FORM_END[] =
     "'>"
     "<button>&#128190;&nbsp; Speichern</button>"
     "</form>"
-    "</div></body></html>";
+    "<hr>"
+    "<form method=POST action=/backup><button class=secondary>Konfiguratioun elo sécheren</button></form>"
+    "<form method=POST action=/restore>"
+    "<label style='margin-top:1.25rem'>Eemolege Restore-Code</label>"
+    "<input name=restoreCode type=text maxlength=12 pattern='[A-Fa-f0-9]{12}' autocomplete=off placeholder='ABCDEF123456' required>"
+    "<button class=secondary>Backup restauréieren</button></form>"
+    "<p class=status>";
+
+static const char HTML_TAIL[] = "</p></div></body></html>";
 
 // ── GET / — serve config form ─────────────────────────────────
 
@@ -152,10 +164,65 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, g_store.apiKey);
     httpd_resp_sendstr_chunk(req, HTML_FORM_GATEWAY);
     httpd_resp_sendstr_chunk(req, g_store.gatewayUrl);
+    httpd_resp_sendstr_chunk(req, g_store.gatewayToken);
     httpd_resp_sendstr_chunk(req, HTML_FORM_END);
+    httpd_resp_sendstr_chunk(req, g_store.configBackupStatus[0]
+        ? g_store.configBackupStatus : "Nach kee Backup-Status.");
+    if (g_store.lastConfigBackupAt[0]) {
+        httpd_resp_sendstr_chunk(req, "<br>Lescht Backup: ");
+        httpd_resp_sendstr_chunk(req, g_store.lastConfigBackupAt);
+    }
+    httpd_resp_sendstr_chunk(req, HTML_TAIL);
 
     httpd_resp_sendstr_chunk(req, NULL);  // end chunked response
     return ESP_OK;
+}
+
+static esp_err_t action_result(httpd_req_t *req, bool ok, const char *message)
+{
+    char page[640];
+    snprintf(page, sizeof(page),
+        "<!DOCTYPE html><html><head><meta charset=utf-8>"
+        "<meta http-equiv=refresh content='3;url=/'>"
+        "<style>body{background:#0f1117;color:#e2e8f0;font-family:system-ui;"
+        "min-height:100vh;display:flex;align-items:center;justify-content:center}"
+        ".box{background:%s;border:1px solid %s;color:%s;border-radius:12px;"
+        "padding:2rem 3rem;text-align:center}p{color:#94a3b8}</style></head>"
+        "<body><div class=box><strong>%s</strong><p>Zréck an 3 Sekonnen...</p></div></body></html>",
+        ok ? "#022c22" : "#2c0a0a", ok ? "#10b981" : "#ef4444",
+        ok ? "#10b981" : "#ef4444", message);
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t backup_post_handler(httpd_req_t *req)
+{
+    esp_err_t err = http_backup_config();
+    return action_result(req, err == ESP_OK,
+                         err == ESP_OK ? "Backup erfollegräich." : "Backup feelgeschloen.");
+}
+
+static esp_err_t restore_post_handler(httpd_req_t *req)
+{
+    int body_len = req->content_len;
+    if (body_len <= 0 || body_len > 64) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad body");
+        return ESP_FAIL;
+    }
+    char body[65] = {}, code[16] = {};
+    int received = httpd_req_recv(req, body, body_len);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
+        return ESP_FAIL;
+    }
+    body[received] = '\0';
+    extract_field(body, "restoreCode=", code, sizeof(code));
+    esp_err_t err = http_restore_config(code);
+    return action_result(req, err == ESP_OK,
+                         err == ESP_OK ? "Restore erfollegräich. Terminal nei starten."
+                                       : "Restore feelgeschloen. Code a Verbindung préiwen.");
 }
 
 // ── POST /save — apply new config ────────────────────────────
@@ -258,6 +325,20 @@ static const httpd_uri_t uri_save = {
     .user_ctx = NULL,
 };
 
+static const httpd_uri_t uri_backup = {
+    .uri = "/backup",
+    .method = HTTP_POST,
+    .handler = backup_post_handler,
+    .user_ctx = NULL,
+};
+
+static const httpd_uri_t uri_restore = {
+    .uri = "/restore",
+    .method = HTTP_POST,
+    .handler = restore_post_handler,
+    .user_ctx = NULL,
+};
+
 // ── Public API ────────────────────────────────────────────────
 
 void web_config_start(void)
@@ -280,6 +361,8 @@ void web_config_start(void)
 
     httpd_register_uri_handler(s_server, &uri_root);
     httpd_register_uri_handler(s_server, &uri_save);
+    httpd_register_uri_handler(s_server, &uri_backup);
+    httpd_register_uri_handler(s_server, &uri_restore);
 
     ESP_LOGI(TAG, "Config web server started — http://%s/", g_store.wifiIp);
 }

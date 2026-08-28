@@ -129,13 +129,15 @@ export async function requireApiKey(req: any, res: any, next: any) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   const rows = await db
-    .select({ id: apiKeysTable.id })
+    .select({ id: apiKeysTable.id, type: apiKeysTable.type })
     .from(apiKeysTable)
     .where(and(eq(apiKeysTable.key, apiKey), eq(apiKeysTable.active, true)))
     .limit(1);
   if (!rows[0]) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+  req.apiKeyId = rows[0].id;
+  req.apiKeyType = rows[0].type;
   next();
 }
 

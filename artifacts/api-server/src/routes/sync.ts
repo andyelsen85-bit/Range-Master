@@ -1,13 +1,154 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable, productsTable, productPriceRevisionsTable, saleEventsTable } from "@workspace/db";
-import { eq, inArray, sql, desc, isNotNull } from "drizzle-orm";
+import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable, productsTable, productPriceRevisionsTable, saleEventsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
+import { and, eq, inArray, sql, desc, isNotNull, gt, isNull } from "drizzle-orm";
 import { requireApiKey } from "./auth";
 import { z } from "zod";
 import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmail } from "../lib/mailer";
 import { catalogue, daySalesReport } from "../lib/products";
+import {
+  decryptTerminalConfiguration,
+  encryptTerminalConfiguration,
+  hashRestoreCode,
+  terminalConfigurationSchema,
+  TERMINAL_CONFIG_SCHEMA_VERSION,
+} from "../lib/terminal-config";
 
 const router = Router();
+
+const terminalIdSchema = z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9._:-]+$/);
+
+// POST /api/sync/config-backup — upload an encrypted, versioned configuration snapshot
+router.post("/config-backup", requireApiKey, async (req, res) => {
+  if ((req as any).apiKeyType !== "TERMINAL") return res.status(403).json({ error: "Terminal API key required" });
+  const body = z.object({
+    terminalId: terminalIdSchema,
+    schemaVersion: z.number().int().positive(),
+    firmwareVersion: z.string().trim().max(80).optional(),
+    configuration: terminalConfigurationSchema,
+  }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: "Ungültige Terminal-Konfiguration", details: body.error.issues });
+  if (body.data.schemaVersion !== TERMINAL_CONFIG_SCHEMA_VERSION) {
+    return res.status(409).json({ error: "Nicht unterstützte Konfigurationsversion", supportedSchemaVersion: TERMINAL_CONFIG_SCHEMA_VERSION });
+  }
+
+  const [latest] = await db.select().from(terminalConfigBackupsTable)
+    .where(and(
+      eq(terminalConfigBackupsTable.terminalId, body.data.terminalId),
+      isNull(terminalConfigBackupsTable.revokedAt),
+    ))
+    .orderBy(desc(terminalConfigBackupsTable.updatedAt))
+    .limit(1);
+  if (latest) {
+    try {
+      const previous = decryptTerminalConfiguration(latest);
+      if (JSON.stringify(previous) === JSON.stringify(body.data.configuration)) {
+        const [backup] = await db.update(terminalConfigBackupsTable)
+          .set({ updatedAt: new Date(), firmwareVersion: body.data.firmwareVersion ?? latest.firmwareVersion })
+          .where(eq(terminalConfigBackupsTable.id, latest.id))
+          .returning({
+            id: terminalConfigBackupsTable.id,
+            terminalId: terminalConfigBackupsTable.terminalId,
+            schemaVersion: terminalConfigBackupsTable.schemaVersion,
+            updatedAt: terminalConfigBackupsTable.updatedAt,
+          });
+        return res.json({ success: true, unchanged: true, backup });
+      }
+    } catch {
+      // Preserve an unreadable snapshot for audit/revocation and create a fresh
+      // validated version instead of overwriting potentially recoverable data.
+    }
+  }
+
+  const encrypted = encryptTerminalConfiguration(body.data.configuration);
+  const [backup] = await db.insert(terminalConfigBackupsTable).values({
+    terminalId: body.data.terminalId,
+    apiKeyId: (req as any).apiKeyId ?? null,
+    schemaVersion: body.data.schemaVersion,
+    firmwareVersion: body.data.firmwareVersion ?? null,
+    ...encrypted,
+  }).returning({
+    id: terminalConfigBackupsTable.id,
+    terminalId: terminalConfigBackupsTable.terminalId,
+    schemaVersion: terminalConfigBackupsTable.schemaVersion,
+    updatedAt: terminalConfigBackupsTable.updatedAt,
+  });
+
+  return res.status(201).json({ success: true, backup });
+});
+
+// GET /api/sync/config-restore?code=... — consume a one-time admin approval
+router.get("/config-restore", requireApiKey, async (req, res) => {
+  if ((req as any).apiKeyType !== "TERMINAL") return res.status(403).json({ error: "Terminal API key required" });
+  const parsed = z.object({
+    code: z.string().trim().regex(/^[A-F0-9]{12}$/i),
+    terminalId: terminalIdSchema,
+  }).safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Ungültiger Wiederherstellungscode" });
+
+  const now = new Date();
+  const [candidate] = await db.select({
+    authorizationId: terminalRestoreAuthorizationsTable.id,
+    backup: terminalConfigBackupsTable,
+  }).from(terminalRestoreAuthorizationsTable)
+    .innerJoin(terminalConfigBackupsTable, eq(terminalRestoreAuthorizationsTable.backupId, terminalConfigBackupsTable.id))
+    .where(and(
+      eq(terminalRestoreAuthorizationsTable.codeHash, hashRestoreCode(parsed.data.code)),
+      eq(terminalRestoreAuthorizationsTable.targetTerminalId, parsed.data.terminalId),
+      eq(terminalRestoreAuthorizationsTable.targetApiKeyId, (req as any).apiKeyId),
+      gt(terminalRestoreAuthorizationsTable.expiresAt, now),
+      isNull(terminalRestoreAuthorizationsTable.usedAt),
+      isNull(terminalRestoreAuthorizationsTable.revokedAt),
+      isNull(terminalConfigBackupsTable.revokedAt),
+    )).limit(1);
+  if (!candidate || candidate.backup.terminalId === parsed.data.terminalId) {
+    return res.status(404).json({ error: "Code ungültig, abgelaf oder Backup net méi verfügbar" });
+  }
+
+  let configuration;
+  try {
+    configuration = decryptTerminalConfiguration(candidate.backup);
+  } catch {
+    return res.status(409).json({ error: "Backup ass korrupt oder net kompatibel" });
+  }
+
+  class RestoreRaceError extends Error {}
+  try {
+    await db.transaction(async (tx) => {
+      const [activeBackup] = await tx.update(terminalConfigBackupsTable)
+        .set({ lastRestoredAt: terminalConfigBackupsTable.lastRestoredAt })
+        .where(and(eq(terminalConfigBackupsTable.id, candidate.backup.id), isNull(terminalConfigBackupsTable.revokedAt)))
+        .returning({ id: terminalConfigBackupsTable.id });
+      if (!activeBackup) throw new RestoreRaceError();
+      const [authorization] = await tx.update(terminalRestoreAuthorizationsTable)
+        .set({ usedAt: now })
+        .where(and(
+          eq(terminalRestoreAuthorizationsTable.id, candidate.authorizationId),
+          eq(terminalRestoreAuthorizationsTable.targetTerminalId, parsed.data.terminalId),
+          eq(terminalRestoreAuthorizationsTable.targetApiKeyId, (req as any).apiKeyId),
+          gt(terminalRestoreAuthorizationsTable.expiresAt, now),
+          isNull(terminalRestoreAuthorizationsTable.usedAt),
+          isNull(terminalRestoreAuthorizationsTable.revokedAt),
+        ))
+        .returning({ id: terminalRestoreAuthorizationsTable.id });
+      if (!authorization) throw new RestoreRaceError();
+      await tx.update(terminalConfigBackupsTable).set({ lastRestoredAt: now })
+        .where(eq(terminalConfigBackupsTable.id, candidate.backup.id));
+    });
+  } catch (error) {
+    if (error instanceof RestoreRaceError) {
+      return res.status(404).json({ error: "Code ungültig, abgelaf oder Backup net méi verfügbar" });
+    }
+    throw error;
+  }
+  return res.json({
+    schemaVersion: candidate.backup.schemaVersion,
+    terminalId: candidate.backup.terminalId,
+    firmwareVersion: candidate.backup.firmwareVersion,
+    checksum: candidate.backup.checksum,
+    configuration,
+  });
+});
 
 /** Auto-generate next WLZ number — same logic used by the admin player-create route */
 async function nextMitgliedNr(): Promise<string> {

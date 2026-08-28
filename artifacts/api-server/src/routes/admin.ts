@@ -1,18 +1,102 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable } from "@workspace/db";
+import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
 import { buildTransport } from "../lib/mailer";
-import { and, desc, eq, lte } from "drizzle-orm";
+import { and, desc, eq, lte, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { authenticate, requireAdmin } from "./auth";
 import { z } from "zod";
 import { catalogue, daySalesReport, ensureSystemProducts } from "../lib/products";
+import { createRestoreCode, hashRestoreCode } from "../lib/terminal-config";
 
 const router = Router();
 
 // All admin routes require auth + admin role
 router.use(authenticate, requireAdmin);
+
+// ─── Terminal configuration backups ───────────────────────────────────────────
+
+router.get("/terminal-config/backups", async (_req, res) => {
+  const rows = await db.select({
+    id: terminalConfigBackupsTable.id,
+    terminalId: terminalConfigBackupsTable.terminalId,
+    schemaVersion: terminalConfigBackupsTable.schemaVersion,
+    firmwareVersion: terminalConfigBackupsTable.firmwareVersion,
+    checksum: terminalConfigBackupsTable.checksum,
+    createdAt: terminalConfigBackupsTable.createdAt,
+    updatedAt: terminalConfigBackupsTable.updatedAt,
+    lastRestoredAt: terminalConfigBackupsTable.lastRestoredAt,
+    revokedAt: terminalConfigBackupsTable.revokedAt,
+  }).from(terminalConfigBackupsTable).orderBy(desc(terminalConfigBackupsTable.updatedAt));
+  const terminalKeys = await db.select({ id: apiKeysTable.id, name: apiKeysTable.name })
+    .from(apiKeysTable)
+    .where(and(eq(apiKeysTable.type, "TERMINAL"), eq(apiKeysTable.active, true)))
+    .orderBy(apiKeysTable.name);
+  return res.json({ backups: rows, terminalKeys });
+});
+
+router.post("/terminal-config/backups/:id/authorize-restore", async (req, res) => {
+  const id = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!id.success) return res.status(400).json({ error: "Ungültige Backup-ID" });
+  const target = z.object({
+    targetTerminalId: z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9._:-]+$/),
+    targetApiKeyId: z.number().int().positive(),
+  }).safeParse(req.body);
+  if (!target.success) return res.status(400).json({ error: "Ersatzterminal an API-Schlëssel sinn obligatoresch" });
+  const [targetKey] = await db.select({ id: apiKeysTable.id }).from(apiKeysTable).where(and(
+    eq(apiKeysTable.id, target.data.targetApiKeyId),
+    eq(apiKeysTable.type, "TERMINAL"),
+    eq(apiKeysTable.active, true),
+  )).limit(1);
+  if (!targetKey) return res.status(400).json({ error: "Terminal API-Schlëssel net fonnt oder inaktiv" });
+
+  const code = createRestoreCode();
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+  const authorized = await db.transaction(async (tx) => {
+    const [backup] = await tx.update(terminalConfigBackupsTable)
+      .set({ updatedAt: terminalConfigBackupsTable.updatedAt })
+      .where(and(eq(terminalConfigBackupsTable.id, id.data), isNull(terminalConfigBackupsTable.revokedAt)))
+      .returning({ id: terminalConfigBackupsTable.id, terminalId: terminalConfigBackupsTable.terminalId });
+    if (!backup || backup.terminalId === target.data.targetTerminalId) return false;
+    await tx.update(terminalRestoreAuthorizationsTable)
+      .set({ revokedAt: new Date() })
+      .where(and(
+        eq(terminalRestoreAuthorizationsTable.backupId, id.data),
+        isNull(terminalRestoreAuthorizationsTable.usedAt),
+        isNull(terminalRestoreAuthorizationsTable.revokedAt),
+      ));
+    await tx.insert(terminalRestoreAuthorizationsTable).values({
+      backupId: id.data,
+      targetTerminalId: target.data.targetTerminalId,
+      targetApiKeyId: target.data.targetApiKeyId,
+      codeHash: hashRestoreCode(code),
+      expiresAt,
+      createdBy: (req as any).user.id,
+    });
+    return true;
+  });
+  if (!authorized) return res.status(400).json({ error: "Backup net disponibel oder Ersatzterminal ass mam Quellterminal identesch" });
+  return res.json({ code, expiresAt, warning: "De Code gëtt nëmmen eemol gewisen." });
+});
+
+router.post("/terminal-config/backups/:id/revoke", async (req, res) => {
+  const id = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!id.success) return res.status(400).json({ error: "Ungültige Backup-ID" });
+  const backup = await db.transaction(async (tx) => {
+    const [updated] = await tx.update(terminalConfigBackupsTable)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(terminalConfigBackupsTable.id, id.data), isNull(terminalConfigBackupsTable.revokedAt)))
+      .returning({ id: terminalConfigBackupsTable.id });
+    if (!updated) return null;
+    await tx.update(terminalRestoreAuthorizationsTable)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(terminalRestoreAuthorizationsTable.backupId, id.data), isNull(terminalRestoreAuthorizationsTable.usedAt), isNull(terminalRestoreAuthorizationsTable.revokedAt)));
+    return updated;
+  });
+  if (!backup) return res.status(404).json({ error: "Backup net fonnt oder schonn revokéiert" });
+  return res.json({ success: true });
+});
 
 // GET /api/admin/spieler — all players with game stats
 router.get("/spieler", async (_req, res) => {

@@ -240,6 +240,8 @@ typedef struct {
     // Sync
     SyncStatus syncStatus;
     char       syncError[128];
+    char       lastConfigBackupAt[32];
+    char       configBackupStatus[128];
 
     // Credits (today)
     char       kreditDatum[11];    // YYYY-MM-DD

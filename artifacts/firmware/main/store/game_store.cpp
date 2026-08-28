@@ -1430,6 +1430,8 @@ void game_store_save(void)
     nvs_set_i32(s_nvs, "click_snd", g_store.clickSoundEnabled ? 1 : 0);
     nvs_set_i32(s_nvs, "auto_sync", g_store.autoSyncEnabled ? 1 : 0);
     nvs_set_u32(s_nvs, "auto_secs", g_store.autoSyncSeconds);
+    nvs_set_str(s_nvs, "cfg_backup_at", g_store.lastConfigBackupAt);
+    nvs_set_str(s_nvs, "cfg_backup_st", g_store.configBackupStatus);
     nvs_set_blob(s_nvs, "custom_seq", g_store.customSequenzen,
                  sizeof(g_store.customSequenzen));
     nvs_set_blob(s_nvs, "custom_len", g_store.customSequenzLen,
@@ -1488,6 +1490,10 @@ void game_store_init(void)
         snprintf(g_store.apiUrl, MAX_URL_LEN, "%s", DEFAULT_API_URL);
     nvs_load_str("wifi_ssid", g_store.wifiSsid, TM_MAX_SSID_LEN);
     nvs_load_str("wifi_pass", g_store.wifiPass, MAX_PASS_LEN);
+    nvs_load_str("cfg_backup_at", g_store.lastConfigBackupAt,
+                 sizeof(g_store.lastConfigBackupAt));
+    nvs_load_str("cfg_backup_st", g_store.configBackupStatus,
+                 sizeof(g_store.configBackupStatus));
     size_t lineup_size = sizeof(g_store.lineupIds);
     if (nvs_get_blob(s_nvs, "lineup_ids", g_store.lineupIds, &lineup_size) != ESP_OK ||
         lineup_size != sizeof(g_store.lineupIds))

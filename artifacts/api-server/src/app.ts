@@ -34,9 +34,9 @@ app.use(express.urlencoded({ extended: true }));
 // live at "/" on Express, not under a sub-path.
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 
-// The nginx ingress rewrites /api(/|$)(.*) → /$2 before forwarding here,
-// so Express receives paths WITHOUT the /api prefix (e.g. /sync/spiele,
-// /auth/login).  Mount the router at root so those paths match.
+// Production ingress may strip /api while the Replit development proxy keeps
+// it. Support both forms so the same bundle works in preview and production.
+app.use("/api", router);
 app.use(router);
 
 // ── Global error handler ───────────────────────────────────────────────────────
