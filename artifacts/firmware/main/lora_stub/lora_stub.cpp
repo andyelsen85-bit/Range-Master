@@ -27,7 +27,8 @@ static char s_status[96] = "Gateway not configured";
 static bool s_request_busy = false;
 static GatewayReachability s_gateway_state = GATEWAY_NOT_CONFIGURED;
 static uint32_t s_gateway_state_ms = 0;
-static TickType_t s_last_health_tick = 0;
+static TickType_t s_last_manual_health_tick = 0;
+static TickType_t s_last_auto_health_tick = 0;
 
 typedef enum : uint8_t {
     GATEWAY_REQUEST_FIRE,
@@ -69,6 +70,27 @@ static void set_gateway_state(GatewayReachability state)
     if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_gateway_state = state;
     s_gateway_state_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+}
+
+static bool health_check_throttled(bool manual, TickType_t now)
+{
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    TickType_t last = manual ? s_last_manual_health_tick
+                            : s_last_auto_health_tick;
+    bool throttled = last != 0 &&
+                     (now - last) < pdMS_TO_TICKS(15000);
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+    return throttled;
+}
+
+static void record_health_check(bool manual, TickType_t now)
+{
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (manual)
+        s_last_manual_health_tick = now;
+    else
+        s_last_auto_health_tick = now;
     if (s_state_mutex) xSemaphoreGive(s_state_mutex);
 }
 
@@ -218,7 +240,7 @@ static void gateway_worker(void *arg)
             TickType_t now = xTaskGetTickCount();
             if (!cop_wifi_is_connected() || !g_store.gatewayUrl[0] ||
                 !g_store.gatewayToken[0] ||
-                (now - s_last_health_tick) < pdMS_TO_TICKS(15000)) {
+                health_check_throttled(false, now)) {
                 if (!cop_wifi_is_connected() &&
                     g_store.gatewayUrl[0] && g_store.gatewayToken[0])
                     set_gateway_state(GATEWAY_UNREACHABLE);
@@ -226,7 +248,7 @@ static void gateway_worker(void *arg)
                     set_gateway_state(GATEWAY_NOT_CONFIGURED);
                 continue;
             }
-            s_last_health_tick = now;
+            record_health_check(false, now);
             request = {};
             request.kind = GATEWAY_REQUEST_HEALTH;
             copy_gateway_config(&request);
@@ -504,8 +526,7 @@ bool lora_gateway_check(void)
         return false;
     }
     TickType_t now = xTaskGetTickCount();
-    if (s_last_health_tick != 0 &&
-        (now - s_last_health_tick) < pdMS_TO_TICKS(15000)) {
+    if (health_check_throttled(true, now)) {
         set_status("Gateway check throttled (15s)");
         return false;
     }
@@ -520,7 +541,7 @@ bool lora_gateway_check(void)
     copy_gateway_config(&request);
     set_status("Checking gateway...");
     set_gateway_state(GATEWAY_CHECKING);
-    s_last_health_tick = now;
+    record_health_check(true, now);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false);
         set_status("Gateway queue unavailable");
