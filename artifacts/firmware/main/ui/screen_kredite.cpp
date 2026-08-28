@@ -14,6 +14,18 @@ static lv_obj_t *s_player_list;
 static lv_obj_t *s_dd_add;
 static lv_obj_t *s_lbl_status;
 
+static void munition_cb(lv_event_t *e)
+{
+    intptr_t packed = (intptr_t)lv_event_get_user_data(e);
+    int spieler_id = (int)(packed >> 4);
+    int code = (int)(packed & 0xF);
+    const char *product = code <= 2 ? "CAL_12" : "CAL_20";
+    int qty = code <= 2 ? code : code - 2;
+    if (!store_queue_verkauf(spieler_id, product, qty))
+        lv_label_set_text(s_lbl_status, "VERKAUF KONNT NET GESPAECHERT GINN");
+    screen_kredite_refresh();
+}
+
 // ── Grant credit (+1) ─────────────────────────────────────────
 static void grant_cb(lv_event_t *e)
 {
@@ -98,7 +110,7 @@ static void build_player_list(void)
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-        // Name + credit count
+        // Name + the three independent daily counters.
         lv_obj_t *info = lv_obj_create(row);
         lv_obj_set_size(info, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(info, LV_OPA_0, 0);
@@ -120,6 +132,13 @@ static void build_player_list(void)
         lv_obj_set_style_text_font(cred_lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(cred_lbl,
             avail > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_DANGER), 0);
+        char ammo_buf[48];
+        snprintf(ammo_buf, sizeof(ammo_buf), "CAL.12: %d     CAL.20: %d",
+                 store_munition_cal12(sid), store_munition_cal20(sid));
+        lv_obj_t *ammo_lbl = lv_label_create(info);
+        lv_label_set_text(ammo_lbl, ammo_buf);
+        lv_obj_set_style_text_font(ammo_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(ammo_lbl, lv_color_hex(CLR_PRIMARY), 0);
 
         // Button group: [-1]  [+1]  [X]
         lv_obj_t *btn_grp = lv_obj_create(row);
@@ -156,6 +175,25 @@ static void build_player_list(void)
         lv_obj_set_style_text_font(bpl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(bpl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(bpl);
+
+        // Ammunition sales: compact, explicit caliber buttons. Quantities are
+        // append-only sale events, not mutable UI totals.
+        for (int action = 1; action <= 4; ++action) {
+            lv_obj_t *ammo = lv_btn_create(btn_grp);
+            lv_obj_set_size(ammo, 58, 44);
+            lv_obj_add_style(ammo, &g_style_btn_secondary, 0);
+            int code = action <= 2 ? action : action; // 1/2 Cal.12, 1/2 Cal.20
+            intptr_t packed = ((intptr_t)sid << 4) | code;
+            lv_obj_add_event_cb(ammo, munition_cb, LV_EVENT_CLICKED, (void *)packed);
+            lv_obj_t *al = lv_label_create(ammo);
+            char text[12];
+            if (action <= 2) snprintf(text, sizeof(text), "12 +%d", action);
+            else snprintf(text, sizeof(text), "20 +%d", action - 2);
+            lv_label_set_text(al, text);
+            lv_obj_set_style_text_font(al, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(al, lv_color_hex(CLR_TEXT), 0);
+            lv_obj_center(al);
+        }
 
         // X (remove from today's list)
         lv_obj_t *btn_del = lv_btn_create(btn_grp);
@@ -205,7 +243,7 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_style_pad_hor(hdr, 20, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
-    lv_label_set_text(title, LV_SYMBOL_CHARGE "  KREDITTER");
+    lv_label_set_text(title, LV_SYMBOL_CHARGE "  SPILLER VUM DAG");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 

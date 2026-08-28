@@ -6,15 +6,22 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './daySalesItem';
+export * from './daySalesReport';
 export * from './ergebnisWithSpiel';
 export * from './ergebnisWithSpielSpiel';
 export * from './errorResponse';
+export * from './flexibleProductInput';
+export * from './flexibleProductInputCategory';
+export * from './getAdminDaySalesParams';
 export * from './getRangliste200';
 export * from './getRanglisteParams';
 export * from './getSpielerErgebnisse200';
+export * from './getStatistikModusBreakdown200';
 export * from './getStatistikVerlauf200';
 export * from './getStatistikVerlauf200VerlaufItem';
 export * from './getStatistikVerlaufParams';
+export * from './getSyncDaySalesParams';
 export * from './getSyncSpieler200';
 export * from './getSyncStatus200';
 export * from './healthStatus';
@@ -23,13 +30,24 @@ export * from './loginRequest';
 export * from './loginResponse';
 export * from './maschine';
 export * from './modus';
+export * from './modusBreakdownEntry';
 export * from './postSyncSpiele200';
 export * from './postSyncSpiele200ResultsItem';
 export * from './postSyncSpiele200ResultsItemStatus';
 export * from './postSyncSpieleBody';
 export * from './postSyncSpieler200';
 export * from './postSyncSpielerBody';
+export * from './priceRevision';
+export * from './priceRevisionInput';
+export * from './product';
+export * from './productCategory';
+export * from './productList';
+export * from './productUpdate';
+export * from './productUpdateCategory';
 export * from './ranglisteEntry';
+export * from './saleEventBatchInput';
+export * from './saleEventInput';
+export * from './saleSyncResult';
 export * from './spielerProfile';
 export * from './spielerStatistik';
 export * from './spielerStatistikMaschinen';

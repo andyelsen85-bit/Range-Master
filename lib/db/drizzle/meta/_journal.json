@@ -8,6 +8,13 @@
       "when": 1785426408452,
       "tag": "0000_equal_bloodstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785426408453,
+      "tag": "0001_products",
+      "breakpoints": true
     }
   ]
 }

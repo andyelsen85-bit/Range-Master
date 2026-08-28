@@ -1,12 +1,13 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, smtpSettingsTable } from "@workspace/db";
+import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable } from "@workspace/db";
 import { buildTransport } from "../lib/mailer";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, lte } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { authenticate, requireAdmin } from "./auth";
 import { z } from "zod";
+import { catalogue, daySalesReport, ensureSystemProducts } from "../lib/products";
 
 const router = Router();
 
@@ -237,6 +238,94 @@ router.get("/kredite", async (req, res) => {
     .groupBy(kreditEventsTable.spielerId, spielerTable.name, spielerTable.mitgliedNr)
     .orderBy(spielerTable.name);
   return res.json({ datum, kredite: rows });
+});
+
+// ─── Product catalogue and sales ─────────────────────────────────────────────
+
+const productId = (raw: string | string[]) => z.coerce.number().int().positive().safeParse(Array.isArray(raw) ? raw[0] : raw);
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+router.get("/products", async (_req, res): Promise<void> => {
+  res.json({ products: await catalogue() });
+});
+
+router.post("/products", async (req, res): Promise<void> => {
+  const parsed = z.object({
+    name: z.string().trim().min(1).max(200),
+    category: z.enum(["FOOD", "DRINK"]),
+    active: z.boolean().default(true),
+    unitPriceCents: z.number().int().min(0),
+  }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const { unitPriceCents, ...values } = parsed.data;
+  const [product] = await db.insert(productsTable).values(values).returning();
+  await db.insert(productPriceRevisionsTable).values({ productId: product.id, unitPriceCents });
+  res.status(201).json(product);
+});
+
+router.patch("/products/:id", async (req, res): Promise<void> => {
+  const id = productId(req.params.id);
+  const parsed = z.object({
+    name: z.string().trim().min(1).max(200).optional(),
+    category: z.enum(["FOOD", "DRINK"]).optional(),
+    active: z.boolean().optional(),
+  }).refine(v => v.name !== undefined || v.category !== undefined || v.active !== undefined).safeParse(req.body);
+  if (!id.success) { res.status(400).json({ error: id.error.message }); return; }
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [existing] = await db.select().from(productsTable).where(eq(productsTable.id, id.data)).limit(1);
+  if (!existing) { res.status(404).json({ error: "Product not found" }); return; }
+  // System identity is protected; only presentation and availability can change.
+  if (existing.isSystem && parsed.data.category !== undefined) {
+    res.status(400).json({ error: "System product category cannot be changed" });
+    return;
+  }
+  const [product] = await db.update(productsTable).set(parsed.data).where(eq(productsTable.id, id.data)).returning();
+  res.json(product);
+});
+
+router.delete("/products/:id", async (req, res): Promise<void> => {
+  const id = productId(req.params.id);
+  if (!id.success) { res.status(400).json({ error: id.error.message }); return; }
+  const [product] = await db.select().from(productsTable).where(eq(productsTable.id, id.data)).limit(1);
+  if (!product) { res.status(404).json({ error: "Product not found" }); return; }
+  if (product.isSystem) { res.status(400).json({ error: "System products cannot be deleted" }); return; }
+  const [sale] = await db.select({ id: saleEventsTable.id }).from(saleEventsTable).where(eq(saleEventsTable.productId, id.data)).limit(1);
+  if (sale) { res.status(400).json({ error: "Products with sales history cannot be deleted" }); return; }
+  await db.transaction(async (tx) => {
+    await tx.delete(productPriceRevisionsTable).where(eq(productPriceRevisionsTable.productId, id.data));
+    await tx.delete(productsTable).where(eq(productsTable.id, id.data));
+  });
+  res.sendStatus(204);
+});
+
+router.post("/products/:id/prices", async (req, res): Promise<void> => {
+  const id = productId(req.params.id);
+  const parsed = z.object({ unitPriceCents: z.number().int().min(0), effectiveFrom: z.string().datetime().optional() }).safeParse(req.body);
+  if (!id.success) { res.status(400).json({ error: id.error.message }); return; }
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [product] = await db.select({ id: productsTable.id }).from(productsTable).where(eq(productsTable.id, id.data)).limit(1);
+  if (!product) { res.status(404).json({ error: "Product not found" }); return; }
+  const [revision] = await db.insert(productPriceRevisionsTable).values({
+    productId: product.id, unitPriceCents: parsed.data.unitPriceCents,
+    ...(parsed.data.effectiveFrom ? { effectiveFrom: new Date(parsed.data.effectiveFrom) } : {}),
+  }).returning();
+  res.status(201).json(revision);
+});
+
+router.get("/products/:id/current-price", async (req, res): Promise<void> => {
+  const id = productId(req.params.id);
+  if (!id.success) { res.status(400).json({ error: id.error.message }); return; }
+  const [product] = await db.select({ id: productsTable.id }).from(productsTable).where(eq(productsTable.id, id.data)).limit(1);
+  const [price] = product ? await db.select().from(productPriceRevisionsTable)
+    .where(and(eq(productPriceRevisionsTable.productId, product.id), lte(productPriceRevisionsTable.effectiveFrom, new Date())))
+    .orderBy(desc(productPriceRevisionsTable.effectiveFrom), desc(productPriceRevisionsTable.id)).limit(1) : [];
+  if (!price) { res.status(404).json({ error: "Product or current price not found" }); return; }
+  res.json(price);
+});
+
+router.get("/sales", async (req, res): Promise<void> => {
+  const datum = day.catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
+  res.json(await daySalesReport(datum));
 });
 
 // ─── API Key routes ───────────────────────────────────────────────────────────

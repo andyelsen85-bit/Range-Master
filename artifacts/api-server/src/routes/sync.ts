@@ -1,10 +1,11 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable } from "@workspace/db";
+import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable, productsTable, productPriceRevisionsTable, saleEventsTable } from "@workspace/db";
 import { eq, inArray, sql, desc, isNotNull } from "drizzle-orm";
 import { requireApiKey } from "./auth";
 import { z } from "zod";
 import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmail } from "../lib/mailer";
+import { catalogue, daySalesReport } from "../lib/products";
 
 const router = Router();
 
@@ -281,6 +282,61 @@ router.post("/kredite", requireApiKey, async (req, res) => {
   }
 
   return res.json({ synced, skipped: body.events.length - synced });
+});
+
+// ─── Product catalogue and sale events ───────────────────────────────────────
+
+const SaleEventSchema = z.object({
+  externalId: z.string().min(1).max(200),
+  spielerId: z.number().int().positive(),
+  datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  productId: z.number().int().positive(),
+  priceRevisionId: z.number().int().positive(),
+  quantity: z.number().int().refine((value) => value !== 0, "quantity must not be zero"),
+});
+
+// GET /api/sync/products — only currently sellable products and their price revision.
+router.get("/products", requireApiKey, async (_req, res): Promise<void> => {
+  res.json({ products: await catalogue(true) });
+});
+
+// GET /api/sync/sales?datum=YYYY-MM-DD — totals for terminal reconciliation.
+router.get("/sales", requireApiKey, async (req, res): Promise<void> => {
+  const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(req.query.datum);
+  if (!datum.success) { res.status(400).json({ error: "datum must be YYYY-MM-DD" }); return; }
+  res.json(await daySalesReport(datum.data));
+});
+
+// POST /api/sync/sales — offline terminal queue upload. A revision must belong
+// to its product; unitPriceCents is copied from that immutable revision.
+router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
+  const parsed = z.object({ events: z.array(SaleEventSchema).max(500) }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  let synced = 0;
+  let skipped = 0;
+  for (const event of parsed.data.events) {
+    const [alreadyRecorded] = await db.select({ id: saleEventsTable.id }).from(saleEventsTable)
+      .where(eq(saleEventsTable.externalId, event.externalId)).limit(1);
+    if (alreadyRecorded) { skipped++; continue; }
+
+    const [spieler] = await db.select({ id: spielerTable.id }).from(spielerTable)
+      .where(eq(spielerTable.id, event.spielerId)).limit(1);
+    if (!spieler) { res.status(400).json({ error: `Unknown player: ${event.spielerId}` }); return; }
+    const [product] = await db.select({ id: productsTable.id }).from(productsTable)
+      .where(eq(productsTable.id, event.productId)).limit(1);
+    if (!product) { res.status(400).json({ error: `Unknown product: ${event.productId}` }); return; }
+    const [revision] = await db.select().from(productPriceRevisionsTable)
+      .where(eq(productPriceRevisionsTable.id, event.priceRevisionId)).limit(1);
+    if (!revision || revision.productId !== product.id) {
+      res.status(400).json({ error: `Unknown price revision for product: ${event.priceRevisionId}` });
+      return;
+    }
+    const inserted = await db.insert(saleEventsTable).values({
+      ...event, unitPriceCents: revision.unitPriceCents,
+    }).onConflictDoNothing({ target: saleEventsTable.externalId }).returning({ id: saleEventsTable.id });
+    if (inserted.length) synced++; else skipped++;
+  }
+  res.json({ synced, skipped });
 });
 
 // ─── New player created on terminal ──────────────────────────────────────────

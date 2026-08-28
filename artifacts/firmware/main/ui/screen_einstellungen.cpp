@@ -5,6 +5,7 @@
 // ============================================================
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "lvgl.h"
 #include "ui_manager.h"
 #include "game_store.h"
@@ -21,6 +22,9 @@ static lv_obj_t *s_ta_url;
 static lv_obj_t *s_ta_key;
 static lv_obj_t *s_ta_gateway;
 static lv_obj_t *s_ta_gateway_token;
+static lv_obj_t *s_ta_price_credit;
+static lv_obj_t *s_ta_price_cal12;
+static lv_obj_t *s_ta_price_cal20;
 static lv_obj_t *s_lbl_api_status;
 static bool s_gateway_check_pending;
 static lv_obj_t *s_lbl_machine_test_status;
@@ -36,6 +40,23 @@ static void save_api_settings(void)
     strncpy(g_store.apiKey, key, MAX_KEY_LEN - 1); g_store.apiKey[MAX_KEY_LEN - 1] = '\0';
     strncpy(g_store.gatewayUrl, gateway, MAX_URL_LEN - 1); g_store.gatewayUrl[MAX_URL_LEN - 1] = '\0';
     strncpy(g_store.gatewayToken, gateway_token, MAX_KEY_LEN - 1); g_store.gatewayToken[MAX_KEY_LEN - 1] = '\0';
+    // Offline prices are retained in the product cache. They are integer cents
+    // so a displayed 7.50 can never acquire floating-point rounding errors;
+    // the next successful catalog pull replaces them with portal values.
+    struct PriceField { lv_obj_t *ta; const char *id; } fields[] = {
+        {s_ta_price_credit, "GAME_CREDIT"}, {s_ta_price_cal12, "CAL_12"},
+        {s_ta_price_cal20, "CAL_20"}
+    };
+    for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+        const Produkt *old = store_produkt(fields[i].id);
+        if (!fields[i].ta || !old) continue;
+        char *end = NULL; double euros = strtod(lv_textarea_get_text(fields[i].ta), &end);
+        if (end != lv_textarea_get_text(fields[i].ta) && *end == '\0' && euros >= 0.0) {
+            for (int p = 0; p < g_store.produkteCount; ++p)
+                if (strcmp(g_store.produkte[p].id, fields[i].id) == 0)
+                    g_store.produkte[p].preisCent = (int)(euros * 100.0 + 0.5);
+        }
+    }
     game_store_save();
 }
 
@@ -126,6 +147,27 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_text_font(s_ta_gateway_token, &lv_font_montserrat_14, 0);
     lv_obj_set_style_bg_color(s_ta_gateway_token, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_gateway_token, lv_color_hex(CLR_TEXT), 0);
+
+    struct PriceField { const char *label; const char *id; lv_obj_t **out; } price_fields[] = {
+        {"PREIS SPIELKREDIT (EUR)", "GAME_CREDIT", &s_ta_price_credit},
+        {"PREIS CAL.12 (EUR)", "CAL_12", &s_ta_price_cal12},
+        {"PREIS CAL.20 (EUR)", "CAL_20", &s_ta_price_cal20},
+    };
+    for (unsigned i = 0; i < sizeof(price_fields)/sizeof(price_fields[0]); ++i) {
+        lv_obj_t *label = lv_label_create(parent);
+        lv_label_set_text(label, price_fields[i].label);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(CLR_TEXT), 0);
+        *price_fields[i].out = lv_textarea_create(parent);
+        lv_obj_set_size(*price_fields[i].out, 180, 50);
+        lv_textarea_set_one_line(*price_fields[i].out, true);
+        const Produkt *p = store_produkt(price_fields[i].id);
+        char price[16]; snprintf(price, sizeof(price), "%d.%02d",
+                                 p ? p->preisCent / 100 : 0, p ? p->preisCent % 100 : 0);
+        lv_textarea_set_text(*price_fields[i].out, price);
+        lv_obj_set_style_bg_color(*price_fields[i].out, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_text_color(*price_fields[i].out, lv_color_hex(CLR_TEXT), 0);
+    }
 
     lv_obj_t *action_row = lv_obj_create(parent);
     lv_obj_set_size(action_row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -896,6 +938,13 @@ lv_obj_t *screen_einstellungen_create(void)
         lv_keyboard_set_textarea(s_kb, s_ta_gateway_token);
         lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     }, LV_EVENT_FOCUSED, NULL);
+    lv_obj_t *price_inputs[] = {s_ta_price_credit, s_ta_price_cal12, s_ta_price_cal20};
+    for (unsigned i = 0; i < sizeof(price_inputs) / sizeof(price_inputs[0]); ++i) {
+        lv_obj_add_event_cb(price_inputs[i], [](lv_event_t *e) {
+            lv_keyboard_set_textarea(s_kb, (lv_obj_t *)lv_event_get_target(e));
+            lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_FOCUSED, NULL);
+    }
     for (int ci = 0; ci < 4; ++ci) {
         if (!s_pair_delay_ta[ci]) continue;
         lv_obj_add_event_cb(s_pair_delay_ta[ci], [](lv_event_t *e) {
@@ -913,6 +962,14 @@ void screen_einstellungen_refresh(void)
     if (s_ta_key) lv_textarea_set_text(s_ta_key, g_store.apiKey);
     if (s_ta_gateway) lv_textarea_set_text(s_ta_gateway, g_store.gatewayUrl);
     if (s_ta_gateway_token) lv_textarea_set_text(s_ta_gateway_token, g_store.gatewayToken);
+    lv_obj_t *price_inputs[] = {s_ta_price_credit, s_ta_price_cal12, s_ta_price_cal20};
+    const char *price_ids[] = {"GAME_CREDIT", "CAL_12", "CAL_20"};
+    for (int i = 0; i < 3; ++i) if (price_inputs[i]) {
+        const Produkt *p = store_produkt(price_ids[i]); char value[16];
+        snprintf(value, sizeof(value), "%d.%02d", p ? p->preisCent / 100 : 0,
+                 p ? p->preisCent % 100 : 0);
+        lv_textarea_set_text(price_inputs[i], value);
+    }
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         if (!s_mach_sw[m]) continue;
         if (g_store.maschinenAktiv[m])

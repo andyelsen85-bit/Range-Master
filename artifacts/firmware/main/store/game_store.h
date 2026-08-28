@@ -15,6 +15,8 @@
 #define MAX_EMAIL_LEN       64
 #define MAX_SPIELER_UPDATES 10
 #define MAX_KREDIT_EVENTS   50   // pending grant/use events queued for portal sync
+#define MAX_PRODUKTE        12   // deliberately small: cached catalog for offline sales
+#define MAX_PENDING_VERKAEUFE 64 // durable, idempotent sale-event outbox
 #define MAX_URL_LEN         128
 #define MAX_KEY_LEN         65
 #define TM_MAX_SSID_LEN     33
@@ -134,6 +136,29 @@ typedef struct {
 } KreditStand;
 
 typedef struct {
+    char id[32];             // stable portal product id, e.g. GAME_CREDIT
+    char name[32];
+    int  preisCent;          // exact integer cents; never use float for money
+    int  preisRevision;      // portal revision used when a sale was recorded
+} Produkt;
+
+typedef struct {
+    int spielerId;
+    int cal12;
+    int cal20;
+} MunitionStand;
+
+typedef struct {
+    char externalId[40];
+    int  spielerId;
+    char datum[11];
+    char produktId[32];
+    int  preisRevision;
+    int  menge;              // signed (+ sale, - correction)
+    bool inFlight;
+} VerkaufEvent;
+
+typedef struct {
     char     externalId[40];
     char     datum[11];        // YYYY-MM-DD (local date, for terminal display)
     char     finishedAt[32];   // ISO datetime UTC "YYYY-MM-DDTHH:MM:SS.000Z" sent as API datum
@@ -208,6 +233,15 @@ typedef struct {
     char       kreditDatum[11];    // YYYY-MM-DD
     KreditStand kredite[MAX_PORTAL_SPIELER]; // indexed by portal player id slot
     int         kreditPlayerIds[MAX_PORTAL_SPIELER]; // parallel array of ids
+    MunitionStand munition[MAX_PORTAL_SPIELER]; // same daily player capacity
+    char          verkaufDatum[11];             // date represented by munition[]
+
+    // Cached catalog remains usable while offline. A successful catalog pull
+    // replaces it wholesale, making portal prices authoritative.
+    Produkt produkte[MAX_PRODUKTE];
+    int     produkteCount;
+    VerkaufEvent pendingVerkaufEvents[MAX_PENDING_VERKAEUFE];
+    int          pendingVerkaufEventCount;
 
     // Queued games
     PendingGame  pendingGames[MAX_PENDING_GAMES];
@@ -286,6 +320,17 @@ void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
 void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht);
 void store_queue_passwort_reset(int spieler_id);
 int  store_pending_update_count(void);
+
+// ── Product sales / ammunition ────────────────────────────────
+const Produkt *store_produkt(const char *produkt_id);
+bool store_queue_verkauf(int spieler_id, const char *produkt_id, int menge);
+int  store_begin_verkauf_sync(VerkaufEvent *snapshot, int capacity);
+void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool delivered);
+void store_apply_portal_verkauf(int spieler_id, const char *produkt_id, int menge);
+void store_replace_produkte(const Produkt *produkte, int count);
+void store_remap_verkauf_spieler(int old_id, int new_id);
+int  store_munition_cal12(int spieler_id);
+int  store_munition_cal20(int spieler_id);
 
 // ── Helpers ──────────────────────────────────────────────────
 const char *maschine_label(Maschine m);

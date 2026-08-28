@@ -6,12 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SpielerProfile {
+export interface PriceRevision {
   id: number;
-  name: string;
-  email?: string | null;
-  mitgliedNr?: string | null;
-  portalAktiv: boolean;
-  isAdmin: boolean;
-  createdAt: Date;
+  productId: number;
+  unitPriceCents: number;
+  effectiveFrom: Date;
 }

@@ -477,6 +477,10 @@ esp_err_t http_push_spieler_updates(void)
                             break;
                         }
                     }
+                    // Sales recorded before a local player was created must
+                    // use the portal id on their first POST.
+                    store_remap_verkauf_spieler(old_id, new_id);
+                    game_store_save(); // remapped durable outbox must survive power loss
                     ESP_LOGI(TAG, "Spieler '%s' created in portal → id=%d (was local %d)",
                              e->name, new_id, old_id);
                     e->used = false;    // mark done — compacted below
@@ -655,6 +659,99 @@ esp_err_t http_pull_kredite(void)
     return ESP_OK;
 }
 
+// ── Product catalog and sale-event sync ────────────────────────
+esp_err_t http_fetch_produkte(void)
+{
+    char *resp = (char *)malloc(8192);
+    if (!resp) return ESP_ERR_NO_MEM;
+    esp_err_t err = http_get_json("/api/sync/produkte", resp, 8192);
+    if (err != ESP_OK) { free(resp); return err; }
+    cJSON *root = cJSON_Parse(resp); free(resp);
+    if (!root) return ESP_ERR_INVALID_RESPONSE;
+    cJSON *arr = cJSON_GetObjectItem(root, "produkte");
+    if (!arr || !cJSON_IsArray(arr)) arr = root;
+    Produkt products[MAX_PRODUKTE] = {};
+    int count = 0; cJSON *item;
+    cJSON_ArrayForEach(item, arr) {
+        if (count == MAX_PRODUKTE || !cJSON_IsObject(item)) break;
+        cJSON *id = cJSON_GetObjectItem(item, "id");
+        cJSON *name = cJSON_GetObjectItem(item, "name");
+        cJSON *price = cJSON_GetObjectItem(item, "preisCent");
+        if (!price) price = cJSON_GetObjectItem(item, "priceCents");
+        cJSON *revision = cJSON_GetObjectItem(item, "preisRevision");
+        if (!revision) revision = cJSON_GetObjectItem(item, "priceRevision");
+        if (!cJSON_IsString(id) || !cJSON_IsNumber(price) || !cJSON_IsNumber(revision)) continue;
+        Produkt *p = &products[count++];
+        strncpy(p->id, id->valuestring, sizeof(p->id) - 1);
+        if (cJSON_IsString(name)) strncpy(p->name, name->valuestring, sizeof(p->name) - 1);
+        p->preisCent = (int)price->valuedouble; p->preisRevision = (int)revision->valuedouble;
+    }
+    if (count) { store_replace_produkte(products, count); game_store_save(); }
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+esp_err_t http_push_verkauf_events(void)
+{
+    VerkaufEvent *snapshot = (VerkaufEvent *)heap_caps_malloc(
+        MAX_PENDING_VERKAEUFE * sizeof(VerkaufEvent), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!snapshot) return ESP_ERR_NO_MEM;
+    int count = store_begin_verkauf_sync(snapshot, MAX_PENDING_VERKAEUFE);
+    if (!count) { heap_caps_free(snapshot); return ESP_OK; }
+    cJSON *root = cJSON_CreateObject(), *arr = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "verkaeufe", arr);
+    for (int i = 0; i < count; ++i) {
+        VerkaufEvent *ev = &snapshot[i]; cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "externalId", ev->externalId);
+        cJSON_AddNumberToObject(item, "spielerId", ev->spielerId);
+        cJSON_AddStringToObject(item, "datum", ev->datum);
+        cJSON_AddStringToObject(item, "produktId", ev->produktId);
+        cJSON_AddNumberToObject(item, "preisRevision", ev->preisRevision);
+        cJSON_AddNumberToObject(item, "menge", ev->menge);
+        cJSON_AddItemToArray(arr, item);
+    }
+    char *body = cJSON_PrintUnformatted(root); cJSON_Delete(root);
+    char *resp = (char *)malloc(512);
+    esp_err_t err = (!body || !resp) ? ESP_ERR_NO_MEM :
+        http_post_json("/api/sync/verkaeufe", body, resp, 512);
+    if (body) free(body); if (resp) free(resp);
+    store_finish_verkauf_sync(snapshot, count, err == ESP_OK);
+    heap_caps_free(snapshot);
+    return err;
+}
+
+esp_err_t http_pull_verkaeufe(void)
+{
+    time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
+    char date[11], path[64]; strftime(date, sizeof(date), "%Y-%m-%d", &tmi);
+    snprintf(path, sizeof(path), "/api/sync/verkaeufe?datum=%s", date);
+    char *resp = (char *)malloc(8192);
+    if (!resp) return ESP_ERR_NO_MEM;
+    esp_err_t err = http_get_json(path, resp, 8192);
+    if (err != ESP_OK) { free(resp); return err; }
+    cJSON *root = cJSON_Parse(resp); free(resp);
+    if (!root) return ESP_ERR_INVALID_RESPONSE;
+    memset(g_store.munition, 0, sizeof(g_store.munition));
+    strncpy(g_store.verkaufDatum, date, sizeof(g_store.verkaufDatum) - 1);
+    cJSON *arr = cJSON_GetObjectItem(root, "verkaeufe");
+    if (!arr || !cJSON_IsArray(arr)) arr = root;
+    cJSON *item; cJSON_ArrayForEach(item, arr) {
+        cJSON *sid = cJSON_GetObjectItem(item, "spielerId");
+        cJSON *product = cJSON_GetObjectItem(item, "produktId");
+        cJSON *qty = cJSON_GetObjectItem(item, "menge");
+        if (!qty) qty = cJSON_GetObjectItem(item, "anzahl");
+        if (cJSON_IsNumber(sid) && cJSON_IsString(product) && cJSON_IsNumber(qty))
+            store_apply_portal_verkauf((int)sid->valuedouble, product->valuestring, (int)qty->valuedouble);
+    }
+    // Reapply durable local events; the portal response is the baseline.
+    for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i) {
+        VerkaufEvent *ev = &g_store.pendingVerkaufEvents[i];
+        store_apply_portal_verkauf(ev->spielerId, ev->produktId, ev->menge);
+    }
+    cJSON_Delete(root); game_store_save();
+    return ESP_OK;
+}
+
 // ── http_sync_all ─────────────────────────────────────────────
 esp_err_t http_sync_all(void)
 {
@@ -670,6 +767,12 @@ esp_err_t http_sync_all(void)
     // Push queued player edits (non-critical)
     esp_err_t pue = http_push_spieler_updates();
     if (pue != ESP_OK) ESP_LOGW(TAG, "Spieler updates push failed — continuing sync");
+    esp_err_t ppr = http_fetch_produkte();
+    if (ppr != ESP_OK) ESP_LOGW(TAG, "Product pull failed — using cached catalog");
+    esp_err_t pve = http_push_verkauf_events();
+    if (pve != ESP_OK) ESP_LOGW(TAG, "Sale push failed — queue retained");
+    esp_err_t plv = http_pull_verkaeufe();
+    if (plv != ESP_OK) ESP_LOGW(TAG, "Sale pull failed — using local totals");
 
     // Push queued credit events (non-critical)
     esp_err_t pke = http_push_kredit_events();

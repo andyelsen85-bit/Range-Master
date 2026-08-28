@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useGameStore, PortalSpieler } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import { PlayerSearch } from '@/components/PlayerSearch';
-import { ArrowLeft, Coins, Minus, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, Coins, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const ADD_AMOUNTS = [1, 2, 3, 4] as const;
@@ -15,6 +15,8 @@ export function KrediteScreen() {
   // Pull latest server state once when the screen opens (best effort — offline OK)
   useEffect(() => {
     void store.ladeKredite();
+    void store.ladeProdukte();
+    void store.ladeVerkaeufe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -33,6 +35,9 @@ export function KrediteScreen() {
         gewaehrt: stand.gewaehrt,
         verbraucht: stand.verbraucht,
         rest: Math.max(0, stand.gewaehrt - stand.verbraucht),
+        cal12: store.getProduktAnzahl(spielerId, 'cal-12'),
+        cal20: store.getProduktAnzahl(spielerId, 'cal-20'),
+        pending: store.pendingVerkaeufe.some(v => v.spielerId === spielerId),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -43,6 +48,11 @@ export function KrediteScreen() {
   const registerPlayer = (ps: PortalSpieler) => {
     store.registerSpielerFuerTag(ps.id);
     setSearchKey(k => k + 1); // reset search so the same player can't be re-clicked
+  };
+  const refreshDay = () => {
+    void store.ladeKredite();
+    void store.ladeProdukte();
+    void store.ladeVerkaeufe();
   };
 
   return (
@@ -62,18 +72,18 @@ export function KrediteScreen() {
           )}
           <TouchButton
             className="h-12 px-4 gap-2"
-            onClick={() => void store.ladeKredite()}
-            disabled={store.krediteLaden}
+            onClick={refreshDay}
+            disabled={store.krediteLaden || store.verkaeufeLaden}
           >
-            <RefreshCw className={cn('w-4 h-4', store.krediteLaden && 'animate-spin')} />
+            <RefreshCw className={cn('w-4 h-4', (store.krediteLaden || store.verkaeufeLaden) && 'animate-spin')} />
             Aktualiséieren
           </TouchButton>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
         {/* ── Left: player search (register only, no credits) ───────────────── */}
-        <div className="w-[380px] border-r-2 border-border flex flex-col">
+        <div className="lg:w-[380px] lg:border-r-2 border-b-2 lg:border-b-0 border-border flex flex-col">
           <div className="p-4 border-b-2 border-border bg-card/50 shrink-0">
             <h2 className="text-base font-bold uppercase tracking-widest text-foreground/80">
               Spiller dobäisetzen
@@ -105,7 +115,7 @@ export function KrediteScreen() {
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
+           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
             {eintraege.length === 0 && (
               <div className="text-muted-foreground italic text-center py-12">
                 Nach keng Spiller fir haut — lénks e Spiller sichen an dobäisetzen
@@ -116,23 +126,14 @@ export function KrediteScreen() {
               <div
                 key={e.spielerId}
                 className={cn(
-                  'flex items-center gap-3 border-2 rounded-xl p-3 transition-all',
+                  'grid grid-cols-1 xl:grid-cols-[minmax(180px,1fr)_auto_auto_auto] items-center gap-3 border-2 rounded-xl p-3 transition-all',
                   e.rest > 0
                     ? 'border-primary/50 bg-primary/5'
                     : 'border-border/40 bg-background/40 opacity-80',
                 )}
               >
-                {/* Remaining badge */}
-                <div className={cn(
-                  'w-14 h-14 rounded-xl flex flex-col items-center justify-center shrink-0',
-                  e.rest > 0 ? 'bg-primary/20 text-primary' : 'bg-muted/30 text-muted-foreground/60',
-                )}>
-                  <span className="text-2xl font-black leading-none">{e.rest}</span>
-                  <span className="text-[9px] font-bold uppercase tracking-widest">Rescht</span>
-                </div>
-
                 {/* Name + stats */}
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0">
                   <div className={cn(
                     'font-bold text-base truncate',
                     e.rest > 0 ? 'text-foreground' : 'text-muted-foreground',
@@ -145,10 +146,12 @@ export function KrediteScreen() {
                       <span className="text-amber-400 font-bold"> · opgebraucht</span>
                     )}
                   </div>
+                  {e.pending && <div data-testid={`status-pending-${e.spielerId}`} className="text-[10px] font-bold text-amber-400 mt-1">Verkeef nach net synchroniséiert</div>}
                 </div>
 
-                {/* Credit buttons: −1 | +1 +2 +3 +4 | 🗑 */}
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase text-primary">Credits: {e.rest}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
                   {/* −1 refund */}
                   <TouchButton
                     variant="ghost"
@@ -189,6 +192,20 @@ export function KrediteScreen() {
                     <Trash2 className="w-4 h-4" />
                   </TouchButton>
                 </div>
+                </div>
+
+                {([
+                  { id: 'cal-12', label: 'Cal. 12', quantity: e.cal12 },
+                  { id: 'cal-20', label: 'Cal. 20', quantity: e.cal20 },
+                ] as const).map(product => (
+                  <div key={product.id} className="flex flex-col gap-1 min-w-[210px]">
+                    <span className="text-[10px] font-bold uppercase text-foreground">{product.label}: <b data-testid={`text-quantity-${product.id}-${e.spielerId}`}>{product.quantity}</b></span>
+                    <div className="flex gap-1">
+                      <TouchButton variant="ghost" className="h-10 w-10 p-0 border border-amber-500/40" onClick={() => store.addVerkauf(e.spielerId, product.id, -1)} data-testid={`button-minus-${product.id}-${e.spielerId}`}>−1</TouchButton>
+                      {ADD_AMOUNTS.map(n => <TouchButton key={n} variant="outline" className="h-10 px-2 font-bold" onClick={() => store.addVerkauf(e.spielerId, product.id, n)} data-testid={`button-add-${product.id}-${n}-${e.spielerId}`}><Plus className="w-3 h-3" />{n}</TouchButton>)}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

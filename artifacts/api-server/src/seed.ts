@@ -10,6 +10,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import { db, pool, spielerTable, apiKeysTable } from "@workspace/db";
 import { eq, count } from "drizzle-orm";
+import { ensureSystemProducts } from "./lib/products";
 
 function randomPassword(length = 16): string {
   const chars =
@@ -23,6 +24,7 @@ function randomPassword(length = 16): string {
 }
 
 async function seed() {
+  await ensureSystemProducts();
   // Count existing admins
   const [{ value: adminCount }] = await db
     .select({ value: count() })

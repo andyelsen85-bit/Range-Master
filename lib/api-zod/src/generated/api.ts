@@ -24,18 +24,19 @@ export const loginBodyPasswortMin = 6;
 
 
 export const LoginBody = zod.object({
-  "email": zod.string().email(),
+  "email": zod.email(),
   "passwort": zod.string().min(loginBodyPasswortMin)
 })
 
 export const LoginResponse = zod.object({
   "token": zod.string(),
   "spieler": zod.object({
-  "id": zod.number().int(),
+  "id": zod.int(),
   "name": zod.string(),
   "email": zod.string().nullish(),
   "mitgliedNr": zod.string().nullish(),
   "portalAktiv": zod.boolean(),
+  "isAdmin": zod.boolean(),
   "createdAt": zod.coerce.date()
 })
 })
@@ -45,11 +46,12 @@ export const LoginResponse = zod.object({
  * @summary Get current user
  */
 export const GetMeResponse = zod.object({
-  "id": zod.number().int(),
+  "id": zod.int(),
   "name": zod.string(),
   "email": zod.string().nullish(),
   "mitgliedNr": zod.string().nullish(),
   "portalAktiv": zod.boolean(),
+  "isAdmin": zod.boolean(),
   "createdAt": zod.coerce.date()
 })
 
@@ -59,11 +61,12 @@ export const GetMeResponse = zod.object({
  */
 export const ListSpielerResponse = zod.object({
   "spieler": zod.array(zod.object({
-  "id": zod.number().int(),
+  "id": zod.int(),
   "name": zod.string(),
   "email": zod.string().nullish(),
   "mitgliedNr": zod.string().nullish(),
   "portalAktiv": zod.boolean(),
+  "isAdmin": zod.boolean(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -77,11 +80,12 @@ export const GetSpielerParams = zod.object({
 })
 
 export const GetSpielerResponse = zod.object({
-  "id": zod.number().int(),
+  "id": zod.int(),
   "name": zod.string(),
   "email": zod.string().nullish(),
   "mitgliedNr": zod.string().nullish(),
   "portalAktiv": zod.boolean(),
+  "isAdmin": zod.boolean(),
   "createdAt": zod.coerce.date()
 })
 
@@ -95,15 +99,15 @@ export const GetSpielerErgebnisseParams = zod.object({
 
 export const GetSpielerErgebnisseResponse = zod.object({
   "ergebnisse": zod.array(zod.object({
-  "id": zod.number().int(),
-  "spielId": zod.number().int(),
-  "lauf": zod.number().int(),
-  "taube": zod.number().int(),
+  "id": zod.int(),
+  "spielId": zod.int(),
+  "lauf": zod.int(),
+  "taube": zod.int(),
   "maschine": zod.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']),
-  "posten": zod.number().int(),
+  "posten": zod.int(),
   "schuss1": zod.boolean(),
   "schuss2": zod.boolean(),
-  "punkte": zod.number().int(),
+  "punkte": zod.int(),
   "wiederholt": zod.boolean(),
   "spiel": zod.object({
   "datum": zod.coerce.date(),
@@ -123,13 +127,14 @@ export const GetRanglisteQueryParams = zod.object({
 
 export const GetRanglisteResponse = zod.object({
   "rangliste": zod.array(zod.object({
-  "rang": zod.number().int(),
-  "spielerId": zod.number().int(),
+  "rang": zod.int(),
+  "spielerId": zod.int(),
   "name": zod.string(),
-  "gesamtPunkte": zod.number().int(),
-  "anzahlLauefe": zod.number().int(),
+  "gesamtPunkte": zod.int(),
+  "anzahlSpiele": zod.int(),
   "durchschnitt": zod.number(),
-  "bestPunkte": zod.number().int()
+  "durchschnittProzent": zod.number().describe('Normalized average as a percentage of the maximum possible score (gesamtPunkte \/ gesamtMaxPunkte × 100). Use this for cross-format comparisons because different game formats have different max scores.\n'),
+  "bestPunkte": zod.int()
 }))
 })
 
@@ -142,15 +147,32 @@ export const GetStatistikParams = zod.object({
 })
 
 export const GetStatistikResponse = zod.object({
-  "spielerId": zod.number().int(),
-  "gesamtLauefe": zod.number().int(),
+  "spielerId": zod.int(),
+  "gesamtSpiele": zod.int(),
   "durchschnitt": zod.number(),
-  "bestPunkte": zod.number().int(),
+  "bestPunkte": zod.int(),
   "trefferquote": zod.number(),
   "maschinen": zod.record(zod.string(), zod.object({
-  "versuche": zod.number().int(),
-  "treffer": zod.number().int(),
+  "versuche": zod.int(),
+  "treffer": zod.int(),
   "quote": zod.number()
+}))
+})
+
+
+/**
+ * @summary Get per-format score breakdown for a player
+ */
+export const GetStatistikModusBreakdownParams = zod.object({
+  "spielerId": zod.coerce.number().int()
+})
+
+export const GetStatistikModusBreakdownResponse = zod.object({
+  "breakdown": zod.array(zod.object({
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3']),
+  "anzahlSpiele": zod.int(),
+  "durchschnitt": zod.number().describe('Raw average points per game'),
+  "durchschnittProzent": zod.number().describe('Normalized average as % of max possible score (same method as leaderboard)')
 }))
 })
 
@@ -171,8 +193,9 @@ export const GetStatistikVerlaufQueryParams = zod.object({
 export const GetStatistikVerlaufResponse = zod.object({
   "verlauf": zod.array(zod.object({
   "datum": zod.coerce.date(),
-  "punkte": zod.number().int(),
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3'])
+  "punkte": zod.int(),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3']),
+  "maxPunkte": zod.int()
 }))
 })
 
@@ -183,7 +206,7 @@ export const GetStatistikVerlaufResponse = zod.object({
 export const GetSyncStatusResponse = zod.object({
   "status": zod.string(),
   "timestamp": zod.coerce.date(),
-  "spielerCount": zod.number().int()
+  "spielerCount": zod.int()
 })
 
 
@@ -192,7 +215,7 @@ export const GetSyncStatusResponse = zod.object({
  */
 export const GetSyncSpielerResponse = zod.object({
   "spieler": zod.array(zod.object({
-  "id": zod.number().int(),
+  "id": zod.int(),
   "name": zod.string(),
   "mitgliedNr": zod.string().nullish()
 }))
@@ -204,14 +227,14 @@ export const GetSyncSpielerResponse = zod.object({
  */
 export const PostSyncSpielerBody = zod.object({
   "spieler": zod.array(zod.object({
-  "id": zod.number().int(),
+  "id": zod.int(),
   "name": zod.string(),
   "mitgliedNr": zod.string().nullish()
 }))
 })
 
 export const PostSyncSpielerResponse = zod.object({
-  "synced": zod.number().int()
+  "synced": zod.int()
 })
 
 
@@ -240,26 +263,26 @@ export const postSyncSpieleBodySpieleItemErgebnisseItemPunkteMax = 4;
 
 export const PostSyncSpieleBody = zod.object({
   "spiele": zod.array(zod.object({
-  "externalId": zod.string().uuid(),
+  "externalId": zod.uuid(),
   "datum": zod.coerce.date(),
   "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3']),
-  "lauf": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemLaufMax),
+  "lauf": zod.int().min(1).max(postSyncSpieleBodySpieleItemLaufMax),
   "abgeschlossen": zod.boolean(),
   "teilnahmen": zod.array(zod.object({
-  "spielerId": zod.number().int(),
-  "startPosten": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemTeilnahmenItemStartPostenMax),
-  "punkte": zod.number().int().min(postSyncSpieleBodySpieleItemTeilnahmenItemPunkteMin).max(postSyncSpieleBodySpieleItemTeilnahmenItemPunkteMax),
-  "lauf": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemTeilnahmenItemLaufMax)
+  "spielerId": zod.int(),
+  "startPosten": zod.int().min(1).max(postSyncSpieleBodySpieleItemTeilnahmenItemStartPostenMax),
+  "punkte": zod.int().min(postSyncSpieleBodySpieleItemTeilnahmenItemPunkteMin).max(postSyncSpieleBodySpieleItemTeilnahmenItemPunkteMax),
+  "lauf": zod.int().min(1).max(postSyncSpieleBodySpieleItemTeilnahmenItemLaufMax)
 })),
   "ergebnisse": zod.array(zod.object({
-  "spielerId": zod.number().int(),
-  "lauf": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemErgebnisseItemLaufMax),
-  "taube": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemErgebnisseItemTaubeMax),
+  "spielerId": zod.int(),
+  "lauf": zod.int().min(1).max(postSyncSpieleBodySpieleItemErgebnisseItemLaufMax),
+  "taube": zod.int().min(1).max(postSyncSpieleBodySpieleItemErgebnisseItemTaubeMax),
   "maschine": zod.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']),
-  "posten": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemErgebnisseItemPostenMax),
+  "posten": zod.int().min(1).max(postSyncSpieleBodySpieleItemErgebnisseItemPostenMax),
   "schuss1": zod.boolean(),
   "schuss2": zod.boolean(),
-  "punkte": zod.number().int().min(postSyncSpieleBodySpieleItemErgebnisseItemPunkteMin).max(postSyncSpieleBodySpieleItemErgebnisseItemPunkteMax),
+  "punkte": zod.int().min(postSyncSpieleBodySpieleItemErgebnisseItemPunkteMin).max(postSyncSpieleBodySpieleItemErgebnisseItemPunkteMax),
   "wiederholt": zod.boolean()
 }))
 }))
@@ -270,6 +293,195 @@ export const PostSyncSpieleResponse = zod.object({
   "externalId": zod.string(),
   "status": zod.enum(['created', 'skipped'])
 }))
+})
+
+
+export const ListAdminProductsResponse = zod.object({
+  "products": zod.array(zod.object({
+  "id": zod.int(),
+  "code": zod.string().nullish(),
+  "name": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "isSystem": zod.boolean(),
+  "active": zod.boolean(),
+  "currentPrice": zod.union([zod.object({
+  "id": zod.int(),
+  "productId": zod.int(),
+  "unitPriceCents": zod.int(),
+  "effectiveFrom": zod.coerce.date()
+}),zod.null()]).optional()
+}))
+})
+
+
+
+export const createAdminProductBodyActiveDefault = true;
+export const createAdminProductBodyUnitPriceCentsMin = 0;
+
+
+
+export const CreateAdminProductBody = zod.object({
+  "name": zod.string().min(1),
+  "category": zod.enum(['FOOD', 'DRINK']),
+  "active": zod.boolean().default(createAdminProductBodyActiveDefault),
+  "unitPriceCents": zod.int().min(createAdminProductBodyUnitPriceCentsMin)
+})
+
+export const CreateAdminProductResponse = zod.object({
+  "id": zod.int(),
+  "code": zod.string().nullish(),
+  "name": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "isSystem": zod.boolean(),
+  "active": zod.boolean(),
+  "currentPrice": zod.union([zod.object({
+  "id": zod.int(),
+  "productId": zod.int(),
+  "unitPriceCents": zod.int(),
+  "effectiveFrom": zod.coerce.date()
+}),zod.null()]).optional()
+})
+
+
+export const UpdateAdminProductParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+
+
+
+export const UpdateAdminProductBody = zod.object({
+  "name": zod.string().min(1).optional(),
+  "category": zod.enum(['FOOD', 'DRINK']).optional(),
+  "active": zod.boolean().optional()
+})
+
+export const UpdateAdminProductResponse = zod.object({
+  "id": zod.int(),
+  "code": zod.string().nullish(),
+  "name": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "isSystem": zod.boolean(),
+  "active": zod.boolean(),
+  "currentPrice": zod.union([zod.object({
+  "id": zod.int(),
+  "productId": zod.int(),
+  "unitPriceCents": zod.int(),
+  "effectiveFrom": zod.coerce.date()
+}),zod.null()]).optional()
+})
+
+
+export const DeleteAdminProductParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const DeleteAdminProductResponse = zod.void()
+
+
+export const CreateAdminProductPriceParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const createAdminProductPriceBodyUnitPriceCentsMin = 0;
+
+
+
+export const CreateAdminProductPriceBody = zod.object({
+  "unitPriceCents": zod.int().min(createAdminProductPriceBodyUnitPriceCentsMin),
+  "effectiveFrom": zod.coerce.date().optional()
+})
+
+export const CreateAdminProductPriceResponse = zod.object({
+  "id": zod.int(),
+  "productId": zod.int(),
+  "unitPriceCents": zod.int(),
+  "effectiveFrom": zod.coerce.date()
+})
+
+
+export const GetAdminCurrentProductPriceParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const GetAdminCurrentProductPriceResponse = zod.object({
+  "id": zod.int(),
+  "productId": zod.int(),
+  "unitPriceCents": zod.int(),
+  "effectiveFrom": zod.coerce.date()
+})
+
+
+export const GetAdminDaySalesQueryParams = zod.object({
+  "datum": zod.date().optional()
+})
+
+export const GetAdminDaySalesResponse = zod.object({
+  "datum": zod.coerce.date(),
+  "sales": zod.array(zod.object({
+  "productId": zod.int(),
+  "productName": zod.string().optional(),
+  "quantity": zod.int(),
+  "totalCents": zod.int()
+})),
+  "totalCents": zod.int()
+})
+
+
+export const GetSyncProductCatalogResponse = zod.object({
+  "products": zod.array(zod.object({
+  "id": zod.int(),
+  "code": zod.string().nullish(),
+  "name": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "isSystem": zod.boolean(),
+  "active": zod.boolean(),
+  "currentPrice": zod.union([zod.object({
+  "id": zod.int(),
+  "productId": zod.int(),
+  "unitPriceCents": zod.int(),
+  "effectiveFrom": zod.coerce.date()
+}),zod.null()]).optional()
+}))
+})
+
+
+export const GetSyncDaySalesQueryParams = zod.object({
+  "datum": zod.date()
+})
+
+export const GetSyncDaySalesResponse = zod.object({
+  "datum": zod.coerce.date(),
+  "sales": zod.array(zod.object({
+  "productId": zod.int(),
+  "productName": zod.string().optional(),
+  "quantity": zod.int(),
+  "totalCents": zod.int()
+})),
+  "totalCents": zod.int()
+})
+
+
+
+
+
+
+
+
+export const PostSyncSaleEventsBody = zod.object({
+  "events": zod.array(zod.object({
+  "externalId": zod.string().min(1),
+  "spielerId": zod.int().min(1),
+  "datum": zod.coerce.date(),
+  "productId": zod.int().min(1),
+  "priceRevisionId": zod.int().min(1),
+  "quantity": zod.int()
+}))
+})
+
+export const PostSyncSaleEventsResponse = zod.object({
+  "synced": zod.int(),
+  "skipped": zod.int()
 })
 
 

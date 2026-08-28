@@ -6,3 +6,4 @@ export * from "./api-keys";
 export * from "./kredite";
 export * from "./smtp-settings";
 export * from "./spieler-updates";
+export * from "./products";

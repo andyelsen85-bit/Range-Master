@@ -247,7 +247,22 @@ export function EinstellungenScreen() {
   const store = useGameStore();
   const [url, setUrl] = useState(store.apiUrl);
   const [key, setKey] = useState(store.apiKey);
-  const [activeTab, setActiveTab] = useState<'api' | 'schanzen' | 'custom' | 'wifi' | 'bluetooth' | 'system'>('api');
+  const [activeTab, setActiveTab] = useState<'api' | 'produkte' | 'schanzen' | 'custom' | 'wifi' | 'bluetooth' | 'system'>('api');
+  const [preise, setPreise] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setPreise(Object.fromEntries(store.produkte.map(p => [
+      p.id, (p.preisRevisionen[p.preisRevisionen.length - 1].preisCents / 100).toFixed(2),
+    ])));
+  }, [store.produkte]);
+
+  const savePreis = (produktId: string) => {
+    const raw = (preise[produktId] ?? '').trim().replace(',', '.');
+    if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) return;
+    const [whole, fraction = ''] = raw.split('.');
+    const cents = Number(whole) * 100 + Number((fraction + '00').slice(0, 2));
+    if (Number.isSafeInteger(cents)) store.setProduktPreis(produktId, cents);
+  };
 
   const save = () => {
     store.setApiSettings(url, key);
@@ -271,6 +286,7 @@ export function EinstellungenScreen() {
       <div className="flex border-b-2 border-border bg-card/50 shrink-0">
         {([
           { key: 'api',       label: 'Portal API' },
+           { key: 'produkte',  label: 'Präisser' },
           { key: 'schanzen',  label: 'Schanzen' },
           { key: 'custom',    label: 'Custom Modi' },
           { key: 'wifi',      label: 'WiFi' },
@@ -357,6 +373,24 @@ export function EinstellungenScreen() {
                 Leschte Sync: {store.lastSync}
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'produkte' && (
+          <div className="max-w-2xl flex flex-col gap-5">
+            <div className="bg-card border-2 border-border rounded-xl p-6">
+              <h2 className="text-base font-bold uppercase tracking-widest mb-2">Terminal-Produkter</h2>
+              <p className="text-sm text-muted-foreground mb-5">Präisser ginn als exakt Cent gespäichert. Eng Ännerung erstellt eng nei Präisrevision; al Verkeef bleiwen onverännert.</p>
+              <div className="flex flex-col gap-3">
+                {store.produkte.map(produkt => (
+                  <div key={produkt.id} className="flex flex-col sm:flex-row gap-3 sm:items-center border border-border rounded-lg p-4">
+                    <div className="flex-1"><b>{produkt.name}</b><div className="text-xs text-muted-foreground">{produkt.preisRevisionen.length} Präisrevision(en)</div></div>
+                    <input data-testid={`input-price-${produkt.id}`} type="text" inputMode="decimal" value={preise[produkt.id] ?? ''} onChange={e => setPreise({ ...preise, [produkt.id]: e.target.value })} className="h-11 w-36 border-2 border-border bg-background rounded-lg px-3 font-mono focus:border-primary focus:outline-none" aria-label={`Präis ${produkt.name}`} />
+                    <TouchButton data-testid={`button-save-price-${produkt.id}`} className="h-11 px-4" onClick={() => savePreis(produkt.id)}><Save className="w-4 h-4" /> Späicheren</TouchButton>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 

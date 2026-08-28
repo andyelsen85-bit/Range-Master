@@ -19,6 +19,9 @@ esp_err_t http_fetch_spielhistorie(void);
 esp_err_t http_push_spieler_updates(void);
 esp_err_t http_push_kredit_events(void);
 esp_err_t http_pull_kredite(void);
+esp_err_t http_fetch_produkte(void);
+esp_err_t http_push_verkauf_events(void);
+esp_err_t http_pull_verkaeufe(void);
 
 /** Run the full sync sequence (push + pull). */
 esp_err_t http_sync_all(void);

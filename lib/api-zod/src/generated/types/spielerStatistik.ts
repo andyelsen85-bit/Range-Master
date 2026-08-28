@@ -9,7 +9,7 @@ import type { SpielerStatistikMaschinen } from './spielerStatistikMaschinen';
 
 export interface SpielerStatistik {
   spielerId: number;
-  gesamtLauefe: number;
+  gesamtSpiele: number;
   durchschnitt: number;
   bestPunkte: number;
   trefferquote: number;

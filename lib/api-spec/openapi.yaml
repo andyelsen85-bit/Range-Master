@@ -20,6 +20,8 @@ tags:
     description: Statistics
   - name: sync
     description: ESP32 display sync
+  - name: admin
+    description: Administrator operations
 
 paths:
   /healthz:
@@ -394,6 +396,104 @@ paths:
                       required: [externalId, status]
                 required: [results]
 
+  # ── PRODUCTS & SALES ─────────────────────────────────────────────────────
+  /admin/products:
+    get:
+      operationId: listAdminProducts
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Product catalogue with current prices
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProductList" } } }
+    post:
+      operationId: createAdminProduct
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/FlexibleProductInput" } } }
+      responses:
+        "201":
+          description: Product created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Product" } } }
+        "400": { description: Invalid product, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /admin/products/{id}:
+    patch:
+      operationId: updateAdminProduct
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProductUpdate" } } }
+      responses:
+        "200": { description: Product updated, content: { application/json: { schema: { $ref: "#/components/schemas/Product" } } } }
+        "404": { description: Product not found, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+    delete:
+      operationId: deleteAdminProduct
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "204": { description: Product deleted }
+        "400": { description: Protected product, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "404": { description: Product not found, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /admin/products/{id}/prices:
+    post:
+      operationId: createAdminProductPrice
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PriceRevisionInput" } } }
+      responses:
+        "201": { description: Immutable price revision created, content: { application/json: { schema: { $ref: "#/components/schemas/PriceRevision" } } } }
+        "404": { description: Product not found, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /admin/products/{id}/current-price:
+    get:
+      operationId: getAdminCurrentProductPrice
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200": { description: Current price, content: { application/json: { schema: { $ref: "#/components/schemas/PriceRevision" } } } }
+        "404": { description: Product or current price not found, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /admin/sales:
+    get:
+      operationId: getAdminDaySales
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: datum, in: query, schema: { type: string, format: date } }]
+      responses:
+        "200": { description: Per-day sales report, content: { application/json: { schema: { $ref: "#/components/schemas/DaySalesReport" } } } }
+  /sync/products:
+    get:
+      operationId: getSyncProductCatalog
+      tags: [sync]
+      security: [{ apiKeyAuth: [] }]
+      responses:
+        "200": { description: Active catalogue, content: { application/json: { schema: { $ref: "#/components/schemas/ProductList" } } } }
+  /sync/sales:
+    get:
+      operationId: getSyncDaySales
+      tags: [sync]
+      security: [{ apiKeyAuth: [] }]
+      parameters: [{ name: datum, in: query, required: true, schema: { type: string, format: date } }]
+      responses:
+        "200": { description: Day aggregates, content: { application/json: { schema: { $ref: "#/components/schemas/DaySalesReport" } } } }
+    post:
+      operationId: postSyncSaleEvents
+      tags: [sync]
+      security: [{ apiKeyAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SaleEventBatchInput" } } }
+      responses:
+        "200": { description: Idempotent upload result, content: { application/json: { schema: { $ref: "#/components/schemas/SaleSyncResult" } } } }
+        "400": { description: "Unknown player, product, or price revision", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+
 # ── COMPONENTS ────────────────────────────────────────────────────────────
 components:
   securitySchemes:
@@ -407,6 +507,89 @@ components:
       name: x-api-key
 
   schemas:
+    ProductCategory:
+      type: string
+      enum: [GAME_CREDIT, AMMO_CAL12, AMMO_CAL20, FOOD, DRINK]
+    Product:
+      type: object
+      required: [id, name, category, isSystem, active]
+      properties:
+        id: { type: integer }
+        code: { type: [string, "null"] }
+        name: { type: string }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        isSystem: { type: boolean }
+        active: { type: boolean }
+        currentPrice: { anyOf: [{ $ref: "#/components/schemas/PriceRevision" }, { type: "null" }] }
+    ProductList:
+      type: object
+      required: [products]
+      properties:
+        products: { type: array, items: { $ref: "#/components/schemas/Product" } }
+    FlexibleProductInput:
+      type: object
+      required: [name, category, unitPriceCents]
+      properties:
+        name: { type: string, minLength: 1 }
+        category: { type: string, enum: [FOOD, DRINK] }
+        active: { type: boolean, default: true }
+        unitPriceCents: { type: integer, minimum: 0 }
+    ProductUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        category: { type: string, enum: [FOOD, DRINK] }
+        active: { type: boolean }
+    PriceRevisionInput:
+      type: object
+      required: [unitPriceCents]
+      properties:
+        unitPriceCents: { type: integer, minimum: 0 }
+        effectiveFrom: { type: string, format: date-time }
+    PriceRevision:
+      type: object
+      required: [id, productId, unitPriceCents, effectiveFrom]
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        unitPriceCents: { type: integer }
+        effectiveFrom: { type: string, format: date-time }
+    SaleEventInput:
+      type: object
+      required: [externalId, spielerId, datum, productId, priceRevisionId, quantity]
+      properties:
+        externalId: { type: string, minLength: 1 }
+        spielerId: { type: integer, minimum: 1 }
+        datum: { type: string, format: date }
+        productId: { type: integer, minimum: 1 }
+        priceRevisionId: { type: integer, minimum: 1 }
+        quantity: { type: integer, not: { const: 0 } }
+    SaleEventBatchInput:
+      type: object
+      required: [events]
+      properties:
+        events: { type: array, items: { $ref: "#/components/schemas/SaleEventInput" } }
+    SaleSyncResult:
+      type: object
+      required: [synced, skipped]
+      properties:
+        synced: { type: integer }
+        skipped: { type: integer }
+    DaySalesItem:
+      type: object
+      required: [productId, quantity, totalCents]
+      properties:
+        productId: { type: integer }
+        productName: { type: string }
+        quantity: { type: integer }
+        totalCents: { type: integer }
+    DaySalesReport:
+      type: object
+      required: [datum, sales, totalCents]
+      properties:
+        datum: { type: string, format: date }
+        sales: { type: array, items: { $ref: "#/components/schemas/DaySalesItem" } }
+        totalCents: { type: integer }
     HealthStatus:
       type: object
       properties:

@@ -90,6 +90,42 @@ export interface KreditEvent {
   anzahl: number;
 }
 
+/** A price is always represented as integer cents; never use floating point money. */
+export interface PreisRevision {
+  id: string;
+  preisCents: number;
+  gueltigAb: string;
+}
+
+export interface Produkt {
+  id: string;
+  name: string;
+  typ: 'KREDIT' | 'MUNITION';
+  preisRevisionen: PreisRevision[];
+}
+
+/** Immutable ledger entry. Negative quantities are corrections, never edits. */
+export interface VerkaufEvent {
+  externalId: string;
+  spielerId: number;
+  datum: string;
+  produktId: string;
+  preisId: string;
+  anzahl: number;
+}
+
+export const PRODUKT_IDS = {
+  kredit: 'game-credit',
+  cal12: 'cal-12',
+  cal20: 'cal-20',
+} as const;
+
+const DEFAULT_PRODUKTE: Produkt[] = [
+  { id: PRODUKT_IDS.kredit, name: 'Game Credit', typ: 'KREDIT', preisRevisionen: [{ id: 'game-credit-v1', preisCents: 0, gueltigAb: '2025-01-01' }] },
+  { id: PRODUKT_IDS.cal12, name: 'Cal. 12', typ: 'MUNITION', preisRevisionen: [{ id: 'cal-12-v1', preisCents: 0, gueltigAb: '2025-01-01' }] },
+  { id: PRODUKT_IDS.cal20, name: 'Cal. 20', typ: 'MUNITION', preisRevisionen: [{ id: 'cal-20-v1', preisCents: 0, gueltigAb: '2025-01-01' }] },
+];
+
 const MAX_PENDING_KREDIT_EVENTS = 50;
 const kreditEventsInFlight = new Set<string>();
 
@@ -128,6 +164,7 @@ interface Settings {
   apiKey: string;
   customSequenzen: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', CustomSequenz>;
   customLaeufe: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', 1 | 2>;
+  produkte: Produkt[];
 }
 
 interface GameState extends Settings {
@@ -168,6 +205,13 @@ interface GameState extends Settings {
   pendingKredite: KreditEvent[];
   krediteLaden: boolean;
 
+  // Product ledger (day-scoped totals are calculated from these immutable events)
+  produkte: Produkt[];
+  verkaufDatum: string;
+  verkaeufe: VerkaufEvent[];
+  pendingVerkaeufe: VerkaufEvent[];
+  verkaeufeLaden: boolean;
+
   // Actions
   setScreen: (screen: Screen) => void;
   dismissResultate: () => void;
@@ -204,6 +248,11 @@ interface GameState extends Settings {
   getKreditRest: (spielerId: number) => number;
   /** Pull today's credit state from the portal and merge with unsynced local events */
   ladeKredite: () => Promise<void>;
+  setProduktPreis: (produktId: string, preisCents: number) => void;
+  addVerkauf: (spielerId: number, produktId: string, anzahl: number) => void;
+  getProduktAnzahl: (spielerId: number, produktId: string) => number;
+  ladeProdukte: () => Promise<void>;
+  ladeVerkaeufe: () => Promise<void>;
 
   /** Queue a player edit (name/email/portal activation) for the next sync */
   queueSpielerUpdate: (spielerId: number, changes: { name: string; email: string | null; portalAktiv: boolean }) => void;
@@ -364,6 +413,33 @@ const PENDING_SPIELER_KEY = 'rangemaster-pending-spieler';
 const KREDITE_KEY = 'rangemaster-kredite';
 const PENDING_KREDITE_KEY = 'rangemaster-pending-kredite';
 const SPIELER_UPDATES_KEY = 'rangemaster-spieler-updates';
+const VERKAEUFE_KEY = 'rangemaster-verkaeufe';
+const PENDING_VERKAEUFE_KEY = 'rangemaster-pending-verkaeufe';
+
+function currentPreis(produkt: Produkt): PreisRevision {
+  return produkt.preisRevisionen[produkt.preisRevisionen.length - 1];
+}
+
+function normalizeProdukte(raw: unknown): Produkt[] {
+  if (!Array.isArray(raw)) return DEFAULT_PRODUKTE;
+  const valid = raw.filter((p): p is Produkt => !!p && typeof p === 'object' &&
+    typeof (p as Produkt).id === 'string' && Array.isArray((p as Produkt).preisRevisionen) &&
+    (p as Produkt).preisRevisionen.length > 0);
+  // The terminal always exposes these three fixed products, even when a stale
+  // local settings file predates the product catalogue.
+  return DEFAULT_PRODUKTE.map(defaultProduct => valid.find(p => p.id === defaultProduct.id) ?? defaultProduct);
+}
+
+function loadVerkaeufe(key: string): VerkaufEvent[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+    return raw ? JSON.parse(raw) as VerkaufEvent[] : [];
+  } catch { return []; }
+}
+
+function saveVerkaeufe(key: string, events: VerkaufEvent[]) {
+  try { localStorage.setItem(key, JSON.stringify(events)); } catch {}
+}
 
 function loadSpielerUpdates(): SpielerUpdate[] {
   try {
@@ -485,9 +561,14 @@ function loadSettings(): Partial<Settings> {
   }
 }
 
-function saveToStorage(settings: Settings) {
+function saveToStorage(settings: Omit<Settings, 'produkte'> & Partial<Pick<Settings, 'produkte'>>) {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    // Legacy settings actions only update game/network preferences. Retain the
+    // independently edited catalogue instead of accidentally dropping it.
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      ...settings,
+      produkte: settings.produkte ?? normalizeProdukte(loadSettings().produkte),
+    }));
   } catch {}
 }
 
@@ -570,6 +651,7 @@ export const useGameStore = create<GameState>((set, get) => {
   const apiKey: string = saved.apiKey ?? '';
   const customSequenzen = normalizeCustomSequenzen(saved.customSequenzen);
   const customLaeufe = saved.customLaeufe ?? { ...DEFAULT_CUSTOM_LAEUFE };
+  const produkte = normalizeProdukte(saved.produkte);
 
   return {
     // Settings (persisted)
@@ -579,6 +661,7 @@ export const useGameStore = create<GameState>((set, get) => {
     apiKey,
     customSequenzen,
     customLaeufe,
+    produkte,
 
     // Volatile
     screen: 'dashboard',
@@ -608,6 +691,10 @@ export const useGameStore = create<GameState>((set, get) => {
     ...loadKredite(),
     pendingKredite: loadPendingKredite(),
     krediteLaden: false,
+    verkaufDatum: todayStr(),
+    verkaeufe: loadVerkaeufe(VERKAEUFE_KEY).filter(e => e.datum === todayStr()),
+    pendingVerkaeufe: loadVerkaeufe(PENDING_VERKAEUFE_KEY),
+    verkaeufeLaden: false,
 
     syncStatus: 'idle',
     lastSync: null,
@@ -621,6 +708,7 @@ export const useGameStore = create<GameState>((set, get) => {
         apiKey: s.apiKey,
         customSequenzen: s.customSequenzen,
         customLaeufe: s.customLaeufe,
+        produkte: s.produkte,
       });
     },
 
@@ -1092,6 +1180,89 @@ export const useGameStore = create<GameState>((set, get) => {
       }
     },
 
+    setProduktPreis: (produktId, preisCents) => set((state) => {
+      if (!Number.isSafeInteger(preisCents) || preisCents < 0) return state;
+      const produkte = state.produkte.map(produkt => {
+        if (produkt.id !== produktId || currentPreis(produkt).preisCents === preisCents) return produkt;
+        return {
+          ...produkt,
+          preisRevisionen: [...produkt.preisRevisionen, {
+            id: `${produkt.id}-${generateSpielId()}`,
+            preisCents,
+            gueltigAb: new Date().toISOString(),
+          }],
+        };
+      });
+      saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen, customLaeufe: state.customLaeufe, produkte });
+      return { produkte };
+    }),
+
+    addVerkauf: (spielerId, produktId, anzahl) => set((state) => {
+      if (!Number.isSafeInteger(anzahl) || anzahl === 0) return state;
+      const produkt = state.produkte.find(p => p.id === produktId);
+      if (!produkt) return state;
+      const event: VerkaufEvent = {
+        externalId: generateSpielId(), spielerId, datum: todayStr(), produktId,
+        preisId: currentPreis(produkt).id, anzahl,
+      };
+      const pendingVerkaeufe = [...state.pendingVerkaeufe, event];
+      const verkaufDatum = todayStr();
+      const verkaeufe = state.verkaufDatum === verkaufDatum
+        ? [...state.verkaeufe, event] : [event];
+      saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
+      saveVerkaeufe(VERKAEUFE_KEY, verkaeufe);
+      return { verkaufDatum, verkaeufe, pendingVerkaeufe };
+    }),
+
+    getProduktAnzahl: (spielerId, produktId) => {
+      const state = get();
+      if (state.verkaufDatum !== todayStr()) return 0;
+      return state.verkaeufe
+        .filter(e => e.spielerId === spielerId && e.produktId === produktId)
+        .reduce((sum, e) => sum + e.anzahl, 0);
+    },
+
+    ladeProdukte: async () => {
+      const state = get();
+      if (!state.apiUrl || !state.apiKey) return;
+      try {
+        const res = await fetch(`${state.apiUrl}/api/sync/produkte`, {
+          headers: { 'x-api-key': state.apiKey }, signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json() as { produkte?: Produkt[] };
+        const produkte = normalizeProdukte(data.produkte);
+        const s = get();
+        saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl: s.apiUrl, apiKey: s.apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe, produkte });
+        set({ produkte });
+      } catch {}
+    },
+
+    ladeVerkaeufe: async () => {
+      const state = get();
+      if (!state.apiUrl || !state.apiKey) return;
+      const datum = todayStr();
+      set({ verkaeufeLaden: true });
+      try {
+        const res = await fetch(`${state.apiUrl}/api/sync/verkaeufe?datum=${datum}`, {
+          headers: { 'x-api-key': state.apiKey }, signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json() as { events?: VerkaufEvent[]; verkaeufe?: VerkaufEvent[] };
+        const serverEvents = data.events ?? data.verkaeufe ?? [];
+        // A pull must not make locally queued sales disappear. Server entries
+        // with an acknowledged externalId replace their local copy once.
+        const pending = get().pendingVerkaeufe;
+        const ids = new Set(serverEvents.map(e => e.externalId));
+        const merged = [
+          ...serverEvents,
+          ...pending.filter(e => e.datum === datum && !ids.has(e.externalId)),
+        ];
+        saveVerkaeufe(VERKAEUFE_KEY, merged);
+        set({ verkaufDatum: datum, verkaeufe: merged, verkaeufeLaden: false });
+      } catch { set({ verkaeufeLaden: false }); }
+    },
+
     queueSpielerUpdate: (spielerId, changes) => set((state) => {
       const spieler = state.portalSpieler.find(p => p.id === spielerId);
       const spielerName = changes.name || spieler?.name || `#${spielerId}`;
@@ -1271,6 +1442,8 @@ export const useGameStore = create<GameState>((set, get) => {
           }));
           const remappedSpieler = s2.spieler.map(s => ({ ...s, id: remap(s.id) }));
             const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
+          const remappedVerkaufEvents = s2.pendingVerkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
+          const remappedVerkaeufe = s2.verkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
             const remappedActiveCreditUses = s2.activeGameCreditUses.map(e => ({
               ...e, spielerId: remap(e.spielerId),
             }));
@@ -1289,6 +1462,8 @@ export const useGameStore = create<GameState>((set, get) => {
           saveCachedSpieler(remappedPortal);
           saveGameHistory(remappedHistory);
           savePendingKredite(remappedKreditEvents);
+          saveVerkaeufe(PENDING_VERKAEUFE_KEY, remappedVerkaufEvents);
+          saveVerkaeufe(VERKAEUFE_KEY, remappedVerkaeufe);
           saveKredite(s2.kreditDatum, remappedKredite);
           saveSpielerUpdates(remappedUpdates);
           set({
@@ -1298,6 +1473,8 @@ export const useGameStore = create<GameState>((set, get) => {
             portalSpieler: remappedPortal,
             gameHistory: remappedHistory,
             pendingKredite: remappedKreditEvents,
+            pendingVerkaeufe: remappedVerkaufEvents,
+            verkaeufe: remappedVerkaeufe,
               activeGameCreditUses: remappedActiveCreditUses,
             kredite: remappedKredite,
             spielerUpdates: remappedUpdates,
@@ -1375,6 +1552,28 @@ export const useGameStore = create<GameState>((set, get) => {
               for (const event of pushable) kreditEventsInFlight.delete(event.externalId);
             }
           }
+        }
+
+        // ── Step 1d: push the immutable product-sale ledger ─────────────────
+        {
+          const pushable = get().pendingVerkaeufe.filter(e => e.spielerId > 0);
+          if (pushable.length) {
+            const sentIds = new Set(pushable.map(e => e.externalId));
+            const resV = await fetch(`${state.apiUrl}/api/sync/verkaeufe`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
+              body: JSON.stringify({ events: pushable }),
+              signal: AbortSignal.timeout(15000),
+            });
+            if (!resV.ok) throw new Error(`HTTP ${resV.status}`);
+            // Only remove the snapshot posted above: a new tap during this
+            // request remains queued and is never lost.
+            const pendingVerkaeufe = get().pendingVerkaeufe.filter(e => !sentIds.has(e.externalId));
+            saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
+            set({ pendingVerkaeufe });
+          }
+          await get().ladeProdukte();
+          await get().ladeVerkaeufe();
         }
 
         // ── Step 2: push pending games ───────────────────────────────────────

@@ -5,11 +5,10 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
-import type { Modus } from './modus';
+import type { DaySalesItem } from './daySalesItem';
 
-export type GetStatistikVerlauf200VerlaufItem = {
+export interface DaySalesReport {
   datum: Date;
-  punkte: number;
-  modus: Modus;
-  maxPunkte: number;
-};
+  sales: DaySalesItem[];
+  totalCents: number;
+}

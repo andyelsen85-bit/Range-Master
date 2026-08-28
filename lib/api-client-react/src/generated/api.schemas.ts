@@ -5,6 +5,112 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+export type ProductCategory = typeof ProductCategory[keyof typeof ProductCategory];
+
+
+export const ProductCategory = {
+  GAME_CREDIT: 'GAME_CREDIT',
+  AMMO_CAL12: 'AMMO_CAL12',
+  AMMO_CAL20: 'AMMO_CAL20',
+  FOOD: 'FOOD',
+  DRINK: 'DRINK',
+} as const;
+
+export interface PriceRevision {
+  id: number;
+  productId: number;
+  unitPriceCents: number;
+  effectiveFrom: string;
+}
+
+export interface Product {
+  id: number;
+  /** @nullable */
+  code?: string | null;
+  name: string;
+  category: ProductCategory;
+  isSystem: boolean;
+  active: boolean;
+  currentPrice?: PriceRevision | null;
+}
+
+export interface ProductList {
+  products: Product[];
+}
+
+export type FlexibleProductInputCategory = typeof FlexibleProductInputCategory[keyof typeof FlexibleProductInputCategory];
+
+
+export const FlexibleProductInputCategory = {
+  FOOD: 'FOOD',
+  DRINK: 'DRINK',
+} as const;
+
+export interface FlexibleProductInput {
+  /** @minLength 1 */
+  name: string;
+  category: FlexibleProductInputCategory;
+  active?: boolean;
+  /** @minimum 0 */
+  unitPriceCents: number;
+}
+
+export type ProductUpdateCategory = typeof ProductUpdateCategory[keyof typeof ProductUpdateCategory];
+
+
+export const ProductUpdateCategory = {
+  FOOD: 'FOOD',
+  DRINK: 'DRINK',
+} as const;
+
+export interface ProductUpdate {
+  /** @minLength 1 */
+  name?: string;
+  category?: ProductUpdateCategory;
+  active?: boolean;
+}
+
+export interface PriceRevisionInput {
+  /** @minimum 0 */
+  unitPriceCents: number;
+  effectiveFrom?: string;
+}
+
+export interface SaleEventInput {
+  /** @minLength 1 */
+  externalId: string;
+  /** @minimum 1 */
+  spielerId: number;
+  datum: string;
+  /** @minimum 1 */
+  productId: number;
+  /** @minimum 1 */
+  priceRevisionId: number;
+  quantity: number;
+}
+
+export interface SaleEventBatchInput {
+  events: SaleEventInput[];
+}
+
+export interface SaleSyncResult {
+  synced: number;
+  skipped: number;
+}
+
+export interface DaySalesItem {
+  productId: number;
+  productName?: string;
+  quantity: number;
+  totalCents: number;
+}
+
+export interface DaySalesReport {
+  datum: string;
+  sales: DaySalesItem[];
+  totalCents: number;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -256,5 +362,13 @@ export type PostSyncSpiele200ResultsItem = {
 
 export type PostSyncSpiele200 = {
   results: PostSyncSpiele200ResultsItem[];
+};
+
+export type GetAdminDaySalesParams = {
+datum?: string;
+};
+
+export type GetSyncDaySalesParams = {
+datum: string;
 };
 

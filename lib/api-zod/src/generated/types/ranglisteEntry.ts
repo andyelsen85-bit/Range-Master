@@ -11,7 +11,9 @@ export interface RanglisteEntry {
   spielerId: number;
   name: string;
   gesamtPunkte: number;
-  anzahlLauefe: number;
+  anzahlSpiele: number;
   durchschnitt: number;
+  /** Normalized average as a percentage of the maximum possible score (gesamtPunkte / gesamtMaxPunkte × 100). Use this for cross-format comparisons because different game formats have different max scores. */
+  durchschnittProzent: number;
   bestPunkte: number;
 }
