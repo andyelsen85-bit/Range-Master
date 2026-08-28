@@ -9,6 +9,7 @@
 #include "game_store.h"
 #include "screen_spiel.h"
 #include "lora_stub.h"
+#include "coprocessor.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_maschine;
@@ -21,6 +22,7 @@ static lv_obj_t *s_lbl_active_pts;    // active shooter: points
 static lv_obj_t *s_btn_wiederhole;
 static lv_obj_t *s_lbl_modus;
 static lv_obj_t *s_lbl_fire_status;
+static lv_obj_t *s_lbl_wifi_status;
 static lv_obj_t *s_btn_fire;
 static lv_obj_t *s_lbl_fire_button;
 static lv_obj_t *s_score_table;
@@ -368,7 +370,18 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_text_font(s_lbl_active_pts, &lv_font_montserrat_36, 0);
     lv_obj_set_style_text_color(s_lbl_active_pts, lv_color_hex(CLR_PRIMARY), 0);
 
-    s_lbl_fire_status = lv_label_create(right);
+    lv_obj_t *network_row = lv_obj_create(right);
+    lv_obj_set_size(network_row, LV_PCT(100), 24);
+    lv_obj_set_style_bg_opa(network_row, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(network_row, 0, 0);
+    lv_obj_set_style_pad_all(network_row, 0, 0);
+    lv_obj_set_flex_flow(network_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(network_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    s_lbl_wifi_status = lv_label_create(network_row);
+    lv_label_set_text(s_lbl_wifi_status, "WIFI: -");
+    lv_obj_set_style_text_font(s_lbl_wifi_status, &lv_font_montserrat_12, 0);
+    s_lbl_fire_status = lv_label_create(network_row);
     lv_label_set_text(s_lbl_fire_status, "Gateway: -");
     lv_obj_set_style_text_font(s_lbl_fire_status, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_lbl_fire_status, lv_color_hex(CLR_MUTED), 0);
@@ -403,11 +416,26 @@ void screen_spiel_refresh(void)
     if (!s_lbl_maschine) return;
     GameStore *s = &g_store;
     if (s_lbl_fire_status) {
-        char status[96];
-        char fire_status[112];
-        lora_copy_status_text(status, sizeof(status));
-        snprintf(fire_status, sizeof(fire_status), "Gateway: %s", status);
+        GatewayReachability gateway = lora_gateway_state();
+        char fire_status[64];
+        snprintf(fire_status, sizeof(fire_status), "GATEWAY: %s",
+                 lora_gateway_state_label(gateway));
         lv_label_set_text(s_lbl_fire_status, fire_status);
+        uint32_t color = gateway == GATEWAY_REACHABLE ? CLR_SUCCESS :
+                         gateway == GATEWAY_CHECKING ? CLR_WARN :
+                         gateway == GATEWAY_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
+        lv_obj_set_style_text_color(s_lbl_fire_status, lv_color_hex(color), 0);
+    }
+    if (s_lbl_wifi_status) {
+        CopWifiState wifi = cop_wifi_state();
+        char text[48];
+        snprintf(text, sizeof(text), "WIFI: %s", cop_wifi_state_label(wifi));
+        lv_label_set_text(s_lbl_wifi_status, text);
+        uint32_t color = wifi == COP_WIFI_CONNECTED ? CLR_SUCCESS :
+                         (wifi == COP_WIFI_CONNECTING ||
+                          wifi == COP_WIFI_RECONNECTING) ? CLR_WARN :
+                         wifi == COP_WIFI_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
+        lv_obj_set_style_text_color(s_lbl_wifi_status, lv_color_hex(color), 0);
     }
 
     // ── Compute current sequenz entry state ───────────────

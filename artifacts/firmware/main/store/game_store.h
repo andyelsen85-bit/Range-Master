@@ -22,6 +22,9 @@
 #define TM_MAX_SSID_LEN     33
 #define MAX_PASS_LEN        64
 #define CUSTOM_SEQ_MAX      16
+#define AUTO_SYNC_MIN_SECONDS 10u
+#define AUTO_SYNC_MAX_SECONDS 86400u
+#define AUTO_SYNC_DEFAULT_SECONDS 300u
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -199,6 +202,8 @@ typedef struct {
     uint32_t gatewaySequence; // persisted, strictly increasing gateway command sequence
     char    wifiSsid[TM_MAX_SSID_LEN];
     char    wifiPass[MAX_PASS_LEN];
+    bool    autoSyncEnabled;
+    uint32_t autoSyncSeconds;
     CustomSequenzEintrag customSequenzen[4][CUSTOM_SEQ_MAX];
     int      customSequenzLen[4];
     int      customLaeufe[4];        // 1 or 2
@@ -309,6 +314,8 @@ void store_register_spieler_fuer_tag(int spieler_id);
  * unavailable or its queue is busy; the caller must not treat it as a sync.
  */
 bool store_sync(void);
+bool store_sync_is_queued_or_running(void);
+bool store_set_auto_sync(bool enabled, uint32_t seconds);
 
 /**
  * Request exactly one initial full sync after this boot's stored-WiFi

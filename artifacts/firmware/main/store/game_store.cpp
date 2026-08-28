@@ -21,9 +21,13 @@
 
 #include "game_store.h"
 #include "http_sync.h"
+#include "coprocessor.h"
 #include "app_config.h"
 
 static const char *TAG = "game_store";
+static_assert(AUTO_SYNC_MIN_SECONDS <= AUTO_SYNC_DEFAULT_SECONDS &&
+              AUTO_SYNC_DEFAULT_SECONDS <= AUTO_SYNC_MAX_SECONDS,
+              "Auto-sync default must remain within persisted validation bounds");
 
 // Forward declaration (defined later in this file)
 static void _store_finish_game(void);
@@ -846,7 +850,9 @@ static QueueHandle_t s_load_spieler_queue = NULL;
 static QueueHandle_t s_sync_queue         = NULL;
 static portMUX_TYPE s_sync_request_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_boot_sync_requested = false;
-static bool s_boot_sync_queued = false;
+static bool s_boot_sync_consumed = false;
+static bool s_sync_pending = false;
+static TickType_t s_next_auto_sync;
 
 static void queue_boot_sync_if_pending(void);
 
@@ -900,15 +906,32 @@ void store_create_workers(void)
         QueueHandle_t queue = (QueueHandle_t)arg;
         uint32_t dummy;
         for (;;) {
-            xQueueReceive(queue, &dummy, portMAX_DELAY);
+            if (xQueueReceive(queue, &dummy, pdMS_TO_TICKS(1000)) != pdTRUE) {
+                bool due = g_store.autoSyncEnabled &&
+                           (int32_t)(xTaskGetTickCount() - s_next_auto_sync) >= 0;
+                if (due && cop_wifi_is_connected() &&
+                    !store_sync_is_queued_or_running()) {
+                    store_sync();
+                }
+                continue;
+            }
+            g_store.syncStatus = SYNC_RUNNING;
             esp_err_t err = http_sync_all();
             g_store.syncStatus = (err == ESP_OK) ? SYNC_SUCCESS : SYNC_ERROR;
             if (err != ESP_OK) {
-                snprintf(g_store.syncError, sizeof(g_store.syncError),
-                         "HTTP sync failed: %s", esp_err_to_name(err));
+                http_sync_copy_last_error(g_store.syncError,
+                                          sizeof(g_store.syncError));
+                if (!g_store.syncError[0])
+                    snprintf(g_store.syncError, sizeof(g_store.syncError),
+                             "HTTP sync failed: %s", esp_err_to_name(err));
+            } else {
+                g_store.syncError[0] = '\0';
             }
-            // If the boot WiFi connection happened while another sync had
-            // filled the queue, retry the one required initial sync now.
+            portENTER_CRITICAL(&s_sync_request_lock);
+            s_sync_pending = false;
+            s_next_auto_sync = xTaskGetTickCount() +
+                pdMS_TO_TICKS(g_store.autoSyncSeconds * 1000u);
+            portEXIT_CRITICAL(&s_sync_request_lock);
             queue_boot_sync_if_pending();
         }
     }, "sync_w", 16384, sync_queue, 5, NULL,
@@ -924,6 +947,8 @@ void store_create_workers(void)
 
     portENTER_CRITICAL(&s_sync_request_lock);
     s_sync_queue = sync_queue;
+    s_next_auto_sync = xTaskGetTickCount() +
+        pdMS_TO_TICKS(g_store.autoSyncSeconds * 1000u);
     portEXIT_CRITICAL(&s_sync_request_lock);
 
     ESP_LOGI(TAG, "Store workers created. Internal RAM remaining: %u",
@@ -1145,9 +1170,22 @@ bool store_sync(void)
         return false;
     }
 
+    portENTER_CRITICAL(&s_sync_request_lock);
+    if (s_sync_pending) {
+        portEXIT_CRITICAL(&s_sync_request_lock);
+        snprintf(g_store.syncError, sizeof(g_store.syncError),
+                 "Sync request already queued or running");
+        return false;
+    }
+    s_sync_pending = true;
+    portEXIT_CRITICAL(&s_sync_request_lock);
+
     g_store.syncStatus = SYNC_RUNNING;
     uint32_t trigger = 1;
     if (xQueueSend(sync_queue, &trigger, 0) != pdTRUE) {
+        portENTER_CRITICAL(&s_sync_request_lock);
+        s_sync_pending = false;
+        portEXIT_CRITICAL(&s_sync_request_lock);
         g_store.syncStatus = SYNC_ERROR;
         snprintf(g_store.syncError, sizeof(g_store.syncError),
                  "Sync request already queued");
@@ -1156,12 +1194,35 @@ bool store_sync(void)
     return true;
 }
 
+bool store_sync_is_queued_or_running(void)
+{
+    portENTER_CRITICAL(&s_sync_request_lock);
+    bool pending = s_sync_pending;
+    portEXIT_CRITICAL(&s_sync_request_lock);
+    return pending;
+}
+
+bool store_set_auto_sync(bool enabled, uint32_t seconds)
+{
+    if (seconds < AUTO_SYNC_MIN_SECONDS || seconds > AUTO_SYNC_MAX_SECONDS)
+        return false;
+    g_store.autoSyncEnabled = enabled;
+    g_store.autoSyncSeconds = seconds;
+    portENTER_CRITICAL(&s_sync_request_lock);
+    s_next_auto_sync = xTaskGetTickCount() + pdMS_TO_TICKS(seconds * 1000u);
+    portEXIT_CRITICAL(&s_sync_request_lock);
+    game_store_save();
+    return true;
+}
+
 void store_sync_after_boot_wifi_connected(void)
 {
     portENTER_CRITICAL(&s_sync_request_lock);
-    if (!s_boot_sync_requested) {
+    // This is deliberately one-shot per boot. A connection flap before the
+    // initial request is accepted can retry queueing; once accepted, normal
+    // scheduler/manual paths handle all later syncs.
+    if (!s_boot_sync_consumed)
         s_boot_sync_requested = true;
-    }
     portEXIT_CRITICAL(&s_sync_request_lock);
 
     queue_boot_sync_if_pending();
@@ -1171,17 +1232,20 @@ static void queue_boot_sync_if_pending(void)
 {
     bool queue_sync_now = false;
     portENTER_CRITICAL(&s_sync_request_lock);
-    if (s_boot_sync_requested && !s_boot_sync_queued && s_sync_queue) {
-        // Reserve the one boot-sync slot before queueing so the autoconnect
-        // task and sync worker cannot enqueue it twice.
-        s_boot_sync_queued = true;
+    if (s_boot_sync_requested && !s_sync_pending && s_sync_queue) {
+        // Consume the request before leaving the lock. If queueing fails it
+        // is restored below; success/failure of the HTTP operation never
+        // leaves a permanent boot latch behind.
+        s_boot_sync_requested = false;
+        s_boot_sync_consumed = true;
         queue_sync_now = true;
     }
     portEXIT_CRITICAL(&s_sync_request_lock);
 
     if (queue_sync_now && !store_sync()) {
         portENTER_CRITICAL(&s_sync_request_lock);
-        s_boot_sync_queued = false;
+        s_boot_sync_requested = true;
+        s_boot_sync_consumed = false;
         portEXIT_CRITICAL(&s_sync_request_lock);
         ESP_LOGE(TAG, "Initial boot sync could not be queued");
     }
@@ -1202,6 +1266,8 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "wifi_pass", g_store.wifiPass);
     nvs_set_i32(s_nvs, "modus", (int32_t)g_store.modus);
     nvs_set_i32(s_nvs, "click_snd", g_store.clickSoundEnabled ? 1 : 0);
+    nvs_set_i32(s_nvs, "auto_sync", g_store.autoSyncEnabled ? 1 : 0);
+    nvs_set_u32(s_nvs, "auto_secs", g_store.autoSyncSeconds);
     nvs_set_blob(s_nvs, "custom_seq", g_store.customSequenzen,
                  sizeof(g_store.customSequenzen));
     nvs_set_blob(s_nvs, "custom_len", g_store.customSequenzLen,
@@ -1237,6 +1303,8 @@ void game_store_init(void)
     g_store.customLaeufe[2] = g_store.customLaeufe[3] = 2;
     set_default_custom_sequences();
     g_store.screen = SCREEN_DASHBOARD;
+    g_store.autoSyncEnabled = true;
+    g_store.autoSyncSeconds = AUTO_SYNC_DEFAULT_SECONDS;
 
     // Load persisted values
     nvs_load_str("api_url",   g_store.apiUrl,   MAX_URL_LEN);
@@ -1296,7 +1364,15 @@ void game_store_init(void)
     else
         g_store.clickSoundEnabled = true;  // first boot — enable by default
 
+    int32_t auto_sync = 1;
+    uint32_t auto_secs = AUTO_SYNC_DEFAULT_SECONDS;
+    if (nvs_get_i32(s_nvs, "auto_sync", &auto_sync) == ESP_OK)
+        g_store.autoSyncEnabled = auto_sync != 0;
+    if (nvs_get_u32(s_nvs, "auto_secs", &auto_secs) == ESP_OK &&
+        auto_secs >= AUTO_SYNC_MIN_SECONDS &&
+        auto_secs <= AUTO_SYNC_MAX_SECONDS)
+        g_store.autoSyncSeconds = auto_secs;
+
     ESP_LOGI(TAG, "Store initialised. API: %s modus: %s",
              g_store.apiUrl, modus_label(g_store.modus));
-    ESP_LOGI(TAG, "API key in use: '%s'", g_store.apiKey);
 }

@@ -277,7 +277,7 @@ extern "C" void app_main(void)
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
     coprocessor_init();
 
-    // ── Auto-connect to last known WiFi (non-blocking task) ──
+    // ── Persistent WiFi supervisor (stored credentials + backoff) ──
     coprocessor_autoconnect();
 
     // ── Gateway fire worker (HTTP → local LoRa gateway) ───────

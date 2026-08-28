@@ -12,6 +12,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/idf_additions.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -31,12 +34,35 @@ static EventGroupHandle_t  s_scan_done_group  = NULL;  // non-NULL only during c
 static volatile bool       s_wifi_connected = false;
 static char                s_ip_addr[16]    = {0};
 static int                 s_retry_count    = 0;
+static SemaphoreHandle_t   s_wifi_op_mutex;
+static QueueHandle_t       s_wifi_command_queue;
+static portMUX_TYPE        s_wifi_state_lock = portMUX_INITIALIZER_UNLOCKED;
+static CopWifiState        s_wifi_state = COP_WIFI_NOT_CONFIGURED;
+static char                s_wifi_status[80] = "WiFi not configured";
+
+typedef struct {
+    bool disconnect;
+    char ssid[TM_MAX_SSID_LEN];
+    char pass[MAX_PASS_LEN];
+} WifiCommand;
+
+static void set_wifi_state(CopWifiState state, const char *status)
+{
+    portENTER_CRITICAL(&s_wifi_state_lock);
+    s_wifi_state = state;
+    snprintf(s_wifi_status, sizeof(s_wifi_status), "%s", status ? status : "");
+    portEXIT_CRITICAL(&s_wifi_state_lock);
+}
 
 #define WIFI_CONNECTED_BIT  BIT0
 #define WIFI_FAIL_BIT       BIT1
 #define SCAN_DONE_BIT       BIT2
 #define WIFI_CONNECT_TIMEOUT_MS  20000   // 20 s — DHCP can be slow
 #define WIFI_SCAN_TIMEOUT_MS     30000   // 30 s — allow for slow RPC; reduce once C6 slave is at 2.12.12
+#define WIFI_BACKOFF_MIN_MS       2000u
+#define WIFI_BACKOFF_MAX_MS      60000u
+static_assert(WIFI_BACKOFF_MIN_MS < WIFI_BACKOFF_MAX_MS,
+              "WiFi retry bounds must be ordered");
 
 // ── WiFi event handler ───────────────────────────────────────
 static void wifi_event_handler(void *arg, esp_event_base_t base,
@@ -69,7 +95,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
                 ESP_LOGW(TAG, "WiFi disconnected (reason %d)", disc->reason);
                 s_wifi_connected = false;
                 s_ip_addr[0]     = '\0';
+                g_store.wifiConnected = false;
                 web_config_stop();
+                if (s_wifi_command_queue) {
+                    WifiCommand wake = {};
+                    xQueueSend(s_wifi_command_queue, &wake, 0);
+                }
                 // Signal failure so cop_wifi_connect() unblocks
                 xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
                 break;
@@ -82,6 +113,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)event_data;
         snprintf(s_ip_addr, sizeof(s_ip_addr), IPSTR, IP2STR(&ev->ip_info.ip));
         s_wifi_connected = true;
+        set_wifi_state(COP_WIFI_CONNECTED, "Connected");
         s_retry_count    = 0;
         ESP_LOGI(TAG, "WiFi got IP: %s", s_ip_addr);
         strncpy(g_store.wifiIp, s_ip_addr, sizeof(g_store.wifiIp) - 1);
@@ -126,6 +158,8 @@ void coprocessor_init(void)
     // internal RAM remain, so the allocation fails and the scan silently
     // returns ESP_ERR_NO_MEM with zero results.
     s_scan_done_group = xEventGroupCreate();
+    s_wifi_op_mutex = xSemaphoreCreateMutex();
+    configASSERT(s_wifi_event_group && s_scan_done_group && s_wifi_op_mutex);
 
     // Standard lwip + event loop initialisation.
     // esp_wifi_remote intercepts esp_wifi_init() and brings up the
@@ -151,7 +185,21 @@ void coprocessor_init(void)
 // ── WiFi ─────────────────────────────────────────────────────
 esp_err_t cop_wifi_connect(const char *ssid, const char *pass)
 {
-    if (!ssid || strlen(ssid) == 0) return ESP_ERR_INVALID_ARG;
+    esp_err_t queued = cop_wifi_request_connect(ssid, pass);
+    if (queued != ESP_OK) return queued;
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS);
+    while ((int32_t)(deadline - xTaskGetTickCount()) > 0) {
+        CopWifiState state = cop_wifi_state();
+        if (state == COP_WIFI_CONNECTED) return ESP_OK;
+        if (state == COP_WIFI_UNREACHABLE || state == COP_WIFI_FAILED) return ESP_FAIL;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t wifi_connect_attempt(const char *ssid, const char *pass)
+{
+    if (!ssid || !ssid[0]) return ESP_ERR_INVALID_ARG;
 
     wifi_config_t wifi_cfg = {};
     strncpy((char *)wifi_cfg.sta.ssid,     ssid, sizeof(wifi_cfg.sta.ssid) - 1);
@@ -166,10 +214,11 @@ esp_err_t cop_wifi_connect(const char *ssid, const char *pass)
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
     s_retry_count = 0;
 
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
-    ESP_ERROR_CHECK(esp_wifi_connect());
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+    if (err == ESP_OK) err = esp_wifi_connect();
+    if (err != ESP_OK) return err;
 
-    ESP_LOGI(TAG, "Connecting to SSID: %s ...", ssid);
+    ESP_LOGI(TAG, "Connecting with stored WiFi credentials...");
 
     EventBits_t bits = xEventGroupWaitBits(
         s_wifi_event_group,
@@ -188,8 +237,24 @@ esp_err_t cop_wifi_connect(const char *ssid, const char *pass)
 
 esp_err_t cop_wifi_disconnect(void)
 {
-    s_wifi_connected = false;
-    return esp_wifi_disconnect();
+    if (!s_wifi_command_queue) return ESP_ERR_INVALID_STATE;
+    WifiCommand command = {};
+    command.disconnect = true;
+    return xQueueOverwrite(s_wifi_command_queue, &command) == pdTRUE
+           ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t cop_wifi_request_connect(const char *ssid, const char *pass)
+{
+    if (!s_wifi_command_queue) return ESP_ERR_INVALID_STATE;
+    if (!ssid || !ssid[0] || !pass) return ESP_ERR_INVALID_ARG;
+    WifiCommand command = {};
+    snprintf(command.ssid, sizeof(command.ssid), "%s", ssid);
+    snprintf(command.pass, sizeof(command.pass), "%s", pass);
+    if (xQueueOverwrite(s_wifi_command_queue, &command) != pdTRUE)
+        return ESP_FAIL;
+    set_wifi_state(COP_WIFI_CONNECTING, "Manual connection queued");
+    return ESP_OK;
 }
 
 esp_err_t cop_wifi_get_ip(char *buf, size_t len)
@@ -202,6 +267,9 @@ esp_err_t cop_wifi_get_ip(char *buf, size_t len)
 
 esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
 {
+    if (!names || !count || max <= 0 || !s_wifi_op_mutex) return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_wifi_op_mutex, pdMS_TO_TICKS(1000)) != pdTRUE)
+        return ESP_ERR_INVALID_STATE;
     *count = 0;
     ESP_LOGI(TAG, "cop_wifi_scan: entered, max=%d", max);
 
@@ -215,6 +283,7 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
     esp_err_t err = esp_wifi_scan_start(&scan_cfg, false);   // non-blocking
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Scan start failed: %s", esp_err_to_name(err));
+        xSemaphoreGive(s_wifi_op_mutex);
         return err;
     }
 
@@ -233,6 +302,7 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
                       "(2) SDIO link stable? Check GPIO14-19/54 connections.",
                  WIFI_SCAN_TIMEOUT_MS / 1000);
         esp_wifi_scan_stop();
+        xSemaphoreGive(s_wifi_op_mutex);
         return ESP_ERR_TIMEOUT;
     }
 
@@ -261,12 +331,16 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
     if (ap_num == 0) {
         ESP_LOGW(TAG, "Still 0 APs — returning empty list");
         *count = 0;
+        xSemaphoreGive(s_wifi_op_mutex);
         return ESP_OK;
     }
 
     wifi_ap_record_t *records =
         (wifi_ap_record_t *)malloc(ap_num * sizeof(wifi_ap_record_t));
-    if (!records) return ESP_ERR_NO_MEM;
+    if (!records) {
+        xSemaphoreGive(s_wifi_op_mutex);
+        return ESP_ERR_NO_MEM;
+    }
 
     uint16_t fetched = ap_num;
     err = esp_wifi_scan_get_ap_records(&fetched, records);
@@ -288,44 +362,117 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count)
                  *count, (unsigned)fetched);
     }
     free(records);
+    xSemaphoreGive(s_wifi_op_mutex);
     return err;
 }
 
 bool cop_wifi_is_connected(void) { return s_wifi_connected; }
 
-// ── Auto-connect on boot ──────────────────────────────────────
+CopWifiState cop_wifi_state(void)
+{
+    portENTER_CRITICAL(&s_wifi_state_lock);
+    CopWifiState state = s_wifi_state;
+    portEXIT_CRITICAL(&s_wifi_state_lock);
+    return state;
+}
+
+const char *cop_wifi_state_label(CopWifiState state)
+{
+    switch (state) {
+        case COP_WIFI_NOT_CONFIGURED: return "NOT CONFIGURED";
+        case COP_WIFI_CONNECTING: return "CONNECTING";
+        case COP_WIFI_CONNECTED: return "CONNECTED";
+        case COP_WIFI_RECONNECTING: return "RECONNECTING";
+        case COP_WIFI_UNREACHABLE: return "UNREACHABLE";
+        default: return "FAILED";
+    }
+}
+
+void cop_wifi_copy_status(char *out, size_t out_len)
+{
+    if (!out || !out_len) return;
+    portENTER_CRITICAL(&s_wifi_state_lock);
+    snprintf(out, out_len, "%s", s_wifi_status);
+    portEXIT_CRITICAL(&s_wifi_state_lock);
+}
+
+static void wifi_supervisor(void *arg)
+{
+    WifiCommand command = {};
+    bool enabled = g_store.wifiSsid[0] != '\0';
+    char ssid[TM_MAX_SSID_LEN], pass[MAX_PASS_LEN];
+    snprintf(ssid, sizeof(ssid), "%s", g_store.wifiSsid);
+    snprintf(pass, sizeof(pass), "%s", g_store.wifiPass);
+    uint32_t backoff_ms = WIFI_BACKOFF_MIN_MS;
+    bool retrying = false;
+    bool first_attempt = true;
+    if (!enabled) set_wifi_state(COP_WIFI_NOT_CONFIGURED, "No stored SSID");
+
+    for (;;) {
+        bool force_connect = false;
+        TickType_t wait = enabled && !s_wifi_connected
+                        ? pdMS_TO_TICKS(backoff_ms) : portMAX_DELAY;
+        if (xQueueReceive(s_wifi_command_queue, &command,
+                          first_attempt && enabled ? 0 : wait) == pdTRUE) {
+            first_attempt = false;
+            if (command.disconnect) {
+                enabled = false;
+                xSemaphoreTake(s_wifi_op_mutex, portMAX_DELAY);
+                esp_wifi_disconnect();
+                xSemaphoreGive(s_wifi_op_mutex);
+                s_wifi_connected = false;
+                g_store.wifiConnected = false;
+                set_wifi_state(g_store.wifiSsid[0] ? COP_WIFI_FAILED
+                                                   : COP_WIFI_NOT_CONFIGURED,
+                               "Disconnected");
+                continue;
+            }
+            if (command.ssid[0]) {
+                snprintf(ssid, sizeof(ssid), "%s", command.ssid);
+                snprintf(pass, sizeof(pass), "%s", command.pass);
+                force_connect = true;
+            }
+            enabled = true;
+            backoff_ms = WIFI_BACKOFF_MIN_MS;
+            retrying = false;
+        } else {
+            first_attempt = false;
+        }
+
+        if (!enabled || (s_wifi_connected && !force_connect)) continue;
+        set_wifi_state(retrying ? COP_WIFI_RECONNECTING : COP_WIFI_CONNECTING,
+                       retrying ? "Reconnecting" : "Connecting");
+        xSemaphoreTake(s_wifi_op_mutex, portMAX_DELAY);
+        esp_err_t err = wifi_connect_attempt(ssid, pass);
+        xSemaphoreGive(s_wifi_op_mutex);
+        if (err == ESP_OK) {
+            backoff_ms = WIFI_BACKOFF_MIN_MS;
+            retrying = false;
+            g_store.wifiConnected = true;
+            store_sync_after_boot_wifi_connected();
+        } else {
+            char status[80];
+            snprintf(status, sizeof(status), "Connect failed: %s", esp_err_to_name(err));
+            set_wifi_state(COP_WIFI_UNREACHABLE, status);
+            if (retrying && backoff_ms < WIFI_BACKOFF_MAX_MS) {
+                backoff_ms *= 2;
+                if (backoff_ms > WIFI_BACKOFF_MAX_MS)
+                    backoff_ms = WIFI_BACKOFF_MAX_MS;
+            }
+            retrying = true;
+        }
+    }
+}
+
+// ── Persistent auto-connect supervisor ────────────────────────
 void coprocessor_autoconnect(void)
 {
-    if (g_store.wifiSsid[0] == '\0') {
-        ESP_LOGI(TAG, "autoconnect: no stored SSID — skipping");
-        return;
-    }
-    ESP_LOGI(TAG, "autoconnect: connecting to stored SSID '%s'", g_store.wifiSsid);
-
-    // One-shot task — tries up to 3 times, then deletes itself.
-    // Stack in SPIRAM; TCB needs internal RAM (always the case with xTaskCreate).
-    xTaskCreateWithCaps([](void *arg) {
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            ESP_LOGI("autoconnect", "Attempt %d/3: SSID='%s'", attempt, g_store.wifiSsid);
-            esp_err_t err = cop_wifi_connect(g_store.wifiSsid, g_store.wifiPass);
-            if (err == ESP_OK) {
-                // Mark connected in the store so the dashboard tick picks it up
-                g_store.wifiConnected = true;
-                ESP_LOGI("autoconnect", "Connected. IP: %s", g_store.wifiIp);
-                // Sync once per boot after the stored WiFi connection is
-                // confirmed. The store safely waits if its worker is still
-                // being created while the display/UI is booting.
-                store_sync_after_boot_wifi_connected();
-                vTaskDelete(NULL);
-                return;
-            }
-            ESP_LOGW("autoconnect", "Attempt %d/3 failed — %s",
-                     attempt, attempt < 3 ? "retrying in 5 s" : "giving up");
-            if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(5000));
-        }
-        vTaskDelete(NULL);
-    }, "autoconn", 4096, NULL, 4, NULL,
-       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_wifi_command_queue) return;
+    s_wifi_command_queue = xQueueCreate(1, sizeof(WifiCommand));
+    configASSERT(s_wifi_command_queue);
+    BaseType_t ok = xTaskCreateWithCaps(wifi_supervisor, "wifi_supervisor",
+        4096, NULL, 4, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    configASSERT(ok == pdPASS);
 }
 
 // ── BLE HID — future work via ESP-Hosted BLE transport ───────

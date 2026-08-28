@@ -184,6 +184,7 @@ void ui_manager_tick(void)
         case SCREEN_EINSTELLUNGEN: screen_einstellungen_tick(); break;
         case SCREEN_DASHBOARD:  screen_dashboard_tick();  break;
         case SCREEN_SPILLER:    screen_spiller_tick();    break;
+        case SCREEN_WIFI:       screen_wifi_tick();       break;
         default: break;
     }
 }

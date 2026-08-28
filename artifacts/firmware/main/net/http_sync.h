@@ -5,6 +5,7 @@
 // ============================================================
 #include "esp_err.h"
 #include "game_store.h"
+#include <stddef.h>
 
 /** POST /api/sync/spiele — push all pending games. */
 esp_err_t http_push_pending_games(void);
@@ -25,3 +26,6 @@ esp_err_t http_pull_verkaeufe(void);
 
 /** Run the full sync sequence (push + pull). */
 esp_err_t http_sync_all(void);
+
+/** Copy the last bounded, credential-free HTTP diagnostic. */
+void http_sync_copy_last_error(char *out, size_t out_len);

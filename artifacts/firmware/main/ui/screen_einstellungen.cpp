@@ -29,6 +29,9 @@ static lv_obj_t *s_lbl_api_status;
 static bool s_gateway_check_pending;
 static lv_obj_t *s_lbl_machine_test_status;
 static bool s_machine_test_pending;
+static lv_obj_t *s_auto_sync_switch;
+static lv_obj_t *s_auto_sync_seconds;
+static lv_obj_t *s_auto_sync_feedback;
 
 static void save_api_settings(void)
 {
@@ -771,6 +774,33 @@ static void click_sound_sw_cb(lv_event_t *e)
     game_store_save();
 }
 
+static bool read_auto_sync_seconds(uint32_t *seconds)
+{
+    if (!s_auto_sync_seconds || !seconds) return false;
+    const char *text = lv_textarea_get_text(s_auto_sync_seconds);
+    if (!text || !text[0]) return false;
+    char *end = NULL;
+    unsigned long value = strtoul(text, &end, 10);
+    if (*end || value < AUTO_SYNC_MIN_SECONDS || value > AUTO_SYNC_MAX_SECONDS)
+        return false;
+    *seconds = (uint32_t)value;
+    return true;
+}
+
+static void auto_sync_changed(lv_event_t *e)
+{
+    uint32_t seconds;
+    if (!read_auto_sync_seconds(&seconds)) {
+        lv_label_set_text(s_auto_sync_feedback, "10..86400 SEKONNEN NOUTWENDIG");
+        lv_obj_set_style_text_color(s_auto_sync_feedback, lv_color_hex(CLR_DANGER), 0);
+        return;
+    }
+    bool enabled = lv_obj_has_state(s_auto_sync_switch, LV_STATE_CHECKED);
+    store_set_auto_sync(enabled, seconds);
+    lv_label_set_text(s_auto_sync_feedback, "AUTO SYNC GESPEICHERT");
+    lv_obj_set_style_text_color(s_auto_sync_feedback, lv_color_hex(CLR_SUCCESS), 0);
+}
+
 static lv_obj_t *build_system_tab(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
@@ -795,6 +825,40 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_obj_t *snd_sw = lv_switch_create(snd_row);
     if (g_store.clickSoundEnabled) lv_obj_add_state(snd_sw, LV_STATE_CHECKED);
     lv_obj_add_event_cb(snd_sw, click_sound_sw_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *sync_row = lv_obj_create(parent);
+    lv_obj_set_size(sync_row, LV_PCT(100), 64);
+    lv_obj_set_style_bg_color(sync_row, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_border_width(sync_row, 0, 0);
+    lv_obj_set_style_radius(sync_row, 8, 0);
+    lv_obj_set_style_pad_hor(sync_row, 12, 0);
+    lv_obj_set_flex_flow(sync_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(sync_row, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(sync_row, 16, 0);
+    lv_obj_t *sync_label = lv_label_create(sync_row);
+    lv_label_set_text(sync_label, "AUTO SYNC");
+    lv_obj_set_style_text_color(sync_label, lv_color_hex(CLR_TEXT), 0);
+    s_auto_sync_switch = lv_switch_create(sync_row);
+    if (g_store.autoSyncEnabled) lv_obj_add_state(s_auto_sync_switch, LV_STATE_CHECKED);
+    s_auto_sync_seconds = lv_textarea_create(sync_row);
+    lv_obj_set_size(s_auto_sync_seconds, 150, 44);
+    lv_textarea_set_one_line(s_auto_sync_seconds, true);
+    lv_textarea_set_accepted_chars(s_auto_sync_seconds, "0123456789");
+    lv_textarea_set_max_length(s_auto_sync_seconds, 5);
+    char seconds_text[12];
+    snprintf(seconds_text, sizeof(seconds_text), "%lu",
+             (unsigned long)g_store.autoSyncSeconds);
+    lv_textarea_set_text(s_auto_sync_seconds, seconds_text);
+    lv_obj_t *seconds_label = lv_label_create(sync_row);
+    lv_label_set_text(seconds_label, "SEK. (10..86400)");
+    lv_obj_set_style_text_color(seconds_label, lv_color_hex(CLR_MUTED), 0);
+    s_auto_sync_feedback = lv_label_create(parent);
+    lv_label_set_text(s_auto_sync_feedback, "");
+    lv_obj_add_event_cb(s_auto_sync_switch, auto_sync_changed,
+                        LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(s_auto_sync_seconds, auto_sync_changed,
+                        LV_EVENT_VALUE_CHANGED, NULL);
 
     // ── Firmware / board info ─────────────────────────────────
     static const char *info_rows[] = {
@@ -901,10 +965,12 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
         lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
         lv_keyboard_set_textarea(s_kb, NULL);
+        lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_TEXT_LOWER);
     }, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_kb, [](lv_event_t *e) {
         lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
         lv_keyboard_set_textarea(s_kb, NULL);
+        lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_TEXT_LOWER);
     }, LV_EVENT_CANCEL, NULL);
 
     // API tab textareas
@@ -931,6 +997,13 @@ lv_obj_t *screen_einstellungen_create(void)
             lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
         }, LV_EVENT_FOCUSED, NULL);
     }
+    if (s_auto_sync_seconds) {
+        lv_obj_add_event_cb(s_auto_sync_seconds, [](lv_event_t *e) {
+            lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_NUMBER);
+            lv_keyboard_set_textarea(s_kb, s_auto_sync_seconds);
+            lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_FOCUSED, NULL);
+    }
 
     return s_scr;
 }
@@ -941,6 +1014,16 @@ void screen_einstellungen_refresh(void)
     if (s_ta_key) lv_textarea_set_text(s_ta_key, g_store.apiKey);
     if (s_ta_gateway) lv_textarea_set_text(s_ta_gateway, g_store.gatewayUrl);
     if (s_ta_gateway_token) lv_textarea_set_text(s_ta_gateway_token, g_store.gatewayToken);
+    if (s_auto_sync_switch) {
+        if (g_store.autoSyncEnabled) lv_obj_add_state(s_auto_sync_switch, LV_STATE_CHECKED);
+        else lv_obj_clear_state(s_auto_sync_switch, LV_STATE_CHECKED);
+    }
+    if (s_auto_sync_seconds) {
+        char value[12];
+        snprintf(value, sizeof(value), "%lu",
+                 (unsigned long)g_store.autoSyncSeconds);
+        lv_textarea_set_text(s_auto_sync_seconds, value);
+    }
     lv_obj_t *price_inputs[] = {s_ta_price_credit, s_ta_price_cal12, s_ta_price_cal20};
     const char *price_ids[] = {"GAME_CREDIT", "AMMO_CAL12", "AMMO_CAL20"};
     for (int i = 0; i < 3; ++i) if (price_inputs[i]) {
@@ -972,13 +1055,9 @@ void screen_einstellungen_tick(void)
     if (s_gateway_check_pending && s_lbl_api_status) {
         char status[96];
         lora_copy_status_text(status, sizeof(status));
-        uint32_t color = CLR_WARN;
-        if (strstr(status, "key accepted")) {
-            color = CLR_SUCCESS;
-        } else if (strstr(status, "key rejected") || strstr(status, "unreachable") ||
-                   strstr(status, "rejected") || strstr(status, "invalid")) {
-            color = CLR_DANGER;
-        }
+        GatewayReachability gateway = lora_gateway_state();
+        uint32_t color = gateway == GATEWAY_REACHABLE ? CLR_SUCCESS :
+                         gateway == GATEWAY_CHECKING ? CLR_WARN : CLR_DANGER;
         set_api_status(status, color);
         if (!lora_request_busy()) s_gateway_check_pending = false;
     }

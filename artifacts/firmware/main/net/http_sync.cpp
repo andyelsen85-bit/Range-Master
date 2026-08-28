@@ -20,6 +20,25 @@
 static const char *TAG = "http_sync";
 
 #define HTTP_BUF_SIZE  (32 * 1024)
+static portMUX_TYPE s_error_lock = portMUX_INITIALIZER_UNLOCKED;
+static char s_last_error[160];
+
+static void set_http_error(const char *operation, const char *path,
+                           const char *reason)
+{
+    portENTER_CRITICAL(&s_error_lock);
+    snprintf(s_last_error, sizeof(s_last_error), "%s %s: %s",
+             operation, path, reason);
+    portEXIT_CRITICAL(&s_error_lock);
+}
+
+void http_sync_copy_last_error(char *out, size_t out_len)
+{
+    if (!out || !out_len) return;
+    portENTER_CRITICAL(&s_error_lock);
+    snprintf(out, out_len, "%s", s_last_error);
+    portEXIT_CRITICAL(&s_error_lock);
+}
 
 // ── UTF-8 → display-safe ASCII ────────────────────────────────
 // Replaces accented / umlaut characters (ä ö ü é à è …) with
@@ -75,16 +94,22 @@ typedef struct {
     char  *buf;
     int    len;
     int    cap;
+    bool   truncated;
 } http_acc_t;
 
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
     http_acc_t *acc = (http_acc_t *)evt->user_data;
     if (evt->event_id == HTTP_EVENT_ON_DATA && acc) {
-        if (acc->len + evt->data_len < acc->cap - 1) {
-            memcpy(acc->buf + acc->len, evt->data, evt->data_len);
-            acc->len += evt->data_len;
+        int available = acc->cap - acc->len - 1;
+        if (available > 0) {
+            int copy = evt->data_len < available ? evt->data_len : available;
+            memcpy(acc->buf + acc->len, evt->data, copy);
+            acc->len += copy;
             acc->buf[acc->len] = '\0';
+            if (copy != evt->data_len) acc->truncated = true;
+        } else {
+            acc->truncated = true;
         }
     }
     return ESP_OK;
@@ -94,13 +119,22 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap)
 {
+    if (!path || !body || (resp_buf && resp_cap < 2)) {
+        set_http_error("POST", path ? path : "(null)", "invalid arguments");
+        return ESP_ERR_INVALID_ARG;
+    }
     char url[256];
-    snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
+    int url_len = snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
+    if (url_len < 0 || url_len >= (int)sizeof(url)) {
+        set_http_error("POST", path, "URL too long");
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     esp_err_t err = ESP_FAIL;
     for (int attempt = 1; attempt <= 3; attempt++) {
         if (resp_buf) resp_buf[0] = '\0';
-        http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap };
+        http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap,
+                           .truncated = false };
 
         esp_http_client_config_t cfg = {};
         cfg.url               = url;
@@ -109,6 +143,10 @@ static esp_err_t http_post_json(const char *path, const char *body,
         cfg.crt_bundle_attach = esp_crt_bundle_attach;
         cfg.timeout_ms        = 12000;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        if (!client) {
+            set_http_error("POST", path, "client init failed");
+            return ESP_ERR_NO_MEM;
+        }
         esp_http_client_set_method(client, HTTP_METHOD_POST);
         esp_http_client_set_header(client, "Content-Type", "application/json");
         esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
@@ -119,10 +157,18 @@ static esp_err_t http_post_json(const char *path, const char *body,
             int status = esp_http_client_get_status_code(client);
             if (status < 200 || status >= 300) {
                 ESP_LOGW(TAG, "POST %s → HTTP %d", path, status);
+                char reason[32];
+                snprintf(reason, sizeof(reason), "HTTP %d", status);
+                set_http_error("POST", path, reason);
                 err = ESP_FAIL;
             }
         } else {
             ESP_LOGW(TAG, "POST %s attempt %d/3 failed: %s", path, attempt, esp_err_to_name(err));
+            set_http_error("POST", path, esp_err_to_name(err));
+        }
+        if (acc.truncated) {
+            set_http_error("POST", path, "response truncated");
+            err = ESP_ERR_INVALID_SIZE;
         }
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
@@ -136,13 +182,22 @@ static esp_err_t http_post_json(const char *path, const char *body,
 static esp_err_t http_get_json(const char *path,
                                char *resp_buf, size_t resp_cap)
 {
+    if (!path || !resp_buf || resp_cap < 2) {
+        set_http_error("GET", path ? path : "(null)", "invalid arguments");
+        return ESP_ERR_INVALID_ARG;
+    }
     char url[256];
-    snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
+    int url_len = snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
+    if (url_len < 0 || url_len >= (int)sizeof(url)) {
+        set_http_error("GET", path, "URL too long");
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     esp_err_t err = ESP_FAIL;
     for (int attempt = 1; attempt <= 3; attempt++) {
         resp_buf[0] = '\0';
-        http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap };
+        http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap,
+                           .truncated = false };
 
         esp_http_client_config_t cfg = {};
         cfg.url               = url;
@@ -151,6 +206,10 @@ static esp_err_t http_get_json(const char *path,
         cfg.crt_bundle_attach = esp_crt_bundle_attach;
         cfg.timeout_ms        = 12000;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        if (!client) {
+            set_http_error("GET", path, "client init failed");
+            return ESP_ERR_NO_MEM;
+        }
         esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
 
         err = esp_http_client_perform(client);
@@ -158,10 +217,18 @@ static esp_err_t http_get_json(const char *path,
             int status = esp_http_client_get_status_code(client);
             if (status < 200 || status >= 300) {
                 ESP_LOGW(TAG, "GET %s → HTTP %d", path, status);
+                char reason[32];
+                snprintf(reason, sizeof(reason), "HTTP %d", status);
+                set_http_error("GET", path, reason);
                 err = ESP_FAIL;
             }
         } else {
             ESP_LOGW(TAG, "GET %s attempt %d/3 failed: %s", path, attempt, esp_err_to_name(err));
+            set_http_error("GET", path, esp_err_to_name(err));
+        }
+        if (acc.truncated) {
+            set_http_error("GET", path, "response truncated");
+            err = ESP_ERR_INVALID_SIZE;
         }
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
@@ -270,7 +337,11 @@ esp_err_t http_push_pending_games(void)
         cJSON_AddItemToObject(wrap, "spiele", arr);
         char *body = cJSON_PrintUnformatted(wrap);
         cJSON_Delete(wrap);          // frees obj and arr too
-        if (!body) continue;
+        if (!body) {
+            overall = ESP_ERR_NO_MEM;
+            set_http_error("POST", "/api/sync/spiele", "JSON allocation failed");
+            continue;
+        }
 
         esp_err_t err = http_post_json("/api/sync/spiele", body, resp, HTTP_BUF_SIZE);
         free(body);
@@ -454,7 +525,11 @@ esp_err_t http_push_spieler_updates(void)
         if (e->email[0]) cJSON_AddStringToObject(req_obj, "email", e->email);
         char *body = cJSON_PrintUnformatted(req_obj);
         cJSON_Delete(req_obj);
-        if (!body) continue;
+        if (!body) {
+            overall = ESP_ERR_NO_MEM;
+            set_http_error("POST", "/api/sync/spieler-neu", "JSON allocation failed");
+            continue;
+        }
 
         char *resp = (char *)malloc(256);
         if (resp) {
@@ -487,12 +562,17 @@ esp_err_t http_push_spieler_updates(void)
                 } else {
                     ESP_LOGW(TAG, "spieler-neu: bad response for '%s' — retaining", e->name);
                     overall = ESP_FAIL;
+                    set_http_error("POST", "/api/sync/spieler-neu",
+                                   "invalid response");
                 }
             } else {
                 ESP_LOGW(TAG, "spieler-neu: HTTP error for '%s': %s", e->name, esp_err_to_name(cerr));
                 overall = cerr;
             }
             free(resp);
+        } else {
+            overall = ESP_ERR_NO_MEM;
+            set_http_error("POST", "/api/sync/spieler-neu", "response allocation failed");
         }
         free(body);
     }
@@ -544,8 +624,16 @@ esp_err_t http_push_spieler_updates(void)
                     if (overall == ESP_OK) overall = uerr;
                 }
                 free(resp);
+            } else {
+                overall = ESP_ERR_NO_MEM;
+                set_http_error("POST", "/api/sync/spieler-updates",
+                               "response allocation failed");
             }
             free(body);
+        } else {
+            overall = ESP_ERR_NO_MEM;
+            set_http_error("POST", "/api/sync/spieler-updates",
+                           "JSON allocation failed");
         }
     }
 
@@ -778,51 +866,67 @@ esp_err_t http_pull_verkaeufe(void)
 // ── http_sync_all ─────────────────────────────────────────────
 esp_err_t http_sync_all(void)
 {
+    portENTER_CRITICAL(&s_error_lock);
+    s_last_error[0] = '\0';
+    portEXIT_CRITICAL(&s_error_lock);
     if (!cop_wifi_is_connected()) {
         ESP_LOGW(TAG, "Sync skipped — WiFi not connected");
+        set_http_error("SYNC", "all", "WiFi not connected");
         return ESP_ERR_INVALID_STATE;
     }
     ESP_LOGI(TAG, "Starting full sync...");
-    ESP_LOGI(TAG, "  URL: %s  key: '%s'", g_store.apiUrl, g_store.apiKey);
+    ESP_LOGI(TAG, "  URL: %s (authenticated)", g_store.apiUrl);
     ESP_LOGI(TAG, "  internal free=%u B  largest block=%u B",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     // Push queued player edits (non-critical)
+    esp_err_t overall = ESP_OK;
     esp_err_t pue = http_push_spieler_updates();
+    if (pue != ESP_OK) overall = pue;
     if (pue != ESP_OK) ESP_LOGW(TAG, "Spieler updates push failed — continuing sync");
     esp_err_t ppr = http_fetch_produkte();
+    if (ppr != ESP_OK && overall == ESP_OK) overall = ppr;
     if (ppr != ESP_OK) ESP_LOGW(TAG, "Product pull failed — using cached catalog");
     esp_err_t pve = http_push_verkauf_events();
+    if (pve != ESP_OK && overall == ESP_OK) overall = pve;
     if (pve != ESP_OK) ESP_LOGW(TAG, "Sale push failed — queue retained");
     esp_err_t plv = http_pull_verkaeufe();
+    if (plv != ESP_OK && overall == ESP_OK) overall = plv;
     if (plv != ESP_OK) ESP_LOGW(TAG, "Sale pull failed — using local totals");
 
     // Push queued credit events (non-critical)
     esp_err_t pke = http_push_kredit_events();
+    if (pke != ESP_OK && overall == ESP_OK) overall = pke;
     if (pke != ESP_OK) ESP_LOGW(TAG, "Kredit events push failed — continuing sync");
 
     esp_err_t err = http_push_pending_games();
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
 
     err = http_fetch_spielhistorie();
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
 
     // Pull today's credit totals (non-critical — portal grants appear on terminal)
     esp_err_t pck = http_pull_kredite();
+    if (pck != ESP_OK && overall == ESP_OK) overall = pck;
     if (pck != ESP_OK) ESP_LOGW(TAG, "Credit pull failed — continuing");
 
     // Refresh player list — heap-allocated: 200×~104 B = ~20 KB would overflow
     // the 12 KB sync_task stack if declared as a local array.
     int count = 0;
     PortalSpieler *buf = (PortalSpieler *)malloc(MAX_PORTAL_SPIELER * sizeof(PortalSpieler));
-    if (!buf) { ESP_LOGE(TAG, "OOM for portal spieler buf"); return ESP_ERR_NO_MEM; }
+    if (!buf) {
+        ESP_LOGE(TAG, "OOM for portal spieler buf");
+        set_http_error("SYNC", "spieler", "out of memory");
+        return ESP_ERR_NO_MEM;
+    }
     err = http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count);
     if (err == ESP_OK) {
         memcpy(g_store.portalSpieler, buf, count * sizeof(PortalSpieler));
         g_store.portalSpielerCount = count;
     }
     free(buf);
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
 
-    ESP_LOGI(TAG, "Sync complete");
-    return ESP_OK;
+    ESP_LOGI(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
+    return overall;
 }

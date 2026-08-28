@@ -5,6 +5,15 @@
 #include <stddef.h>
 #include "game_store.h"
 
+typedef enum {
+    GATEWAY_NOT_CONFIGURED = 0,
+    GATEWAY_CHECKING,
+    GATEWAY_REACHABLE,
+    GATEWAY_UNREACHABLE,
+    GATEWAY_AUTH_FAILED,
+    GATEWAY_FAILED,
+} GatewayReachability;
+
 /** Create the persistent fire worker. Must be called once at boot. */
 void lora_stub_init(void);
 
@@ -33,3 +42,7 @@ bool lora_request_busy(void);
 
 /** Copy the latest user-visible result safely into caller-owned storage. */
 void lora_copy_status_text(char *out, size_t out_len);
+GatewayReachability lora_gateway_state(void);
+uint32_t lora_gateway_state_timestamp_ms(void);
+const char *lora_gateway_state_label(GatewayReachability state);
+void lora_copy_gateway_state_label(char *out, size_t out_len);

@@ -14,6 +14,8 @@
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_dashboard.h"
+#include "coprocessor.h"
+#include "lora_stub.h"
 
 
 // Persistent widget handles for screen_dashboard_refresh()
@@ -21,6 +23,7 @@ static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_sync_status;
 static lv_obj_t *s_lbl_pending;
 static lv_obj_t *s_lbl_wifi;
+static lv_obj_t *s_lbl_gateway;
 static lv_obj_t *s_history_list;
 static lv_obj_t *s_shutdown_modal;
 static lv_obj_t *s_shutdown_message;
@@ -121,7 +124,7 @@ static void shutdown_confirm_cb(lv_event_t *e)
 {
     if (s_shutdown_sync_pending) return;
 
-    if (!g_store.wifiConnected) {
+    if (cop_wifi_state() != COP_WIFI_CONNECTED) {
         set_shutdown_message("WIFI IS NOT CONNECTED.\n"
                              "CONNECT FIRST, THEN TRY AGAIN.", CLR_DANGER);
         return;
@@ -247,6 +250,12 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_font(s_lbl_wifi, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_wifi, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    s_lbl_gateway = lv_label_create(header);
+    lv_label_set_text(s_lbl_gateway, "GATEWAY: NOT CONFIGURED");
+    lv_obj_set_style_text_font(s_lbl_gateway, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(CLR_MUTED), 0);
+    lv_obj_align(s_lbl_gateway, LV_ALIGN_RIGHT_MID, -260, 0);
 
     // ── Left content area (game history) ──────────────────────
     lv_obj_t *content = lv_obj_create(s_scr);
@@ -430,13 +439,28 @@ void screen_dashboard_refresh(void)
     lv_label_set_text(s_lbl_pending, buf);
 
     // WiFi
-    if (g_store.wifiConnected) {
+    CopWifiState wifi_state = cop_wifi_state();
+    if (wifi_state == COP_WIFI_CONNECTED) {
         snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI "  %s", g_store.wifiIp);
         lv_label_set_text(s_lbl_wifi, buf);
         lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_SUCCESS), 0);
     } else {
-        lv_label_set_text(s_lbl_wifi, LV_SYMBOL_WIFI "  NET VERBONNEN");
-        lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_MUTED), 0);
+        snprintf(buf, sizeof(buf), "WIFI: %s", cop_wifi_state_label(wifi_state));
+        lv_label_set_text(s_lbl_wifi, buf);
+        uint32_t color = (wifi_state == COP_WIFI_CONNECTING ||
+                          wifi_state == COP_WIFI_RECONNECTING) ? CLR_WARN :
+                         wifi_state == COP_WIFI_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
+        lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(color), 0);
+    }
+    if (s_lbl_gateway) {
+        GatewayReachability gateway_state = lora_gateway_state();
+        snprintf(buf, sizeof(buf), "GATEWAY: %s",
+                 lora_gateway_state_label(gateway_state));
+        lv_label_set_text(s_lbl_gateway, buf);
+        uint32_t color = gateway_state == GATEWAY_REACHABLE ? CLR_SUCCESS :
+                         gateway_state == GATEWAY_CHECKING ? CLR_WARN :
+                         gateway_state == GATEWAY_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
+        lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(color), 0);
     }
 
     // History list (most-recent 5 entries) - proper-height rows
@@ -544,6 +568,6 @@ void screen_dashboard_tick(void)
     static uint32_t last = 0;
     if (lv_tick_get() - last > 2000) {
         last = lv_tick_get();
-        if (g_store.wifiConnected) screen_dashboard_refresh();
+        screen_dashboard_refresh();
     }
 }

@@ -4,15 +4,24 @@
 // WiFi via esp_wifi_remote → esp_hosted → C6 SDIO slave
 // ============================================================
 #include <stdbool.h>
+#include <stddef.h>
 #include "esp_err.h"
+
+typedef enum {
+    COP_WIFI_NOT_CONFIGURED = 0,
+    COP_WIFI_CONNECTING,
+    COP_WIFI_CONNECTED,
+    COP_WIFI_RECONNECTING,
+    COP_WIFI_UNREACHABLE,
+    COP_WIFI_FAILED,
+} CopWifiState;
 
 /** Initialise UART to the C6 co-processor. */
 void coprocessor_init(void);
 
 /**
- * If a WiFi SSID is stored in NVS, spawn a one-shot background task that
- * calls cop_wifi_connect() automatically.  Call after coprocessor_init()
- * and game_store_init().
+ * Start the one persistent WiFi supervisor. It owns all station
+ * configuration/connect/disconnect operations and retries stored credentials.
  */
 void coprocessor_autoconnect(void);
 
@@ -24,6 +33,9 @@ esp_err_t cop_wifi_connect(const char *ssid, const char *pass);
 /** Disconnect from current AP. */
 esp_err_t cop_wifi_disconnect(void);
 
+/** Queue new credentials for the persistent supervisor (non-blocking). */
+esp_err_t cop_wifi_request_connect(const char *ssid, const char *pass);
+
 /** Get current IP address (null-terminates buf). */
 esp_err_t cop_wifi_get_ip(char *buf, size_t len);
 
@@ -32,6 +44,9 @@ esp_err_t cop_wifi_scan(char names[][33], int max, int *count);
 
 /** Returns true if C6 reports WiFi connected. */
 bool cop_wifi_is_connected(void);
+CopWifiState cop_wifi_state(void);
+void cop_wifi_copy_status(char *out, size_t out_len);
+const char *cop_wifi_state_label(CopWifiState state);
 
 // ── BLE HID keyboard ────────────────────────────────────────
 

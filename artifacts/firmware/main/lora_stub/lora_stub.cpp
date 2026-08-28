@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "lora_stub.h"
 #include "game_store.h"
+#include "coprocessor.h"
 #include "../../../lora-common/trapmaster_auth.h"
 
 static const char *TAG = "lora_stub";
@@ -24,6 +25,9 @@ static QueueHandle_t s_gateway_queue;
 static SemaphoreHandle_t s_state_mutex;
 static char s_status[96] = "Gateway not configured";
 static bool s_request_busy = false;
+static GatewayReachability s_gateway_state = GATEWAY_NOT_CONFIGURED;
+static uint32_t s_gateway_state_ms = 0;
+static TickType_t s_last_health_tick = 0;
 
 typedef enum : uint8_t {
     GATEWAY_REQUEST_FIRE,
@@ -37,6 +41,7 @@ typedef struct {
     Maschine second_machine;
     uint16_t delay_ms;
     uint32_t sequence;
+    bool manual; // FIRE and operator-initiated health; autonomous health is false
     char gateway_url[MAX_URL_LEN];
     char gateway_token[MAX_KEY_LEN];
 } GatewayRequest;
@@ -55,6 +60,14 @@ static void set_request_busy(bool busy)
 {
     if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_request_busy = busy;
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+}
+
+static void set_gateway_state(GatewayReachability state)
+{
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_gateway_state = state;
+    s_gateway_state_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
     if (s_state_mutex) xSemaphoreGive(s_state_mutex);
 }
 
@@ -167,11 +180,11 @@ static bool build_health_url(char *url, size_t url_len, const GatewayRequest *re
 }
 
 static bool perform_authenticated_get(const char *url, const char *mac_hex,
-                                      int *last_http, int timeout_ms)
+                                       int *last_http, int timeout_ms, int attempts)
 {
     bool success = false;
     *last_http = 0;
-    for (int attempt = 0; attempt < 3 && !success; attempt++) {
+    for (int attempt = 0; attempt < attempts && !success; attempt++) {
         esp_http_client_config_t cfg = {};
         cfg.url = url;
         cfg.timeout_ms = timeout_ms;
@@ -189,7 +202,7 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
         }
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
-        if (!success && attempt < 2)
+        if (!success && attempt + 1 < attempts)
             vTaskDelay(pdMS_TO_TICKS(100));
     }
     return success;
@@ -200,7 +213,30 @@ static void gateway_worker(void *arg)
     GatewayRequest request;
     char url[MAX_URL_LEN + 96];
     for (;;) {
-        if (xQueueReceive(s_gateway_queue, &request, portMAX_DELAY) != pdTRUE) continue;
+        if (xQueueReceive(s_gateway_queue, &request, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            TickType_t now = xTaskGetTickCount();
+            if (!cop_wifi_is_connected() || !g_store.gatewayUrl[0] ||
+                !g_store.gatewayToken[0] ||
+                (now - s_last_health_tick) < pdMS_TO_TICKS(15000)) {
+                if (!cop_wifi_is_connected() &&
+                    g_store.gatewayUrl[0] && g_store.gatewayToken[0])
+                    set_gateway_state(GATEWAY_UNREACHABLE);
+                if (!g_store.gatewayUrl[0] || !g_store.gatewayToken[0])
+                    set_gateway_state(GATEWAY_NOT_CONFIGURED);
+                continue;
+            }
+            s_last_health_tick = now;
+            request = {};
+            request.kind = GATEWAY_REQUEST_HEALTH;
+            copy_gateway_config(&request);
+            set_gateway_state(GATEWAY_CHECKING);
+            // FIRE/manual work queued during the idle timeout takes priority.
+            // Autonomous health never owns s_request_busy and uses one short
+            // request, so it cannot suppress subsequent FIRE requests.
+            GatewayRequest queued;
+            if (xQueueReceive(s_gateway_queue, &queued, 0) == pdTRUE)
+                request = queued;
+        }
 
         uint8_t mac[tm_auth::MAC_LEN];
         char mac_hex[tm_auth::MAC_HEX_LEN + 1];
@@ -214,23 +250,28 @@ static void gateway_worker(void *arg)
                                          strlen(request.gateway_token), mac)) {
                 request_ready = true;
                 tm_auth::mac_to_hex(mac, mac_hex);
-                success = perform_authenticated_get(url, mac_hex, &last_http, 2000);
+                success = perform_authenticated_get(url, mac_hex, &last_http,
+                    request.manual ? 2000 : 250, request.manual ? 3 : 1);
             } else if (request.gateway_token[0] && strlen(request.gateway_token) >= 16) {
                 set_status("Gateway auth key invalid");
             }
 
             if (success) {
                 set_status("Gateway reachable - key accepted");
+                set_gateway_state(GATEWAY_REACHABLE);
             } else if (last_http == 401 || last_http == 403) {
                 set_status("Gateway key rejected");
+                set_gateway_state(GATEWAY_AUTH_FAILED);
             } else if (last_http >= 400) {
                 char msg[96];
                 snprintf(msg, sizeof(msg), "Gateway check rejected (HTTP %d)", last_http);
                 set_status(msg);
+                set_gateway_state(GATEWAY_FAILED);
             } else if (request_ready) {
                 set_status("Gateway unreachable");
+                set_gateway_state(GATEWAY_UNREACHABLE);
             }
-            set_request_busy(false);
+            if (request.manual) set_request_busy(false);
             continue;
         }
 
@@ -245,7 +286,7 @@ static void gateway_worker(void *arg)
                     request.delay_ms, request.sequence, mac)) {
                 request_ready = true;
                 tm_auth::mac_to_hex(mac, mac_hex);
-                success = perform_authenticated_get(url, mac_hex, &last_http, 20000);
+                success = perform_authenticated_get(url, mac_hex, &last_http, 20000, 3);
             }
         } else if (build_fire_url(url, sizeof(url), &request) &&
                    tm_auth::make_request_mac((const uint8_t *)request.gateway_token,
@@ -254,12 +295,13 @@ static void gateway_worker(void *arg)
                                               request.sequence, mac)) {
             request_ready = true;
             tm_auth::mac_to_hex(mac, mac_hex);
-            success = perform_authenticated_get(url, mac_hex, &last_http, 7000);
+            success = perform_authenticated_get(url, mac_hex, &last_http, 7000, 3);
         } else if (request.gateway_token[0] && strlen(request.gateway_token) >= 16) {
             set_status("Gateway auth key invalid");
         }
 
         if (success) {
+            set_gateway_state(GATEWAY_REACHABLE);
             char msg[96];
             if (request.kind == GATEWAY_REQUEST_FIRE_PAIR) {
                 snprintf(msg, sizeof(msg),
@@ -282,8 +324,11 @@ static void gateway_worker(void *arg)
             char msg[96];
             snprintf(msg, sizeof(msg), "Gateway rejected (HTTP %d)", last_http);
             set_status(msg);
+            set_gateway_state((last_http == 401 || last_http == 403)
+                                  ? GATEWAY_AUTH_FAILED : GATEWAY_FAILED);
         } else if (request_ready) {
             set_status("Gateway unreachable");
+            set_gateway_state(GATEWAY_UNREACHABLE);
         }
         set_request_busy(false);
     }
@@ -312,12 +357,19 @@ void lora_stub_init(void)
         return;
     }
     ESP_LOGI(TAG, "Gateway fire worker ready");
+    set_gateway_state((g_store.gatewayUrl[0] && g_store.gatewayToken[0])
+                          ? GATEWAY_UNREACHABLE : GATEWAY_NOT_CONFIGURED);
 }
 
 bool lora_fire_machine(Maschine m)
 {
     if (!s_gateway_queue || m < MASCHINE_A || m >= MASCHINE_COUNT) {
         set_status("Fire request unavailable");
+        return false;
+    }
+    if (!cop_wifi_is_connected()) {
+        set_status("WiFi not connected");
+        set_gateway_state(GATEWAY_UNREACHABLE);
         return false;
     }
     if (!begin_request()) {
@@ -340,6 +392,7 @@ bool lora_fire_machine(Maschine m)
     game_store_save();
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE;
+    request.manual = true;
     request.machine = m;
     request.sequence = g_store.gatewaySequence;
     copy_gateway_config(&request);
@@ -359,6 +412,11 @@ bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms)
         set_status("Invalid custom doublette");
         return false;
     }
+    if (!cop_wifi_is_connected()) {
+        set_status("WiFi not connected");
+        set_gateway_state(GATEWAY_UNREACHABLE);
+        return false;
+    }
     if (!begin_request()) {
         set_status("Gateway request already in progress");
         return false;
@@ -372,6 +430,7 @@ bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms)
     game_store_save();
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE_PAIR;
+    request.manual = true;
     request.machine = first;
     request.second_machine = second;
     request.delay_ms = delay_ms;
@@ -395,15 +454,34 @@ bool lora_gateway_check(void)
         set_status("Gateway request unavailable");
         return false;
     }
+    if (!cop_wifi_is_connected()) {
+        set_status("WiFi not connected");
+        set_gateway_state(GATEWAY_UNREACHABLE);
+        return false;
+    }
+    if (!g_store.gatewayUrl[0] || !g_store.gatewayToken[0]) {
+        set_status("Gateway not configured");
+        set_gateway_state(GATEWAY_NOT_CONFIGURED);
+        return false;
+    }
+    TickType_t now = xTaskGetTickCount();
+    if (s_last_health_tick != 0 &&
+        (now - s_last_health_tick) < pdMS_TO_TICKS(15000)) {
+        set_status("Gateway check throttled (15s)");
+        return false;
+    }
     if (!begin_request()) {
         set_status("Gateway request already in progress");
         return false;
     }
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_HEALTH;
+    request.manual = true;
     request.machine = MASCHINE_A;
     copy_gateway_config(&request);
     set_status("Checking gateway...");
+    set_gateway_state(GATEWAY_CHECKING);
+    s_last_health_tick = now;
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false);
         set_status("Gateway queue unavailable");
@@ -425,5 +503,41 @@ void lora_copy_status_text(char *out, size_t out_len)
     if (!out || out_len == 0) return;
     if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     snprintf(out, out_len, "%s", s_status);
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+}
+
+GatewayReachability lora_gateway_state(void)
+{
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    GatewayReachability state = s_gateway_state;
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+    return state;
+}
+
+uint32_t lora_gateway_state_timestamp_ms(void)
+{
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    uint32_t timestamp = s_gateway_state_ms;
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+    return timestamp;
+}
+
+const char *lora_gateway_state_label(GatewayReachability state)
+{
+    switch (state) {
+        case GATEWAY_NOT_CONFIGURED: return "NOT CONFIGURED";
+        case GATEWAY_CHECKING: return "CHECKING";
+        case GATEWAY_REACHABLE: return "REACHABLE";
+        case GATEWAY_UNREACHABLE: return "UNREACHABLE";
+        case GATEWAY_AUTH_FAILED: return "AUTH FAILED";
+        default: return "FAILED";
+    }
+}
+
+void lora_copy_gateway_state_label(char *out, size_t out_len)
+{
+    if (!out || !out_len) return;
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    snprintf(out, out_len, "%s", lora_gateway_state_label(s_gateway_state));
     if (s_state_mutex) xSemaphoreGive(s_state_mutex);
 }
