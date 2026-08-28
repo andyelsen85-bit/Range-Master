@@ -36,6 +36,9 @@ export const saleEventsTable = pgTable("sale_events", {
   datum: date("datum", { mode: "string" }).notNull(),
   productId: integer("product_id").notNull().references(() => productsTable.id, { onDelete: "restrict" }),
   priceRevisionId: integer("price_revision_id").notNull().references(() => productPriceRevisionsTable.id, { onDelete: "restrict" }),
+  /** Historical catalogue values: reports must survive later product edits. */
+  productName: text("product_name").notNull(),
+  productCategory: productCategoryEnum("product_category").notNull(),
   unitPriceCents: integer("unit_price_cents").notNull(),
   quantity: integer("quantity").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

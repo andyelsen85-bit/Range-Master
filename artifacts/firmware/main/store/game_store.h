@@ -17,6 +17,12 @@
 #define MAX_KREDIT_EVENTS   50   // pending grant/use events queued for portal sync
 #define MAX_PRODUKTE        12   // deliberately small: cached catalog for offline sales
 #define MAX_PENDING_VERKAEUFE 64 // durable, idempotent sale-event outbox
+#define VERKAUF_PRICE_REVISION_UNALLOCATED 0 // server allocates correction to original lot
+#define MAX_PENDING_PAYMENTS 64  // durable Paid confirmations awaiting portal acceptance
+#define MAX_DAY_BILLS       24   // bounded offline cache for one authoritative day
+#define MAX_BILL_LINES       8
+#define MAX_BILL_CATEGORIES  8
+#define MAX_DAY_PRODUCTS     12
 #define MAX_URL_LEN         128
 #define MAX_KEY_LEN         65
 #define TM_MAX_SSID_LEN     33
@@ -173,10 +179,83 @@ typedef struct {
     int  spielerId;
     char datum[11];
     int  produktId;
+    // Positive sales carry their immutable price revision. Negative corrections
+    // use VERKAUF_PRICE_REVISION_UNALLOCATED so the server reverses the
+    // original lot instead of applying today's cached price.
     int  preisRevisionId;
     int  quantity;           // signed (+ sale, - correction)
     bool inFlight;
 } VerkaufEvent;
+
+// A payment never mutates the active-day roster until the portal explicitly
+// accepts this idempotent event.  inFlight is persisted so a reset during a
+// request simply retries the same externalId.
+typedef struct {
+    char externalId[40];
+    int  spielerId;
+    char datum[11];
+    bool inFlight;
+    char lastError[48];
+} PaymentEvent;
+
+typedef struct {
+    int  produktId;
+    int  preisRevisionId;
+    char produktName[32];
+    char category[24];
+    int  quantity;
+    int  unitPriceCent;
+    int  lineTotalCent;
+    bool localPending; // projected unsynced event, not in portal baseline
+} BillLine;
+
+typedef struct {
+    char name[24];
+    int  totalCent;
+} BillCategoryTotal;
+
+typedef enum {
+    BILL_OPEN = 0,
+    BILL_PENDING_NEUTRAL,
+    BILL_PAID,
+} BillState;
+
+typedef struct {
+    int  spielerId;
+    char spielerName[MAX_NAME_LEN];
+    BillLine lines[MAX_BILL_LINES];
+    int  lineCount;
+    BillCategoryTotal categories[MAX_BILL_CATEGORIES];
+    int  categoryCount;
+    int  totalCent;
+    int  creditGranted;
+    int  creditUsed;
+    int  creditRemaining;
+    int  games;
+    int  completedGames;
+    int  confirmedClays;
+    BillState state;
+    char paymentExternalId[40];
+    char paidAt[32];
+    char paymentSource[16];
+} PlayerBill;
+
+typedef struct {
+    char datum[11];
+    PlayerBill players[MAX_DAY_BILLS];
+    int playerCount;
+    BillCategoryTotal categories[MAX_BILL_CATEGORIES];
+    int categoryCount;
+    BillLine products[MAX_DAY_PRODUCTS];
+    int productCount;
+    int generalTotalCent;
+    int uniquePlayers;
+    int paidPlayers;
+    int games;
+    int completedGames;
+    int confirmedClays;
+    bool authoritative;
+} BillDaySummary;
 
 typedef struct {
     char     externalId[40];
@@ -186,6 +265,7 @@ typedef struct {
     int      lauf;
     int      taubenProLauf;
     bool     abgeschlossen;
+    int      confirmedLaunches; // actual gateway ACKed launches; never test/skips
     struct {
         int  spielerId;
         int  startPosten;
@@ -248,6 +328,7 @@ typedef struct {
     int      ergebnisseCount;
     char     spielId[40];
     bool     currentFireSent; // one physical gateway request per launch unit
+    int      activeAcknowledgedClays;
     // Exact USE events charged when this game started. They let a canceled
     // game safely remove unsynced charges or compensate charges already sent.
     int      activeGameCreditPlayerIds[MAX_SPIELER];
@@ -279,6 +360,9 @@ typedef struct {
     int     produkteCount;
     VerkaufEvent pendingVerkaufEvents[MAX_PENDING_VERKAEUFE];
     int          pendingVerkaufEventCount;
+    PaymentEvent pendingPaymentEvents[MAX_PENDING_PAYMENTS];
+    int          pendingPaymentEventCount;
+    BillDaySummary billDay;
 
     // Queued games
     PendingGame  pendingGames[MAX_PENDING_GAMES];
@@ -324,6 +408,7 @@ bool store_cancel_spiel(void);  // refunds this game's credits; no result is sav
 void store_eintragen(int punkte);
 void store_wiederholen(void);
 void store_skip_taube(void);
+void store_account_acknowledged_clays(int count);
 void store_dismiss_resultate(void);
 
 // ── Players ──────────────────────────────────────────────────
@@ -340,6 +425,11 @@ void store_remap_lineup_spieler(int old_id, int new_id);
 
 // ── Credits ──────────────────────────────────────────────────
 void store_add_kredite(int spieler_id, int anzahl);
+/**
+ * Append a signed GRANT adjustment and update the local projection. Negative
+ * adjustments are rejected when they would make available credit negative.
+ */
+bool store_adjust_kredite(int spieler_id, int delta);
 void store_register_spieler_fuer_tag(int spieler_id);
 
 // ── Sync ─────────────────────────────────────────────────────
@@ -380,6 +470,17 @@ void store_replace_produkte(const Produkt *produkte, int count);
 void store_remap_verkauf_spieler(int old_id, int new_id);
 int  store_munition_cal12(int spieler_id);
 int  store_munition_cal20(int spieler_id);
+
+// ── Day settlement / payments ─────────────────────────────────
+bool store_queue_payment(int spieler_id);
+bool store_payment_pending(int spieler_id);
+int  store_begin_payment_sync(PaymentEvent *snapshot, int capacity);
+// acceptedIds contains only portal-accepted external IDs. Other events remain
+// visible and queued (with inFlight cleared), including conflicts.
+void store_finish_payment_sync(const PaymentEvent *snapshot, int count,
+                               const char *const *acceptedIds, int acceptedCount,
+                               const char *error);
+void store_cache_bill_day(const BillDaySummary *summary);
 
 // ── Terminal operating mode / Catering access ─────────────────
 bool store_set_catering_pin(const char *pin);

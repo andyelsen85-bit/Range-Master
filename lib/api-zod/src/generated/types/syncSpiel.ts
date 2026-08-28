@@ -19,6 +19,8 @@ export interface SyncSpiel {
      */
   lauf: number;
   abgeschlossen: boolean;
+  /** @minimum 0 */
+  confirmedLaunches?: number;
   teilnahmen: SyncTeilnahme[];
   ergebnisse: SyncErgebnis[];
 }

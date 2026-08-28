@@ -23,6 +23,8 @@ void lora_stub_init(void);
  * immediately; it never performs network I/O on the LVGL task.
  */
 bool lora_fire_machine(Maschine m);
+/** As lora_fire_machine, but tagged as a live game launch for ACK accounting. */
+bool lora_fire_machine_game(Maschine m);
 
 /**
  * Send one authenticated, ordered A-G custom doublette to the gateway.
@@ -30,6 +32,7 @@ bool lora_fire_machine(Maschine m);
  * queues only one HTTP request and never blocks the LVGL task.
  */
 bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms);
+bool lora_fire_doublette_game(Maschine first, Maschine second, uint16_t delay_ms);
 
 /**
  * Queue a non-actuating authenticated request to verify that the configured

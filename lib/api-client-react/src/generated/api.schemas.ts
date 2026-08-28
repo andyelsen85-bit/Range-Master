@@ -84,8 +84,13 @@ export interface SaleEventInput {
   datum: string;
   /** @minimum 1 */
   productId: number;
-  /** @minimum 1 */
-  priceRevisionId: number;
+  /**
+     * Required for positive sales. Omit, null, or use legacy 0 for a negative correction; the server allocates its original immutable sale lot.
+     * @minimum 0
+     * @nullable
+     */
+  priceRevisionId?: number | null;
+  /** @minimum -1 */
   quantity: number;
 }
 
@@ -96,6 +101,125 @@ export interface SaleEventBatchInput {
 export interface SaleSyncResult {
   synced: number;
   skipped: number;
+}
+
+export type AdminCreditAdjustmentInputDelta = typeof AdminCreditAdjustmentInputDelta[keyof typeof AdminCreditAdjustmentInputDelta];
+
+
+export const AdminCreditAdjustmentInputDelta = {
+  NUMBER_MINUS_1: -1,
+  NUMBER_1: 1,
+} as const;
+
+export interface AdminCreditAdjustmentInput {
+  /** @minimum 1 */
+  spielerId: number;
+  datum: string;
+  delta: AdminCreditAdjustmentInputDelta;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  externalId: string;
+}
+
+export type AdminAmmoAdjustmentInput = AdminCreditAdjustmentInput & {
+  /** @minimum 1 */
+  productId: number;
+};
+
+export type AdminCreditAdjustmentResultStatus = typeof AdminCreditAdjustmentResultStatus[keyof typeof AdminCreditAdjustmentResultStatus];
+
+
+export const AdminCreditAdjustmentResultStatus = {
+  accepted: 'accepted',
+  skipped: 'skipped',
+} as const;
+
+export type AdminCreditAdjustmentResultCredit = {
+  spielerId: number;
+  datum: string;
+  gewaehrt: number;
+  verbraucht: number;
+  available: number;
+};
+
+export interface AdminCreditAdjustmentResult {
+  externalId: string;
+  status: AdminCreditAdjustmentResultStatus;
+  credit: AdminCreditAdjustmentResultCredit;
+}
+
+export type AdminAmmoAdjustmentResultStatus = typeof AdminAmmoAdjustmentResultStatus[keyof typeof AdminAmmoAdjustmentResultStatus];
+
+
+export const AdminAmmoAdjustmentResultStatus = {
+  accepted: 'accepted',
+  skipped: 'skipped',
+} as const;
+
+export type AdminAmmoAdjustmentResultAmmo = {
+  spielerId: number;
+  datum: string;
+  productId: number;
+  quantity: number;
+};
+
+export interface AdminAmmoAdjustmentResult {
+  externalId: string;
+  status: AdminAmmoAdjustmentResultStatus;
+  ammo: AdminAmmoAdjustmentResultAmmo;
+}
+
+export interface BillPaymentInput {
+  externalId: string;
+  spielerId: number;
+  datum: string;
+  terminalId?: string;
+}
+
+export type BillPaymentResultStatus = typeof BillPaymentResultStatus[keyof typeof BillPaymentResultStatus];
+
+
+export const BillPaymentResultStatus = {
+  accepted: 'accepted',
+  skipped: 'skipped',
+  conflict: 'conflict',
+} as const;
+
+export interface BillPaymentResult {
+  externalId: string;
+  status: BillPaymentResultStatus;
+  error?: string;
+}
+
+export type BillDaySummaryPlayersItem = { [key: string]: unknown };
+
+export type BillDaySummaryCategorySubtotals = {[key: string]: number};
+
+export interface BillProductTotal {
+  productId: number;
+  productName: string;
+  category: ProductCategory;
+  priceRevisionId: number;
+  unitPriceCents: number;
+  quantity: number;
+  totalCents: number;
+}
+
+export type BillDaySummaryProductTotals = {[key: string]: BillProductTotal};
+
+export interface BillDaySummary {
+  datum: string;
+  players: BillDaySummaryPlayersItem[];
+  categorySubtotals: BillDaySummaryCategorySubtotals;
+  productTotals: BillDaySummaryProductTotals;
+  generalTotalCents: number;
+  uniquePlayers: number;
+  paidPlayers: number;
+  games: number;
+  completedGames: number;
+  confirmedClays: number;
 }
 
 export interface DaySalesItem {
@@ -287,6 +411,8 @@ export interface SyncSpiel {
      */
   lauf: number;
   abgeschlossen: boolean;
+  /** @minimum 0 */
+  confirmedLaunches?: number;
   teilnahmen: SyncTeilnahme[];
   ergebnisse: SyncErgebnis[];
 }
@@ -372,5 +498,26 @@ datum?: string;
 
 export type GetSyncDaySalesParams = {
 datum: string;
+};
+
+export type GetSyncBillDaySummaryParams = {
+datum: string;
+};
+
+export type PostSyncBillPaymentsBody = {
+  events: BillPaymentInput[];
+};
+
+export type PostSyncBillPayments200 = {
+  results: BillPaymentResult[];
+};
+
+export type GetAdminBillDaySummaryParams = {
+datum: string;
+};
+
+export type MarkAdminBillPaidBody = {
+  datum: string;
+  externalId?: string;
 };
 

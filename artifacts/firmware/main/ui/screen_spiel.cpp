@@ -47,11 +47,11 @@ static void fire_cb(lv_event_t *e)
 
     bool queued = false;
     if (se->isPair && se->maschine != MASCHINE_H) {
-        queued = lora_fire_doublette(se->maschine, se->partner, se->delayMs);
+        queued = lora_fire_doublette_game(se->maschine, se->partner, se->delayMs);
     } else {
         // H remains one physical relay and one radio command. H2 is generated
         // locally by the addressed relay after its fixed system delay.
-        queued = lora_fire_machine(se->maschine);
+        queued = lora_fire_machine_game(se->maschine);
     }
     if (queued) g_store.currentFireSent = true;
     screen_spiel_refresh();

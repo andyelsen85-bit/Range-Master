@@ -1,14 +1,14 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
+import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable, billPaymentsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
 import { buildTransport } from "../lib/mailer";
-import { and, desc, eq, lte, isNull } from "drizzle-orm";
-import { sql } from "drizzle-orm";
+import { and, desc, eq, lte, isNull, sql } from "drizzle-orm";
 import { authenticate, requireAdmin } from "./auth";
 import { z } from "zod";
 import { catalogue, daySalesReport, ensureSystemProducts } from "../lib/products";
 import { createRestoreCode, hashRestoreCode } from "../lib/terminal-config";
+import { dayBillSummary } from "../lib/bills";
 
 const router = Router();
 
@@ -328,6 +328,145 @@ router.get("/kredite", async (req, res) => {
 
 const productId = (raw: string | string[]) => z.coerce.number().int().positive().safeParse(Array.isArray(raw) ? raw[0] : raw);
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const adminAdjustment = z.object({
+  spielerId: z.number().int().positive(),
+  datum: day,
+  delta: z.union([z.literal(1), z.literal(-1)]),
+  externalId: z.string().trim().min(1).max(200),
+});
+
+/** Shared lock names are also used by terminal uploads to serialize ledger totals. */
+async function lockLedger(tx: any, scope: string): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${scope}, 0))`);
+}
+
+async function creditAggregate(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], spielerId: number, datum: string) {
+  const [totals] = await tx.select({
+    granted: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'GRANT' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
+    used: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'USE' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
+  }).from(kreditEventsTable).where(and(
+    eq(kreditEventsTable.spielerId, spielerId),
+    eq(kreditEventsTable.datum, datum),
+  ));
+  const gewaehrt = Number(totals?.granted ?? 0);
+  const verbraucht = Number(totals?.used ?? 0);
+  return { spielerId, datum, gewaehrt, verbraucht, available: gewaehrt - verbraucht };
+}
+
+async function ammoAggregate(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], spielerId: number, datum: string, productId: number) {
+  const [totals] = await tx.select({
+    quantity: sql<number>`COALESCE(SUM(${saleEventsTable.quantity}), 0)::int`,
+  }).from(saleEventsTable).where(and(
+    eq(saleEventsTable.spielerId, spielerId),
+    eq(saleEventsTable.datum, datum),
+    eq(saleEventsTable.productId, productId),
+  ));
+  return { spielerId, datum, productId, quantity: Number(totals?.quantity ?? 0) };
+}
+
+// POST /api/admin/kredite/adjust — append a one-credit grant or correction.
+router.post("/kredite/adjust", async (req, res): Promise<void> => {
+  const parsed = adminAdjustment.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "spielerId, datum, delta (+1 or -1), and externalId are required" }); return; }
+  const event = parsed.data;
+  const externalId = event.externalId;
+  const result = await db.transaction(async (tx) => {
+    await lockLedger(tx, `credit:${event.spielerId}:${event.datum}`);
+    const [prior] = await tx.select().from(kreditEventsTable).where(eq(kreditEventsTable.externalId, externalId)).limit(1);
+    if (prior) {
+      const matches = prior.spielerId === event.spielerId && prior.datum === event.datum && prior.typ === "GRANT" && prior.anzahl === event.delta;
+      return matches
+        ? { status: "skipped" as const, aggregate: await creditAggregate(tx, event.spielerId, event.datum) }
+        : { status: "conflict" as const };
+    }
+    const [player] = await tx.select({ id: spielerTable.id }).from(spielerTable).where(eq(spielerTable.id, event.spielerId)).limit(1);
+    if (!player) return { status: "not_found" as const };
+    const before = await creditAggregate(tx, event.spielerId, event.datum);
+    if (before.available + event.delta < 0) return { status: "insufficient" as const, aggregate: before };
+    const inserted = await tx.insert(kreditEventsTable).values({
+      externalId, spielerId: event.spielerId, datum: event.datum,
+      // A negative GRANT is an append-only correction; USE remains reserved for game starts.
+      typ: "GRANT", anzahl: event.delta,
+    }).onConflictDoNothing({ target: kreditEventsTable.externalId }).returning({ id: kreditEventsTable.id });
+    if (!inserted.length) return { status: "conflict" as const };
+    return { status: "accepted" as const, aggregate: await creditAggregate(tx, event.spielerId, event.datum) };
+  });
+  if (result.status === "not_found") { res.status(404).json({ error: "Player not found" }); return; }
+  if (result.status === "insufficient") { res.status(409).json({ error: "Credit balance cannot become negative", credit: result.aggregate }); return; }
+  if (result.status === "conflict") { res.status(409).json({ error: "externalId belongs to a different credit adjustment" }); return; }
+  res.json({ externalId, status: result.status, credit: result.aggregate });
+});
+
+// POST /api/admin/ammo/adjust — append a one-box sale or reversal for ammunition.
+router.post("/ammo/adjust", async (req, res): Promise<void> => {
+  const parsed = adminAdjustment.extend({ productId: z.number().int().positive() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "spielerId, datum, productId, delta (+1 or -1), and externalId are required" }); return; }
+  const event = parsed.data;
+  const externalId = event.externalId;
+  const result = await db.transaction(async (tx) => {
+    await lockLedger(tx, `ammo:${event.spielerId}:${event.datum}:${event.productId}`);
+    const [prior] = await tx.select().from(saleEventsTable).where(eq(saleEventsTable.externalId, externalId)).limit(1);
+    if (prior) {
+      const matches = prior.spielerId === event.spielerId && prior.datum === event.datum &&
+        prior.productId === event.productId && prior.quantity === event.delta;
+      return matches
+        ? { status: "skipped" as const, aggregate: await ammoAggregate(tx, event.spielerId, event.datum, event.productId) }
+        : { status: "conflict" as const };
+    }
+    const [player] = await tx.select({ id: spielerTable.id }).from(spielerTable).where(eq(spielerTable.id, event.spielerId)).limit(1);
+    if (!player) return { status: "not_found" as const };
+    const [product] = await tx.select().from(productsTable).where(and(
+      eq(productsTable.id, event.productId),
+      eq(productsTable.isSystem, true),
+      eq(productsTable.active, true),
+      sql`${productsTable.code} IN ('AMMO_CAL12', 'AMMO_CAL20')`,
+    )).limit(1);
+    if (!product) return { status: "invalid_product" as const };
+    const before = await ammoAggregate(tx, event.spielerId, event.datum, product.id);
+    if (before.quantity + event.delta < 0) return { status: "insufficient" as const, aggregate: before };
+    const saleSnapshot = event.delta === 1
+      ? (() => tx.select({
+        id: productPriceRevisionsTable.id,
+        unitPriceCents: productPriceRevisionsTable.unitPriceCents,
+      }).from(productPriceRevisionsTable).where(and(
+        eq(productPriceRevisionsTable.productId, product.id),
+        lte(productPriceRevisionsTable.effectiveFrom, new Date()),
+      )).orderBy(desc(productPriceRevisionsTable.effectiveFrom), desc(productPriceRevisionsTable.id)).limit(1)
+        .then(([price]) => price ? { ...price, productName: product.name, productCategory: product.category } : null))()
+      : tx.select({
+        id: saleEventsTable.priceRevisionId,
+        productName: saleEventsTable.productName,
+        productCategory: saleEventsTable.productCategory,
+        unitPriceCents: saleEventsTable.unitPriceCents,
+      }).from(saleEventsTable).where(and(
+        eq(saleEventsTable.spielerId, event.spielerId),
+        eq(saleEventsTable.datum, event.datum),
+        eq(saleEventsTable.productId, product.id),
+      )).groupBy(
+        saleEventsTable.priceRevisionId, saleEventsTable.productName,
+        saleEventsTable.productCategory, saleEventsTable.unitPriceCents,
+      ).having(sql`SUM(${saleEventsTable.quantity}) > 0`)
+        // LIFO: choose the lot whose original positive sale is newest; a later
+        // correction must not make an older lot appear newer.
+        .orderBy(desc(sql`MAX(CASE WHEN ${saleEventsTable.quantity} > 0 THEN ${saleEventsTable.id} ELSE 0 END)`)).limit(1)
+        .then(([price]) => price ?? null);
+    const price = await saleSnapshot;
+    if (!price) return { status: "missing_price" as const };
+    const inserted = await tx.insert(saleEventsTable).values({
+      externalId, spielerId: event.spielerId, datum: event.datum, productId: product.id,
+      priceRevisionId: price.id, productName: price.productName, productCategory: price.productCategory,
+      unitPriceCents: price.unitPriceCents, quantity: event.delta,
+    }).onConflictDoNothing({ target: saleEventsTable.externalId }).returning({ id: saleEventsTable.id });
+    if (!inserted.length) return { status: "conflict" as const };
+    return { status: "accepted" as const, aggregate: await ammoAggregate(tx, event.spielerId, event.datum, product.id) };
+  });
+  if (result.status === "not_found") { res.status(404).json({ error: "Player not found" }); return; }
+  if (result.status === "invalid_product") { res.status(400).json({ error: "productId must be an active AMMO_CAL12 or AMMO_CAL20 system product" }); return; }
+  if (result.status === "missing_price") { res.status(409).json({ error: "A current price revision is required" }); return; }
+  if (result.status === "insufficient") { res.status(409).json({ error: "Ammunition quantity cannot become negative", ammo: result.aggregate }); return; }
+  if (result.status === "conflict") { res.status(409).json({ error: "externalId belongs to a different ammunition adjustment" }); return; }
+  res.json({ externalId, status: result.status, ammo: result.aggregate });
+});
 
 router.get("/products", async (_req, res): Promise<void> => {
   res.json({ products: await catalogue() });
@@ -410,6 +549,32 @@ router.get("/products/:id/current-price", async (req, res): Promise<void> => {
 router.get("/sales", async (req, res): Promise<void> => {
   const datum = day.catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
   res.json(await daySalesReport(datum));
+});
+
+router.get("/bills/day-summary", async (req, res) => {
+  const datum = day.safeParse(req.query.datum);
+  if (!datum.success) return res.status(400).json({ error: "datum must be YYYY-MM-DD" });
+  return res.json(await dayBillSummary(datum.data));
+});
+
+/** Admin closure uses the same immutable event and uniqueness invariant as terminals. */
+router.post("/bills/:spielerId/paid", async (req, res) => {
+  const spielerId = z.coerce.number().int().positive().safeParse(req.params.spielerId);
+  const body = z.object({ datum: day, externalId: z.string().trim().min(1).max(200).optional() }).safeParse(req.body);
+  if (!spielerId.success || !body.success) return res.status(400).json({ error: "spielerId and datum are required" });
+  const externalId = body.data.externalId ?? `admin:${randomBytes(16).toString("hex")}`;
+  const outcome = await db.transaction(async tx => {
+    const [prior] = await tx.select().from(billPaymentsTable).where(eq(billPaymentsTable.externalId, externalId)).limit(1);
+    if (prior) return prior.spielerId === spielerId.data && prior.datum === body.data.datum ? "skipped" : "conflict";
+    const [paid] = await tx.select({ id: billPaymentsTable.id }).from(billPaymentsTable)
+      .where(and(eq(billPaymentsTable.spielerId, spielerId.data), eq(billPaymentsTable.datum, body.data.datum))).limit(1);
+    if (paid) return "conflict";
+    const inserted = await tx.insert(billPaymentsTable).values({
+      externalId, spielerId: spielerId.data, datum: body.data.datum, source: "ADMIN", markedByAdminId: (req as any).user.id,
+    }).onConflictDoNothing().returning({ id: billPaymentsTable.id });
+    return inserted.length ? "accepted" : "conflict";
+  });
+  return res.status(outcome === "conflict" ? 409 : 200).json({ externalId, status: outcome });
 });
 
 // ─── API Key routes ───────────────────────────────────────────────────────────

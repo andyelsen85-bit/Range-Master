@@ -36,6 +36,50 @@ static lv_obj_t *s_config_backup_status;
 static lv_obj_t *s_catering_pin;
 static lv_obj_t *s_catering_old_pin;
 static lv_obj_t *s_catering_status;
+static lv_obj_t *s_bill_day_summary;
+
+static void refresh_bill_day_summary(void)
+{
+    if (!s_bill_day_summary) return;
+    const BillDaySummary *day = &g_store.billDay;
+    char text[1024];
+    if (!day->datum[0]) {
+        snprintf(text, sizeof(text), "DAGESSUMMARY: NACH KENG PORTAL-DATEN");
+    } else {
+        snprintf(text, sizeof(text),
+                 "DAGESSUMMARY %s%s\n"
+                 "SPILLER: %d  |  BEZUELT: %d\n"
+                 "SPILLER: %d  |  OFGESCHLOSS: %d  |  CONFIRMED CLAYS: %d\n"
+                 "GENERAL TOTAL: %d.%02d EUR",
+                 day->datum, day->authoritative ? "" : " (OFFLINE CACHE)",
+                 day->uniquePlayers, day->paidPlayers, day->games,
+                 day->completedGames, day->confirmedClays,
+                 day->generalTotalCent / 100, abs(day->generalTotalCent % 100));
+        size_t used = strlen(text);
+        for (int i = 0; i < day->categoryCount && used < sizeof(text); ++i) {
+            int n = snprintf(text + used, sizeof(text) - used, "\n%s: %d.%02d EUR",
+                             day->categories[i].name,
+                             day->categories[i].totalCent / 100,
+                             abs(day->categories[i].totalCent % 100));
+            if (n < 0 || (size_t)n >= sizeof(text) - used) break;
+            used += (size_t)n;
+        }
+        for (int i = 0; i < day->productCount && used < sizeof(text); ++i) {
+            int n = snprintf(text + used, sizeof(text) - used,
+                             "\n%s%s: %d x %d.%02d = %d.%02d EUR",
+                             day->products[i].localPending ? "PENDING " : "",
+                             day->products[i].produktName,
+                             day->products[i].quantity,
+                             day->products[i].unitPriceCent / 100,
+                             abs(day->products[i].unitPriceCent % 100),
+                             day->products[i].lineTotalCent / 100,
+                             abs(day->products[i].lineTotalCent % 100));
+            if (n < 0 || (size_t)n >= sizeof(text) - used) break;
+            used += (size_t)n;
+        }
+    }
+    lv_label_set_text(s_bill_day_summary, text);
+}
 
 static void catering_save_pin_cb(lv_event_t *)
 {
@@ -927,6 +971,11 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_obj_add_event_cb(s_auto_sync_seconds, auto_sync_changed,
                         LV_EVENT_VALUE_CHANGED, NULL);
 
+    s_bill_day_summary = lv_label_create(parent);
+    lv_obj_set_style_text_font(s_bill_day_summary, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_TEXT), 0);
+    refresh_bill_day_summary();
+
     lv_obj_t *cat = lv_obj_create(parent);
     lv_obj_set_size(cat, LV_PCT(100), 180);
     lv_obj_add_style(cat, &g_style_card, 0);
@@ -1115,6 +1164,7 @@ lv_obj_t *screen_einstellungen_create(void)
 
 void screen_einstellungen_refresh(void)
 {
+    refresh_bill_day_summary();
     if (s_ta_url) lv_textarea_set_text(s_ta_url, g_store.apiUrl);
     if (s_ta_key) lv_textarea_set_text(s_ta_key, g_store.apiKey);
     if (s_ta_gateway) lv_textarea_set_text(s_ta_gateway, g_store.gatewayUrl);

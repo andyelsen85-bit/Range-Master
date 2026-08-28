@@ -14,7 +14,12 @@ export interface SaleEventInput {
   datum: Date;
   /** @minimum 1 */
   productId: number;
-  /** @minimum 1 */
-  priceRevisionId: number;
+  /**
+     * Required for positive sales. Omit, null, or use legacy 0 for a negative correction; the server allocates its original immutable sale lot.
+     * @minimum 0
+     * @nullable
+     */
+  priceRevisionId?: number | null;
+  /** @minimum -1 */
   quantity: number;
 }

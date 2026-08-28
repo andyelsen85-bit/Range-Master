@@ -42,6 +42,7 @@ typedef struct {
     uint16_t delay_ms;
     uint32_t sequence;
     bool manual; // FIRE and operator-initiated health; autonomous health is false
+    bool gameLaunch; // only live-game ACKs contribute to clay accounting
     char gateway_url[MAX_URL_LEN];
     char gateway_token[MAX_KEY_LEN];
 } GatewayRequest;
@@ -301,6 +302,12 @@ static void gateway_worker(void *arg)
         }
 
         if (success) {
+            // 202 explicitly means the gateway did not observe a FIRE ACK.
+            // Tests use the untagged API, so they cannot affect a game total.
+            if (request.gameLaunch && last_http != 202)
+                store_account_acknowledged_clays(
+                    request.kind == GATEWAY_REQUEST_FIRE_PAIR ||
+                    request.machine == MASCHINE_H ? 2 : 1);
             set_gateway_state(GATEWAY_REACHABLE);
             char msg[96];
             if (request.kind == GATEWAY_REQUEST_FIRE_PAIR) {
@@ -404,6 +411,22 @@ bool lora_fire_machine(Maschine m)
     return true;
 }
 
+bool lora_fire_machine_game(Maschine m)
+{
+    // The queue request must be marked before the worker can consume it, so
+    // share the normal validation/sequence flow in a compact local copy.
+    if (!s_gateway_queue || m < MASCHINE_A || m >= MASCHINE_COUNT || !cop_wifi_is_connected() ||
+        !begin_request() || g_store.gatewaySequence == UINT32_MAX) return false;
+    g_store.gatewaySequence++; game_store_save();
+    GatewayRequest request = {};
+    request.kind = GATEWAY_REQUEST_FIRE; request.manual = true; request.gameLaunch = true;
+    request.machine = m; request.sequence = g_store.gatewaySequence; copy_gateway_config(&request);
+    if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
+        set_request_busy(false); set_status("Gateway queue unavailable"); return false;
+    }
+    return true;
+}
+
 bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms)
 {
     if (!s_gateway_queue || first < MASCHINE_A || first > MASCHINE_G ||
@@ -444,6 +467,22 @@ bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms)
         set_request_busy(false);
         set_status("Gateway queue unavailable");
         return false;
+    }
+    return true;
+}
+
+bool lora_fire_doublette_game(Maschine first, Maschine second, uint16_t delay_ms)
+{
+    if (!s_gateway_queue || first < MASCHINE_A || first > MASCHINE_G ||
+        second < MASCHINE_A || second > MASCHINE_G || first == second || delay_ms > 10000 ||
+        !cop_wifi_is_connected() || !begin_request() || g_store.gatewaySequence == UINT32_MAX) return false;
+    g_store.gatewaySequence++; game_store_save();
+    GatewayRequest request = {};
+    request.kind = GATEWAY_REQUEST_FIRE_PAIR; request.manual = true; request.gameLaunch = true;
+    request.machine = first; request.second_machine = second; request.delay_ms = delay_ms;
+    request.sequence = g_store.gatewaySequence; copy_gateway_config(&request);
+    if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
+        set_request_busy(false); set_status("Gateway queue unavailable"); return false;
     }
     return true;
 }

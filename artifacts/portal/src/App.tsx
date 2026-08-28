@@ -18,6 +18,7 @@ import AdminApiKeys from '@/pages/admin-api-keys';
 import AdminKredite from '@/pages/admin-kredite';
 import AdminMail from '@/pages/admin-mail';
 import AdminVerkeef from '@/pages/admin-verkeef';
+import AdminOfrechnung from '@/pages/admin-ofrechnung';
 import AdminSpielrProfil from '@/pages/admin-spieler-profil';
 import AdminTerminalConfig from '@/pages/admin-terminal-config';
 import Profil from '@/pages/profil';
@@ -77,6 +78,7 @@ function Router() {
             <Route path="/admin/api-schluesselen" component={() => <AdminRoute component={AdminApiKeys} />} />
             <Route path="/admin/kreditter" component={() => <AdminRoute component={AdminKredite} />} />
             <Route path="/admin/verkeef" component={() => <AdminRoute component={AdminVerkeef} />} />
+            <Route path="/admin/ofrechnung" component={() => <AdminRoute component={AdminOfrechnung} />} />
             <Route path="/admin/mail" component={() => <AdminRoute component={AdminMail} />} />
             <Route path="/admin/terminal-config" component={() => <AdminRoute component={AdminTerminalConfig} />} />
             <Route component={NotFound} />

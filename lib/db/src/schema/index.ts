@@ -8,3 +8,4 @@ export * from "./smtp-settings";
 export * from "./spieler-updates";
 export * from "./products";
 export * from "./terminal-config";
+export * from "./bills";

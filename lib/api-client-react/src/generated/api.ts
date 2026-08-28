@@ -20,9 +20,15 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AdminAmmoAdjustmentInput,
+  AdminAmmoAdjustmentResult,
+  AdminCreditAdjustmentInput,
+  AdminCreditAdjustmentResult,
+  BillDaySummary,
   DaySalesReport,
   ErrorResponse,
   FlexibleProductInput,
+  GetAdminBillDaySummaryParams,
   GetAdminDaySalesParams,
   GetRangliste200,
   GetRanglisteParams,
@@ -30,6 +36,7 @@ import type {
   GetStatistikModusBreakdown200,
   GetStatistikVerlauf200,
   GetStatistikVerlaufParams,
+  GetSyncBillDaySummaryParams,
   GetSyncDaySalesParams,
   GetSyncSpieler200,
   GetSyncStatus200,
@@ -37,6 +44,9 @@ import type {
   ListSpieler200,
   LoginRequest,
   LoginResponse,
+  MarkAdminBillPaidBody,
+  PostSyncBillPayments200,
+  PostSyncBillPaymentsBody,
   PostSyncSpiele200,
   PostSyncSpieleBody,
   PostSyncSpieler200,
@@ -1640,6 +1650,148 @@ export function useGetAdminDaySales<TData = Awaited<ReturnType<typeof getAdminDa
 
 
 
+export const getAdjustAdminCreditUrl = () => {
+
+
+
+
+  return `/api/admin/kredite/adjust`
+}
+
+/**
+ * @summary Append a one-credit grant or correction
+ */
+export const adjustAdminCredit = async (adminCreditAdjustmentInput: AdminCreditAdjustmentInput, options?: Parameters<typeof customFetch>[1]): Promise<AdminCreditAdjustmentResult> => {
+
+  return customFetch<AdminCreditAdjustmentResult>(getAdjustAdminCreditUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(adminCreditAdjustmentInput)
+  }
+);}
+
+
+
+
+
+export const getAdjustAdminCreditMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustAdminCredit>>, TError,{data: BodyType<AdminCreditAdjustmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof adjustAdminCredit>>, TError,{data: BodyType<AdminCreditAdjustmentInput>}, TContext> => {
+
+const mutationKey = ['adjustAdminCredit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof adjustAdminCredit>>, {data: BodyType<AdminCreditAdjustmentInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  adjustAdminCredit(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AdjustAdminCreditMutationResult = NonNullable<Awaited<ReturnType<typeof adjustAdminCredit>>>
+    export type AdjustAdminCreditMutationBody = BodyType<AdminCreditAdjustmentInput>
+    export type AdjustAdminCreditMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Append a one-credit grant or correction
+ */
+export const useAdjustAdminCredit = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustAdminCredit>>, TError,{data: BodyType<AdminCreditAdjustmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof adjustAdminCredit>>,
+        TError,
+        {data: BodyType<AdminCreditAdjustmentInput>},
+        TContext
+      > => {
+      return useMutation(getAdjustAdminCreditMutationOptions(options));
+    }
+
+export const getAdjustAdminAmmoUrl = () => {
+
+
+
+
+  return `/api/admin/ammo/adjust`
+}
+
+/**
+ * @summary Append a one-unit ammunition sale or reversal
+ */
+export const adjustAdminAmmo = async (adminAmmoAdjustmentInput: AdminAmmoAdjustmentInput, options?: Parameters<typeof customFetch>[1]): Promise<AdminAmmoAdjustmentResult> => {
+
+  return customFetch<AdminAmmoAdjustmentResult>(getAdjustAdminAmmoUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(adminAmmoAdjustmentInput)
+  }
+);}
+
+
+
+
+
+export const getAdjustAdminAmmoMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustAdminAmmo>>, TError,{data: BodyType<AdminAmmoAdjustmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof adjustAdminAmmo>>, TError,{data: BodyType<AdminAmmoAdjustmentInput>}, TContext> => {
+
+const mutationKey = ['adjustAdminAmmo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof adjustAdminAmmo>>, {data: BodyType<AdminAmmoAdjustmentInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  adjustAdminAmmo(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AdjustAdminAmmoMutationResult = NonNullable<Awaited<ReturnType<typeof adjustAdminAmmo>>>
+    export type AdjustAdminAmmoMutationBody = BodyType<AdminAmmoAdjustmentInput>
+    export type AdjustAdminAmmoMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Append a one-unit ammunition sale or reversal
+ */
+export const useAdjustAdminAmmo = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustAdminAmmo>>, TError,{data: BodyType<AdminAmmoAdjustmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof adjustAdminAmmo>>,
+        TError,
+        {data: BodyType<AdminAmmoAdjustmentInput>},
+        TContext
+      > => {
+      return useMutation(getAdjustAdminAmmoMutationOptions(options));
+    }
+
 export const getGetSyncProductCatalogUrl = () => {
 
 
@@ -1852,5 +2004,292 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getPostSyncSaleEventsMutationOptions(options));
+    }
+
+export const getGetSyncBillDaySummaryUrl = (params: GetSyncBillDaySummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/bills/day-summary?${stringifiedParams}` : `/api/sync/bills/day-summary`
+}
+
+export const getSyncBillDaySummary = async (params: GetSyncBillDaySummaryParams, options?: Parameters<typeof customFetch>[1]): Promise<BillDaySummary> => {
+
+  return customFetch<BillDaySummary>(getGetSyncBillDaySummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSyncBillDaySummaryQueryKey = (params?: GetSyncBillDaySummaryParams,) => {
+    return [
+    `/api/sync/bills/day-summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSyncBillDaySummaryQueryOptions = <TData = Awaited<ReturnType<typeof getSyncBillDaySummary>>, TError = ErrorType<unknown>>(params: GetSyncBillDaySummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSyncBillDaySummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSyncBillDaySummaryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSyncBillDaySummary>>> = ({ signal }) => getSyncBillDaySummary(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSyncBillDaySummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSyncBillDaySummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getSyncBillDaySummary>>>
+export type GetSyncBillDaySummaryQueryError = ErrorType<unknown>
+
+
+
+export function useGetSyncBillDaySummary<TData = Awaited<ReturnType<typeof getSyncBillDaySummary>>, TError = ErrorType<unknown>>(
+ params: GetSyncBillDaySummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSyncBillDaySummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSyncBillDaySummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPostSyncBillPaymentsUrl = () => {
+
+
+
+
+  return `/api/sync/payments`
+}
+
+export const postSyncBillPayments = async (postSyncBillPaymentsBody: PostSyncBillPaymentsBody, options?: Parameters<typeof customFetch>[1]): Promise<PostSyncBillPayments200> => {
+
+  return customFetch<PostSyncBillPayments200>(getPostSyncBillPaymentsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(postSyncBillPaymentsBody)
+  }
+);}
+
+
+
+
+
+export const getPostSyncBillPaymentsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postSyncBillPayments>>, TError,{data: BodyType<PostSyncBillPaymentsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postSyncBillPayments>>, TError,{data: BodyType<PostSyncBillPaymentsBody>}, TContext> => {
+
+const mutationKey = ['postSyncBillPayments'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postSyncBillPayments>>, {data: BodyType<PostSyncBillPaymentsBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postSyncBillPayments(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostSyncBillPaymentsMutationResult = NonNullable<Awaited<ReturnType<typeof postSyncBillPayments>>>
+    export type PostSyncBillPaymentsMutationBody = BodyType<PostSyncBillPaymentsBody>
+    export type PostSyncBillPaymentsMutationError = ErrorType<void>
+
+    export const usePostSyncBillPayments = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postSyncBillPayments>>, TError,{data: BodyType<PostSyncBillPaymentsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof postSyncBillPayments>>,
+        TError,
+        {data: BodyType<PostSyncBillPaymentsBody>},
+        TContext
+      > => {
+      return useMutation(getPostSyncBillPaymentsMutationOptions(options));
+    }
+
+export const getGetAdminBillDaySummaryUrl = (params: GetAdminBillDaySummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/bills/day-summary?${stringifiedParams}` : `/api/admin/bills/day-summary`
+}
+
+export const getAdminBillDaySummary = async (params: GetAdminBillDaySummaryParams, options?: Parameters<typeof customFetch>[1]): Promise<BillDaySummary> => {
+
+  return customFetch<BillDaySummary>(getGetAdminBillDaySummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminBillDaySummaryQueryKey = (params?: GetAdminBillDaySummaryParams,) => {
+    return [
+    `/api/admin/bills/day-summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAdminBillDaySummaryQueryOptions = <TData = Awaited<ReturnType<typeof getAdminBillDaySummary>>, TError = ErrorType<unknown>>(params: GetAdminBillDaySummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminBillDaySummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminBillDaySummaryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminBillDaySummary>>> = ({ signal }) => getAdminBillDaySummary(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminBillDaySummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminBillDaySummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminBillDaySummary>>>
+export type GetAdminBillDaySummaryQueryError = ErrorType<unknown>
+
+
+
+export function useGetAdminBillDaySummary<TData = Awaited<ReturnType<typeof getAdminBillDaySummary>>, TError = ErrorType<unknown>>(
+ params: GetAdminBillDaySummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminBillDaySummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminBillDaySummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getMarkAdminBillPaidUrl = (spielerId: number,) => {
+
+
+
+
+  return `/api/admin/bills/${spielerId}/paid`
+}
+
+export const markAdminBillPaid = async (spielerId: number,
+    markAdminBillPaidBody: MarkAdminBillPaidBody, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getMarkAdminBillPaidUrl(spielerId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(markAdminBillPaidBody)
+  }
+);}
+
+
+
+
+
+export const getMarkAdminBillPaidMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markAdminBillPaid>>, TError,{spielerId: number;data: BodyType<MarkAdminBillPaidBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof markAdminBillPaid>>, TError,{spielerId: number;data: BodyType<MarkAdminBillPaidBody>}, TContext> => {
+
+const mutationKey = ['markAdminBillPaid'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markAdminBillPaid>>, {spielerId: number;data: BodyType<MarkAdminBillPaidBody>}> = (props) => {
+          const {spielerId,data} = props ?? {};
+
+          return  markAdminBillPaid(spielerId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkAdminBillPaidMutationResult = NonNullable<Awaited<ReturnType<typeof markAdminBillPaid>>>
+    export type MarkAdminBillPaidMutationBody = BodyType<MarkAdminBillPaidBody>
+    export type MarkAdminBillPaidMutationError = ErrorType<void>
+
+    export const useMarkAdminBillPaid = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markAdminBillPaid>>, TError,{spielerId: number;data: BodyType<MarkAdminBillPaidBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof markAdminBillPaid>>,
+        TError,
+        {spielerId: number;data: BodyType<MarkAdminBillPaidBody>},
+        TContext
+      > => {
+      return useMutation(getMarkAdminBillPaidMutationOptions(options));
     }
 

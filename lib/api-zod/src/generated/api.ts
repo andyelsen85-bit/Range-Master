@@ -243,6 +243,8 @@ export const PostSyncSpielerResponse = zod.object({
  */
 export const postSyncSpieleBodySpieleItemLaufMax = 2;
 
+export const postSyncSpieleBodySpieleItemConfirmedLaunchesMin = 0;
+
 export const postSyncSpieleBodySpieleItemTeilnahmenItemStartPostenMax = 6;
 
 export const postSyncSpieleBodySpieleItemTeilnahmenItemPunkteMin = 0;
@@ -268,6 +270,7 @@ export const PostSyncSpieleBody = zod.object({
   "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3']),
   "lauf": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemLaufMax),
   "abgeschlossen": zod.boolean(),
+  "confirmedLaunches": zod.number().int().min(postSyncSpieleBodySpieleItemConfirmedLaunchesMin).optional(),
   "teilnahmen": zod.array(zod.object({
   "spielerId": zod.number().int(),
   "startPosten": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemTeilnahmenItemStartPostenMax),
@@ -430,6 +433,64 @@ export const GetAdminDaySalesResponse = zod.object({
 })
 
 
+/**
+ * @summary Append a one-credit grant or correction
+ */
+
+export const adjustAdminCreditBodyExternalIdMax = 200;
+
+
+
+export const AdjustAdminCreditBody = zod.object({
+  "spielerId": zod.number().int().min(1),
+  "datum": zod.coerce.date(),
+  "delta": zod.union([zod.literal(-1),zod.literal(1)]),
+  "externalId": zod.string().min(1).max(adjustAdminCreditBodyExternalIdMax)
+})
+
+export const AdjustAdminCreditResponse = zod.object({
+  "externalId": zod.string(),
+  "status": zod.enum(['accepted', 'skipped']),
+  "credit": zod.object({
+  "spielerId": zod.number().int(),
+  "datum": zod.coerce.date(),
+  "gewaehrt": zod.number().int(),
+  "verbraucht": zod.number().int(),
+  "available": zod.number().int()
+})
+})
+
+
+/**
+ * @summary Append a one-unit ammunition sale or reversal
+ */
+
+export const adjustAdminAmmoBodyOneExternalIdMax = 200;
+
+
+
+
+export const AdjustAdminAmmoBody = zod.object({
+  "spielerId": zod.number().int().min(1),
+  "datum": zod.coerce.date(),
+  "delta": zod.union([zod.literal(-1),zod.literal(1)]),
+  "externalId": zod.string().min(1).max(adjustAdminAmmoBodyOneExternalIdMax)
+}).and(zod.object({
+  "productId": zod.number().int().min(1)
+}))
+
+export const AdjustAdminAmmoResponse = zod.object({
+  "externalId": zod.string(),
+  "status": zod.enum(['accepted', 'skipped']),
+  "ammo": zod.object({
+  "spielerId": zod.number().int(),
+  "datum": zod.coerce.date(),
+  "productId": zod.number().int(),
+  "quantity": zod.number().int()
+})
+})
+
+
 export const GetSyncProductCatalogResponse = zod.object({
   "products": zod.array(zod.object({
   "id": zod.number().int(),
@@ -469,6 +530,9 @@ export const GetSyncDaySalesResponse = zod.object({
 
 
 
+export const postSyncSaleEventsBodyEventsItemPriceRevisionIdMin = 0;
+
+export const postSyncSaleEventsBodyEventsItemQuantityMin = -1;
 
 
 
@@ -478,8 +542,8 @@ export const PostSyncSaleEventsBody = zod.object({
   "spielerId": zod.number().int().min(1),
   "datum": zod.coerce.date(),
   "productId": zod.number().int().min(1),
-  "priceRevisionId": zod.number().int().min(1),
-  "quantity": zod.number().int()
+  "priceRevisionId": zod.number().int().min(postSyncSaleEventsBodyEventsItemPriceRevisionIdMin).nullish().describe('Required for positive sales. Omit, null, or use legacy 0 for a negative correction; the server allocates its original immutable sale lot.'),
+  "quantity": zod.number().int().min(postSyncSaleEventsBodyEventsItemQuantityMin)
 }))
 })
 
@@ -487,5 +551,91 @@ export const PostSyncSaleEventsResponse = zod.object({
   "synced": zod.number().int(),
   "skipped": zod.number().int()
 })
+
+
+export const GetSyncBillDaySummaryQueryParams = zod.object({
+  "datum": zod.date()
+})
+
+export const GetSyncBillDaySummaryResponse = zod.object({
+  "datum": zod.coerce.date(),
+  "players": zod.array(zod.object({
+
+})),
+  "categorySubtotals": zod.record(zod.string(), zod.number().int()),
+  "productTotals": zod.record(zod.string(), zod.object({
+  "productId": zod.number().int(),
+  "productName": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "priceRevisionId": zod.number().int(),
+  "unitPriceCents": zod.number().int(),
+  "quantity": zod.number().int(),
+  "totalCents": zod.number().int()
+})),
+  "generalTotalCents": zod.number().int(),
+  "uniquePlayers": zod.number().int(),
+  "paidPlayers": zod.number().int(),
+  "games": zod.number().int(),
+  "completedGames": zod.number().int(),
+  "confirmedClays": zod.number().int()
+})
+
+
+export const PostSyncBillPaymentsBody = zod.object({
+  "events": zod.array(zod.object({
+  "externalId": zod.string(),
+  "spielerId": zod.number().int(),
+  "datum": zod.coerce.date(),
+  "terminalId": zod.string().optional()
+}))
+})
+
+export const PostSyncBillPaymentsResponse = zod.object({
+  "results": zod.array(zod.object({
+  "externalId": zod.string(),
+  "status": zod.enum(['accepted', 'skipped', 'conflict']),
+  "error": zod.string().optional()
+}))
+})
+
+
+export const GetAdminBillDaySummaryQueryParams = zod.object({
+  "datum": zod.date()
+})
+
+export const GetAdminBillDaySummaryResponse = zod.object({
+  "datum": zod.coerce.date(),
+  "players": zod.array(zod.object({
+
+})),
+  "categorySubtotals": zod.record(zod.string(), zod.number().int()),
+  "productTotals": zod.record(zod.string(), zod.object({
+  "productId": zod.number().int(),
+  "productName": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "priceRevisionId": zod.number().int(),
+  "unitPriceCents": zod.number().int(),
+  "quantity": zod.number().int(),
+  "totalCents": zod.number().int()
+})),
+  "generalTotalCents": zod.number().int(),
+  "uniquePlayers": zod.number().int(),
+  "paidPlayers": zod.number().int(),
+  "games": zod.number().int(),
+  "completedGames": zod.number().int(),
+  "confirmedClays": zod.number().int()
+})
+
+
+export const MarkAdminBillPaidParams = zod.object({
+  "spielerId": zod.coerce.number().int()
+})
+
+export const MarkAdminBillPaidBody = zod.object({
+  "datum": zod.coerce.date(),
+  "externalId": zod.string().optional()
+})
+
+export const MarkAdminBillPaidResponse = zod.unknown()
 
 

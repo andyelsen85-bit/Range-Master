@@ -30,6 +30,12 @@ static const char *TAG = "game_store";
 static_assert(AUTO_SYNC_MIN_SECONDS <= AUTO_SYNC_DEFAULT_SECONDS &&
               AUTO_SYNC_DEFAULT_SECONDS <= AUTO_SYNC_MAX_SECONDS,
               "Auto-sync default must remain within persisted validation bounds");
+static_assert(MAX_KREDIT_EVENTS > 0,
+              "Credit event persistence requires a non-empty outbox");
+static_assert(sizeof(((KreditEvent *)0)->externalId) >= 16,
+              "Credit event IDs must remain durable idempotency keys");
+static_assert(VERKAUF_PRICE_REVISION_UNALLOCATED == 0,
+              "Sales correction wire sentinel is part of the API contract");
 
 // Forward declaration (defined later in this file)
 static void _store_finish_game(void);
@@ -62,6 +68,27 @@ static void kredit_events_unlock(void)
 }
 
 static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anzahl);
+static bool save_kredit_state_unlocked(void);
+
+// This is deliberately a single NVS transaction: the projected balance must
+// never be made durable without the immutable event which explains it.
+static bool save_kredit_state_unlocked(void)
+{
+    esp_err_t err = nvs_set_str(s_nvs, "credit_date", g_store.kreditDatum);
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds,
+                           sizeof(g_store.kreditPlayerIds));
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
+                           sizeof(g_store.pendingKreditEvents));
+    if (err == ESP_OK)
+        err = nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
+    if (err == ESP_OK) err = nvs_commit(s_nvs);
+    if (err != ESP_OK) ESP_LOGE(TAG, "Could not persist credit state: %s", esp_err_to_name(err));
+    return err == ESP_OK;
+}
 
 static int find_munition_slot(int spieler_id)
 {
@@ -94,6 +121,119 @@ int store_munition_cal20(int spieler_id) {
     for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
         if (g_store.munition[i].spielerId == spieler_id) return g_store.munition[i].cal20;
     return 0;
+}
+
+bool store_payment_pending(int spieler_id)
+{
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    for (int i = 0; i < g_store.pendingPaymentEventCount; ++i)
+        if (g_store.pendingPaymentEvents[i].spielerId == spieler_id &&
+            strcmp(g_store.pendingPaymentEvents[i].datum, today) == 0) return true;
+    return false;
+}
+
+bool store_queue_payment(int spieler_id)
+{
+    if (spieler_id <= 0) return false;
+    kredit_events_lock();
+    // One unresolved Paid action per player/day is the local idempotency
+    // boundary. Re-tapping a pending bill can never create a second payment.
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    bool duplicate = false;
+    for (int i = 0; i < g_store.pendingPaymentEventCount; ++i)
+        if (g_store.pendingPaymentEvents[i].spielerId == spieler_id &&
+            strcmp(g_store.pendingPaymentEvents[i].datum, today) == 0) {
+            duplicate = true; break;
+        }
+    if (duplicate || g_store.pendingPaymentEventCount >= MAX_PENDING_PAYMENTS) {
+        kredit_events_unlock();
+        return false;
+    }
+    bool active = false;
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
+        if (g_store.kreditPlayerIds[i] == spieler_id) { active = true; break; }
+    if (!active) { kredit_events_unlock(); return false; }
+    PaymentEvent *event =
+        &g_store.pendingPaymentEvents[g_store.pendingPaymentEventCount++];
+    memset(event, 0, sizeof(*event));
+    snprintf(event->externalId, sizeof(event->externalId), "pay-%d-%08x",
+             spieler_id, (unsigned)esp_random());
+    event->spielerId = spieler_id;
+    strftime(event->datum, sizeof(event->datum), "%Y-%m-%d", &tm);
+    kredit_events_unlock();
+    game_store_save();
+    return true;
+}
+
+int store_begin_payment_sync(PaymentEvent *snapshot, int capacity)
+{
+    if (!snapshot || capacity <= 0) return 0;
+    kredit_events_lock();
+    int count = 0;
+    for (int i = 0; i < g_store.pendingPaymentEventCount && count < capacity; ++i) {
+        PaymentEvent *event = &g_store.pendingPaymentEvents[i];
+        if (event->spielerId <= 0 || event->inFlight) continue;
+        event->inFlight = true;
+        snapshot[count++] = *event;
+    }
+    kredit_events_unlock();
+    game_store_save();
+    return count;
+}
+
+void store_finish_payment_sync(const PaymentEvent *snapshot, int count,
+                               const char *const *acceptedIds, int acceptedCount,
+                               const char *error)
+{
+    if (!snapshot || count <= 0) return;
+    kredit_events_lock();
+    for (int n = 0; n < count; ++n) {
+        bool accepted = false;
+        for (int a = 0; a < acceptedCount; ++a)
+            if (acceptedIds[a] && !strcmp(snapshot[n].externalId, acceptedIds[a]))
+                { accepted = true; break; }
+        for (int i = 0; i < g_store.pendingPaymentEventCount; ++i) {
+            PaymentEvent *event = &g_store.pendingPaymentEvents[i];
+            if (strcmp(event->externalId, snapshot[n].externalId)) continue;
+            if (accepted) {
+                // Portal acceptance is the sole authorization to retire a
+                // Player of Day.  Sales/history remain append-only elsewhere.
+                time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+                char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+                for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
+                    if (strcmp(event->datum, today) == 0 &&
+                        g_store.kreditPlayerIds[k] == event->spielerId) {
+                        g_store.kreditPlayerIds[k] = 0;
+                        g_store.kredite[k] = (KreditStand){};
+                        break;
+                    }
+                memmove(event, event + 1, (size_t)(g_store.pendingPaymentEventCount - i - 1) *
+                                         sizeof(*event));
+                memset(&g_store.pendingPaymentEvents[--g_store.pendingPaymentEventCount],
+                       0, sizeof(*event));
+            } else {
+                event->inFlight = false;
+                snprintf(event->lastError, sizeof(event->lastError), "%s",
+                         error && error[0] ? error : "Portal nicht bestaetegt");
+            }
+            break;
+        }
+    }
+    kredit_events_unlock();
+    game_store_save();
+}
+
+void store_cache_bill_day(const BillDaySummary *summary)
+{
+    if (!summary || summary->playerCount < 0 || summary->playerCount > MAX_DAY_BILLS)
+        return;
+    g_store.billDay = *summary;
+    // Keep the large offline snapshot out of game_store_save(): scoring and
+    // FIRE sequence commits must not rewrite ~20KB on the LVGL path.
+    nvs_set_blob(s_nvs, "bill_day", &g_store.billDay, sizeof(g_store.billDay));
+    nvs_commit(s_nvs);
 }
 
 static int munition_caliber_for_product(int produkt_id)
@@ -134,8 +274,24 @@ void store_replace_produkte(const Produkt *produkte, int count)
 bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
 {
     const Produkt *produkt = store_produkt(produkt_code);
-    if (!produkt || produkt->id <= 0 || produkt->preisRevisionId <= 0 ||
-        spieler_id == 0 || quantity == 0) return false;
+    // A correction must remain possible when its product has since been
+    // deactivated. It still requires a known ammunition product ID, but must
+    // not inherit the current price revision: the portal allocates it to the
+    // original immutable sale lot using the zero sentinel.
+    if (!produkt && quantity < 0 && produkt_code) {
+        for (int i = 0; i < g_store.produkteCount; ++i)
+            if (strcmp(g_store.produkte[i].code, produkt_code) == 0) {
+                produkt = &g_store.produkte[i];
+                break;
+            }
+    }
+    if (!produkt || produkt->id <= 0 || spieler_id == 0 || quantity == 0)
+        return false;
+    int caliber = munition_caliber_for_product(produkt->id);
+    if (quantity > 0 && (!produkt->active || produkt->preisRevisionId <= 0))
+        return false;
+    if (quantity < 0 && (caliber != 12 && caliber != 20))
+        return false;
     time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tmi);
     xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
@@ -149,13 +305,29 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
         ESP_LOGW(TAG, "Sale outbox full");
         return false;
     }
+    // Corrections are signed immutable sale events.  Reject an invalid
+    // correction at the transaction boundary as well as in the UI.
+    if (quantity < 0) {
+        int current = 0;
+        for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
+            if (g_store.munition[i].spielerId == spieler_id) {
+                current = caliber == 12 ? g_store.munition[i].cal12 :
+                          caliber == 20 ? g_store.munition[i].cal20 : 0;
+                break;
+            }
+        if (current < -quantity) {
+            xSemaphoreGive(s_verkauf_events_mutex);
+            return false;
+        }
+    }
     VerkaufEvent *event = &g_store.pendingVerkaufEvents[g_store.pendingVerkaufEventCount++];
     memset(event, 0, sizeof(*event));
     snprintf(event->externalId, sizeof(event->externalId), "sal-%d-%08x",
              spieler_id, (unsigned)esp_random());
     event->spielerId = spieler_id;
     event->produktId = produkt->id;
-    event->preisRevisionId = produkt->preisRevisionId;
+    event->preisRevisionId = quantity < 0 ? VERKAUF_PRICE_REVISION_UNALLOCATED
+                                          : produkt->preisRevisionId;
     event->quantity = quantity;
     strftime(event->datum, sizeof(event->datum), "%Y-%m-%d", &tmi);
     store_apply_portal_verkauf(spieler_id, produkt->id, quantity);
@@ -736,22 +908,59 @@ void store_register_spieler_fuer_tag(int spieler_id)
 
 void store_add_kredite(int spieler_id, int anzahl)
 {
-    if (anzahl <= 0) return;
+    if (anzahl > 0) (void)store_adjust_kredite(spieler_id, anzahl);
+}
+
+bool store_adjust_kredite(int spieler_id, int delta)
+{
+    if (spieler_id == 0 || delta == 0) return false;
+    kredit_events_lock();
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
         if (g_store.kreditPlayerIds[i] == spieler_id) {
-            g_store.kredite[i].gewaehrt += anzahl;
-            store_queue_kredit_event(spieler_id, "GRANT", anzahl);
-            game_store_save();
-            return;
+            // A correction is an immutable, signed GRANT event.  Never alter
+            // the projection unless its matching event was reserved first.
+            if (delta < 0 &&
+                g_store.kredite[i].gewaehrt - g_store.kredite[i].verbraucht < -delta) {
+                kredit_events_unlock();
+                return false;
+            }
+            if (!queue_kredit_event_unlocked(spieler_id, "GRANT", delta)) {
+                kredit_events_unlock();
+                return false;
+            }
+            KreditStand prior = g_store.kredite[i];
+            g_store.kredite[i].gewaehrt += delta;
+            if (!save_kredit_state_unlocked()) {
+                g_store.kredite[i] = prior;
+                memset(&g_store.pendingKreditEvents[--g_store.pendingKreditEventCount], 0,
+                       sizeof(g_store.pendingKreditEvents[0]));
+                kredit_events_unlock();
+                return false;
+            }
+            kredit_events_unlock();
+            return true;
         }
-        if (g_store.kreditPlayerIds[i] == 0) {
+        if (delta > 0 && g_store.kreditPlayerIds[i] == 0) {
+            if (!queue_kredit_event_unlocked(spieler_id, "GRANT", delta)) {
+                kredit_events_unlock();
+                return false;
+            }
             g_store.kreditPlayerIds[i] = spieler_id;
-            g_store.kredite[i] = (KreditStand){anzahl, 0};
-            store_queue_kredit_event(spieler_id, "GRANT", anzahl);
-            game_store_save();
-            return;
+            g_store.kredite[i] = (KreditStand){delta, 0};
+            if (!save_kredit_state_unlocked()) {
+                g_store.kreditPlayerIds[i] = 0;
+                g_store.kredite[i] = (KreditStand){};
+                memset(&g_store.pendingKreditEvents[--g_store.pendingKreditEventCount], 0,
+                       sizeof(g_store.pendingKreditEvents[0]));
+                kredit_events_unlock();
+                return false;
+            }
+            kredit_events_unlock();
+            return true;
         }
     }
+    kredit_events_unlock();
+    return false;
 }
 
 // ── store_start_spiel ────────────────────────────────────────
@@ -759,6 +968,7 @@ bool store_start_spiel(void)
 {
     GameStore *s = &g_store;
     if (s->operatingMode == TERMINAL_MODE_CATERING) return false;
+    s->activeAcknowledgedClays = 0;
     // Snapshot the durable setup in post order. Never persist this active
     // game's points or second-run rotations back into lineupIds.
     s->spielerCount = 0;
@@ -932,6 +1142,7 @@ bool store_cancel_spiel(void)
     s->spielerIndex = 0;
     s->spielId[0] = '\0';
     s->currentFireSent = false;
+    s->activeAcknowledgedClays = 0;
     s->screen = SCREEN_DASHBOARD;
     game_store_save();
     ESP_LOGI(TAG, "Game canceled; all participant credits restored");
@@ -1063,6 +1274,16 @@ void store_eintragen(int punkte)
     game_store_save();
 }
 
+void store_account_acknowledged_clays(int count)
+{
+    // Called only by the gateway worker after an actual FIRE ACK. It is
+    // deliberately independent of scoring so skipped/rejected launches never
+    // become clay consumption.
+    if (count <= 0 || g_store.screen != SCREEN_SPIEL) return;
+    g_store.activeAcknowledgedClays += count;
+    game_store_save();
+}
+
 // ── _store_finish_game ───────────────────────────────────────
 static void _store_finish_game(void)
 {
@@ -1074,6 +1295,7 @@ static void _store_finish_game(void)
     fg.base.lauf          = s->lauf;
     fg.base.taubenProLauf = s->sequenzLen;
     fg.base.abgeschlossen = true;
+    fg.base.confirmedLaunches = s->activeAcknowledgedClays;
     fg.base.ergebnisse_count = s->ergebnisseCount;
     memcpy(fg.base.ergebnisse, s->ergebnisse,
            s->ergebnisseCount * sizeof(Ergebnis));
@@ -1126,6 +1348,7 @@ static void _store_finish_game(void)
     s->lastFinished   = fg;
     s->hasLastFinished = true;
     clear_active_game_credit_tracking(s);
+    s->activeAcknowledgedClays = 0;
     s->screen         = SCREEN_RESULTATE;
     game_store_save();
     ESP_LOGI(TAG, "Game finished, navigating to resultate");
@@ -1363,6 +1586,15 @@ int store_begin_kredit_event_sync(KreditEvent *snapshot, int capacity)
         event->inFlight = true;
         snapshot[count++] = *event;
     }
+    if (count > 0 && !save_kredit_state_unlocked()) {
+        // Do not send a snapshot whose reservation was not made durable.
+        // Retrying will retain the same event IDs and is therefore idempotent.
+        for (int i = 0; i < count; ++i) {
+            int eventIndex = find_pending_kredit_event(&g_store, snapshot[i].externalId);
+            if (eventIndex >= 0) g_store.pendingKreditEvents[eventIndex].inFlight = false;
+        }
+        count = 0;
+    }
     kredit_events_unlock();
     return count;
 }
@@ -1375,12 +1607,18 @@ void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
     for (int i = 0; i < count; i++) {
         int eventIndex = find_pending_kredit_event(&g_store, snapshot[i].externalId);
         if (eventIndex < 0) continue;
+        // An acknowledgement may only settle the specific persisted snapshot,
+        // never an event appended while the HTTP request was in progress.
+        if (!g_store.pendingKreditEvents[eventIndex].inFlight) continue;
         if (delivered) {
             remove_pending_kredit_event(&g_store, eventIndex);
         } else {
             g_store.pendingKreditEvents[eventIndex].inFlight = false;
         }
     }
+    // The helper reports NVS failures and leaves the committed prior state
+    // intact for a safe idempotent retry after a reboot.
+    (void)save_kredit_state_unlocked();
     kredit_events_unlock();
 }
 
@@ -1617,10 +1855,16 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
     nvs_set_i32(s_nvs, "sale_12", g_store.verkaufCal12Total);
     nvs_set_i32(s_nvs, "sale_20", g_store.verkaufCal20Total);
+    nvs_set_blob(s_nvs, "payments", g_store.pendingPaymentEvents,
+                 sizeof(g_store.pendingPaymentEvents));
+    nvs_set_i32(s_nvs, "payment_cnt", g_store.pendingPaymentEventCount);
     nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds, sizeof(g_store.lineupIds));
     nvs_set_str(s_nvs, "credit_date", g_store.kreditDatum);
     nvs_set_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds, sizeof(g_store.kreditPlayerIds));
     nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
+    nvs_set_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
+                 sizeof(g_store.pendingKreditEvents));
+    nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
     // Cache roster and unsynced creates too: an offline reboot must still be
     // able to render the saved setup and later complete its create sync.
     nvs_set_blob(s_nvs, "plrs", g_store.portalSpieler, sizeof(g_store.portalSpieler));
@@ -1684,6 +1928,40 @@ void game_store_init(void)
         memset(g_store.kreditPlayerIds, 0, sizeof(g_store.kreditPlayerIds));
         memset(g_store.kredite, 0, sizeof(g_store.kredite));
     }
+    size_t credit_events_size = sizeof(g_store.pendingKreditEvents);
+    int32_t credit_event_count = 0;
+    if (nvs_get_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
+                     &credit_events_size) == ESP_OK &&
+        credit_events_size == sizeof(g_store.pendingKreditEvents) &&
+        nvs_get_i32(s_nvs, "credit_evt_cnt", &credit_event_count) == ESP_OK &&
+        credit_event_count >= 0 && credit_event_count <= MAX_KREDIT_EVENTS) {
+        bool valid = true;
+        for (int i = 0; i < credit_event_count; ++i) {
+            const KreditEvent *event = &g_store.pendingKreditEvents[i];
+            if (event->spielerId == 0 || event->anzahl == 0 ||
+                !memchr(event->externalId, '\0', sizeof(event->externalId)) ||
+                (strcmp(event->typ, "GRANT") != 0 && strcmp(event->typ, "USE") != 0)) {
+                valid = false;
+                break;
+            }
+        }
+        if (valid) g_store.pendingKreditEventCount = credit_event_count;
+        else memset(g_store.pendingKreditEvents, 0, sizeof(g_store.pendingKreditEvents));
+    } else {
+        memset(g_store.pendingKreditEvents, 0, sizeof(g_store.pendingKreditEvents));
+    }
+    // An interrupted POST may have been accepted by the portal. Retry its
+    // stable external ID rather than leaving the outbox permanently in flight.
+    bool reset_credit_flights = false;
+    for (int i = 0; i < g_store.pendingKreditEventCount; ++i) {
+        reset_credit_flights |= g_store.pendingKreditEvents[i].inFlight;
+        g_store.pendingKreditEvents[i].inFlight = false;
+    }
+    if (reset_credit_flights) {
+        kredit_events_lock();
+        (void)save_kredit_state_unlocked();
+        kredit_events_unlock();
+    }
     size_t lineup_size = sizeof(g_store.lineupIds);
     if (nvs_get_blob(s_nvs, "lineup_ids", g_store.lineupIds, &lineup_size) != ESP_OK ||
         lineup_size != sizeof(g_store.lineupIds))
@@ -1734,6 +2012,45 @@ void game_store_init(void)
     nvs_load_str("sale_date", g_store.verkaufDatum, sizeof(g_store.verkaufDatum));
     nvs_get_i32(s_nvs, "sale_12", &g_store.verkaufCal12Total);
     nvs_get_i32(s_nvs, "sale_20", &g_store.verkaufCal20Total);
+    size_t payments_size = sizeof(g_store.pendingPaymentEvents);
+    int32_t payment_count = 0;
+    if (nvs_get_blob(s_nvs, "payments", g_store.pendingPaymentEvents, &payments_size) == ESP_OK &&
+        payments_size == sizeof(g_store.pendingPaymentEvents) &&
+        nvs_get_i32(s_nvs, "payment_cnt", &payment_count) == ESP_OK &&
+        payment_count >= 0 && payment_count <= MAX_PENDING_PAYMENTS)
+        g_store.pendingPaymentEventCount = payment_count;
+    // A power loss can occur after inFlight was committed but before an HTTP
+    // response reached us. Reset it at boot and retry its stable externalId.
+    bool reset_payment_flights = false;
+    for (int i = 0; i < g_store.pendingPaymentEventCount; ++i) {
+        reset_payment_flights |= g_store.pendingPaymentEvents[i].inFlight;
+        g_store.pendingPaymentEvents[i].inFlight = false;
+    }
+    if (reset_payment_flights) {
+        nvs_set_blob(s_nvs, "payments", g_store.pendingPaymentEvents,
+                     sizeof(g_store.pendingPaymentEvents));
+        nvs_commit(s_nvs);
+    }
+    size_t bill_day_size = sizeof(g_store.billDay);
+    if (nvs_get_blob(s_nvs, "bill_day", &g_store.billDay, &bill_day_size) != ESP_OK ||
+        bill_day_size != sizeof(g_store.billDay) ||
+        g_store.billDay.playerCount < 0 || g_store.billDay.playerCount > MAX_DAY_BILLS ||
+        g_store.billDay.categoryCount < 0 ||
+        g_store.billDay.categoryCount > MAX_BILL_CATEGORIES ||
+        g_store.billDay.productCount < 0 ||
+        g_store.billDay.productCount > MAX_DAY_PRODUCTS) {
+        memset(&g_store.billDay, 0, sizeof(g_store.billDay));
+    } else {
+        bool nested_valid = true;
+        for (int i = 0; i < g_store.billDay.playerCount; ++i)
+            if (g_store.billDay.players[i].lineCount < 0 ||
+                g_store.billDay.players[i].lineCount > MAX_BILL_LINES ||
+                g_store.billDay.players[i].categoryCount < 0 ||
+                g_store.billDay.players[i].categoryCount > MAX_BILL_CATEGORIES)
+                nested_valid = false;
+        if (!nested_valid) memset(&g_store.billDay, 0, sizeof(g_store.billDay));
+        else g_store.billDay.authoritative = false; // valid portal snapshot, now offline cache
+    }
     time_t today_now = time(NULL); struct tm today_tm; localtime_r(&today_now, &today_tm);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &today_tm);
     if (strcmp(g_store.verkaufDatum, today) != 0) {

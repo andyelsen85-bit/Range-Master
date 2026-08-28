@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx/esm --test src/routes/rangliste-compute.test.ts"
+    "test": "node --import tsx/esm --test src/routes/rangliste-compute.test.ts src/lib/immutable-events.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

@@ -1,0 +1,314 @@
+import React, { useEffect, useState } from 'react';
+import { useGameStore, PortalSpieler, DaySummary } from '@/store/gameStore';
+import { TouchButton } from '@/components/TouchButton';
+import { PlayerSearch } from '@/components/PlayerSearch';
+import { ArrowLeft, Coins, Plus, RefreshCw, Trash2, Receipt, CheckCircle2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+const ADD_AMOUNTS = [1, 2, 3, 4] as const;
+
+function BillModal({ spielerId, summary, onClose }: { spielerId: number; summary: NonNullable<DaySummary['players'][number]>; onClose: () => void }) {
+  const store = useGameStore();
+  const [confirmPaid, setConfirmPaid] = useState(false);
+
+  const handlePaid = () => {
+    store.markBillPaid(spielerId);
+    onClose();
+  };
+
+  const isPending = store.pendingPayments.some(p => p.spielerId === spielerId && p.datum === store.verkaufDatum);
+  const isPaid = summary.state === 'PAID' || isPending;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-card border-2 border-border rounded-xl shadow-2xl flex flex-col w-full max-w-2xl overflow-hidden max-h-full">
+        <header className="px-6 py-4 border-b-2 border-border flex items-center justify-between bg-background shrink-0">
+          <div>
+            <h2 className="text-xl font-black text-primary">RECHNUNG</h2>
+            <div className="text-sm font-bold text-muted-foreground">{summary.spielerName} · {summary.mitgliedNr ?? 'Kee Member'}</div>
+          </div>
+          <TouchButton variant="ghost" className="h-12 w-12 p-0" onClick={onClose}>
+            <Trash2 className="hidden" /> {/* just placeholder */}
+            &times;
+          </TouchButton>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 bg-background">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-card border-2 border-border rounded-lg p-3 text-center flex flex-col items-center">
+              <span className="text-[10px] font-bold uppercase text-muted-foreground mb-1">Kreditter kritt</span>
+              <span className="text-xl font-black">{summary.credit.granted}</span>
+            </div>
+            <div className="bg-card border-2 border-border rounded-lg p-3 text-center flex flex-col items-center">
+              <span className="text-[10px] font-bold uppercase text-muted-foreground mb-1">Verbraucht</span>
+              <span className="text-xl font-black">{summary.credit.used}</span>
+            </div>
+            <div className="bg-primary/10 border-2 border-primary/30 rounded-lg p-3 text-center flex flex-col items-center">
+              <span className="text-[10px] font-bold uppercase text-primary mb-1">Rest</span>
+              <span className="text-xl font-black text-primary">{summary.credit.remaining}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Detailer</h3>
+            <div className="border-2 border-border rounded-lg overflow-hidden bg-card">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-background/50 border-b-2 border-border">
+                  <tr>
+                    <th className="p-3 font-bold">Produkt</th>
+                    <th className="p-3 font-bold">Quantitéit</th>
+                    <th className="p-3 font-bold text-right">Präis/E</th>
+                    <th className="p-3 font-bold text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border font-mono">
+                  {summary.lines.length === 0 ? (
+                    <tr><td colSpan={4} className="p-4 text-center text-muted-foreground italic">Keng Konsumatiounen</td></tr>
+                  ) : (
+                    summary.lines.map((line, i) => (
+                      <tr key={i}>
+                        <td className="p-3">
+                          <div className="font-bold font-sans">{line.productName}</div>
+                          <div className="text-[10px] text-muted-foreground">{line.category}</div>
+                        </td>
+                        <td className="p-3">{line.quantity}</td>
+                        <td className="p-3 text-right">{(line.unitPriceCents / 100).toFixed(2)} €</td>
+                        <td className="p-3 text-right">{(line.totalCents / 100).toFixed(2)} €</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot className="bg-background/50">
+                  {Object.entries(summary.categorySubtotals).map(([cat, cents]) => (
+                    <tr key={cat}>
+                      <td colSpan={3} className="p-3 font-bold text-muted-foreground uppercase text-[10px] tracking-wider text-right">{cat}</td>
+                      <td className="p-3 font-bold font-mono text-right text-muted-foreground">{(cents / 100).toFixed(2)} €</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t-2 border-border">
+                    <td colSpan={3} className="p-4 font-black text-lg text-right">TOTAL</td>
+                    <td className="p-4 font-black text-lg text-primary text-right font-mono">{(summary.totalCents / 100).toFixed(2)} €</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <footer className="px-6 py-4 border-t-2 border-border flex items-center justify-end bg-card gap-3 shrink-0">
+          <TouchButton variant="outline" className="h-12 px-6" onClick={onClose}>Zréck</TouchButton>
+          {!isPaid ? (
+            confirmPaid ? (
+              <TouchButton variant="success" className="h-12 px-8 font-black gap-2" onClick={handlePaid} data-testid={`button-confirm-paid-${spielerId}`}>
+                <CheckCircle2 className="w-5 h-5" />
+                JO, ASS BEZUELT
+              </TouchButton>
+            ) : (
+              <TouchButton variant="primary" className="h-12 px-8 font-black" onClick={() => setConfirmPaid(true)} data-testid={`button-mark-paid-${spielerId}`}>
+                BEZUELT
+              </TouchButton>
+            )
+          ) : (
+            <div className="h-12 px-6 flex items-center gap-2 font-bold text-green-500 bg-green-500/10 border border-green-500/30 rounded-lg">
+              <CheckCircle2 className="w-5 h-5" />
+              {isPending ? 'BEZUELT (Pending)' : 'BEZUELT'}
+            </div>
+          )}
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+export function KrediteScreen() {
+  const store = useGameStore();
+  const [searchKey, setSearchKey] = useState(0);
+  const [billSpielerId, setBillSpielerId] = useState<number | null>(null);
+
+  useEffect(() => {
+    void store.ladeKredite();
+    void store.ladeProdukte();
+    void store.ladeVerkaeufe();
+    void store.ladeDaySummary();
+  }, []);
+
+  const nameFor = (id: number) =>
+    store.portalSpieler.find(p => p.id === id)?.name ??
+    store.spieler.find(s => s.id === id)?.name ??
+    `Spiller #${id}`;
+
+  const cal12 = store.produkte.find(p => p.code === 'AMMO_CAL12' || p.category === 'AMMO_CAL12');
+  const cal20 = store.produkte.find(p => p.code === 'AMMO_CAL20' || p.category === 'AMMO_CAL20');
+
+  // Collect all players from store.kredite AND store.daySummary
+  const combinedPlayerIds = new Set(Object.keys(store.kredite).map(Number));
+  store.daySummary?.players.forEach(p => combinedPlayerIds.add(p.spielerId));
+
+  const eintraege = Array.from(combinedPlayerIds)
+    .map(spielerId => {
+      const stand = store.kredite[spielerId] ?? { gewaehrt: 0, verbraucht: 0 };
+      const dsPlayer = store.daySummary?.players.find(p => p.spielerId === spielerId);
+
+      return {
+        spielerId,
+        name: dsPlayer?.spielerName ?? nameFor(spielerId),
+        gewaehrt: stand.gewaehrt,
+        verbraucht: stand.verbraucht,
+        rest: Math.max(0, stand.gewaehrt - stand.verbraucht),
+        cal12: store.getProduktAnzahl(spielerId, cal12?.id ?? -2),
+        cal20: store.getProduktAnzahl(spielerId, cal20?.id ?? -3),
+        pending: store.pendingVerkaeufe.some(v => v.spielerId === spielerId),
+        daySummaryRow: dsPlayer,
+        isPaid: dsPlayer?.state === 'PAID' || store.pendingPayments.some(p => p.spielerId === spielerId && p.datum === store.verkaufDatum),
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const mitRest = eintraege.filter(e => e.rest > 0);
+  const ohneRest = eintraege.filter(e => e.rest === 0);
+
+  const registerPlayer = (ps: PortalSpieler) => {
+    store.registerSpielerFuerTag(ps.id);
+    setSearchKey(k => k + 1);
+  };
+
+  const refreshDay = () => {
+    void store.ladeKredite();
+    void store.ladeProdukte();
+    void store.ladeVerkaeufe();
+    void store.ladeDaySummary();
+  };
+
+  const selectedSummary = billSpielerId ? store.daySummary?.players.find(p => p.spielerId === billSpielerId) : null;
+
+  return (
+    <div className="flex h-full w-full bg-background flex-col">
+      <header className="h-16 border-b-2 border-border flex items-center px-6 bg-card gap-4 shrink-0 pr-20">
+        <TouchButton onClick={() => store.setScreen('dashboard')} className="w-12 h-12 p-0">
+          <ArrowLeft className="w-6 h-6" />
+        </TouchButton>
+        <h1 className="text-xl font-bold tracking-wider text-primary">SPILLER VUM DAG</h1>
+        <span className="text-xs text-muted-foreground font-mono">{store.kreditDatum}</span>
+        <div className="ml-auto flex items-center gap-3">
+          {(store.pendingKredite.length > 0 || store.pendingPayments.length > 0) && (
+            <span className="text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-1.5">
+              {store.pendingKredite.length + store.pendingPayments.length} net synchroniséiert
+            </span>
+          )}
+          <TouchButton className="h-12 px-4 gap-2" onClick={refreshDay} disabled={store.krediteLaden || store.verkaeufeLaden || store.daySummaryLaden}>
+            <RefreshCw className={cn('w-4 h-4', (store.krediteLaden || store.verkaeufeLaden || store.daySummaryLaden) && 'animate-spin')} />
+            Aktualiséieren
+          </TouchButton>
+        </div>
+      </header>
+
+      <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
+        <div className="lg:w-[380px] lg:border-r-2 border-b-2 lg:border-b-0 border-border flex flex-col">
+          <div className="p-4 border-b-2 border-border bg-card/50 shrink-0">
+            <h2 className="text-base font-bold uppercase tracking-widest text-foreground/80">Spiller dobäisetzen</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Spiller sichen → erschéngt riets → Kreditter dobäisetzen</p>
+          </div>
+          <div className="p-4 flex flex-col gap-3 flex-1 overflow-y-auto">
+            <PlayerSearch key={searchKey} onSelect={registerPlayer} placeholder="Spiller sichen…" />
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="p-4 border-b-2 border-border bg-card/50 shrink-0 flex items-center gap-3">
+            <Coins className="w-5 h-5 text-primary" />
+            <h2 className="text-base font-bold uppercase tracking-widest text-foreground/80">Haut um Terrain</h2>
+            <span className="text-sm text-muted-foreground">
+              <span className="text-primary font-black">{mitRest.length}</span> mat Kreditter
+              {ohneRest.length > 0 && <> · <span className="font-bold">{ohneRest.length}</span> op Null</>}
+            </span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+            {eintraege.length === 0 && (
+              <div className="text-muted-foreground italic text-center py-12">Nach keng Spiller fir haut — lénks e Spiller sichen an dobäisetzen</div>
+            )}
+
+            {eintraege.map(e => (
+              <div
+                key={e.spielerId}
+                className={cn(
+                  'grid grid-cols-1 xl:grid-cols-[minmax(180px,1fr)_auto_auto_auto] items-center gap-3 border-2 rounded-xl p-3 transition-all',
+                  e.rest > 0 ? 'border-primary/50 bg-primary/5' : 'border-border/40 bg-background/40 opacity-80',
+                  e.isPaid && 'border-green-500/30 bg-green-500/5 opacity-70'
+                )}
+              >
+                <div className="min-w-0">
+                  <div className={cn('font-bold text-base truncate flex items-center gap-2', e.rest > 0 ? 'text-foreground' : 'text-muted-foreground')}>
+                    {e.name}
+                    {e.isPaid && <span className="text-[10px] font-bold bg-green-500/20 text-green-500 px-1.5 py-0.5 rounded">BEZUELT</span>}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5 font-mono">
+                    {e.gewaehrt} bezuelt · {e.verbraucht} gespillt
+                    {e.rest === 0 && e.gewaehrt > 0 && <span className="text-amber-400 font-bold"> · opgebraucht</span>}
+                  </div>
+                  {e.pending && <div data-testid={`status-pending-${e.spielerId}`} className="text-[10px] font-bold text-amber-400 mt-1">Verkeef nach net synchroniséiert</div>}
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase text-primary">Credits: {e.rest}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <TouchButton variant="ghost" className="h-11 w-11 p-0 border border-amber-500/40" onClick={() => store.removeKredit(e.spielerId, 1)} disabled={e.rest === 0} style={e.rest === 0 ? { opacity: 0.3, pointerEvents: 'none' } : undefined} title="1 Kredit zréckbezuelen">
+                      <span className={cn('font-black text-base', e.rest > 0 ? 'text-amber-400' : 'text-muted-foreground')}>−1</span>
+                    </TouchButton>
+                    <div className="w-px h-8 bg-border/60 mx-0.5" />
+                    {ADD_AMOUNTS.map(n => (
+                      <TouchButton key={n} variant="outline" className="h-11 px-3 font-bold text-sm gap-0.5" onClick={() => store.addKredite(e.spielerId, n)}>
+                        <Plus className="w-3 h-3" />{n}
+                      </TouchButton>
+                    ))}
+                    <div className="w-px h-8 bg-border/60 mx-0.5" />
+                    <TouchButton variant="ghost" className="h-11 w-11 p-0 text-destructive hover:bg-destructive/10" onClick={() => store.deleteKreditEntry(e.spielerId)} title="Feeler korrigéieren — Spiller vum Dag läschen">
+                      <Trash2 className="w-4 h-4" />
+                    </TouchButton>
+                  </div>
+                </div>
+
+                {([
+                  { id: cal12?.id ?? -2, label: 'Cal. 12', quantity: e.cal12, available: !!cal12?.currentPrice && cal12.id > 0 },
+                  { id: cal20?.id ?? -3, label: 'Cal. 20', quantity: e.cal20, available: !!cal20?.currentPrice && cal20.id > 0 },
+                ] as const).map(product => (
+                  <div key={product.id} className="flex flex-col gap-1 min-w-[210px]">
+                    <span className="text-[10px] font-bold uppercase text-foreground">{product.label}: <b data-testid={`text-quantity-${product.id}-${e.spielerId}`}>{product.quantity}</b></span>
+                    <div className="flex gap-1">
+                      <TouchButton variant="ghost" disabled={!product.available} className="h-10 w-10 p-0 border border-amber-500/40" onClick={() => store.addVerkauf(e.spielerId, product.id, -1)} data-testid={`button-minus-${product.id}-${e.spielerId}`}>−1</TouchButton>
+                      {ADD_AMOUNTS.map(n => <TouchButton key={n} disabled={!product.available} variant="outline" className="h-10 px-2 font-bold" onClick={() => store.addVerkauf(e.spielerId, product.id, n)} data-testid={`button-add-${product.id}-${n}-${e.spielerId}`}><Plus className="w-3 h-3" />{n}</TouchButton>)}
+                    </div>
+                  </div>
+                ))}
+
+                <div className="flex flex-col gap-1 shrink-0 ml-4 border-l-2 border-border pl-4">
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground opacity-0">Action</span>
+                  <TouchButton
+                    variant={e.isPaid ? 'ghost' : 'outline'}
+                    className={cn("h-10 px-4 font-bold text-xs border-2 gap-2", e.isPaid && "text-green-500 border-green-500/30 hover:bg-green-500/10")}
+                    disabled={!e.daySummaryRow}
+                    onClick={() => setBillSpielerId(e.spielerId)}
+                    data-testid={`button-bill-${e.spielerId}`}
+                  >
+                    <Receipt className="w-4 h-4" />
+                    {e.isPaid ? 'RECHNUNG (BEZUELT)' : 'RECHNUNG'}
+                  </TouchButton>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {mitRest.length > 0 && (
+            <div className="border-t-2 border-border bg-card/50 px-4 py-2 text-xs text-muted-foreground shrink-0">
+              Kreditter gëlle just haut — wat um Enn vum Dag iwwreg ass, gëtt zréckbezuelt ({mitRest.reduce((s, e) => s + e.rest, 0)} Kreditter oppen)
+            </div>
+          )}
+        </div>
+      </div>
+
+      {billSpielerId && selectedSummary && (
+        <BillModal spielerId={billSpielerId} summary={selectedSummary} onClose={() => setBillSpielerId(null)} />
+      )}
+    </div>
+  );
+}

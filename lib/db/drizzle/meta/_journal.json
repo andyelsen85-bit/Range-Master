@@ -22,6 +22,13 @@
       "when": 1787921000000,
       "tag": "0002_terminal_config_backups",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787921000001,
+      "tag": "0003_bills_and_confirmed_launches",
+      "breakpoints": true
     }
   ]
 }

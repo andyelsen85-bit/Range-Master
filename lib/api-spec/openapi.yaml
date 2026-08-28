@@ -468,6 +468,34 @@ paths:
       parameters: [{ name: datum, in: query, schema: { type: string, format: date } }]
       responses:
         "200": { description: Per-day sales report, content: { application/json: { schema: { $ref: "#/components/schemas/DaySalesReport" } } } }
+  /admin/kredite/adjust:
+    post:
+      operationId: adjustAdminCredit
+      tags: [admin]
+      summary: Append a one-credit grant or correction
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AdminCreditAdjustmentInput" } } }
+      responses:
+        "200": { description: Adjustment accepted or idempotently skipped, content: { application/json: { schema: { $ref: "#/components/schemas/AdminCreditAdjustmentResult" } } } }
+        "400": { description: Invalid adjustment, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "404": { description: Player not found, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "409": { description: Negative balance or idempotency conflict, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /admin/ammo/adjust:
+    post:
+      operationId: adjustAdminAmmo
+      tags: [admin]
+      summary: Append a one-unit ammunition sale or reversal
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AdminAmmoAdjustmentInput" } } }
+      responses:
+        "200": { description: Adjustment accepted or idempotently skipped, content: { application/json: { schema: { $ref: "#/components/schemas/AdminAmmoAdjustmentResult" } } } }
+        "400": { description: Invalid adjustment or non-ammunition product, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "404": { description: Player not found, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "409": { description: "Negative quantity, missing price, or idempotency conflict", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /sync/products:
     get:
       operationId: getSyncProductCatalog
@@ -493,6 +521,55 @@ paths:
       responses:
         "200": { description: Idempotent upload result, content: { application/json: { schema: { $ref: "#/components/schemas/SaleSyncResult" } } } }
         "400": { description: "Unknown player, product, or price revision", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /sync/bills/day-summary:
+    get:
+      operationId: getSyncBillDaySummary
+      tags: [sync]
+      security: [{ apiKeyAuth: [] }]
+      parameters: [{ name: datum, in: query, required: true, schema: { type: string, format: date } }]
+      responses:
+        "200": { description: Authoritative player bills and daily totals, content: { application/json: { schema: { $ref: "#/components/schemas/BillDaySummary" } } } }
+  /sync/payments:
+    post:
+      operationId: postSyncBillPayments
+      tags: [sync]
+      security: [{ apiKeyAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [events], properties: { events: { type: array, items: { $ref: "#/components/schemas/BillPaymentInput" } } } } } }
+      responses:
+        "200":
+          description: Per-event accepted, skipped, or conflict result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/BillPaymentResult" }
+        "400": { description: Entire batch failed validation }
+  /admin/bills/day-summary:
+    get:
+      operationId: getAdminBillDaySummary
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: datum, in: query, required: true, schema: { type: string, format: date } }]
+      responses:
+        "200": { description: Authoritative bill day summary, content: { application/json: { schema: { $ref: "#/components/schemas/BillDaySummary" } } } }
+  /admin/bills/{spielerId}/paid:
+    post:
+      operationId: markAdminBillPaid
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: spielerId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [datum], properties: { datum: { type: string, format: date }, externalId: { type: string } } } } }
+      responses:
+        "200": { description: Payment accepted or idempotently skipped }
+        "409": { description: Existing paid closure conflicts }
 
 # ── COMPONENTS ────────────────────────────────────────────────────────────
 components:
@@ -556,14 +633,17 @@ components:
         effectiveFrom: { type: string, format: date-time }
     SaleEventInput:
       type: object
-      required: [externalId, spielerId, datum, productId, priceRevisionId, quantity]
+      required: [externalId, spielerId, datum, productId, quantity]
       properties:
         externalId: { type: string, minLength: 1 }
         spielerId: { type: integer, minimum: 1 }
         datum: { type: string, format: date }
         productId: { type: integer, minimum: 1 }
-        priceRevisionId: { type: integer, minimum: 1 }
-        quantity: { type: integer, not: { const: 0 } }
+        priceRevisionId:
+          description: Required for positive sales. Omit, null, or use legacy 0 for a negative correction; the server allocates its original immutable sale lot.
+          type: [integer, "null"]
+          minimum: 0
+        quantity: { type: integer, minimum: -1, not: { const: 0 } }
     SaleEventBatchInput:
       type: object
       required: [events]
@@ -575,6 +655,93 @@ components:
       properties:
         synced: { type: integer }
         skipped: { type: integer }
+    AdminCreditAdjustmentInput:
+      type: object
+      required: [spielerId, datum, delta, externalId]
+      properties:
+        spielerId: { type: integer, minimum: 1 }
+        datum: { type: string, format: date }
+        delta: { type: integer, enum: [-1, 1] }
+        externalId: { type: string, minLength: 1, maxLength: 200 }
+    AdminAmmoAdjustmentInput:
+      allOf:
+        - $ref: "#/components/schemas/AdminCreditAdjustmentInput"
+        - type: object
+          required: [productId]
+          properties:
+            productId: { type: integer, minimum: 1 }
+    AdminCreditAdjustmentResult:
+      type: object
+      required: [externalId, status, credit]
+      properties:
+        externalId: { type: string }
+        status: { type: string, enum: [accepted, skipped] }
+        credit:
+          type: object
+          required: [spielerId, datum, gewaehrt, verbraucht, available]
+          properties:
+            spielerId: { type: integer }
+            datum: { type: string, format: date }
+            gewaehrt: { type: integer }
+            verbraucht: { type: integer }
+            available: { type: integer }
+    AdminAmmoAdjustmentResult:
+      type: object
+      required: [externalId, status, ammo]
+      properties:
+        externalId: { type: string }
+        status: { type: string, enum: [accepted, skipped] }
+        ammo:
+          type: object
+          required: [spielerId, datum, productId, quantity]
+          properties:
+            spielerId: { type: integer }
+            datum: { type: string, format: date }
+            productId: { type: integer }
+            quantity: { type: integer }
+    BillPaymentInput:
+      type: object
+      required: [externalId, spielerId, datum]
+      properties:
+        externalId: { type: string }
+        spielerId: { type: integer }
+        datum: { type: string, format: date }
+        terminalId: { type: string }
+    BillPaymentResult:
+      type: object
+      required: [externalId, status]
+      properties:
+        externalId: { type: string }
+        status: { type: string, enum: [accepted, skipped, conflict] }
+        error: { type: string }
+    BillDaySummary:
+      type: object
+      required: [datum, players, categorySubtotals, productTotals, generalTotalCents, uniquePlayers, paidPlayers, games, completedGames, confirmedClays]
+      properties:
+        datum: { type: string, format: date }
+        players: { type: array, items: { type: object } }
+        categorySubtotals: { type: object, additionalProperties: { type: integer } }
+        productTotals:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/BillProductTotal"
+        generalTotalCents: { type: integer }
+        uniquePlayers: { type: integer }
+        paidPlayers: { type: integer }
+        games: { type: integer }
+        completedGames: { type: integer }
+        confirmedClays: { type: integer }
+    BillProductTotal:
+      type: object
+      required: [productId, productName, category, priceRevisionId, unitPriceCents, quantity, totalCents]
+      properties:
+        productId: { type: integer }
+        productName: { type: string }
+        category: { $ref: "#/components/schemas/ProductCategory" }
+        priceRevisionId: { type: integer }
+        unitPriceCents: { type: integer }
+        quantity: { type: integer }
+        totalCents: { type: integer }
     DaySalesItem:
       type: object
       required: [spielerId, productId, quantity, totalCents]
@@ -793,6 +960,9 @@ components:
           maximum: 2
         abgeschlossen:
           type: boolean
+        confirmedLaunches:
+          type: integer
+          minimum: 0
         teilnahmen:
           type: array
           items:

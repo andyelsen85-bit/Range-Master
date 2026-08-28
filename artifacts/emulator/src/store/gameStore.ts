@@ -114,6 +114,47 @@ export interface VerkaufEvent {
   quantity: number;
 }
 
+export interface PaymentEvent {
+  externalId: string;
+  spielerId: number;
+  datum: string;
+}
+
+export interface DaySummary {
+  datum: string;
+  players: Array<{
+    spielerId: number;
+    spielerName: string;
+    mitgliedNr: string | null;
+    lines: Array<{
+      productId: number;
+      productName: string;
+      category: string;
+      priceRevisionId: number;
+      unitPriceCents: number;
+      quantity: number;
+      totalCents: number;
+    }>;
+    categorySubtotals: Record<string, number>;
+    totalCents: number;
+    credit: { granted: number; used: number; remaining: number };
+    games: number;
+    completedGames: number;
+    confirmedClays: number;
+    state: 'OPEN' | 'PENDING_NEUTRAL' | 'PAID';
+    paymentExternalId: string | null;
+    paidAt: string | null;
+  }>;
+  categorySubtotals: Record<string, number>;
+  productTotals: Record<string, number>;
+  generalTotalCents: number;
+  uniquePlayers: number;
+  paidPlayers: number;
+  games: number;
+  completedGames: number;
+  confirmedClays: number;
+}
+
 /** Authoritative, per-player/day sale row returned by GET /api/sync/sales. */
 export interface VerkaufReportRow {
   spielerId: number;
@@ -160,6 +201,7 @@ export interface PendingGame {
     lauf: number;
   }>;
   ergebnisse: Ergebnis[];
+  confirmedLaunches: number;
 }
 
 /** Compute tauben per Lauf from a sequence (H = 2 tauben) */
@@ -193,8 +235,10 @@ interface GameState extends Settings {
   lauf: number;
   taubeIndex: number;  // which machine in sequenz
   spielerIndex: number; // which player is shooting within this taube (0..N-1)
+  taubeGeworfen: boolean;
   sequenz: SequenzEintrag[];
   ergebnisse: Ergebnis[];
+  confirmedLaunches: number;
   spielId: string | null;
   /** The exact USE events charged when the current game started. */
   activeGameCreditUses: KreditEvent[];
@@ -231,6 +275,10 @@ interface GameState extends Settings {
   verkaeufeLaden: boolean;
   /** Cached authoritative report rows; pending events are layered at read time. */
   serverVerkaeufe: VerkaufReportRow[];
+  daySummary: DaySummary | null;
+  daySummaryLaden: boolean;
+  pendingPayments: PaymentEvent[];
+  paidBillCache: Record<number, DaySummary['players'][number]>;
 
   // Actions
   setScreen: (screen: Screen) => void;
@@ -273,8 +321,11 @@ interface GameState extends Settings {
   ladeKredite: () => Promise<void>;
   addVerkauf: (spielerId: number, productId: number, quantity: number) => void;
   getProduktAnzahl: (spielerId: number, productId: number) => number;
+  getProjectedDaySummary: (spielerId: number) => DaySummary['players'][number] | null;
   ladeProdukte: () => Promise<void>;
   ladeVerkaeufe: () => Promise<void>;
+  ladeDaySummary: () => Promise<void>;
+  markBillPaid: (spielerId: number) => void;
 
   /** Queue a player edit (name/email/portal activation) for the next sync */
   queueSpielerUpdate: (spielerId: number, changes: { name: string; email: string | null; portalAktiv: boolean }) => void;
@@ -460,6 +511,8 @@ const SPIELER_UPDATES_KEY = 'rangemaster-spieler-updates';
 const VERKAEUFE_KEY = 'rangemaster-verkaeufe';
 const PENDING_VERKAEUFE_KEY = 'rangemaster-pending-verkaeufe';
 const SERVER_VERKAEUFE_KEY = 'rangemaster-server-verkaeufe';
+const PENDING_PAYMENTS_KEY = 'rangemaster-pending-payments';
+const DAY_SUMMARY_KEY = 'rangemaster-day-summary';
 const LINEUP_KEY = 'rangemaster-lineup';
 
 function loadLineup(): LineupEintrag[] {
@@ -519,6 +572,28 @@ function loadVerkaufsReport(): { datum: string; rows: VerkaufReportRow[] } {
 
 function saveVerkaufsReport(datum: string, rows: VerkaufReportRow[]) {
   try { localStorage.setItem(SERVER_VERKAEUFE_KEY, JSON.stringify({ datum, rows })); } catch {}
+}
+
+function loadPendingPayments(): PaymentEvent[] {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PENDING_PAYMENTS_KEY) : null;
+    return raw ? JSON.parse(raw) as PaymentEvent[] : [];
+  } catch { return []; }
+}
+
+function savePendingPayments(events: PaymentEvent[]) {
+  try { localStorage.setItem(PENDING_PAYMENTS_KEY, JSON.stringify(events)); } catch {}
+}
+
+function loadDaySummary(): DaySummary | null {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(DAY_SUMMARY_KEY) : null;
+    return raw ? JSON.parse(raw) as DaySummary : null;
+  } catch { return null; }
+}
+
+function saveDaySummary(summary: DaySummary) {
+  try { localStorage.setItem(DAY_SUMMARY_KEY, JSON.stringify(summary)); } catch {}
 }
 
 function loadSpielerUpdates(): SpielerUpdate[] {
@@ -777,8 +852,10 @@ export const useGameStore = create<GameState>((set, get) => {
     lauf: 1,
     taubeIndex: 0,
     spielerIndex: 0,
+    taubeGeworfen: false,
     sequenz: generateSequenz(modus, maschinenAktiv, customSequenzen),
     ergebnisse: [],
+    confirmedLaunches: 0,
     spielId: null,
     activeGameCreditUses: [],
     // Render the persisted lineup immediately after a reload; authoritative
@@ -806,6 +883,10 @@ export const useGameStore = create<GameState>((set, get) => {
     pendingVerkaeufe: loadVerkaeufe(PENDING_VERKAEUFE_KEY),
     verkaeufeLaden: false,
     serverVerkaeufe: savedVerkaufsReport.datum === todayStr() ? savedVerkaufsReport.rows : [],
+    daySummary: loadDaySummary(),
+    daySummaryLaden: false,
+    pendingPayments: loadPendingPayments(),
+    paidBillCache: {},
 
     syncStatus: 'idle',
     lastSync: null,
@@ -969,6 +1050,7 @@ export const useGameStore = create<GameState>((set, get) => {
         lauf: 1,
         taubeIndex: 0,
         spielerIndex: 0,
+        taubeGeworfen: false,
         ergebnisse: [],
         sequenz: generateSequenz(state.modus, state.maschinenAktiv, state.customSequenzen),
         // Ensure consistent game order by startPosten; reset points
@@ -1028,6 +1110,7 @@ export const useGameStore = create<GameState>((set, get) => {
         // Same taube, next player
         return {
           ergebnisse: [...state.ergebnisse, neuesErgebnis],
+          taubeGeworfen: false,
           spielerIndex: nextSpielerIndex,
           spieler: updatedSpieler,
         };
@@ -1039,6 +1122,7 @@ export const useGameStore = create<GameState>((set, get) => {
       if (nextTaubeIndex < state.sequenz.length) {
         return {
           ergebnisse: [...state.ergebnisse, neuesErgebnis],
+          taubeGeworfen: false,
           spielerIndex: 0,
           taubeIndex: nextTaubeIndex,
           spieler: updatedSpieler,
@@ -1077,6 +1161,7 @@ export const useGameStore = create<GameState>((set, get) => {
           abgeschlossen: true,
           teilnahmen,
           ergebnisse: allErgebnisse,
+          confirmedLaunches: state.confirmedLaunches,
         };
 
         const newPendingGames = [...state.pendingGames, newPendingGame];
@@ -1108,6 +1193,7 @@ export const useGameStore = create<GameState>((set, get) => {
 
       return {
         ergebnisse: [...state.ergebnisse, neuesErgebnis],
+        taubeGeworfen: false,
         spielerIndex: 0,
         taubeIndex: 0,
         lauf: nextLauf,
@@ -1128,6 +1214,7 @@ export const useGameStore = create<GameState>((set, get) => {
         : Math.max(0, state.taubeIndex - 1);
       return {
         ergebnisse: state.ergebnisse.slice(0, -1),
+        taubeGeworfen: false,
         spielerIndex: prevSpielerIndex,
         taubeIndex: prevTaubeIndex,
         spieler: state.spieler.map(s =>
@@ -1142,11 +1229,11 @@ export const useGameStore = create<GameState>((set, get) => {
       // Skip current player's turn
       const nextSpielerIndex = state.spielerIndex + 1;
       if (nextSpielerIndex < state.spieler.length) {
-        return { spielerIndex: nextSpielerIndex };
+        return { spielerIndex: nextSpielerIndex, taubeGeworfen: false };
       }
       const nextTaubeIndex = state.taubeIndex + 1;
       if (nextTaubeIndex < state.sequenz.length) {
-        return { spielerIndex: 0, taubeIndex: nextTaubeIndex };
+        return { spielerIndex: 0, taubeIndex: nextTaubeIndex, taubeGeworfen: false };
       }
       const nextLauf = state.lauf + 1;
       const maxLaeufe: number =
@@ -1155,12 +1242,13 @@ export const useGameStore = create<GameState>((set, get) => {
           : 2;
       if (nextLauf > maxLaeufe) {
         // ueberspringen path: skip showing resultate, just go to dashboard
-        return { screen: 'dashboard' as Screen, spielerIndex: 0, taubeIndex: 0, lauf: nextLauf };
+        return { screen: 'dashboard' as Screen, spielerIndex: 0, taubeIndex: 0, lauf: nextLauf, taubeGeworfen: false };
       }
       return {
         spielerIndex: 0,
         taubeIndex: 0,
         lauf: nextLauf,
+        taubeGeworfen: false,
         sequenz: generateSequenz(state.modus, state.maschinenAktiv, state.customSequenzen),
       };
     }),
@@ -1222,6 +1310,7 @@ export const useGameStore = create<GameState>((set, get) => {
           spielerIndex: 0,
           sequenz: [],
           ergebnisse: [],
+          confirmedLaunches: 0,
           spielId: null,
           activeGameCreditUses: [],
           kreditDatum,
@@ -1232,9 +1321,22 @@ export const useGameStore = create<GameState>((set, get) => {
       return canceled;
     },
 
-    werfenTaube: () => {
-      // ESP32: triggers GPIO relay. Emulator: no-op.
-    },
+    werfenTaube: () => set((state) => {
+      // In the emulator we simulate the trap gateway ACK immediately on press.
+      if (state.screen !== 'spiel' || state.taubeGeworfen) return state;
+      const currentSpieler = state.spieler[state.spielerIndex];
+      if (!currentSpieler) return state;
+      const rawPosten = getCurrentPosten(currentSpieler, state.taubeIndex, state.spieler.length);
+      const eintrag = getEintragForPlayer(state.sequenz, state.taubeIndex, rawPosten, state.modus);
+
+      let clays = 1;
+      if (eintrag && eintrag.doubletteNr === 1) clays = 2;
+
+      return {
+        taubeGeworfen: true,
+        confirmedLaunches: state.confirmedLaunches + clays,
+      };
+    }),
 
     setApiSettings: (apiUrl, apiKey) => {
       set({ apiUrl, apiKey });
@@ -1366,9 +1468,11 @@ export const useGameStore = create<GameState>((set, get) => {
         priceRevisionId: product.currentPrice.id, quantity,
       };
       const pendingVerkaeufe = [...state.pendingVerkaeufe, event];
+      const verkaeufe = [...state.verkaeufe, event];
       const verkaufDatum = todayStr();
       saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
-      return { verkaufDatum, pendingVerkaeufe };
+      saveVerkaeufe(VERKAEUFE_KEY, verkaeufe);
+      return { verkaufDatum, pendingVerkaeufe, verkaeufe };
     }),
 
     getProduktAnzahl: (spielerId, productId) => {
@@ -1381,6 +1485,84 @@ export const useGameStore = create<GameState>((set, get) => {
         .filter(event => event.datum === state.verkaufDatum && event.spielerId === spielerId && event.productId === productId)
         .reduce((sum, event) => sum + event.quantity, 0);
       return serverQuantity + pendingQuantity;
+    },
+
+    getProjectedDaySummary: (spielerId) => {
+      const state = get();
+      const serverPlayer = state.daySummary?.players.find(p => p.spielerId === spielerId);
+      const cached = state.paidBillCache[spielerId];
+      const baseSource = serverPlayer || cached;
+
+      const datum = todayStr();
+      const spieler = state.pendingSpieler.find(s => s.localId === spielerId) || state.spielerUpdates.find(s => s.spielerId === spielerId && s.status === 'pending');
+      const baseName = baseSource?.spielerName || (spieler ? spieler.name : `Spiller ${spielerId}`) || `Spiller ${spielerId}`;
+
+      const projected: DaySummary['players'][number] = {
+        spielerId,
+        spielerName: baseName,
+        mitgliedNr: baseSource?.mitgliedNr ?? null,
+        lines: baseSource ? [...baseSource.lines.map(l => ({ ...l }))] : [],
+        categorySubtotals: baseSource ? { ...baseSource.categorySubtotals } : {},
+        totalCents: baseSource?.totalCents ?? 0,
+        credit: baseSource ? { ...baseSource.credit } : { granted: 0, used: 0, remaining: 0 },
+        games: baseSource?.games ?? 0,
+        completedGames: baseSource?.completedGames ?? 0,
+        confirmedClays: baseSource?.confirmedClays ?? 0,
+        state: baseSource?.state ?? 'OPEN',
+        paymentExternalId: baseSource?.paymentExternalId ?? null,
+        paidAt: baseSource?.paidAt ?? null,
+      };
+
+      // 1. Layer credits
+      const k = state.kredite[spielerId];
+      if (k) {
+        projected.credit.granted = k.gewaehrt;
+        projected.credit.used = k.verbraucht;
+        projected.credit.remaining = Math.max(0, k.gewaehrt - k.verbraucht);
+      }
+
+      // 2. Layer sales
+      const pendingSales = (baseSource ? state.pendingVerkaeufe : state.verkaeufe).filter(v => v.spielerId === spielerId && v.datum === datum);
+      for (const sale of pendingSales) {
+        const prod = state.produkte.find(p => p.id === sale.productId);
+        if (!prod || !prod.currentPrice) continue;
+        const linePriceCents = prod.currentPrice.unitPriceCents;
+        const addTotal = sale.quantity * linePriceCents;
+
+        const existingLine = projected.lines.find(l => l.productId === sale.productId && l.priceRevisionId === sale.priceRevisionId);
+        if (existingLine) {
+          existingLine.quantity += sale.quantity;
+          existingLine.totalCents += addTotal;
+        } else {
+          projected.lines.push({
+            productId: sale.productId,
+            productName: prod.name,
+            category: prod.category,
+            priceRevisionId: sale.priceRevisionId,
+            unitPriceCents: linePriceCents,
+            quantity: sale.quantity,
+            totalCents: addTotal,
+          });
+        }
+        projected.totalCents += addTotal;
+        projected.categorySubtotals[prod.category] = (projected.categorySubtotals[prod.category] || 0) + addTotal;
+      }
+
+      projected.lines = projected.lines.filter(l => l.quantity > 0);
+
+      // 3. Layer games
+      const pendingGames = state.pendingGames.filter(g => g.datum.startsWith(datum) && g.teilnahmen.some(t => t.spielerId === spielerId));
+      for (const g of pendingGames) {
+        projected.games += 1;
+        if (g.abgeschlossen) projected.completedGames += 1;
+        projected.confirmedClays += g.confirmedLaunches;
+      }
+
+      if (!baseSource && !k && pendingSales.length === 0 && pendingGames.length === 0) {
+        return null;
+      }
+
+      return projected;
     },
 
     ladeProdukte: async () => {
@@ -1417,6 +1599,44 @@ export const useGameStore = create<GameState>((set, get) => {
         set({ verkaufDatum: datum, serverVerkaeufe, verkaeufeLaden: false });
       } catch { set({ verkaeufeLaden: false }); }
     },
+
+    ladeDaySummary: async () => {
+      const state = get();
+      if (!state.apiUrl || !state.apiKey) return;
+      set({ daySummaryLaden: true });
+      const datum = todayStr();
+      try {
+        const res = await fetch(`${state.apiUrl}/api/sync/bills/day-summary?datum=${datum}`, {
+          headers: { 'x-api-key': state.apiKey },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json() as DaySummary;
+        if (data.datum === datum) {
+          saveDaySummary(data);
+          set({ daySummary: data, daySummaryLaden: false });
+        } else {
+          set({ daySummaryLaden: false });
+        }
+      } catch { set({ daySummaryLaden: false }); }
+    },
+
+    markBillPaid: (spielerId) => set((state) => {
+      // Prevent duplicate pending payments for the same player today
+      if (state.pendingPayments.some(p => p.spielerId === spielerId && p.datum === todayStr())) {
+        return state;
+      }
+      const event: PaymentEvent = {
+        externalId: generateSpielId(),
+        spielerId,
+        datum: todayStr(),
+      };
+      const pendingPayments = [...state.pendingPayments, event];
+      savePendingPayments(pendingPayments);
+
+      // Offline Paid remains pending and does not remove active player until portal acceptance.
+      return { pendingPayments };
+    }),
 
     queueSpielerUpdate: (spielerId, changes) => set((state) => {
       const spieler = state.portalSpieler.find(p => p.id === spielerId);
@@ -1577,31 +1797,26 @@ export const useGameStore = create<GameState>((set, get) => {
       }
       set({ syncStatus: 'syncing' });
 
+      let hasError = false;
+
+      // ── Step 1: push locally created players first, get server IDs ──────
       try {
-        // ── Step 1: push locally created players first, get server IDs ──────
-        if (state.pendingSpieler.length > 0) {
+        if (get().pendingSpieler.length > 0) {
           const resSp = await fetch(`${state.apiUrl}/api/sync/spieler`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': state.apiKey,
-            },
-            body: JSON.stringify({
-              spieler: state.pendingSpieler.map(p => ({ id: p.localId, name: p.name })),
-            }),
+            headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
+            body: JSON.stringify({ spieler: get().pendingSpieler.map(p => ({ id: p.localId, name: p.name })) }),
             signal: AbortSignal.timeout(15000),
           });
           if (!resSp.ok) throw new Error(`HTTP ${resSp.status}`);
-          const spData = await resSp.json() as {
-            mappings?: Array<{ localId: number; id: number; name: string }>;
-          };
+          const spData = await resSp.json() as { mappings?: Array<{ localId: number; id: number; name: string }> };
 
           const idMap = new Map<number, number>();
           for (const m of spData.mappings ?? []) idMap.set(m.localId, m.id);
 
-          // Remap local IDs → server IDs everywhere they are referenced
           const remap = (id: number) => idMap.get(id) ?? id;
           const s2 = get();
+
           const remappedPending = s2.pendingGames.map(g => ({
             ...g,
             teilnahmen: g.teilnahmen.map(t => ({ ...t, spielerId: remap(t.spielerId) })),
@@ -1611,21 +1826,16 @@ export const useGameStore = create<GameState>((set, get) => {
             ...g,
             teilnahmen: g.teilnahmen.map(t => ({ ...t, spielerId: remap(t.spielerId) })),
             ergebnisse: g.ergebnisse.map(e => ({ ...e, spielerId: remap(e.spielerId) })),
-            spielerNamen: Object.fromEntries(
-              Object.entries(g.spielerNamen).map(([id, name]) => [remap(Number(id)), name])
-            ),
+            spielerNamen: Object.fromEntries(Object.entries(g.spielerNamen).map(([id, name]) => [remap(Number(id)), name]))
           }));
           const remappedSpieler = s2.spieler.map(s => ({ ...s, id: remap(s.id) }));
-          const remappedLineup = s2.lineup.map(entry => ({
-            ...entry, spielerId: remap(entry.spielerId),
-          }));
-            const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
+          const remappedLineup = s2.lineup.map(entry => ({ ...entry, spielerId: remap(entry.spielerId) }));
+          const remappedKreditEvents = s2.pendingKredite.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedVerkaufEvents = s2.pendingVerkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedVerkaeufe = s2.verkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedServerVerkaeufe = s2.serverVerkaeufe.map(row => ({ ...row, spielerId: remap(row.spielerId) }));
-            const remappedActiveCreditUses = s2.activeGameCreditUses.map(e => ({
-              ...e, spielerId: remap(e.spielerId),
-            }));
+          const remappedPayments = s2.pendingPayments.map(p => ({ ...p, spielerId: remap(p.spielerId) }));
+          const remappedActiveCreditUses = s2.activeGameCreditUses.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedUpdates = s2.spielerUpdates.map(u => ({ ...u, spielerId: remap(u.spielerId) }));
           const remappedKredite = Object.fromEntries(
             Object.entries(s2.kredite).map(([id, stand]) => [remap(Number(id)), stand])
@@ -1633,7 +1843,6 @@ export const useGameStore = create<GameState>((set, get) => {
           const remappedPortal = s2.portalSpieler.map(p =>
             idMap.has(p.id) ? { ...p, id: idMap.get(p.id)!, lokal: undefined } : p
           );
-          // Only clear players the server acknowledged
           const stillPending = s2.pendingSpieler.filter(p => !idMap.has(p.localId));
 
           savePendingGames(remappedPending);
@@ -1643,10 +1852,12 @@ export const useGameStore = create<GameState>((set, get) => {
           savePendingKredite(remappedKreditEvents);
           saveVerkaeufe(PENDING_VERKAEUFE_KEY, remappedVerkaufEvents);
           saveVerkaeufe(VERKAEUFE_KEY, remappedVerkaeufe);
+          savePendingPayments(remappedPayments);
           saveVerkaufsReport(s2.verkaufDatum, remappedServerVerkaeufe);
           saveKredite(s2.kreditDatum, remappedKredite);
           saveSpielerUpdates(remappedUpdates);
           saveLineup(remappedLineup);
+
           set({
             pendingGames: remappedPending,
             pendingSpieler: stillPending,
@@ -1658,164 +1869,218 @@ export const useGameStore = create<GameState>((set, get) => {
             pendingVerkaeufe: remappedVerkaufEvents,
             verkaeufe: remappedVerkaeufe,
             serverVerkaeufe: remappedServerVerkaeufe,
-              activeGameCreditUses: remappedActiveCreditUses,
+            activeGameCreditUses: remappedActiveCreditUses,
             kredite: remappedKredite,
+            pendingPayments: remappedPayments,
             spielerUpdates: remappedUpdates,
           });
         }
+      } catch (err) {
+        console.error('Step 1 (Spieler) failed:', err);
+        hasError = true;
+      }
 
-        // ── Step 1c: push pending player edits / password resets ─────────────
-        {
-          const pushable = get().spielerUpdates.filter(u => u.status === 'pending' && u.spielerId > 0);
-          if (pushable.length > 0) {
-            const resU = await fetch(`${state.apiUrl}/api/sync/spieler-updates`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': state.apiKey,
-              },
-              body: JSON.stringify({
-                updates: pushable.map(u => ({
-                  externalId: u.externalId,
-                  spielerId: u.spielerId,
-                  typ: u.typ,
-                  ...(u.typ === 'UPDATE' ? { name: u.name, email: u.email || null, portalAktiv: u.portalAktiv } : {}),
-                })),
-              }),
-              signal: AbortSignal.timeout(30000),
-            });
-            if (!resU.ok) throw new Error(`HTTP ${resU.status}`);
-            const dataU = await resU.json() as {
-              results: Array<{ externalId: string; status: string; emailStatus: string; error?: string }>;
-            };
-            const byId = new Map(dataU.results.map(r => [r.externalId, r]));
-            const spielerUpdates = get().spielerUpdates.map(u => {
-              const r = byId.get(u.externalId);
-              if (!r) return u;
-              if (r.status === 'error') return { ...u, status: 'email_failed' as const, fehler: r.error ?? 'Feeler' };
+      // ── Step 1b: push pending kredite and verkaeufe ─────────────
+      try {
+        const pk = get().pendingKredite.filter(e => e.spielerId > 0);
+        const pv = get().pendingVerkaeufe.filter(e => e.spielerId > 0);
+
+        if (pk.length > 0) {
+          const resKr = await fetch(`${state.apiUrl}/api/sync/kredite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
+            body: JSON.stringify({ events: pk }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!resKr.ok) throw new Error(`HTTP ${resKr.status}`);
+          const submittedIds = new Set(pk.map(e => e.externalId));
+          set(s => {
+            const remaining = s.pendingKredite.filter(e => !submittedIds.has(e.externalId));
+            savePendingKredite(remaining);
+            return { pendingKredite: remaining };
+          });
+        }
+
+        if (pv.length > 0) {
+          const resVk = await fetch(`${state.apiUrl}/api/sync/sales`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
+            body: JSON.stringify({ events: pv }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!resVk.ok) throw new Error(`HTTP ${resVk.status}`);
+          const submittedIdsVk = new Set(pv.map(e => e.externalId));
+          set(s => {
+            const remaining = s.pendingVerkaeufe.filter(e => !submittedIdsVk.has(e.externalId));
+            saveVerkaeufe(PENDING_VERKAEUFE_KEY, remaining);
+            return { pendingVerkaeufe: remaining };
+          });
+        }
+      } catch (err) {
+        console.error('Step 1b (Credits/Sales) failed:', err);
+        hasError = true;
+      }
+
+      // ── Step 1c: push pending player edits / password resets ─────────────
+      try {
+        const pushable = get().spielerUpdates.filter(u => u.status === 'pending' && u.spielerId > 0);
+        if (pushable.length > 0) {
+          const resU = await fetch(`${state.apiUrl}/api/sync/spieler-updates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
+            body: JSON.stringify({
+              updates: pushable.map(u => ({
+                externalId: u.externalId,
+                spielerId: u.spielerId,
+                typ: u.typ,
+                ...(u.typ === 'UPDATE' ? { name: u.name, email: u.email || null, portalAktiv: u.portalAktiv } : {}),
+              })),
+            }),
+            signal: AbortSignal.timeout(30000),
+          });
+          if (!resU.ok) throw new Error(`HTTP ${resU.status}`);
+          const dataU = await resU.json() as { results: Array<{ externalId: string; status: string; emailStatus: string; error?: string }> };
+          const byId = new Map(dataU.results.map(r => [r.externalId, r]));
+
+          const nextUpdates = get().spielerUpdates.map(u => {
+            const r = byId.get(u.externalId);
+            if (!r) return u;
+            if (r.status === 'error') return { ...u, fehler: r.error };
+            if (u.typ === 'UPDATE') return { ...u, status: 'synced' as const, fehler: undefined };
+            if (u.typ === 'PASSWORT_RESET') {
               if (r.emailStatus === 'SENT') return { ...u, status: 'email_sent' as const, fehler: undefined };
-              if (r.emailStatus === 'FAILED' || r.emailStatus === 'PENDING') return { ...u, status: 'email_failed' as const, fehler: 'Email nach net verschéckt' };
+              if (r.emailStatus === 'FAILED') return { ...u, status: 'email_failed' as const, fehler: r.error ?? 'Email Error' };
               return { ...u, status: 'synced' as const, fehler: undefined };
-            });
-            saveSpielerUpdates(spielerUpdates);
-            set({ spielerUpdates });
-          }
-          // Poll email status for anything still open (also retries failed sends server-side)
-          await get().refreshSpielerUpdateStatus();
-        }
-
-        // ── Step 1b: push pending credit events (only remapped/server IDs) ───
-        {
-          const allEvents = get().pendingKredite;
-          const pushable = allEvents.filter(e => e.spielerId > 0);
-          if (pushable.length > 0) {
-            const sentIds = new Set(pushable.map(event => event.externalId));
-            for (const event of pushable) kreditEventsInFlight.add(event.externalId);
-            try {
-              const resK = await fetch(`${state.apiUrl}/api/sync/kredite`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-api-key': state.apiKey,
-                },
-                body: JSON.stringify({ events: pushable }),
-                signal: AbortSignal.timeout(15000),
-              });
-              if (!resK.ok) throw new Error(`HTTP ${resK.status}`);
-              // Remove only the sent snapshot. A cancel during this request
-              // may add a GRANT that must remain for the next sync.
-              const stillPendingKredite = get().pendingKredite.filter(
-                event => !sentIds.has(event.externalId),
-              );
-              savePendingKredite(stillPendingKredite);
-              set({ pendingKredite: stillPendingKredite });
-              // Reconcile today's state from the server
-              await get().ladeKredite();
-            } finally {
-              for (const event of pushable) kreditEventsInFlight.delete(event.externalId);
             }
-          }
+            return u;
+          });
+          saveSpielerUpdates(nextUpdates);
+          set({ spielerUpdates: nextUpdates });
         }
+      } catch (err) {
+        console.error('Step 1c (Player Updates) failed:', err);
+        hasError = true;
+      }
 
-        // ── Step 1d: push the immutable product-sale ledger ─────────────────
-        {
-          const pushable = get().pendingVerkaeufe.filter(e => e.spielerId > 0);
-          if (pushable.length) {
-            const sentIds = new Set(pushable.map(e => e.externalId));
-            const resV = await fetch(`${state.apiUrl}/api/sync/sales`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
-              body: JSON.stringify({ events: pushable }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (!resV.ok) throw new Error(`HTTP ${resV.status}`);
-            // Only remove the snapshot posted above: a new tap during this
-            // request remains queued and is never lost.
-            const pendingVerkaeufe = get().pendingVerkaeufe.filter(e => !sentIds.has(e.externalId));
-            saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
-            set({ pendingVerkaeufe });
-          }
-          await get().ladeProdukte();
-          await get().ladeVerkaeufe();
-        }
-
-        // ── Step 2: push pending games ───────────────────────────────────────
-        if (get().pendingGames.length > 0) {
+      // ── Step 2: push pending games ─────────────
+      try {
+        const pushableGames = [...get().pendingGames];
+        if (pushableGames.length > 0) {
           const res = await fetch(`${state.apiUrl}/api/sync/spiele`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': state.apiKey,
-            },
-            body: JSON.stringify({ spiele: get().pendingGames }),
+            headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
+            body: JSON.stringify({ spiele: pushableGames }),
             signal: AbortSignal.timeout(30000),
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-          const data = await res.json() as { results: Array<{ status: string }> };
-          const synced = data.results?.filter(r => r.status === 'created').length ?? 0;
-          const skipped = data.results?.filter(r => r.status === 'skipped').length ?? 0;
+          const resData = await res.json().catch(() => ({})) as { results?: Array<{ externalId?: string, status: string }> };
+          const byId = new Map(resData.results?.map((r, i) => [r.externalId || pushableGames[i]?.externalId, r]) || []);
 
-          savePendingGames([]);
-          set({ pendingGames: [] });
-          console.log(`Sync: ${synced} created, ${skipped} skipped`);
+          set(s => {
+            const remaining = s.pendingGames.filter(g => {
+              const isPushed = pushableGames.some(pg => pg.externalId === g.externalId);
+              if (!isPushed) return true; // added in flight
+
+              // Find result in response
+              const result = resData.results?.find(r => r.externalId === g.externalId);
+
+              // fallback is 'created' ONLY IF it was pushed and there are no results
+              // wait, if we are in conflict, result.status will be 'conflict'
+              const status = result?.status || (resData.results ? 'unknown' : 'created');
+
+              return status !== 'created' && status !== 'skipped' && status !== 'accepted';
+            });
+            savePendingGames(remaining);
+            return { pendingGames: remaining };
+          });
         }
+      } catch (err) {
+        console.error('Step 2 (Games) failed:', err);
+        hasError = true;
+      }
+
+      // ── Step 2.5: push pending payments ─────────────
+      try {
+        const pushablePayments = get().pendingPayments;
+        if (pushablePayments.length > 0) {
+          const resP = await fetch(`${state.apiUrl}/api/sync/payments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
+            body: JSON.stringify({ events: pushablePayments }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!resP.ok) throw new Error(`HTTP ${resP.status}`);
+          const dataP = await resP.json() as { results: Array<{ externalId: string; status: string }> };
+          const byId = new Map(dataP.results.map(r => [r.externalId, r]));
+
+          const successfulPlayerIds = new Set<number>();
+          // Remove accepted and skipped, keep conflict or failed
+          const nextPending = get().pendingPayments.filter(p => {
+            const status = byId.get(p.externalId)?.status;
+            if (status === 'accepted' || status === 'skipped') {
+              successfulPlayerIds.add(p.spielerId);
+              return false; // remove from pending
+            }
+            return true; // keep conflict or unacknowledged
+          });
+
+          savePendingPayments(nextPending);
+          set({ pendingPayments: nextPending });
+
+          if (successfulPlayerIds.size > 0) {
+            // Remove successful payments from today's kredite & lineup (but bill history in day summary stays)
+            const s = get();
+            const newKredite = { ...s.kredite };
+            const newCache = { ...s.paidBillCache };
+            for (const pId of successfulPlayerIds) {
+              const proj = s.getProjectedDaySummary(pId);
+              if (proj) {
+                proj.state = 'PAID';
+                proj.paidAt = new Date().toISOString();
+                newCache[pId] = proj;
+              }
+              delete newKredite[pId];
+            }
+            saveKredite(s.kreditDatum, newKredite);
+
+            const newLineup = s.lineup.filter(l => !successfulPlayerIds.has(l.spielerId));
+            saveLineup(newLineup);
+
+            set({
+              kredite: newKredite,
+              lineup: newLineup,
+              paidBillCache: newCache,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Step 2.5 (Payments) failed:', err);
+        hasError = true;
+      }
 
       // ── Step 3: pull recent games from server → merge into local history ──
       try {
-        const pullRes = await fetch(`${get().apiUrl}/api/sync/spiele?limit=100`, {
-          headers: { 'x-api-key': get().apiKey },
+        const pullRes = await fetch(`${state.apiUrl}/api/sync/spiele?limit=100`, {
+          headers: { 'x-api-key': state.apiKey },
           signal: AbortSignal.timeout(15000),
         });
         if (pullRes.ok) {
           const pullData = await pullRes.json() as {
             spiele: Array<{
-              externalId: string;
-              datum: string;
-              modus: Modus;
-              lauf: number;
-              taubenProLauf: number;
-              abgeschlossen: boolean;
-              teilnahmen: Array<{ spielerId: number; startPosten: number; punkte: number; lauf: number }>;
-              spielerNamen: Record<number, string>;
+              externalId: string; datum: string; modus: Modus; lauf: number; taubenProLauf: number;
+              abgeschlossen: boolean; teilnahmen: Array<{ spielerId: number; startPosten: number; punkte: number; lauf: number }>;
+              spielerNamen: Record<number, string>; confirmedLaunches?: number;
             }>;
           };
           const existingIds = new Set(get().gameHistory.map(g => g.externalId));
-          const newGames: FinishedGame[] = (pullData.spiele ?? [])
+          const newGames = (pullData.spiele ?? [])
             .filter(g => !existingIds.has(g.externalId))
             .map(g => ({
-              externalId: g.externalId,
-              datum: g.datum,
-              modus: g.modus,
-              lauf: g.lauf,
-              taubenProLauf: g.taubenProLauf,
-              abgeschlossen: g.abgeschlossen,
-              teilnahmen: g.teilnahmen,
-              ergebnisse: [],
-              finishedAt: g.datum,
-              spielerNamen: Object.fromEntries(
-                Object.entries(g.spielerNamen).map(([k, v]) => [Number(k), v])
-              ),
+              externalId: g.externalId, datum: g.datum, modus: g.modus, lauf: g.lauf,
+              taubenProLauf: g.taubenProLauf, abgeschlossen: g.abgeschlossen, teilnahmen: g.teilnahmen,
+              ergebnisse: [], confirmedLaunches: g.confirmedLaunches ?? 0, finishedAt: g.datum,
+              spielerNamen: Object.fromEntries(Object.entries(g.spielerNamen).map(([k, v]) => [Number(k), v])),
             }));
           if (newGames.length > 0) {
             const merged = [...newGames, ...get().gameHistory]
@@ -1825,27 +2090,31 @@ export const useGameStore = create<GameState>((set, get) => {
             set({ gameHistory: merged });
           }
         }
-      } catch {
-        // pull failure is non-fatal — push already succeeded
+      } catch (err) {
+        console.error('Step 3 (Games Pull) failed:', err);
+        hasError = true;
+      }
+
+      try {
+        await get().ladeDaySummary();
+      } catch (err) {
+        console.error('Day Summary Pull failed:', err);
+        hasError = true;
       }
 
       set({
-        syncStatus: 'success',
+        syncStatus: hasError ? 'error' : 'success',
         lastSync: new Date().toLocaleTimeString('de-LU', {
           hour: '2-digit', minute: '2-digit', second: '2-digit',
         }),
       });
-      } catch {
-        set({ syncStatus: 'error' });
-      }
     },
 
     setKioskMode: (mode) => {
       set({ kioskMode: mode });
       get().saveSettings();
     },
-
-    setKioskPin: async (oldPin, newPin) => {
+    setKioskPin: async (oldPin: string | null, newPin: string | null) => {
       const { kioskPinHash, kioskPinSalt } = get();
 
       // If a PIN already exists, they must prove the old one first

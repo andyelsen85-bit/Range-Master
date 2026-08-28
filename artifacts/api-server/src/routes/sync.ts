@@ -1,11 +1,13 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable, productsTable, productPriceRevisionsTable, saleEventsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
+import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable, productsTable, productPriceRevisionsTable, saleEventsTable, billPaymentsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
 import { and, eq, inArray, sql, desc, isNotNull, gt, isNull } from "drizzle-orm";
 import { requireApiKey } from "./auth";
 import { z } from "zod";
 import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmail } from "../lib/mailer";
 import { catalogue, daySalesReport } from "../lib/products";
+import { dayBillSummary } from "../lib/bills";
+import { sameImmutableChildren } from "../lib/immutable-events";
 import {
   decryptTerminalConfiguration,
   encryptTerminalConfiguration,
@@ -184,6 +186,7 @@ const SpielSchema = z.object({
   lauf: z.number().int().min(1).max(2),
   taubenProLauf: z.number().int().min(1).default(9),
   abgeschlossen: z.boolean(),
+  confirmedLaunches: z.number().int().min(0).optional().default(0),
   teilnahmen: z.array(
     z.object({
       spielerId: z.number().int(),
@@ -280,7 +283,7 @@ router.get("/spiele", requireApiKey, async (req, res) => {
       modus: spieleTable.modus,
       lauf: spieleTable.lauf,
       taubenProLauf: spieleTable.taubenProLauf,
-      abgeschlossen: spieleTable.abgeschlossen,
+      abgeschlossen: spieleTable.abgeschlossen, confirmedLaunches: spieleTable.confirmedLaunches,
     })
     .from(spieleTable)
     .where(isNotNull(spieleTable.externalId))
@@ -319,6 +322,7 @@ router.get("/spiele", requireApiKey, async (req, res) => {
       lauf: s.lauf,
       taubenProLauf: s.taubenProLauf,
       abgeschlossen: s.abgeschlossen,
+      confirmedLaunches: s.confirmedLaunches,
       teilnahmen: teilnahmen.map(t => ({ spielerId: t.spielerId, startPosten: t.startPosten, punkte: t.punkte, lauf: t.lauf })),
       spielerNamen,
     };
@@ -333,44 +337,87 @@ router.post("/spiele", requireApiKey, async (req, res) => {
   const results = [];
 
   for (const s of body.spiele) {
-    const existing = await db
-      .select({ id: spieleTable.id })
-      .from(spieleTable)
-      .where(eq(spieleTable.externalId, s.externalId))
-      .limit(1);
-
-    if (existing[0]) {
-      results.push({ externalId: s.externalId, status: "skipped" as const });
+    if (s.confirmedLaunches > 0 && (!s.abgeschlossen || s.confirmedLaunches > s.ergebnisse.length)) {
+      results.push({ externalId: s.externalId, status: "conflict" as const, error: "confirmedLaunches requires completed game and cannot exceed result count" });
       continue;
     }
-
-    const [spiel] = await db
-      .insert(spieleTable)
-      .values({
-        externalId: s.externalId,
-        datum: new Date(s.datum),
-        modus: s.modus,
-        lauf: s.lauf,
-        taubenProLauf: s.taubenProLauf,
-        abgeschlossen: s.abgeschlossen,
-        syncedAt: new Date(),
-      })
-      .returning({ id: spieleTable.id });
-
-    if (s.teilnahmen.length) {
-      await db.insert(spielTeilnahmenTable).values(
-        s.teilnahmen.map((t) => ({ spielId: spiel.id, ...t }))
-      );
-    }
-    if (s.ergebnisse.length) {
-      await db.insert(ergebnisseTable).values(
-        s.ergebnisse.map((e) => ({ spielId: spiel.id, ...e }))
-      );
-    }
-
-    results.push({ externalId: s.externalId, status: "created" as const });
+    const status = await db.transaction(async tx => {
+      // The unique external ID is the concurrency gate.  A competing writer
+      // either creates all children in this transaction or leaves nothing.
+      const inserted = await tx.insert(spieleTable).values({
+        externalId: s.externalId, datum: new Date(s.datum), modus: s.modus, lauf: s.lauf,
+        taubenProLauf: s.taubenProLauf, abgeschlossen: s.abgeschlossen,
+        confirmedLaunches: s.confirmedLaunches, syncedAt: new Date(),
+      }).onConflictDoNothing({ target: spieleTable.externalId }).returning({ id: spieleTable.id });
+      if (inserted[0]) {
+        if (s.teilnahmen.length) await tx.insert(spielTeilnahmenTable).values(s.teilnahmen.map(t => ({ spielId: inserted[0].id, ...t })));
+        if (s.ergebnisse.length) await tx.insert(ergebnisseTable).values(s.ergebnisse.map(e => ({ spielId: inserted[0].id, ...e })));
+        return "created" as const;
+      }
+      const [stored] = await tx.select().from(spieleTable).where(eq(spieleTable.externalId, s.externalId)).limit(1);
+      if (!stored) return "conflict" as const; // defensive: a concurrently deleted row
+      const [storedTeilnahmen, storedErgebnisse] = await Promise.all([
+        tx.select({ spielerId: spielTeilnahmenTable.spielerId, startPosten: spielTeilnahmenTable.startPosten, punkte: spielTeilnahmenTable.punkte, lauf: spielTeilnahmenTable.lauf }).from(spielTeilnahmenTable).where(eq(spielTeilnahmenTable.spielId, stored.id)),
+        tx.select({ spielerId: ergebnisseTable.spielerId, lauf: ergebnisseTable.lauf, taube: ergebnisseTable.taube, maschine: ergebnisseTable.maschine, posten: ergebnisseTable.posten, schuss1: ergebnisseTable.schuss1, schuss2: ergebnisseTable.schuss2, punkte: ergebnisseTable.punkte, wiederholt: ergebnisseTable.wiederholt }).from(ergebnisseTable).where(eq(ergebnisseTable.spielId, stored.id)),
+      ]);
+      const sameParent = stored.datum.toISOString() === new Date(s.datum).toISOString() && stored.modus === s.modus &&
+        stored.lauf === s.lauf && stored.taubenProLauf === s.taubenProLauf && stored.abgeschlossen === s.abgeschlossen &&
+        stored.confirmedLaunches === s.confirmedLaunches;
+      return sameParent && sameImmutableChildren(storedTeilnahmen, s.teilnahmen) && sameImmutableChildren(storedErgebnisse, s.ergebnisse)
+        ? "skipped" as const : "conflict" as const;
+    });
+    results.push({ externalId: s.externalId, status });
   }
 
+  return res.json({ results });
+});
+
+const PaymentEventSchema = z.object({
+  externalId: z.string().trim().min(1).max(200),
+  spielerId: z.number().int().positive(),
+  datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  terminalId: terminalIdSchema.optional(),
+});
+
+// GET /api/sync/bills/day-summary?datum=YYYY-MM-DD — shared authoritative bills.
+router.get("/bills/day-summary", requireApiKey, async (req, res) => {
+  const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(req.query.datum);
+  if (!datum.success) return res.status(400).json({ error: "datum must be YYYY-MM-DD" });
+  return res.json(await dayBillSummary(datum.data));
+});
+
+// POST /api/sync/payments — atomic validation with explicit idempotency outcomes.
+router.post("/payments", requireApiKey, async (req, res) => {
+  const parsed = z.object({ events: z.array(PaymentEventSchema).min(1).max(500) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+  const duplicateIds = new Set<string>();
+  const seen = new Set<string>();
+  for (const event of parsed.data.events) { if (seen.has(event.externalId)) duplicateIds.add(event.externalId); seen.add(event.externalId); }
+  const playerIds = [...new Set(parsed.data.events.map(e => e.spielerId))];
+  const players = await db.select({ id: spielerTable.id }).from(spielerTable).where(inArray(spielerTable.id, playerIds));
+  const known = new Set(players.map(p => p.id));
+  if (playerIds.some(id => !known.has(id))) return res.status(400).json({ error: "Unknown player in payment batch" });
+  const results = await db.transaction(async tx => {
+    const outcome: Array<{ externalId: string; status: "accepted" | "skipped" | "conflict"; error?: string }> = [];
+    for (const event of parsed.data.events) {
+      if (duplicateIds.has(event.externalId)) { outcome.push({ externalId: event.externalId, status: "conflict", error: "duplicate externalId in batch" }); continue; }
+      const [byExternal] = await tx.select().from(billPaymentsTable).where(eq(billPaymentsTable.externalId, event.externalId)).limit(1);
+      if (byExternal) {
+        outcome.push({ externalId: event.externalId, status: byExternal.spielerId === event.spielerId && byExternal.datum === event.datum ? "skipped" : "conflict", ...(byExternal.spielerId === event.spielerId && byExternal.datum === event.datum ? {} : { error: "externalId belongs to a different payment" }) }); continue;
+      }
+      const [existingPaid] = await tx.select({ id: billPaymentsTable.id }).from(billPaymentsTable).where(and(eq(billPaymentsTable.spielerId, event.spielerId), eq(billPaymentsTable.datum, event.datum))).limit(1);
+      if (existingPaid) { outcome.push({ externalId: event.externalId, status: "conflict", error: "bill is already paid" }); continue; }
+      // No target deliberately covers both unique externalId and the partial
+      // one-paid-closure index if another terminal wins this race.
+      const inserted = await tx.insert(billPaymentsTable).values({
+        ...event, source: "TERMINAL", markedByApiKeyId: (req as any).apiKeyId ?? null,
+      }).onConflictDoNothing().returning({ id: billPaymentsTable.id });
+      outcome.push(inserted.length
+        ? { externalId: event.externalId, status: "accepted" }
+        : { externalId: event.externalId, status: "conflict", error: "payment conflicts with an existing closure" });
+    }
+    return outcome;
+  });
   return res.json({ results });
 });
 
@@ -383,6 +430,12 @@ const KreditEventSchema = z.object({
   typ: z.enum(["GRANT", "USE"]),
   anzahl: z.number().int().min(-100).max(100).refine(n => n !== 0, "anzahl darf net 0 sinn"),
 });
+class LedgerBalanceError extends Error {}
+
+/** Must stay byte-for-byte compatible with the admin ledger lock names. */
+async function lockLedger(tx: any, scope: string): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${scope}, 0))`);
+}
 
 // GET /api/sync/kredite?datum=YYYY-MM-DD — aggregated per-player credits for one day
 router.get("/kredite", requireApiKey, async (req, res) => {
@@ -414,12 +467,40 @@ router.post("/kredite", requireApiKey, async (req, res) => {
       return res.status(400).json({ error: `Onbekannte Spiller-IDs: ${unknown.join(", ")}` });
     }
 
-    const inserted = await db
-      .insert(kreditEventsTable)
-      .values(body.events)
-      .onConflictDoNothing({ target: kreditEventsTable.externalId })
-      .returning({ id: kreditEventsTable.id });
-    synced = inserted.length;
+    try {
+      synced = await db.transaction(async (tx) => {
+        const scopes = [...new Set(body.events.map(event => `credit:${event.spielerId}:${event.datum}`))].sort();
+        for (const scope of scopes) await lockLedger(tx, scope);
+
+        // Already-stored IDs and duplicate IDs in this upload are no-ops, just
+        // like the former bulk ON CONFLICT upload.
+        const candidates: typeof body.events = [];
+        const seen = new Set<string>();
+        for (const event of body.events) {
+          if (seen.has(event.externalId)) continue;
+          seen.add(event.externalId);
+          const [prior] = await tx.select({ id: kreditEventsTable.id }).from(kreditEventsTable)
+            .where(eq(kreditEventsTable.externalId, event.externalId)).limit(1);
+          if (!prior) candidates.push(event);
+        }
+        for (const scope of scopes) {
+          const [, spielerIdText, datum] = scope.split(":");
+          const spielerId = Number(spielerIdText);
+          const [balance] = await tx.select({
+            available: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'GRANT' THEN ${kreditEventsTable.anzahl} ELSE -${kreditEventsTable.anzahl} END), 0)::int`,
+          }).from(kreditEventsTable).where(and(eq(kreditEventsTable.spielerId, spielerId), eq(kreditEventsTable.datum, datum)));
+          const change = candidates.filter(event => event.spielerId === spielerId && event.datum === datum)
+            .reduce((sum, event) => sum + (event.typ === "GRANT" ? event.anzahl : -event.anzahl), 0);
+          if (Number(balance?.available ?? 0) + change < 0) throw new LedgerBalanceError("Credit balance cannot become negative");
+        }
+        const inserted = await tx.insert(kreditEventsTable).values(candidates)
+          .onConflictDoNothing({ target: kreditEventsTable.externalId }).returning({ id: kreditEventsTable.id });
+        return inserted.length;
+      });
+    } catch (error) {
+      if (error instanceof LedgerBalanceError) return res.status(409).json({ error: error.message });
+      throw error;
+    }
   }
 
   return res.json({ synced, skipped: body.events.length - synced });
@@ -432,10 +513,20 @@ const SaleEventSchema = z.object({
   spielerId: z.number().int().positive(),
   datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   productId: z.number().int().positive(),
-  priceRevisionId: z.number().int().positive(),
-  quantity: z.number().int().refine((value) => value !== 0, "quantity must not be zero"),
+  // null/omitted (and legacy wire value 0) requests server-side allocation of
+  // a negative correction to the original immutable sale lot.
+  priceRevisionId: z.number().int().min(0).nullable().optional(),
+  quantity: z.number().int().min(-1).refine((value) => value !== 0, "quantity must not be zero"),
+}).superRefine((event, ctx) => {
+  if (event.quantity > 0 && !(event.priceRevisionId && event.priceRevisionId > 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["priceRevisionId"], message: "positive sales require a price revision" });
+  }
+  if (event.quantity < 0 && event.priceRevisionId != null && event.priceRevisionId !== 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["priceRevisionId"], message: "negative corrections must be unallocated" });
+  }
 });
 class SaleBatchValidationError extends Error {}
+class SaleIdempotencyConflictError extends Error {}
 
 // GET /api/sync/products — only currently sellable products and their price revision.
 router.get("/products", requireApiKey, async (_req, res): Promise<void> => {
@@ -460,36 +551,85 @@ router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
       // a malformed offline batch all-or-nothing rather than partly accepted.
       const playerIds = [...new Set(parsed.data.events.map((event) => event.spielerId))];
       const productIds = [...new Set(parsed.data.events.map((event) => event.productId))];
-      const revisionIds = [...new Set(parsed.data.events.map((event) => event.priceRevisionId))];
+      const revisionIds = [...new Set(parsed.data.events
+        .filter((event) => event.quantity > 0)
+        .map((event) => event.priceRevisionId!))];
       const players = playerIds.length
         ? await tx.select({ id: spielerTable.id }).from(spielerTable).where(inArray(spielerTable.id, playerIds))
         : [];
       const products = productIds.length
-        ? await tx.select({ id: productsTable.id }).from(productsTable).where(inArray(productsTable.id, productIds))
+        ? await tx.select({ id: productsTable.id, name: productsTable.name, category: productsTable.category }).from(productsTable).where(inArray(productsTable.id, productIds))
         : [];
       const revisions = revisionIds.length
         ? await tx.select().from(productPriceRevisionsTable).where(inArray(productPriceRevisionsTable.id, revisionIds))
         : [];
       const knownPlayers = new Set(players.map((player) => player.id));
       const knownProducts = new Set(products.map((product) => product.id));
+      const productById = new Map(products.map((product) => [product.id, product]));
       const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
       for (const event of parsed.data.events) {
         if (!knownPlayers.has(event.spielerId)) throw new SaleBatchValidationError(`Unknown player: ${event.spielerId}`);
         if (!knownProducts.has(event.productId)) throw new SaleBatchValidationError(`Unknown product: ${event.productId}`);
-        const revision = revisionById.get(event.priceRevisionId);
-        if (!revision || revision.productId !== event.productId) {
+        const revision = event.quantity > 0 ? revisionById.get(event.priceRevisionId!) : undefined;
+        if (event.quantity > 0 && (!revision || revision.productId !== event.productId)) {
           throw new SaleBatchValidationError(`Unknown price revision for product: ${event.priceRevisionId}`);
         }
       }
-      const inserted = parsed.data.events.length
-        ? await tx.insert(saleEventsTable).values(parsed.data.events.map((event) => ({
-          ...event, unitPriceCents: revisionById.get(event.priceRevisionId)!.unitPriceCents,
-        }))).onConflictDoNothing({ target: saleEventsTable.externalId }).returning({ id: saleEventsTable.id })
-        : [];
-      return { synced: inserted.length, skipped: parsed.data.events.length - inserted.length };
+      const scopes = [...new Set(parsed.data.events.map(event => `ammo:${event.spielerId}:${event.datum}:${event.productId}`))].sort();
+      for (const scope of scopes) await lockLedger(tx, scope);
+      const seen = new Set<string>();
+      let synced = 0;
+      for (const event of parsed.data.events) {
+        if (seen.has(event.externalId)) throw new SaleIdempotencyConflictError("duplicate externalId in batch");
+        seen.add(event.externalId);
+        const [prior] = await tx.select().from(saleEventsTable)
+          .where(eq(saleEventsTable.externalId, event.externalId)).limit(1);
+        if (prior) {
+          // Unallocated correction replays deliberately ignore the stored,
+          // server-allocated revision but retain all caller-owned fields.
+          const matches = prior.spielerId === event.spielerId && prior.datum === event.datum &&
+            prior.productId === event.productId && prior.quantity === event.quantity &&
+            (event.quantity < 0 || prior.priceRevisionId === event.priceRevisionId);
+          if (!matches) throw new SaleIdempotencyConflictError("externalId belongs to a different sale");
+          continue;
+        }
+        if (event.quantity > 0) {
+          const revision = revisionById.get(event.priceRevisionId!)!;
+          await tx.insert(saleEventsTable).values({
+            externalId: event.externalId, spielerId: event.spielerId, datum: event.datum, productId: event.productId,
+            priceRevisionId: revision.id, unitPriceCents: revision.unitPriceCents,
+            productName: productById.get(event.productId)!.name, productCategory: productById.get(event.productId)!.category,
+            quantity: event.quantity,
+          });
+        } else {
+          const [lot] = await tx.select({
+            priceRevisionId: saleEventsTable.priceRevisionId,
+            productName: saleEventsTable.productName,
+            productCategory: saleEventsTable.productCategory,
+            unitPriceCents: saleEventsTable.unitPriceCents,
+          }).from(saleEventsTable).where(and(
+            eq(saleEventsTable.spielerId, event.spielerId), eq(saleEventsTable.datum, event.datum),
+            eq(saleEventsTable.productId, event.productId),
+          )).groupBy(saleEventsTable.priceRevisionId, saleEventsTable.productName, saleEventsTable.productCategory, saleEventsTable.unitPriceCents)
+            .having(sql`SUM(${saleEventsTable.quantity}) > 0`)
+            .orderBy(desc(sql`MAX(CASE WHEN ${saleEventsTable.quantity} > 0 THEN ${saleEventsTable.id} ELSE 0 END)`)).limit(1);
+          if (!lot) throw new LedgerBalanceError("Ammunition quantity cannot become negative");
+          await tx.insert(saleEventsTable).values({ ...event, ...lot });
+        }
+        synced++;
+      }
+      return { synced, skipped: parsed.data.events.length - synced };
     });
     res.json(result);
   } catch (error) {
+    if (error instanceof LedgerBalanceError) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
+    if (error instanceof SaleIdempotencyConflictError) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
     if (error instanceof SaleBatchValidationError) {
       res.status(400).json({ error: error.message });
       return;

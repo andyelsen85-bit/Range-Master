@@ -21,6 +21,8 @@ export const spieleTable = pgTable("spiele", {
   lauf: integer("lauf").notNull(),
   taubenProLauf: integer("tauben_pro_lauf").notNull().default(9),
   abgeschlossen: boolean("abgeschlossen").notNull().default(false),
+  /** Immutable server-acknowledged, confirmed launches; never inferred from test/rejected traffic. */
+  confirmedLaunches: integer("confirmed_launches").notNull().default(0),
   syncedAt: timestamp("synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

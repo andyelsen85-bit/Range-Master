@@ -23,6 +23,10 @@ esp_err_t http_pull_kredite(void);
 esp_err_t http_fetch_produkte(void);
 esp_err_t http_push_verkauf_events(void);
 esp_err_t http_pull_verkaeufe(void);
+/** POST /sync/payments — submit durable Paid confirmations. */
+esp_err_t http_push_payment_events(void);
+/** GET /sync/bills/day-summary?datum=YYYY-MM-DD — canonical daily bill pull. */
+esp_err_t http_fetch_bill_day_summary(void);
 
 /** Run the full sync sequence (push + pull). */
 esp_err_t http_sync_all(void);

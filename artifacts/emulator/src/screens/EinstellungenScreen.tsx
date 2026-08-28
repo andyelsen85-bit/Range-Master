@@ -247,7 +247,7 @@ export function EinstellungenScreen() {
   const store = useGameStore();
   const [url, setUrl] = useState(store.apiUrl);
   const [key, setKey] = useState(store.apiKey);
-  const [activeTab, setActiveTab] = useState<'api' | 'produkte' | 'schanzen' | 'custom' | 'wifi' | 'bluetooth' | 'system' | 'kiosk'>('api');
+  const [activeTab, setActiveTab] = useState<'api' | 'produkte' | 'schanzen' | 'custom' | 'wifi' | 'bluetooth' | 'system' | 'kiosk' | 'daySummary'>('api');
 
   const [oldPin, setOldPin] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -276,6 +276,7 @@ export function EinstellungenScreen() {
       <div className="flex border-b-2 border-border bg-card/50 shrink-0">
         {([
           { key: 'api',       label: 'Portal API' },
+          { key: 'daySummary',label: 'Dag Bilan' },
            { key: 'produkte',  label: 'Präisser' },
           { key: 'schanzen',  label: 'Schanzen' },
           { key: 'custom',    label: 'Custom Modi' },
@@ -366,6 +367,66 @@ export function EinstellungenScreen() {
             )}
           </div>
         )}
+{activeTab === 'daySummary' && (
+  <div className="max-w-3xl flex flex-col gap-5">
+    <div className="flex items-center justify-between">
+      <h2 className="text-base font-bold uppercase tracking-widest text-primary">Dag Bilan — {store.verkaufDatum}</h2>
+      <TouchButton className="h-10 px-4 gap-2" variant="outline" onClick={() => store.ladeDaySummary()} disabled={store.daySummaryLaden}>
+        <RefreshCw className={cn("w-4 h-4", store.daySummaryLaden && "animate-spin")} />
+        Aktualiséieren
+      </TouchButton>
+    </div>
+
+    {!store.daySummary ? (
+      <div className="p-8 border-2 border-border border-dashed rounded-xl text-center text-muted-foreground">
+        Keen Dag Bilan verfügbar. Dréckt Aktualiséieren.
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Main stats */}
+        <div className="bg-card border-2 border-border rounded-xl p-5 flex flex-col gap-4">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Allgemeng</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-background border border-border rounded-lg p-3 text-center">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Spiller</div>
+              <div className="text-2xl font-black text-foreground">{store.daySummary.uniquePlayers}</div>
+            </div>
+            <div className="bg-background border border-border rounded-lg p-3 text-center">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Bezuelt</div>
+              <div className="text-2xl font-black text-green-500">{store.daySummary.paidPlayers}</div>
+            </div>
+            <div className="bg-background border border-border rounded-lg p-3 text-center">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Gespillt</div>
+              <div className="text-2xl font-black">{store.daySummary.games}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">{store.daySummary.completedGames} ofgeschloss</div>
+            </div>
+            <div className="bg-background border border-border rounded-lg p-3 text-center">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Tauben (Konfirméiert)</div>
+              <div className="text-2xl font-black text-primary" data-testid="confirmed-clays">{store.daySummary.confirmedClays}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Categories */}
+        <div className="bg-card border-2 border-border rounded-xl p-5 flex flex-col gap-4">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Umsaz (Net-Bezuelt Inklusiv)</h3>
+          <div className="flex flex-col gap-2 font-mono text-sm">
+            {Object.entries(store.daySummary.categorySubtotals).map(([cat, cents]) => (
+              <div key={cat} className="flex justify-between p-2 bg-background border border-border rounded-lg">
+                <span className="font-bold text-muted-foreground uppercase tracking-wider text-[10px] self-center">{cat}</span>
+                <span className="font-black">{(cents / 100).toFixed(2)} €</span>
+              </div>
+            ))}
+            <div className="flex justify-between p-2 bg-primary/10 border-2 border-primary/30 rounded-lg mt-2">
+              <span className="font-bold text-primary uppercase tracking-wider text-xs self-center">TOTAL</span>
+              <span className="font-black text-primary text-lg">{(store.daySummary.generalTotalCents / 100).toFixed(2)} €</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+)}
 
         {activeTab === 'produkte' && (
           <div className="max-w-2xl flex flex-col gap-5">
