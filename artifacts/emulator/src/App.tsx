@@ -8,10 +8,12 @@ import { ResultateScreen } from '@/screens/ResultateScreen';
 import { SpillgeschichteScreen } from '@/screens/SpillgeschichteScreen';
 import { KrediteScreen } from '@/screens/KrediteScreen';
 import { SpillerScreen } from '@/screens/SpillerScreen';
+import { CateringScreen } from '@/screens/CateringScreen';
 import { SimControls } from '@/components/SimControls';
 
 export default function App() {
   const screen = useGameStore(s => s.screen);
+  const kioskMode = useGameStore(s => s.kioskMode);
   const [scale, setScale] = useState(1);
 
   // Auto-scale to fit window while preserving exactly 1280x800 layout
@@ -33,17 +35,23 @@ export default function App() {
         className="w-[1280px] h-[800px] bg-background text-foreground font-mono relative overflow-hidden shadow-[0_0_50px_rgba(232,103,10,0.1)] outline outline-1 outline-primary/20 shrink-0 flex flex-col"
         style={{ transform: `scale(${scale})`, transformOrigin: 'center' }}
       >
-        {screen === 'dashboard' && <DashboardScreen />}
-        {screen === 'start' && <StartScreen />}
-        {screen === 'spiel' && <SpielScreen />}
-        {screen === 'einstellungen' && <EinstellungenScreen />}
-        {screen === 'resultate' && <ResultateScreen />}
-        {screen === 'geschichte' && <SpillgeschichteScreen />}
-        {screen === 'kredite' && <KrediteScreen />}
-        {screen === 'spillerverwaltung' && <SpillerScreen />}
+        {kioskMode === 'CATERING' ? (
+          <CateringScreen />
+        ) : (
+          <>
+            {screen === 'dashboard' && <DashboardScreen />}
+            {screen === 'start' && <StartScreen />}
+            {screen === 'spiel' && <SpielScreen />}
+            {screen === 'einstellungen' && <EinstellungenScreen />}
+            {screen === 'resultate' && <ResultateScreen />}
+            {screen === 'geschichte' && <SpillgeschichteScreen />}
+            {screen === 'kredite' && <KrediteScreen />}
+            {screen === 'spillerverwaltung' && <SpillerScreen />}
+          </>
+        )}
         
         {/* Emulator overlay controls */}
-        <SimControls />
+        {kioskMode !== 'CATERING' && <SimControls />}
       </div>
     </div>
   );

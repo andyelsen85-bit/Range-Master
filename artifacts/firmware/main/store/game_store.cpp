@@ -15,6 +15,8 @@
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
 #include "esp_random.h"
+#include "mbedtls/md.h"
+#include "mbedtls/pkcs5.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -40,6 +42,13 @@ EXT_RAM_BSS_ATTR GameStore g_store;
 static nvs_handle_t s_nvs;
 static SemaphoreHandle_t s_kredit_events_mutex;
 static SemaphoreHandle_t s_verkauf_events_mutex;
+
+#define CATERING_PIN_MIN_LEN 4
+#define CATERING_PIN_MAX_LEN 16
+#define CATERING_PIN_ITERATIONS 120000
+#define CATERING_PIN_MAX_FAILURES 5
+#define CATERING_PIN_LOCK_SECONDS 30
+#define VALID_UNIX_TIME 1704067200LL /* 2024-01-01 */
 
 static void kredit_events_lock(void)
 {
@@ -153,6 +162,154 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
     xSemaphoreGive(s_verkauf_events_mutex);
     game_store_save();
     return true;
+}
+
+static bool catering_player_is_active(int spieler_id)
+{
+    if (spieler_id <= 0) return false;
+    // The daily registration is part of the sale authorization, not merely a
+    // UI filter. Do this check at the enqueue transaction boundary.
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    if (strcmp(g_store.kreditDatum, today) != 0) return false;
+    for (int i = 0; i < g_store.portalSpielerCount; ++i)
+        if (g_store.portalSpieler[i].id == spieler_id && g_store.portalSpieler[i].portalAktiv)
+            for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
+                if (g_store.kreditPlayerIds[k] == spieler_id) return true;
+    return false;
+}
+
+bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
+                                 const int *quantities, int line_count)
+{
+    if (!produkt_ids || !quantities || line_count < 1 || line_count > MAX_PRODUKTE)
+        return false;
+    kredit_events_lock();
+    bool authorized = catering_player_is_active(spieler_id);
+    kredit_events_unlock();
+    if (!authorized) return false;
+    time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tmi);
+    xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
+    // Revalidate the cached catalog under the same lock as reservation.
+    for (int line = 0; line < line_count; ++line) {
+        const Produkt *p = NULL;
+        for (int i = 0; i < g_store.produkteCount; ++i)
+            if (g_store.produkte[i].id == produkt_ids[line]) { p = &g_store.produkte[i]; break; }
+        if (!p || !p->active || p->preisRevisionId <= 0 || quantities[line] <= 0 ||
+            (strcmp(p->category, "FOOD") && strcmp(p->category, "DRINK"))) {
+            xSemaphoreGive(s_verkauf_events_mutex);
+            return false;
+        }
+    }
+    // Reserve all slots before writing any event: a full outbox is all-or-nothing.
+    if (g_store.pendingVerkaufEventCount + line_count > MAX_PENDING_VERKAEUFE) {
+        xSemaphoreGive(s_verkauf_events_mutex);
+        return false;
+    }
+    if (strcmp(g_store.verkaufDatum, today) != 0) {
+        memset(g_store.munition, 0, sizeof(g_store.munition));
+        g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
+        snprintf(g_store.verkaufDatum, sizeof(g_store.verkaufDatum), "%s", today);
+    }
+    for (int line = 0; line < line_count; ++line) {
+        const Produkt *p = NULL;
+        for (int i = 0; i < g_store.produkteCount; ++i)
+            if (g_store.produkte[i].id == produkt_ids[line]) { p = &g_store.produkte[i]; break; }
+        VerkaufEvent *event = &g_store.pendingVerkaufEvents[g_store.pendingVerkaufEventCount++];
+        memset(event, 0, sizeof(*event));
+        snprintf(event->externalId, sizeof(event->externalId), "cat-%d-%08x",
+                 spieler_id, (unsigned)esp_random());
+        event->spielerId = spieler_id; event->produktId = p->id;
+        event->preisRevisionId = p->preisRevisionId; event->quantity = quantities[line];
+        snprintf(event->datum, sizeof(event->datum), "%s", today);
+    }
+    // Commit while the outbox remains locked. The NVS commit is atomic; on a
+    // failure remove the entire just-created basket from RAM as well, so a
+    // caller can never observe a partially accepted basket.
+    int first_event = g_store.pendingVerkaufEventCount - line_count;
+    esp_err_t persist = nvs_set_blob(s_nvs, "sales", g_store.pendingVerkaufEvents,
+                                     sizeof(g_store.pendingVerkaufEvents));
+    if (persist == ESP_OK)
+        persist = nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
+    if (persist == ESP_OK)
+        persist = nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
+    if (persist == ESP_OK) persist = nvs_commit(s_nvs);
+    if (persist != ESP_OK) {
+        memset(&g_store.pendingVerkaufEvents[first_event], 0,
+               (size_t)line_count * sizeof(VerkaufEvent));
+        g_store.pendingVerkaufEventCount = first_event;
+    }
+    xSemaphoreGive(s_verkauf_events_mutex);
+    return persist == ESP_OK;
+}
+
+static bool catering_pin_digest(const char *pin, const uint8_t salt[16], uint8_t out[32])
+{
+    size_t len = pin ? strnlen(pin, CATERING_PIN_MAX_LEN + 1) : 0;
+    if (len < CATERING_PIN_MIN_LEN || len > CATERING_PIN_MAX_LEN) return false;
+    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    return md && mbedtls_pkcs5_pbkdf2_hmac(md, (const unsigned char *)pin, len,
+              salt, 16, CATERING_PIN_ITERATIONS, sizeof(g_store.cateringPinHash), out) == 0;
+}
+
+bool store_set_catering_pin(const char *pin)
+{
+    uint8_t digest[32], salt[16];
+    for (size_t i = 0; i < sizeof(salt); i += sizeof(uint32_t)) {
+        uint32_t r = esp_random(); memcpy(salt + i, &r, sizeof(r));
+    }
+    if (!catering_pin_digest(pin, salt, digest)) return false;
+    memcpy(g_store.cateringPinSalt, salt, sizeof(salt));
+    memcpy(g_store.cateringPinHash, digest, sizeof(digest));
+    memset(digest, 0, sizeof(digest));
+    g_store.cateringPinConfigured = true;
+    g_store.cateringPinFailures = 0;
+    g_store.cateringPinLockoutUntil = 0;
+    game_store_save();
+    return true;
+}
+
+bool store_catering_pin_configured(void) { return g_store.cateringPinConfigured; }
+CateringPinVerifyResult store_verify_catering_pin(const char *pin)
+{
+    time_t now = time(NULL);
+    if (!g_store.cateringPinConfigured) return CATERING_PIN_NOT_CONFIGURED;
+    if ((int64_t)now >= VALID_UNIX_TIME &&
+        g_store.cateringPinLockoutUntil > (int64_t)now) return CATERING_PIN_LOCKED;
+    uint8_t digest[32]; bool equal = true;
+    if (!catering_pin_digest(pin, g_store.cateringPinSalt, digest)) return CATERING_PIN_WRONG;
+    for (size_t i = 0; i < sizeof(digest); ++i) equal &= digest[i] == g_store.cateringPinHash[i];
+    memset(digest, 0, sizeof(digest));
+    if (equal) {
+        g_store.cateringPinFailures = 0; g_store.cateringPinLockoutUntil = 0;
+        game_store_save();
+        return CATERING_PIN_OK;
+    }
+    if (g_store.cateringPinFailures < UINT8_MAX) g_store.cateringPinFailures++;
+    if (g_store.cateringPinFailures >= CATERING_PIN_MAX_FAILURES &&
+        (int64_t)now >= VALID_UNIX_TIME)
+        g_store.cateringPinLockoutUntil = (int64_t)now + CATERING_PIN_LOCK_SECONDS;
+    game_store_save();
+    // Without a trustworthy RTC an absolute persisted expiry cannot be made
+    // safe. Retain the persisted failure threshold (valid PIN still clears
+    // it) rather than inventing a permanent time-based lockout.
+    if ((int64_t)now < VALID_UNIX_TIME &&
+        g_store.cateringPinFailures >= CATERING_PIN_MAX_FAILURES)
+        return CATERING_PIN_LOCKED;
+    return g_store.cateringPinLockoutUntil > (int64_t)now ? CATERING_PIN_LOCKED : CATERING_PIN_WRONG;
+}
+uint32_t store_catering_pin_lockout_remaining(void)
+{
+    time_t now = time(NULL);
+    if ((int64_t)now < VALID_UNIX_TIME || g_store.cateringPinLockoutUntil <= (int64_t)now) return 0;
+    return (uint32_t)(g_store.cateringPinLockoutUntil - (int64_t)now);
+}
+bool store_set_operating_mode(TerminalOperatingMode mode)
+{
+    if (mode != TERMINAL_MODE_NORMAL && mode != TERMINAL_MODE_CATERING) return false;
+    if (mode == TERMINAL_MODE_CATERING && !g_store.cateringPinConfigured) return false;
+    g_store.operatingMode = mode; game_store_save(); return true;
 }
 
 int store_begin_verkauf_sync(VerkaufEvent *snapshot, int capacity)
@@ -560,6 +717,8 @@ void store_remap_spieler_id(int old_id, int new_id)
         for (int r = 0; r < g_store.lastFinished.base.ergebnisse_count; ++r) if (g_store.lastFinished.base.ergebnisse[r].spielerId == old_id) g_store.lastFinished.base.ergebnisse[r].spielerId = new_id;
     }
     for (int u = 0; u < g_store.spielerUpdateCount; ++u) if (g_store.spielerUpdates[u].spielerId == old_id) g_store.spielerUpdates[u].spielerId = new_id;
+    // Keep the persisted daily player authorization in step with ID remaps.
+    game_store_save();
 }
 
 void store_register_spieler_fuer_tag(int spieler_id)
@@ -569,6 +728,7 @@ void store_register_spieler_fuer_tag(int spieler_id)
         if (g_store.kreditPlayerIds[i] == 0) {
             g_store.kreditPlayerIds[i] = spieler_id;
             g_store.kredite[i] = (KreditStand){0, 0};
+            game_store_save();
             return;
         }
     }
@@ -598,6 +758,7 @@ void store_add_kredite(int spieler_id, int anzahl)
 bool store_start_spiel(void)
 {
     GameStore *s = &g_store;
+    if (s->operatingMode == TERMINAL_MODE_CATERING) return false;
     // Snapshot the durable setup in post order. Never persist this active
     // game's points or second-run rotations back into lineupIds.
     s->spielerCount = 0;
@@ -1001,6 +1162,10 @@ void store_skip_taube(void)
 // ── Navigation ───────────────────────────────────────────────
 void store_navigate(Screen s)
 {
+    if (g_store.operatingMode == TERMINAL_MODE_CATERING && s != SCREEN_CATERING) {
+        g_store.screen = SCREEN_CATERING;
+        return;
+    }
     g_store.screen = s;
     // ui_manager_show is called by the UI layer watching g_store.screen
 }
@@ -1427,6 +1592,12 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "wifi_ssid", g_store.wifiSsid);
     nvs_set_str(s_nvs, "wifi_pass", g_store.wifiPass);
     nvs_set_i32(s_nvs, "modus", (int32_t)g_store.modus);
+    nvs_set_i32(s_nvs, "op_mode", (int32_t)g_store.operatingMode);
+    nvs_set_i32(s_nvs, "cat_pin_set", g_store.cateringPinConfigured ? 1 : 0);
+    nvs_set_blob(s_nvs, "cat_pin_salt", g_store.cateringPinSalt, sizeof(g_store.cateringPinSalt));
+    nvs_set_blob(s_nvs, "cat_pin_hash", g_store.cateringPinHash, sizeof(g_store.cateringPinHash));
+    nvs_set_i32(s_nvs, "cat_pin_fail", g_store.cateringPinFailures);
+    nvs_set_i64(s_nvs, "cat_pin_lock", g_store.cateringPinLockoutUntil);
     nvs_set_i32(s_nvs, "click_snd", g_store.clickSoundEnabled ? 1 : 0);
     nvs_set_i32(s_nvs, "auto_sync", g_store.autoSyncEnabled ? 1 : 0);
     nvs_set_u32(s_nvs, "auto_secs", g_store.autoSyncSeconds);
@@ -1447,6 +1618,9 @@ void game_store_save(void)
     nvs_set_i32(s_nvs, "sale_12", g_store.verkaufCal12Total);
     nvs_set_i32(s_nvs, "sale_20", g_store.verkaufCal20Total);
     nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds, sizeof(g_store.lineupIds));
+    nvs_set_str(s_nvs, "credit_date", g_store.kreditDatum);
+    nvs_set_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds, sizeof(g_store.kreditPlayerIds));
+    nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
     // Cache roster and unsynced creates too: an offline reboot must still be
     // able to render the saved setup and later complete its create sync.
     nvs_set_blob(s_nvs, "plrs", g_store.portalSpieler, sizeof(g_store.portalSpieler));
@@ -1476,6 +1650,8 @@ void game_store_init(void)
     g_store.screen = SCREEN_DASHBOARD;
     g_store.autoSyncEnabled = true;
     g_store.autoSyncSeconds = AUTO_SYNC_DEFAULT_SECONDS;
+    time_t credit_now = time(NULL); struct tm credit_tm; localtime_r(&credit_now, &credit_tm);
+    strftime(g_store.kreditDatum, sizeof(g_store.kreditDatum), "%Y-%m-%d", &credit_tm);
 
     // Load persisted values
     nvs_load_str("api_url",   g_store.apiUrl,   MAX_URL_LEN);
@@ -1494,6 +1670,20 @@ void game_store_init(void)
                  sizeof(g_store.lastConfigBackupAt));
     nvs_load_str("cfg_backup_st", g_store.configBackupStatus,
                  sizeof(g_store.configBackupStatus));
+    size_t credit_ids_size = sizeof(g_store.kreditPlayerIds);
+    size_t credits_size = sizeof(g_store.kredite);
+    char saved_credit_date[11] = {};
+    nvs_load_str("credit_date", saved_credit_date, sizeof(saved_credit_date));
+    if (strcmp(saved_credit_date, g_store.kreditDatum) == 0 &&
+        nvs_get_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds, &credit_ids_size) == ESP_OK &&
+        credit_ids_size == sizeof(g_store.kreditPlayerIds) &&
+        nvs_get_blob(s_nvs, "credits", g_store.kredite, &credits_size) == ESP_OK &&
+        credits_size == sizeof(g_store.kredite)) {
+        // Current day only; otherwise the zero defaults are deliberately retained.
+    } else {
+        memset(g_store.kreditPlayerIds, 0, sizeof(g_store.kreditPlayerIds));
+        memset(g_store.kredite, 0, sizeof(g_store.kredite));
+    }
     size_t lineup_size = sizeof(g_store.lineupIds);
     if (nvs_get_blob(s_nvs, "lineup_ids", g_store.lineupIds, &lineup_size) != ESP_OK ||
         lineup_size != sizeof(g_store.lineupIds))
@@ -1555,6 +1745,35 @@ void game_store_init(void)
     int32_t modus = 0;
     if (nvs_get_i32(s_nvs, "modus", &modus) == ESP_OK)
         g_store.modus = (Modus)modus;
+    // PIN material is independent of active mode. A terminal may have a PIN
+    // configured for a future Catering session while booting in normal mode.
+    int32_t operating_mode = TERMINAL_MODE_NORMAL, pin_set = 0;
+    size_t pin_salt_size = sizeof(g_store.cateringPinSalt);
+    size_t pin_hash_size = sizeof(g_store.cateringPinHash);
+    bool valid_pin = nvs_get_i32(s_nvs, "cat_pin_set", &pin_set) == ESP_OK && pin_set == 1 &&
+        nvs_get_blob(s_nvs, "cat_pin_salt", g_store.cateringPinSalt, &pin_salt_size) == ESP_OK &&
+        pin_salt_size == sizeof(g_store.cateringPinSalt) &&
+        nvs_get_blob(s_nvs, "cat_pin_hash", g_store.cateringPinHash, &pin_hash_size) == ESP_OK &&
+        pin_hash_size == sizeof(g_store.cateringPinHash);
+    if (valid_pin) g_store.cateringPinConfigured = true;
+    if (valid_pin) {
+        int32_t failures = 0;
+        if (nvs_get_i32(s_nvs, "cat_pin_fail", &failures) == ESP_OK &&
+            failures >= 0 && failures <= UINT8_MAX) g_store.cateringPinFailures = (uint8_t)failures;
+        nvs_get_i64(s_nvs, "cat_pin_lock", &g_store.cateringPinLockoutUntil);
+        time_t now = time(NULL);
+        if ((int64_t)now < VALID_UNIX_TIME ||
+            g_store.cateringPinLockoutUntil <= (int64_t)now)
+            g_store.cateringPinLockoutUntil = 0;
+    }
+    // An invalid/unknown mode or an incomplete PIN state is intentionally
+    // normal mode; never enter a locked-down operational state accidentally.
+    if (nvs_get_i32(s_nvs, "op_mode", &operating_mode) == ESP_OK &&
+        operating_mode == TERMINAL_MODE_CATERING && valid_pin) {
+        g_store.cateringPinConfigured = true;
+        g_store.operatingMode = TERMINAL_MODE_CATERING;
+        g_store.screen = SCREEN_CATERING;
+    }
 
     int32_t click_snd = 1;  // default ON
     if (nvs_get_i32(s_nvs, "click_snd", &click_snd) == ESP_OK)

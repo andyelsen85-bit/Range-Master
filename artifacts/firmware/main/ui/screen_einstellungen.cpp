@@ -33,6 +33,38 @@ static lv_obj_t *s_auto_sync_switch;
 static lv_obj_t *s_auto_sync_seconds;
 static lv_obj_t *s_auto_sync_feedback;
 static lv_obj_t *s_config_backup_status;
+static lv_obj_t *s_catering_pin;
+static lv_obj_t *s_catering_old_pin;
+static lv_obj_t *s_catering_status;
+
+static void catering_save_pin_cb(lv_event_t *)
+{
+    if (store_catering_pin_configured() &&
+        store_verify_catering_pin(lv_textarea_get_text(s_catering_old_pin)) != CATERING_PIN_OK) {
+        lv_textarea_set_text(s_catering_old_pin, "");
+        lv_label_set_text(s_catering_status, "ALE PIN ASS NET KORREKT.");
+        lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
+        return;
+    }
+    if (store_set_catering_pin(lv_textarea_get_text(s_catering_pin))) {
+        lv_textarea_set_text(s_catering_pin, "");
+        lv_textarea_set_text(s_catering_old_pin, "");
+        lv_label_set_text(s_catering_status, "CATERING PIN GESPEICHERT.");
+        lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_SUCCESS), 0);
+    } else {
+        lv_label_set_text(s_catering_status, "PIN MUSS 4 BIS 16 ZIFFEREN HUN.");
+        lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
+    }
+}
+static void catering_enter_cb(lv_event_t *)
+{
+    if (!store_set_operating_mode(TERMINAL_MODE_CATERING)) {
+        lv_label_set_text(s_catering_status, "FIR D'RAUSCHT E PIN KONFIGUREIEREN.");
+        lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
+        return;
+    }
+    ui_manager_show(SCREEN_CATERING);
+}
 
 static void save_api_settings(void)
 {
@@ -895,6 +927,30 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_obj_add_event_cb(s_auto_sync_seconds, auto_sync_changed,
                         LV_EVENT_VALUE_CHANGED, NULL);
 
+    lv_obj_t *cat = lv_obj_create(parent);
+    lv_obj_set_size(cat, LV_PCT(100), 180);
+    lv_obj_add_style(cat, &g_style_card, 0);
+    lv_obj_set_flex_flow(cat, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(cat, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *cat_label = lv_label_create(cat);
+    lv_label_set_text(cat_label, "ALE PIN");
+    s_catering_old_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_old_pin, 140, 44);
+    lv_textarea_set_one_line(s_catering_old_pin, true); lv_textarea_set_password_mode(s_catering_old_pin, true);
+    lv_textarea_set_accepted_chars(s_catering_old_pin, "0123456789"); lv_textarea_set_max_length(s_catering_old_pin, 16);
+    cat_label = lv_label_create(cat);
+    lv_label_set_text(cat_label, "NEI PIN (4-16)");
+    s_catering_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_pin, 180, 44);
+    lv_textarea_set_one_line(s_catering_pin, true); lv_textarea_set_password_mode(s_catering_pin, true);
+    lv_textarea_set_accepted_chars(s_catering_pin, "0123456789"); lv_textarea_set_max_length(s_catering_pin, 16);
+    lv_obj_t *pin_save = lv_btn_create(cat); lv_obj_add_style(pin_save, &g_style_btn_secondary, 0);
+    lv_obj_add_event_cb(pin_save, catering_save_pin_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *pin_save_l = lv_label_create(pin_save); lv_label_set_text(pin_save_l, "PIN SPEICHERN"); lv_obj_center(pin_save_l);
+    lv_obj_t *enter = lv_btn_create(cat); lv_obj_add_style(enter, &g_style_btn_danger, 0);
+    lv_obj_add_event_cb(enter, catering_enter_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *enter_l = lv_label_create(enter); lv_label_set_text(enter_l, "CATERING STARTEN"); lv_obj_center(enter_l);
+    s_catering_status = lv_label_create(parent);
+    lv_label_set_text(s_catering_status, g_store.cateringPinConfigured ? "CATERING PIN ASS KONFIGUREIERT." : "KENG CATERING PIN KONFIGUREIERT.");
+
     // ── Firmware / board info ─────────────────────────────────
     static const char *info_rows[] = {
         "FIRMWARE: " APP_VERSION,
@@ -1036,6 +1092,20 @@ lv_obj_t *screen_einstellungen_create(void)
         lv_obj_add_event_cb(s_auto_sync_seconds, [](lv_event_t *e) {
             lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_NUMBER);
             lv_keyboard_set_textarea(s_kb, s_auto_sync_seconds);
+            lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_FOCUSED, NULL);
+    }
+    if (s_catering_pin) {
+        lv_obj_add_event_cb(s_catering_pin, [](lv_event_t *) {
+            lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_NUMBER);
+            lv_keyboard_set_textarea(s_kb, s_catering_pin);
+            lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_FOCUSED, NULL);
+    }
+    if (s_catering_old_pin) {
+        lv_obj_add_event_cb(s_catering_old_pin, [](lv_event_t *) {
+            lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_NUMBER);
+            lv_keyboard_set_textarea(s_kb, s_catering_old_pin);
             lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
         }, LV_EVENT_FOCUSED, NULL);
     }

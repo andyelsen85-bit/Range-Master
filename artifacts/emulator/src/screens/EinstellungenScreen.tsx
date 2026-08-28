@@ -247,7 +247,12 @@ export function EinstellungenScreen() {
   const store = useGameStore();
   const [url, setUrl] = useState(store.apiUrl);
   const [key, setKey] = useState(store.apiKey);
-  const [activeTab, setActiveTab] = useState<'api' | 'produkte' | 'schanzen' | 'custom' | 'wifi' | 'bluetooth' | 'system'>('api');
+  const [activeTab, setActiveTab] = useState<'api' | 'produkte' | 'schanzen' | 'custom' | 'wifi' | 'bluetooth' | 'system' | 'kiosk'>('api');
+
+  const [oldPin, setOldPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [pinMessage, setPinMessage] = useState('');
+  const [pinError, setPinError] = useState('');
 
   const save = () => {
     store.setApiSettings(url, key);
@@ -277,6 +282,7 @@ export function EinstellungenScreen() {
           { key: 'wifi',      label: 'WiFi' },
           { key: 'bluetooth', label: 'Bluetooth' },
           { key: 'system',    label: 'System' },
+          { key: 'kiosk',     label: 'Bar / Kiosk' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -468,6 +474,98 @@ export function EinstellungenScreen() {
                 <div><span className="text-foreground font-bold">Harakiri:</span> A–G zufälleg, H ëmmer um Enn</div>
                 <div><span className="text-foreground font-bold">Custom 1–4:</span> Fräi konfiguréierbar (Tab: Custom Modi)</div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Kiosk Tab ── */}
+        {activeTab === 'kiosk' && (
+          <div className="max-w-2xl flex flex-col gap-5" data-testid="settings-kiosk-tab">
+            <div className="bg-card border-2 border-border rounded-xl p-6">
+              <h2 className="text-base font-bold uppercase tracking-widest mb-2">Catering Kiosk Modus</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                Aktivéiert e séchere Modus fir d'Bar, deen den Zougang zu de Spiller an Astellunge blockéiert.
+                De Kiosk Modus kann nëmme mat engem PIN verlooss ginn.
+              </p>
+
+              <div className="bg-background border-2 border-border rounded-lg p-5 mb-6">
+                <label className="block text-sm font-bold text-muted-foreground mb-2 uppercase tracking-wider">PIN Astellen (4-Zifferen)</label>
+                <div className="flex flex-col gap-3">
+                  {store.kioskPinHash && (
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="password"
+                        maxLength={4}
+                        value={oldPin}
+                        onChange={(e) => setOldPin(e.target.value.replace(/\D/g, ''))}
+                        placeholder="Aktuellen PIN"
+                        className="w-48 bg-card border-2 border-border rounded-lg h-12 px-4 text-center tracking-[1em] font-mono text-xl focus:border-primary focus:outline-none"
+                        data-testid="input-kiosk-old-pin"
+                      />
+                      <span className="text-xs text-muted-foreground font-bold">Néideg fir z'änneren</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="password"
+                      maxLength={4}
+                      value={newPin}
+                      onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                      placeholder={store.kioskPinHash ? 'Neie PIN' : '0000'}
+                      className="w-48 bg-card border-2 border-border rounded-lg h-12 px-4 text-center tracking-[1em] font-mono text-xl focus:border-primary focus:outline-none"
+                      data-testid="input-kiosk-new-pin"
+                    />
+                    <TouchButton
+                      variant="outline"
+                      className="h-12"
+                      disabled={(newPin.length !== 4 && newPin !== '') || (!!store.kioskPinHash && oldPin.length !== 4)}
+                      onClick={async () => {
+                        setPinMessage('');
+                        setPinError('');
+
+                        const result = await store.setKioskPin(store.kioskPinHash ? oldPin : null, newPin || null);
+                        if (result.success) {
+                          setPinMessage(newPin ? 'Neie PIN gespäichert.' : 'PIN geläscht.');
+                          setNewPin('');
+                          setOldPin('');
+                        } else {
+                          setPinError(result.error || 'Feeler beim PIN späicheren');
+                        }
+
+                        setTimeout(() => {
+                          setPinMessage('');
+                          setPinError('');
+                        }, 3000);
+                      }}
+                      data-testid="button-save-kiosk-pin"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      Späicheren
+                    </TouchButton>
+                  </div>
+                </div>
+                {pinMessage && <div className="text-green-400 font-bold text-sm mt-2">{pinMessage}</div>}
+                {pinError && <div className="text-destructive font-bold text-sm mt-2">{pinError}</div>}
+                <div className="text-xs text-muted-foreground mt-2">
+                  {store.kioskPinHash ? 'E PIN ass aktuell agestallt.' : 'Et ass kee PIN agestallt.'}
+                </div>
+              </div>
+
+              <TouchButton
+                variant="primary"
+                size="xl"
+                className="w-full h-16 text-xl font-bold"
+                disabled={!store.kioskPinHash}
+                onClick={() => store.setKioskMode('CATERING')}
+                data-testid="button-enter-kiosk-mode"
+              >
+                CATERING MODUS STARTEN
+              </TouchButton>
+              {!store.kioskPinHash && (
+                <div className="text-destructive text-sm font-bold text-center mt-2">
+                  Setzt e PIN an, fir de Catering Modus z'aktivéieren.
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -44,6 +44,19 @@ typedef enum {
     MODUS_COUNT
 } Modus;
 
+// This is deliberately independent from Modus: Catering never becomes a game
+// format and therefore cannot reach the launcher/fire flow.
+typedef enum {
+    TERMINAL_MODE_NORMAL = 0,
+    TERMINAL_MODE_CATERING,
+} TerminalOperatingMode;
+typedef enum {
+    CATERING_PIN_OK = 0,
+    CATERING_PIN_WRONG,
+    CATERING_PIN_LOCKED,
+    CATERING_PIN_NOT_CONFIGURED,
+} CateringPinVerifyResult;
+
 typedef enum {
     SCREEN_DASHBOARD = 0,
     SCREEN_START,
@@ -55,6 +68,7 @@ typedef enum {
     SCREEN_EINSTELLUNGEN,
     SCREEN_WIFI,
     SCREEN_BLUETOOTH,
+    SCREEN_CATERING,
     SCREEN_COUNT
 } Screen;
 
@@ -194,6 +208,13 @@ typedef struct {
 typedef struct {
     // Settings
     Modus   modus;
+    TerminalOperatingMode operatingMode;
+    // Only a random salt and derived digest are retained; never the PIN.
+    uint8_t cateringPinSalt[16];
+    uint8_t cateringPinHash[32];
+    bool    cateringPinConfigured;
+    uint8_t cateringPinFailures;
+    int64_t cateringPinLockoutUntil; // Unix seconds; 0 if clock unavailable
     bool    maschinenAktiv[MASCHINE_COUNT];
     char    apiUrl[MAX_URL_LEN];
     char    apiKey[MAX_KEY_LEN];
@@ -349,6 +370,9 @@ int  store_pending_update_count(void);
 // ── Product sales / ammunition ────────────────────────────────
 const Produkt *store_produkt(const char *produkt_code);
 bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity);
+/** Atomically validates and appends every line of a catering basket. */
+bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
+                                 const int *quantities, int line_count);
 int  store_begin_verkauf_sync(VerkaufEvent *snapshot, int capacity);
 void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool delivered);
 void store_apply_portal_verkauf(int spieler_id, int produkt_id, int quantity);
@@ -356,6 +380,13 @@ void store_replace_produkte(const Produkt *produkte, int count);
 void store_remap_verkauf_spieler(int old_id, int new_id);
 int  store_munition_cal12(int spieler_id);
 int  store_munition_cal20(int spieler_id);
+
+// ── Terminal operating mode / Catering access ─────────────────
+bool store_set_catering_pin(const char *pin);
+bool store_catering_pin_configured(void);
+CateringPinVerifyResult store_verify_catering_pin(const char *pin);
+uint32_t store_catering_pin_lockout_remaining(void);
+bool store_set_operating_mode(TerminalOperatingMode mode);
 
 // ── Helpers ──────────────────────────────────────────────────
 const char *maschine_label(Maschine m);

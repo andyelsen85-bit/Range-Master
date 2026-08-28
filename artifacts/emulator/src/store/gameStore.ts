@@ -175,6 +175,11 @@ interface Settings {
   customSequenzen: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', CustomSequenz>;
   customLaeufe: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', 1 | 2>;
   produkte: Produkt[];
+  kioskMode: 'GAME' | 'CATERING';
+  kioskPinHash: string | null;
+  kioskPinSalt: string | null;
+  kioskFailedAttempts: number;
+  kioskLockoutUntil: number | null;
 }
 
 interface GameState extends Settings {
@@ -279,9 +284,31 @@ interface GameState extends Settings {
   refreshSpielerUpdateStatus: () => Promise<void>;
   /** Remove finished (email_sent) entries from the change list */
   clearErledegtSpielerUpdates: () => void;
+
+  setKioskMode: (mode: 'GAME' | 'CATERING') => void;
+  setKioskPin: (oldPin: string | null, newPin: string | null) => Promise<{ success: boolean; error?: string }>;
+  verifyKioskPin: (pin: string) => Promise<boolean>;
+  queueCateringBasket: (spielerId: number, cart: Record<number, number>) => { success: boolean; error?: string };
+
+  kioskFailedAttempts: number;
+  kioskLockoutUntil: number | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function hashPin(pin: string, salt: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(pin + salt);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function generateSalt(): string {
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 const MASCHINEN: Maschine[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 export { MASCHINEN as MASCHINEN_LIST };
@@ -453,15 +480,23 @@ function saveLineup(lineup: LineupEintrag[]) {
   try { localStorage.setItem(LINEUP_KEY, JSON.stringify(lineup)); } catch {}
 }
 
-function normalizeProdukte(raw: unknown): Produkt[] {
+export function normalizeProdukte(raw: unknown): Produkt[] {
   if (!Array.isArray(raw)) return DEFAULT_PRODUKTE;
   const valid = raw.filter((p): p is Produkt => !!p && typeof p === 'object' &&
     typeof (p as Produkt).id === 'number' && typeof (p as Produkt).category === 'string');
+
   // The terminal always exposes these three fixed products, even when a stale
   // local settings file predates the product catalogue.
-  return DEFAULT_PRODUKTE.map(defaultProduct =>
+  const defaults = DEFAULT_PRODUKTE.map(defaultProduct =>
     valid.find(p => p.code === defaultProduct.code || p.category === defaultProduct.category) ?? defaultProduct
   );
+
+  // Keep other valid products (like FOOD/DRINK)
+  const defaultCodes = new Set(DEFAULT_PRODUKTE.map(p => p.code));
+  const defaultCategories = new Set(DEFAULT_PRODUKTE.map(p => p.category));
+  const others = valid.filter(p => p.code && !defaultCodes.has(p.code) && !defaultCategories.has(p.category));
+
+  return [...defaults, ...others];
 }
 
 function loadVerkaeufe(key: string): VerkaufEvent[] {
@@ -707,6 +742,17 @@ export const useGameStore = create<GameState>((set, get) => {
   const customSequenzen = normalizeCustomSequenzen(saved.customSequenzen);
   const customLaeufe = saved.customLaeufe ?? { ...DEFAULT_CUSTOM_LAEUFE };
   const produkte = normalizeProdukte(saved.produkte);
+  const kioskMode = saved.kioskMode ?? 'GAME';
+  const kioskPinHash = saved.kioskPinHash ?? null;
+  const kioskPinSalt = saved.kioskPinSalt ?? null;
+  let kioskFailedAttempts = saved.kioskFailedAttempts ?? 0;
+  let kioskLockoutUntil = saved.kioskLockoutUntil ?? null;
+
+  // Safely clear expired timestamps
+  if (kioskLockoutUntil && Date.now() > kioskLockoutUntil) {
+    kioskFailedAttempts = 0;
+    kioskLockoutUntil = null;
+  }
 
   return {
     // Settings (persisted)
@@ -717,6 +763,11 @@ export const useGameStore = create<GameState>((set, get) => {
     customSequenzen,
     customLaeufe,
     produkte,
+    kioskMode,
+    kioskPinHash,
+    kioskPinSalt,
+    kioskFailedAttempts,
+    kioskLockoutUntil,
 
     // Volatile
     screen: 'dashboard',
@@ -769,6 +820,11 @@ export const useGameStore = create<GameState>((set, get) => {
         customSequenzen: s.customSequenzen,
         customLaeufe: s.customLaeufe,
         produkte: s.produkte,
+        kioskMode: s.kioskMode,
+        kioskPinHash: s.kioskPinHash,
+        kioskPinSalt: s.kioskPinSalt,
+        kioskFailedAttempts: s.kioskFailedAttempts,
+        kioskLockoutUntil: s.kioskLockoutUntil,
       });
     },
 
@@ -830,13 +886,13 @@ export const useGameStore = create<GameState>((set, get) => {
     setModus: (modus) => {
       set({ modus });
       const s = get();
-      saveToStorage({ modus, maschinenAktiv: s.maschinenAktiv, apiUrl: s.apiUrl, apiKey: s.apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe });
+      saveToStorage({ modus, maschinenAktiv: s.maschinenAktiv, apiUrl: s.apiUrl, apiKey: s.apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe, kioskMode: s.kioskMode, kioskPinHash: s.kioskPinHash, kioskPinSalt: s.kioskPinSalt, kioskFailedAttempts: s.kioskFailedAttempts, kioskLockoutUntil: s.kioskLockoutUntil });
     },
 
     toggleMaschineAktiv: (m) => {
       set((state) => {
         const maschinenAktiv = { ...state.maschinenAktiv, [m]: !state.maschinenAktiv[m] };
-        saveToStorage({ modus: state.modus, maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen, customLaeufe: state.customLaeufe });
+        saveToStorage({ modus: state.modus, maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen, customLaeufe: state.customLaeufe, kioskMode: state.kioskMode, kioskPinHash: state.kioskPinHash, kioskPinSalt: state.kioskPinSalt, kioskFailedAttempts: state.kioskFailedAttempts, kioskLockoutUntil: state.kioskLockoutUntil });
         return { maschinenAktiv };
       });
     },
@@ -844,7 +900,7 @@ export const useGameStore = create<GameState>((set, get) => {
     setCustomSequenz: (modus, seq) => {
       set((state) => {
         const customSequenzen = { ...state.customSequenzen, [modus]: seq };
-        saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen, customLaeufe: state.customLaeufe });
+        saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen, customLaeufe: state.customLaeufe, kioskMode: state.kioskMode, kioskPinHash: state.kioskPinHash, kioskPinSalt: state.kioskPinSalt, kioskFailedAttempts: state.kioskFailedAttempts, kioskLockoutUntil: state.kioskLockoutUntil });
         return { customSequenzen };
       });
     },
@@ -852,7 +908,7 @@ export const useGameStore = create<GameState>((set, get) => {
     setCustomLaeufe: (modus, laeufe) => {
       set((state) => {
         const customLaeufe = { ...state.customLaeufe, [modus]: laeufe };
-        saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen, customLaeufe });
+        saveToStorage({ modus: state.modus, maschinenAktiv: state.maschinenAktiv, apiUrl: state.apiUrl, apiKey: state.apiKey, customSequenzen: state.customSequenzen, customLaeufe, kioskMode: state.kioskMode, kioskPinHash: state.kioskPinHash, kioskPinSalt: state.kioskPinSalt, kioskFailedAttempts: state.kioskFailedAttempts, kioskLockoutUntil: state.kioskLockoutUntil });
         return { customLaeufe };
       });
     },
@@ -1183,7 +1239,7 @@ export const useGameStore = create<GameState>((set, get) => {
     setApiSettings: (apiUrl, apiKey) => {
       set({ apiUrl, apiKey });
       const s = get();
-      saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl, apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe });
+      saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl, apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe, kioskMode: s.kioskMode, kioskPinHash: s.kioskPinHash, kioskPinSalt: s.kioskPinSalt, kioskFailedAttempts: s.kioskFailedAttempts, kioskLockoutUntil: s.kioskLockoutUntil });
     },
 
     addLocalSpieler: (name) => {
@@ -1338,7 +1394,7 @@ export const useGameStore = create<GameState>((set, get) => {
         const data = await res.json() as { products?: Produkt[] };
         const produkte = normalizeProdukte(data.products);
         const s = get();
-        saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl: s.apiUrl, apiKey: s.apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe, produkte });
+        saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl: s.apiUrl, apiKey: s.apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe, kioskMode: s.kioskMode, kioskPinHash: s.kioskPinHash, kioskPinSalt: s.kioskPinSalt, kioskFailedAttempts: s.kioskFailedAttempts, kioskLockoutUntil: s.kioskLockoutUntil, produkte });
         set({ produkte });
       } catch {}
     },
@@ -1782,6 +1838,143 @@ export const useGameStore = create<GameState>((set, get) => {
       } catch {
         set({ syncStatus: 'error' });
       }
+    },
+
+    setKioskMode: (mode) => {
+      set({ kioskMode: mode });
+      get().saveSettings();
+    },
+
+    setKioskPin: async (oldPin, newPin) => {
+      const { kioskPinHash, kioskPinSalt } = get();
+
+      // If a PIN already exists, they must prove the old one first
+      if (kioskPinHash && kioskPinSalt) {
+        if (!oldPin) {
+          return { success: false, error: 'Current PIN required' };
+        }
+        const oldHash = await hashPin(oldPin, kioskPinSalt);
+        if (oldHash !== kioskPinHash) {
+          return { success: false, error: 'Incorrect current PIN' };
+        }
+      }
+
+      if (!newPin) {
+        set({ kioskPinHash: null, kioskPinSalt: null, kioskFailedAttempts: 0, kioskLockoutUntil: null });
+        get().saveSettings();
+        return { success: true };
+      }
+
+      const salt = generateSalt();
+      const hash = await hashPin(newPin, salt);
+      set({ kioskPinHash: hash, kioskPinSalt: salt, kioskFailedAttempts: 0, kioskLockoutUntil: null });
+      get().saveSettings();
+      return { success: true };
+    },
+
+    verifyKioskPin: async (pin) => {
+      const { kioskPinHash, kioskPinSalt, kioskFailedAttempts, kioskLockoutUntil } = get();
+      if (!kioskPinHash || !kioskPinSalt) return true;
+
+      const now = Date.now();
+      if (kioskLockoutUntil && now < kioskLockoutUntil) {
+        return false; // Locked out
+      }
+
+      const hash = await hashPin(pin, kioskPinSalt);
+
+      // Constant-time comparison
+      let isMatch = true;
+      if (hash.length !== kioskPinHash.length) {
+        isMatch = false;
+      }
+      const len = Math.min(hash.length, kioskPinHash.length);
+      for (let i = 0; i < len; i++) {
+        if (hash[i] !== kioskPinHash[i]) {
+          isMatch = false;
+        }
+      }
+
+      if (isMatch) {
+        if (kioskFailedAttempts > 0) {
+          set({ kioskFailedAttempts: 0, kioskLockoutUntil: null });
+          get().saveSettings();
+        }
+        return true;
+      } else {
+        const attempts = kioskFailedAttempts + 1;
+        if (attempts >= 5) {
+          set({ kioskFailedAttempts: attempts, kioskLockoutUntil: now + 30000 });
+        } else {
+          set({ kioskFailedAttempts: attempts });
+        }
+        get().saveSettings();
+        return false;
+      }
+    },
+
+    queueCateringBasket: (spielerId, cart) => {
+      const state = get();
+
+      if (state.kioskMode !== 'CATERING') {
+        return { success: false, error: 'Not in catering mode' };
+      }
+
+      if (!state.kredite[spielerId]) {
+        return { success: false, error: 'Spiller vum Dag net fonnt (stale player)' };
+      }
+
+      const player = state.portalSpieler.find(s => s.id === spielerId) || state.spieler.find(s => s.id === spielerId);
+      if (!player) {
+        return { success: false, error: 'Onbekannte Spiller' };
+      }
+      if ('portalAktiv' in player && player.portalAktiv === false) {
+        return { success: false, error: 'Spiller ass inaktiv' };
+      }
+
+      const MAX_QUEUE = 1000;
+      const totalNewItems = Object.keys(cart).length;
+      if (state.pendingVerkaeufe.length + totalNewItems > MAX_QUEUE) {
+        return { success: false, error: 'Offline queue voll, synchroniséiert w.e.g.' };
+      }
+
+      const events: VerkaufEvent[] = [];
+      const datum = todayStr();
+
+      for (const [pIdStr, qty] of Object.entries(cart)) {
+        const productId = Number(pIdStr);
+        if (!Number.isSafeInteger(qty) || qty <= 0) {
+          return { success: false, error: `Invalid quantity for product ${productId}` };
+        }
+
+        const product = state.produkte.find(p => p.id === productId);
+        if (!product || !product.active || (product.category !== 'FOOD' && product.category !== 'DRINK')) {
+          return { success: false, error: `Produkt net disponibel: ${product?.name || productId}` };
+        }
+
+        if (!product.currentPrice || product.id <= 0) {
+          return { success: false, error: `Invalid price for product ${product.name}` };
+        }
+
+        events.push({
+          externalId: generateSpielId(),
+          spielerId,
+          datum,
+          productId,
+          priceRevisionId: product.currentPrice.id,
+          quantity: qty,
+        });
+      }
+
+      if (events.length === 0) {
+        return { success: true };
+      }
+
+      const pendingVerkaeufe = [...state.pendingVerkaeufe, ...events];
+      saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
+      set({ verkaufDatum: datum, pendingVerkaeufe });
+
+      return { success: true };
     },
   };
 });

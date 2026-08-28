@@ -1,0 +1,185 @@
+#include <stdio.h>
+#include <string.h>
+#include "lvgl.h"
+#include "ui_manager.h"
+#include "game_store.h"
+#include "screen_catering.h"
+
+#define CATERING_IDLE_MS 60000u
+static lv_obj_t *s_scr, *s_players, *s_products, *s_total, *s_status, *s_pin_modal, *s_pin, *s_pin_kb;
+static int s_player_id, s_qty[MAX_PRODUKTE];
+static bool s_submitting, s_confirm_armed;
+static uint32_t s_last_touch;
+
+static bool player_today(const PortalSpieler *p) {
+    if (!p || !p->portalAktiv) return false;
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
+        if (g_store.kreditPlayerIds[i] == p->id) return true;
+    return false;
+}
+static void activity(void) { s_last_touch = lv_tick_get(); }
+static void reset_basket(void) {
+    s_player_id = 0; memset(s_qty, 0, sizeof(s_qty)); s_submitting = s_confirm_armed = false; activity();
+}
+static void refresh_total(void) {
+    int cents = 0, count = 0;
+    for (int i = 0; i < g_store.produkteCount; ++i) {
+        cents += s_qty[i] * g_store.produkte[i].preisCent; count += s_qty[i];
+    }
+    char text[80]; snprintf(text, sizeof(text), "TOTAL: %d.%02d EUR  (%d ARTIKEL)",
+                             cents / 100, cents % 100, count);
+    lv_label_set_text(s_total, text);
+}
+static void rebuild(void);
+static void product_cb(lv_event_t *e) {
+    int packed = (int)(intptr_t)lv_event_get_user_data(e), i = packed >> 1;
+    if (!s_player_id || s_submitting || i < 0 || i >= g_store.produkteCount) return;
+    if ((packed & 1) && s_qty[i] < 99) s_qty[i]++;
+    else if (!(packed & 1) && s_qty[i] > 0) s_qty[i]--;
+    s_confirm_armed = false; activity(); rebuild();
+}
+static void player_cb(lv_event_t *e) {
+    s_player_id = (int)(intptr_t)lv_event_get_user_data(e);
+    memset(s_qty, 0, sizeof(s_qty)); s_confirm_armed = false; activity(); rebuild();
+}
+static void confirm_cb(lv_event_t *) {
+    if (!s_player_id || s_submitting) return;
+    int ids[MAX_PRODUKTE], qty[MAX_PRODUKTE], n = 0;
+    for (int i = 0; i < g_store.produkteCount; ++i) if (s_qty[i]) {
+        ids[n] = g_store.produkte[i].id; qty[n++] = s_qty[i];
+    }
+    if (!n) { lv_label_set_text(s_status, "E MINDSTENS EN ARTIKEL WIELEN."); return; }
+    if (!s_confirm_armed) {
+        s_confirm_armed = true;
+        char summary[192] = "ZESUMMEFAASSUNG: ";
+        size_t used = strlen(summary);
+        for (int i = 0; i < g_store.produkteCount && used + 8 < sizeof(summary); ++i) {
+            if (!s_qty[i]) continue;
+            int written = snprintf(summary + used, sizeof(summary) - used, "%s%d x %.20s",
+                                   used == strlen("ZESUMMEFAASSUNG: ") ? "" : ", ",
+                                   s_qty[i], g_store.produkte[i].name);
+            if (written < 0 || (size_t)written >= sizeof(summary) - used) break;
+            used += (size_t)written;
+        }
+        snprintf(summary + used, sizeof(summary) - used, "\nNACH EMOL BESTAETEGEN.");
+        lv_label_set_text(s_status, summary);
+        return;
+    }
+    s_submitting = true; // prevents a second touch before store persistence returns
+    bool ok = store_queue_catering_basket(s_player_id, ids, qty, n);
+    lv_label_set_text(s_status, ok ? "VERKAAF GESPEICHERT." :
+                      "VERKAAF NET GESPEICHERT: SPILLER/PRODUKT ODER QUEUE PRUEWEN.");
+    if (ok) reset_basket();
+    rebuild();
+}
+static void exit_pin_cb(lv_event_t *) {
+    CateringPinVerifyResult result = store_verify_catering_pin(lv_textarea_get_text(s_pin));
+    if (result == CATERING_PIN_OK) {
+        lv_obj_del(s_pin_modal); s_pin_modal = s_pin = s_pin_kb = NULL;
+        store_set_operating_mode(TERMINAL_MODE_NORMAL);
+        ui_manager_show(SCREEN_DASHBOARD);
+        return;
+    }
+    lv_textarea_set_text(s_pin, "");
+    if (result == CATERING_PIN_LOCKED) {
+        uint32_t remaining = store_catering_pin_lockout_remaining();
+        char message[64];
+        if (remaining) snprintf(message, sizeof(message), "ZE VILL FALSCH PINEN. WAART %lu SEKONNEN.",
+                                (unsigned long)remaining);
+        else snprintf(message, sizeof(message), "ZE VILL FALSCH PINEN. KORREKT PIN ASS NOETEG.");
+        lv_label_set_text(s_status, message);
+    } else lv_label_set_text(s_status, "FALSCH PIN.");
+}
+static void close_pin_cb(lv_event_t *) {
+    if (s_pin_modal) lv_obj_del(s_pin_modal);
+    s_pin_modal = s_pin = s_pin_kb = NULL;
+}
+static void exit_open_cb(lv_event_t *) {
+    if (s_pin_modal) return;
+    s_pin_modal = lv_obj_create(s_scr); lv_obj_set_size(s_pin_modal, 540, 500);
+    lv_obj_center(s_pin_modal); lv_obj_add_style(s_pin_modal, &g_style_card, 0);
+    lv_obj_set_flex_flow(s_pin_modal, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_pin_modal, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *l = lv_label_create(s_pin_modal); lv_label_set_text(l, "CATERING VERLOOSSEN - PIN");
+    s_pin = lv_textarea_create(s_pin_modal); lv_obj_set_width(s_pin, 360);
+    lv_textarea_set_one_line(s_pin, true); lv_textarea_set_password_mode(s_pin, true);
+    lv_textarea_set_accepted_chars(s_pin, "0123456789"); lv_textarea_set_max_length(s_pin, 16);
+    lv_obj_t *actions = lv_obj_create(s_pin_modal); lv_obj_set_size(actions, LV_PCT(100), 50);
+    lv_obj_set_style_bg_opa(actions, LV_OPA_0, 0); lv_obj_set_style_border_width(actions, 0, 0);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW); lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *b = lv_btn_create(actions); lv_obj_add_style(b, &g_style_btn_primary, 0);
+    lv_obj_add_event_cb(b, exit_pin_cb, LV_EVENT_CLICKED, NULL);
+    l = lv_label_create(b); lv_label_set_text(l, "PIN PRUEWEN"); lv_obj_center(l);
+    b = lv_btn_create(actions); lv_obj_add_style(b, &g_style_btn_secondary, 0);
+    lv_obj_add_event_cb(b, close_pin_cb, LV_EVENT_CLICKED, NULL);
+    l = lv_label_create(b); lv_label_set_text(l, "OFBRIECHEN"); lv_obj_center(l);
+    s_pin_kb = lv_keyboard_create(s_pin_modal);
+    lv_obj_set_size(s_pin_kb, 480, 190); lv_keyboard_set_mode(s_pin_kb, LV_KEYBOARD_MODE_NUMBER);
+    lv_keyboard_set_textarea(s_pin_kb, s_pin);
+    lv_obj_add_event_cb(s_pin_kb, [](lv_event_t *e) {
+        uint32_t key = lv_event_get_key(e);
+        if (key == LV_KEY_ENTER) exit_pin_cb(e);
+    }, LV_EVENT_KEY, NULL);
+}
+static lv_obj_t *button(lv_obj_t *p, const char *text, lv_style_t *style) {
+    lv_obj_t *b = lv_btn_create(p); lv_obj_add_style(b, style, 0);
+    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, text); lv_obj_center(l); return b;
+}
+static void rebuild(void) {
+    if (!s_players) return;
+    lv_obj_clean(s_players); lv_obj_clean(s_products);
+    lv_obj_t *heading = lv_label_create(s_players);
+    lv_label_set_text(heading, "SPILLER VUM DAG");
+    lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(heading, lv_color_hex(CLR_MUTED), 0);
+    for (int i = 0; i < g_store.portalSpielerCount; ++i) if (player_today(&g_store.portalSpieler[i])) {
+        lv_obj_t *b = button(s_players, g_store.portalSpieler[i].name,
+                             g_store.portalSpieler[i].id == s_player_id ? &g_style_btn_primary : &g_style_btn_secondary);
+        lv_obj_set_width(b, LV_PCT(100)); lv_obj_add_event_cb(b, player_cb, LV_EVENT_CLICKED,
+                       (void *)(intptr_t)g_store.portalSpieler[i].id);
+    }
+    heading = lv_label_create(s_products);
+    lv_label_set_text(heading, "IESSEN & GEDRENKS");
+    lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(heading, lv_color_hex(CLR_MUTED), 0);
+    for (int i = 0; i < g_store.produkteCount; ++i) {
+        Produkt *p = &g_store.produkte[i];
+        if (!p->active || (strcmp(p->category, "FOOD") && strcmp(p->category, "DRINK"))) continue;
+        lv_obj_t *row = lv_obj_create(s_products); lv_obj_set_size(row, LV_PCT(100), 56);
+        lv_obj_set_style_bg_opa(row, LV_OPA_0, 0); lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW); lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        char name[64]; snprintf(name, sizeof(name), "%s  %d.%02d", p->name, p->preisCent / 100, p->preisCent % 100);
+        lv_obj_t *l = lv_label_create(row); lv_label_set_text(l, name); lv_obj_set_flex_grow(l, 1);
+        lv_obj_t *minus = button(row, "-", &g_style_btn_secondary); lv_obj_set_size(minus, 50, 44);
+        lv_obj_add_event_cb(minus, product_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(i << 1));
+        char amount[8]; snprintf(amount, sizeof(amount), "%d", s_qty[i]); l = lv_label_create(row); lv_label_set_text(l, amount);
+        lv_obj_t *plus = button(row, "+", &g_style_btn_primary); lv_obj_set_size(plus, 50, 44);
+        lv_obj_add_event_cb(plus, product_cb, LV_EVENT_CLICKED, (void *)(intptr_t)((i << 1) | 1));
+    }
+    refresh_total();
+}
+lv_obj_t *screen_catering_create(void) {
+    s_scr = lv_obj_create(NULL); lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H); screen_base_init(s_scr);
+    lv_obj_t *title = lv_label_create(s_scr); lv_label_set_text(title, "CATERING"); lv_obj_add_style(title, &g_style_label_title, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
+    s_players = lv_obj_create(s_scr); lv_obj_set_size(s_players, 300, 590); lv_obj_align(s_players, LV_ALIGN_LEFT_MID, 18, 30); lv_obj_add_style(s_players, &g_style_card, 0); lv_obj_set_flex_flow(s_players, LV_FLEX_FLOW_COLUMN);
+    s_products = lv_obj_create(s_scr); lv_obj_set_size(s_products, 620, 590); lv_obj_align(s_products, LV_ALIGN_CENTER, 40, 30); lv_obj_add_style(s_products, &g_style_card, 0); lv_obj_set_flex_flow(s_products, LV_FLEX_FLOW_COLUMN);
+    s_total = lv_label_create(s_scr); lv_obj_align(s_total, LV_ALIGN_BOTTOM_MID, 100, -36); lv_obj_set_style_text_font(s_total, &lv_font_montserrat_20, 0);
+    s_status = lv_label_create(s_scr); lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 100, -8);
+    lv_obj_t *confirm = button(s_scr, "BESTAETEG VERKAAF", &g_style_btn_primary); lv_obj_set_size(confirm, 250, 70); lv_obj_align(confirm, LV_ALIGN_RIGHT_MID, -35, 30); lv_obj_add_event_cb(confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel = button(s_scr, "OFBRIECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, 250, 55); lv_obj_align(cancel, LV_ALIGN_RIGHT_MID, -35, 115); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); rebuild(); }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *exit = button(s_scr, "CATERING VERLOOSSEN", &g_style_btn_danger); lv_obj_set_size(exit, 250, 55); lv_obj_align(exit, LV_ALIGN_RIGHT_MID, -35, -100); lv_obj_add_event_cb(exit, exit_open_cb, LV_EVENT_CLICKED, NULL);
+    reset_basket(); rebuild(); return s_scr;
+}
+void screen_catering_refresh(void) { reset_basket(); rebuild(); }
+void screen_catering_tick(void) {
+    if (s_pin_modal) {
+        uint32_t remaining = store_catering_pin_lockout_remaining();
+        if (remaining) {
+            char message[64];
+            snprintf(message, sizeof(message), "ZE VILL FALSCH PINEN. WAART %lu SEKONNEN.",
+                     (unsigned long)remaining);
+            lv_label_set_text(s_status, message);
+        }
+    }
+    if (!s_pin_modal && lv_tick_elaps(s_last_touch) > CATERING_IDLE_MS && (s_player_id || s_submitting)) { reset_basket(); rebuild(); }
+}

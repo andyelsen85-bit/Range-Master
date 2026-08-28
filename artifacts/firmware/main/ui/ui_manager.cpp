@@ -19,6 +19,7 @@
 #include "screen_spiller.h"
 #include "screen_wifi.h"
 #include "screen_bluetooth.h"
+#include "screen_catering.h"
 
 static const char *TAG = "ui_manager";
 
@@ -136,18 +137,26 @@ void ui_manager_init(void)
     s_screens[SCREEN_EINSTELLUNGEN]= screen_einstellungen_create();vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_WIFI]         = screen_wifi_create();         vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_BLUETOOTH]    = screen_bluetooth_create();
+    s_screens[SCREEN_CATERING]     = screen_catering_create();
 
     // Register a timer to poll store.screen changes
     lv_timer_create([](lv_timer_t *t) {
         ui_manager_tick();
     }, 50, NULL);
 
-    ui_manager_show(SCREEN_DASHBOARD);
+    ui_manager_show(g_store.operatingMode == TERMINAL_MODE_CATERING ?
+                    SCREEN_CATERING : SCREEN_DASHBOARD);
     ESP_LOGI(TAG, "UI ready");
 }
 
 void ui_manager_show(Screen s)
 {
+    // Catering is an allow-list, not merely hidden buttons. This also blocks
+    // navigation requests from stale callbacks or external store logic.
+    if (g_store.operatingMode == TERMINAL_MODE_CATERING && s != SCREEN_CATERING) {
+        g_store.screen = SCREEN_CATERING;
+        return;
+    }
     if (s >= SCREEN_COUNT || !s_screens[s]) return;
     if (s == s_current) return;
 
@@ -163,6 +172,7 @@ void ui_manager_show(Screen s)
         case SCREEN_EINSTELLUNGEN:screen_einstellungen_refresh();break;
         case SCREEN_WIFI:         screen_wifi_refresh();         break;
         case SCREEN_BLUETOOTH:    screen_bluetooth_refresh();    break;
+        case SCREEN_CATERING:     screen_catering_refresh();     break;
         default: break;
     }
 
@@ -185,6 +195,7 @@ void ui_manager_tick(void)
         case SCREEN_DASHBOARD:  screen_dashboard_tick();  break;
         case SCREEN_SPILLER:    screen_spiller_tick();    break;
         case SCREEN_WIFI:       screen_wifi_tick();       break;
+        case SCREEN_CATERING:   screen_catering_tick();   break;
         default: break;
     }
 }

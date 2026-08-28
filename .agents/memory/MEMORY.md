@@ -21,3 +21,4 @@
 - [Player identity remapping](player-identity-remapping.md) — local→portal ID changes must atomically remap every player-keyed ledger and use one roster-application path
 - [Terminal restore trust boundary](terminal-restore-trust-boundary.md) — bind restore approval to the replacement ID/key; never restore the source terminal API key
 - [API route prefixes](api-route-prefixes.md) — accept both `/api/*` and rewritten root paths because development preserves the prefix while production ingress may strip it
+- [Catering terminal isolation](catering-terminal-isolation.md) — Catering is a persisted operating mode, not a game mode; enforce player/product authorization and PIN lockout below the UI
