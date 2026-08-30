@@ -241,21 +241,25 @@ lv_obj_t *screen_spiel_create(void)
 
     s_btn_wiederhole = lv_btn_create(ctrl_row);
     lv_obj_add_style(s_btn_wiederhole, &g_style_btn_secondary, 0);
-    lv_obj_set_size(s_btn_wiederhole, 112, 40);
+    // Keep both controls within the 240px inner panel while meeting a more
+    // usable touch size than the previous 112x40 targets.
+    lv_obj_set_size(s_btn_wiederhole, 116, 48);
     lv_obj_set_style_pad_hor(s_btn_wiederhole, 10, 0);
     lv_obj_add_event_cb(s_btn_wiederhole, wiederhole_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = lv_label_create(s_btn_wiederhole);
     lv_label_set_text(wl, LV_SYMBOL_REFRESH " WDH");
+    lv_obj_set_style_text_font(wl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(wl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(wl);
 
     lv_obj_t *skip_btn = lv_btn_create(ctrl_row);
     lv_obj_add_style(skip_btn, &g_style_btn_secondary, 0);
-    lv_obj_set_size(skip_btn, 112, 40);
+    lv_obj_set_size(skip_btn, 116, 48);
     lv_obj_set_style_pad_hor(skip_btn, 10, 0);
     lv_obj_add_event_cb(skip_btn, skip_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *sl = lv_label_create(skip_btn);
     lv_label_set_text(sl, LV_SYMBOL_NEXT " SKIP");
+    lv_obj_set_style_text_font(sl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(sl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sl);
 
@@ -357,6 +361,11 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_pad_all(name_col, 0, 0);
     lv_obj_set_flex_flow(name_col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(name_col, 2, 0);
+    // The post and points labels are fixed-width siblings.  Let the name
+    // column consume the remaining space instead of pushing those values off
+    // the banner when a roster name is long.
+    lv_obj_set_width(name_col, 0);
+    lv_obj_set_flex_grow(name_col, 1);
 
     lv_obj_t *shooter_hdr_lbl = lv_label_create(name_col);
     lv_label_set_text(shooter_hdr_lbl, "AKTUELLEN SCHUTZ");
@@ -367,6 +376,8 @@ lv_obj_t *screen_spiel_create(void)
     lv_label_set_text(s_lbl_active_name, "---");
     lv_obj_set_style_text_font(s_lbl_active_name, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(s_lbl_active_name, lv_color_hex(CLR_TEXT), 0);
+    lv_label_set_long_mode(s_lbl_active_name, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_lbl_active_name, LV_PCT(100));
 
     // Post + Points
     s_lbl_active_post = lv_label_create(shooter_bar);
@@ -607,6 +618,9 @@ void screen_spiel_refresh(void)
             lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(name_lbl,
                 isActive ? lv_color_hex(0x000000) : lv_color_hex(CLR_TEXT), 0);
+            lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(name_lbl, 0);
+            lv_obj_set_flex_grow(name_lbl, 1);
 
             char pts_buf[10];
             snprintf(pts_buf, sizeof(pts_buf), "%dp", s->spieler[i].punkte);
@@ -615,6 +629,7 @@ void screen_spiel_refresh(void)
             lv_obj_set_style_text_font(pts_lbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(pts_lbl,
                 isActive ? lv_color_hex(0x000000) : lv_color_hex(CLR_PRIMARY), 0);
+            lv_obj_set_width(pts_lbl, 32);
         }
 
         if (!anyPlayer) {
@@ -647,6 +662,8 @@ void screen_spiel_refresh(void)
             int cur_post = pos_of(s->spieler[i].startPosten);
             char rb[16];
             lv_table_set_cell_value(s_score_table, i + 1, 0, s->spieler[i].name);
+            lv_table_add_cell_ctrl(s_score_table, i + 1, 0,
+                                   LV_TABLE_CELL_CTRL_TEXT_CROP);
             snprintf(rb, sizeof(rb), "P%d", cur_post);
             lv_table_set_cell_value(s_score_table, i + 1, 1, rb);
             snprintf(rb, sizeof(rb), "%d", s->spieler[i].punkte);

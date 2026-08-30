@@ -199,6 +199,8 @@ static void bill_cb(lv_event_t *e)
     lv_obj_t *title = lv_label_create(card);
     char title_text[100]; snprintf(title_text, sizeof(title_text), "RECHNUNG - %s", name);
     lv_label_set_text(title, title_text); lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, LV_PCT(100));
     char totals[256];
     int granted = bill_data ? bill_data->creditGranted : stand.gewaehrt;
     int used = bill_data ? bill_data->creditUsed : stand.verbraucht;
@@ -258,6 +260,9 @@ static void bill_cb(lv_event_t *e)
         lv_obj_set_style_text_font(left, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(left,
             pending ? lv_color_hex(CLR_WARN) : lv_color_hex(0x111827), 0);
+        lv_label_set_long_mode(left, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(left, 0);
+        lv_obj_set_flex_grow(left, 1);
         lv_obj_t *right = lv_label_create(line_row); char right_text[32];
         if (price_unknown) snprintf(right_text, sizeof(right_text), "RECONCILE");
         else snprintf(right_text, sizeof(right_text), "%d.%02d EUR",
@@ -269,6 +274,7 @@ static void bill_cb(lv_event_t *e)
         lv_obj_set_style_text_font(right, &lv_font_montserrat_18, 0);
         lv_obj_set_style_text_color(right,
             price_unknown ? lv_color_hex(CLR_WARN) : lv_color_hex(CLR_PRIMARY), 0);
+         lv_obj_set_width(right, 120);
     };
     if (bill_data) {
         for (int i = 0; i < bill_data->lineCount; ++i) {
@@ -480,6 +486,8 @@ static void build_player_list(void)
         lv_label_set_text(name_lbl, name);
         lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_TEXT), 0);
+        lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(name_lbl, LV_PCT(100));
 
         char cred_buf[48];
         int avail = k->gewaehrt - k->verbraucht;
@@ -713,6 +721,8 @@ lv_obj_t *screen_kredite_create(void)
     lv_label_set_text(s_lbl_status, "");
     lv_obj_align(s_lbl_status, LV_ALIGN_TOP_MID, 0, 148);
     lv_obj_set_style_text_font(s_lbl_status, &lv_font_montserrat_14, 0);
+    lv_label_set_long_mode(s_lbl_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_lbl_status, DISPLAY_LOGICAL_W - 40);
 
     // Player list
     s_player_list = lv_obj_create(s_scr);

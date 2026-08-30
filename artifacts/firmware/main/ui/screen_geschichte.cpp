@@ -59,6 +59,8 @@ static void show_detail(int idx)
         snprintf(pp, sizeof(pp), "P%d", posten);
         snprintf(ps, sizeof(ps), "%d", pts);
         lv_table_set_cell_value(s_detail_table, p + 1, 0, fg->spielerNamen[p]);
+        lv_table_add_cell_ctrl(s_detail_table, p + 1, 0,
+                               LV_TABLE_CELL_CTRL_TEXT_CROP);
         lv_table_set_cell_value(s_detail_table, p + 1, 1, pp);
         lv_table_set_cell_value(s_detail_table, p + 1, 2, ps);
     }
@@ -147,6 +149,9 @@ static void build_history_rows(void)
         lv_label_set_text(win_lbl, w_buf);
         lv_obj_set_style_text_font(win_lbl, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(win_lbl, lv_color_hex(CLR_TEXT), 0);
+        lv_label_set_long_mode(win_lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(win_lbl, 0);
+        lv_obj_set_flex_grow(win_lbl, 1);
 
         char p_buf[16];
         snprintf(p_buf, sizeof(p_buf), "%d " LV_SYMBOL_LIST, fg->spieler_count);

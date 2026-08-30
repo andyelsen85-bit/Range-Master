@@ -300,12 +300,15 @@ lv_obj_t *screen_start_create(void)
 
         for (int dir = 0; dir < 2; ++dir) {
             lv_obj_t *move = lv_btn_create(row);
-            lv_obj_set_size(move, 34, 38);
+            // Make the reorder controls easy to hit with a finger and keep
+            // the existing 10px row spacing between them.
+            lv_obj_set_size(move, 48, 44);
             lv_obj_add_style(move, &g_style_btn_secondary, 0);
             intptr_t action = ((intptr_t)(i + 1) << 8) | (dir == 0 ? 1 : 2);
             lv_obj_add_event_cb(move, lineup_action_cb, LV_EVENT_CLICKED, (void *)action);
             lv_obj_t *label = lv_label_create(move);
             lv_label_set_text(label, dir == 0 ? LV_SYMBOL_UP : LV_SYMBOL_DOWN);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
             lv_obj_center(label);
         }
     }

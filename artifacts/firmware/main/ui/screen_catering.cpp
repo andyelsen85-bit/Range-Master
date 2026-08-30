@@ -220,6 +220,8 @@ static void exit_open_cb(lv_event_t *) {
 static lv_obj_t *button(lv_obj_t *p, const char *text, lv_style_t *style) {
     lv_obj_t *b = lv_btn_create(p); lv_obj_add_style(b, style, 0);
     lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, text);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(l, LV_PCT(100));
     lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(l); return b;
 }
@@ -252,6 +254,8 @@ static void rebuild(void) {
         char name[64]; snprintf(name, sizeof(name), "%s  %d.%02d", p->name, p->preisCent / 100, p->preisCent % 100);
         lv_obj_t *l = lv_label_create(row); lv_label_set_text(l, name);
         lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(l, 0);
         lv_obj_set_flex_grow(l, 1);
         lv_obj_t *minus = button(row, "-", &g_style_btn_secondary); lv_obj_set_size(minus, 50, 44);
         lv_obj_add_event_cb(minus, product_cb, LV_EVENT_CLICKED,
@@ -288,6 +292,8 @@ lv_obj_t *screen_catering_create(void) {
     s_total = lv_label_create(s_checkout); lv_obj_align(s_total, LV_ALIGN_TOP_LEFT, 0, 42); lv_obj_set_style_text_font(s_total, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(s_total, lv_color_hex(CLR_TEXT), 0);
     s_status = lv_label_create(s_checkout); lv_obj_set_width(s_status, LV_PCT(100)); lv_obj_align(s_status, LV_ALIGN_TOP_LEFT, 0, 82);
+    lv_label_set_long_mode(s_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_height(s_status, 110);
     lv_obj_set_style_text_color(s_status, lv_color_hex(CLR_TEXT), 0);
     lv_obj_t *confirm = button(s_checkout, "BESTAETEG VERKAAF", &g_style_btn_primary); lv_obj_set_size(confirm, LV_PCT(100), 70); lv_obj_align(confirm, LV_ALIGN_TOP_LEFT, 0, 210); lv_obj_add_event_cb(confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cancel = button(s_checkout, "OFBRIECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, LV_PCT(100), 55); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 0, 296); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); refresh_selection(); }, LV_EVENT_CLICKED, NULL);

@@ -80,6 +80,9 @@ lv_obj_t *screen_resultate_create(void)
     lv_label_set_text(s_lbl_winner, "WINNER: -");
     lv_obj_set_style_text_font(s_lbl_winner, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(s_lbl_winner, lv_color_hex(CLR_WARN), 0);
+    lv_label_set_long_mode(s_lbl_winner, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_lbl_winner, 0);
+    lv_obj_set_flex_grow(s_lbl_winner, 1);
 
     s_lbl_max = lv_label_create(win_card);
     lv_label_set_text(s_lbl_max, "");
@@ -93,7 +96,7 @@ lv_obj_t *screen_resultate_create(void)
     lv_obj_align(s_table, LV_ALIGN_TOP_MID, 0, 80 + 106);
     lv_table_set_col_cnt(s_table, 5);
     lv_table_set_col_width(s_table, 0, 50);  // Rank
-    lv_table_set_col_width(s_table, 1, 240); // Name
+    lv_table_set_col_width(s_table, 1, 360); // Name
     lv_table_set_col_width(s_table, 2, 110); // LAUF 1
     lv_table_set_col_width(s_table, 3, 110); // LAUF 2
     lv_table_set_col_width(s_table, 4, 110); // TOTAL
@@ -163,6 +166,7 @@ void screen_resultate_refresh(void)
         snprintf(cell, sizeof(cell), "%d", i + 1);
         lv_table_set_cell_value(s_table, i+1, 0, cell);
         lv_table_set_cell_value(s_table, i+1, 1, rows[i].name);
+        lv_table_add_cell_ctrl(s_table, i+1, 1, LV_TABLE_CELL_CTRL_TEXT_CROP);
         snprintf(cell, sizeof(cell), "%d", rows[i].lauf1);
         lv_table_set_cell_value(s_table, i+1, 2, cell);
         snprintf(cell, sizeof(cell), "%d", rows[i].lauf2);

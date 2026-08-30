@@ -417,11 +417,15 @@ lv_obj_t *screen_dashboard_create(void)
     lv_label_set_text(s_lbl_pending, "0 SPILLER AM WAARDRAUM");
     lv_obj_set_style_text_font(s_lbl_pending, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_pending, lv_color_hex(CLR_TEXT), 0);
+    lv_label_set_long_mode(s_lbl_pending, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_lbl_pending, LV_PCT(100));
 
     s_lbl_sync_status = lv_label_create(queue);
     lv_label_set_text(s_lbl_sync_status, "BEREET");
     lv_obj_set_style_text_font(s_lbl_sync_status, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_lbl_sync_status, lv_color_hex(CLR_MUTED), 0);
+    lv_label_set_long_mode(s_lbl_sync_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_lbl_sync_status, LV_PCT(100));
 
     lv_obj_t *sync_btn = lv_btn_create(queue);
     lv_obj_add_style(sync_btn, &g_style_btn_primary, 0);
@@ -580,6 +584,9 @@ void screen_dashboard_refresh(void)
             lv_label_set_text(win_lbl, w_buf);
             lv_obj_set_style_text_font(win_lbl, &lv_font_montserrat_16, 0);
             lv_obj_set_style_text_color(win_lbl, lv_color_hex(CLR_TEXT), 0);
+            lv_label_set_long_mode(win_lbl, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(win_lbl, 0);
+            lv_obj_set_flex_grow(win_lbl, 1);
 
             char p_buf[12];
             snprintf(p_buf, sizeof(p_buf), "%d SPILLER", fg->spieler_count);

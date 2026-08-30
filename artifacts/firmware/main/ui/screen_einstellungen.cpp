@@ -373,6 +373,8 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
         lv_label_set_text(lbl, labels[m]);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(lbl, 0);
         lv_obj_set_flex_grow(lbl, 1);
 
         lv_obj_t *test = lv_btn_create(row);
@@ -565,6 +567,9 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         lv_label_set_text(cname, CUSTOM_NAMES[ci]);
         lv_obj_set_style_text_font(cname, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(cname, lv_color_hex(CLR_TEXT), 0);
+        lv_label_set_long_mode(cname, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(cname, 0);
+        lv_obj_set_flex_grow(cname, 1);
 
         lv_obj_t *clr = lv_btn_create(title_row);
         lv_obj_add_style(clr, &g_style_btn_secondary, 0);
@@ -908,6 +913,8 @@ static lv_obj_t *build_products_bills_tab(lv_obj_t *parent)
     s_bill_day_summary = lv_label_create(parent);
     lv_obj_set_style_text_font(s_bill_day_summary, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_TEXT), 0);
+    lv_label_set_long_mode(s_bill_day_summary, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_bill_day_summary, LV_PCT(100));
     refresh_bill_day_summary();
     return parent;
 }
