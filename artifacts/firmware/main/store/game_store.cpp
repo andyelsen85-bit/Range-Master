@@ -1038,14 +1038,31 @@ bool store_set_catering_pin(const char *pin)
         uint32_t r = esp_random(); memcpy(salt + i, &r, sizeof(r));
     }
     if (!catering_pin_digest(pin, salt, digest)) return false;
-    memcpy(g_store.cateringPinSalt, salt, sizeof(salt));
-    memcpy(g_store.cateringPinHash, digest, sizeof(digest));
+
+    nvs_lock();
+    esp_err_t err = nvs_set_i32(s_nvs, "cat_pin_set", 1);
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "cat_pin_salt", salt, sizeof(salt));
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "cat_pin_hash", digest, sizeof(digest));
+    if (err == ESP_OK) err = nvs_set_i32(s_nvs, "cat_pin_fail", 0);
+    if (err == ESP_OK) err = nvs_set_i64(s_nvs, "cat_pin_lock", 0);
+    if (err == ESP_OK) err = nvs_commit(s_nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not persist Catering PIN: %s", esp_err_to_name(err));
+        nvs_reopen_after_failure();
+    } else {
+        // Publish the new PIN state only after its complete NVS transaction
+        // committed, while the lock still prevents a stale broad save.
+        memcpy(g_store.cateringPinSalt, salt, sizeof(salt));
+        memcpy(g_store.cateringPinHash, digest, sizeof(digest));
+        g_store.cateringPinConfigured = true;
+        g_store.cateringPinFailures = 0;
+        g_store.cateringPinLockoutUntil = 0;
+    }
+    nvs_unlock();
     memset(digest, 0, sizeof(digest));
-    g_store.cateringPinConfigured = true;
-    g_store.cateringPinFailures = 0;
-    g_store.cateringPinLockoutUntil = 0;
-    game_store_save();
-    return true;
+    return err == ESP_OK;
 }
 
 bool store_catering_pin_configured(void) { return g_store.cateringPinConfigured; }
@@ -1087,7 +1104,19 @@ bool store_set_operating_mode(TerminalOperatingMode mode)
 {
     if (mode != TERMINAL_MODE_NORMAL && mode != TERMINAL_MODE_CATERING) return false;
     if (mode == TERMINAL_MODE_CATERING && !g_store.cateringPinConfigured) return false;
-    g_store.operatingMode = mode; game_store_save(); return true;
+    nvs_lock();
+    esp_err_t err = nvs_set_i32(s_nvs, "op_mode", (int32_t)mode);
+    if (err == ESP_OK) err = nvs_commit(s_nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not persist operating mode: %s", esp_err_to_name(err));
+        nvs_reopen_after_failure();
+    } else {
+        // Keep RAM and NVS ordered under the same lock. Otherwise a concurrent
+        // full save could observe and recommit the previous mode in this gap.
+        g_store.operatingMode = mode;
+    }
+    nvs_unlock();
+    return err == ESP_OK;
 }
 
 int store_begin_verkauf_sync(VerkaufEvent *snapshot, int capacity)

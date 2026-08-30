@@ -23,7 +23,18 @@ static const char *TAG = "http_sync";
 
 #define HTTP_BUF_SIZE  (32 * 1024)
 static portMUX_TYPE s_error_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_session_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_last_error[384];
+
+typedef struct {
+    esp_http_client_handle_t client;
+    char base_url[MAX_URL_LEN];
+    char api_key[MAX_KEY_LEN];
+} http_session_t;
+
+static http_session_t *s_active_session;
+static TaskHandle_t s_active_session_owner;
+
 static void set_http_error(const char *operation, const char *path,
                            const char *reason);
 static esp_err_t http_post_json(const char *path, const char *body,
@@ -529,6 +540,120 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+static esp_err_t http_session_open(http_session_t *session)
+{
+    if (!session) return ESP_ERR_INVALID_ARG;
+    memset(session, 0, sizeof(*session));
+    int base_len = snprintf(session->base_url, sizeof(session->base_url), "%s",
+                            g_store.apiUrl);
+    int key_len = snprintf(session->api_key, sizeof(session->api_key), "%s",
+                           g_store.apiKey);
+    if (base_len < 0 || base_len >= (int)sizeof(session->base_url) ||
+        key_len < 0 || key_len >= (int)sizeof(session->api_key)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_http_client_config_t cfg = {};
+    cfg.url               = session->base_url;
+    cfg.event_handler     = http_event_handler;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.timeout_ms        = 12000;
+    session->client = esp_http_client_init(&cfg);
+    return session->client ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+static void http_session_close(http_session_t *session)
+{
+    if (!session || !session->client) return;
+    (void)esp_http_client_set_user_data(session->client, NULL);
+    esp_http_client_close(session->client);
+    esp_http_client_cleanup(session->client);
+    session->client = NULL;
+}
+
+static esp_err_t http_session_reopen(http_session_t *session)
+{
+    if (!session || !session->client) return ESP_ERR_INVALID_ARG;
+    (void)esp_http_client_set_user_data(session->client, NULL);
+    esp_http_client_close(session->client);
+    esp_http_client_cleanup(session->client);
+    session->client = NULL;
+
+    esp_http_client_config_t cfg = {};
+    cfg.url               = session->base_url;
+    cfg.event_handler     = http_event_handler;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    cfg.timeout_ms        = 12000;
+    session->client = esp_http_client_init(&cfg);
+    return session->client ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+static http_session_t *http_active_session_for_current_task(void)
+{
+    http_session_t *session = NULL;
+    TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_session_lock);
+    if (s_active_session_owner == current) session = s_active_session;
+    portEXIT_CRITICAL(&s_session_lock);
+    return session;
+}
+
+static esp_err_t http_session_activate(http_session_t *session)
+{
+    if (!session) return ESP_ERR_INVALID_ARG;
+    TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    esp_err_t err = ESP_OK;
+    portENTER_CRITICAL(&s_session_lock);
+    if (s_active_session) {
+        err = ESP_ERR_INVALID_STATE;
+    } else {
+        s_active_session = session;
+        s_active_session_owner = current;
+    }
+    portEXIT_CRITICAL(&s_session_lock);
+    return err;
+}
+
+static void http_session_deactivate(http_session_t *session)
+{
+    portENTER_CRITICAL(&s_session_lock);
+    if (s_active_session == session &&
+        s_active_session_owner == xTaskGetCurrentTaskHandle()) {
+        s_active_session = NULL;
+        s_active_session_owner = NULL;
+    }
+    portEXIT_CRITICAL(&s_session_lock);
+}
+
+static esp_err_t http_prepare_request(http_session_t *session, const char *path,
+                                      esp_http_client_method_t method,
+                                      const char *body, http_acc_t *acc)
+{
+    if (!session || !session->client || !path || !acc) return ESP_ERR_INVALID_ARG;
+    char url[256];
+    int url_len = snprintf(url, sizeof(url), "%s%s", session->base_url, path);
+    if (url_len < 0 || url_len >= (int)sizeof(url)) return ESP_ERR_INVALID_SIZE;
+
+    esp_err_t err = esp_http_client_set_url(session->client, url);
+    if (err != ESP_OK) return err;
+    err = esp_http_client_set_method(session->client, method);
+    if (err != ESP_OK) return err;
+    err = esp_http_client_set_header(session->client, "x-api-key",
+                                     session->api_key);
+    if (err != ESP_OK) return err;
+    err = esp_http_client_set_user_data(session->client, acc);
+    if (err != ESP_OK) return err;
+
+    if (method == HTTP_METHOD_POST) {
+        err = esp_http_client_set_header(session->client, "Content-Type",
+                                         "application/json");
+        if (err != ESP_OK) return err;
+        return esp_http_client_set_post_field(session->client, body, strlen(body));
+    }
+    (void)esp_http_client_delete_header(session->client, "Content-Type");
+    return esp_http_client_set_post_field(session->client, NULL, 0);
+}
+
 // ── Generic POST helper (with retry) ─────────────────────────
 static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap)
@@ -539,11 +664,16 @@ static esp_err_t http_post_json(const char *path, const char *body,
         set_http_error("POST", diagnostic_path, "invalid arguments");
         return ESP_ERR_INVALID_ARG;
     }
-    char url[256];
-    int url_len = snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
-    if (url_len < 0 || url_len >= (int)sizeof(url)) {
-        set_http_error("POST", diagnostic_path, "URL too long");
-        return ESP_ERR_INVALID_SIZE;
+    http_session_t owned_session;
+    http_session_t *session = http_active_session_for_current_task();
+    bool owns_session = session == NULL;
+    if (owns_session) {
+        esp_err_t open_err = http_session_open(&owned_session);
+        if (open_err != ESP_OK) {
+            set_http_error("POST", diagnostic_path, "client init failed");
+            return open_err;
+        }
+        session = &owned_session;
     }
 
     esp_err_t err = ESP_FAIL;
@@ -552,25 +682,16 @@ static esp_err_t http_post_json(const char *path, const char *body,
         http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap,
                            .truncated = false };
 
-        esp_http_client_config_t cfg = {};
-        cfg.url               = url;
-        cfg.event_handler     = http_event_handler;
-        cfg.user_data         = resp_buf ? &acc : NULL;
-        cfg.crt_bundle_attach = esp_crt_bundle_attach;
-        cfg.timeout_ms        = 12000;
-        esp_http_client_handle_t client = esp_http_client_init(&cfg);
-        if (!client) {
-            set_http_error("POST", diagnostic_path, "client init failed");
-            return ESP_ERR_NO_MEM;
-        }
-        esp_http_client_set_method(client, HTTP_METHOD_POST);
-        esp_http_client_set_header(client, "Content-Type", "application/json");
-        esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
-        esp_http_client_set_post_field(client, body, strlen(body));
-
-        err = esp_http_client_perform(client);
+        err = http_prepare_request(session, path, HTTP_METHOD_POST, body, &acc);
+        bool transport_error = false;
         if (err == ESP_OK) {
-            int status = esp_http_client_get_status_code(client);
+            err = esp_http_client_perform(session->client);
+            transport_error = err != ESP_OK;
+        }
+        if (session->client)
+            (void)esp_http_client_set_user_data(session->client, NULL);
+        if (err == ESP_OK) {
+            int status = esp_http_client_get_status_code(session->client);
             if (status < 200 || status >= 300) {
                 ESP_LOGW(TAG, "POST %s → HTTP %d", diagnostic_path, status);
                 char reason[32];
@@ -586,11 +707,20 @@ static esp_err_t http_post_json(const char *path, const char *body,
             set_http_error("POST", diagnostic_path, "response truncated");
             err = ESP_ERR_INVALID_SIZE;
         }
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
         if (err == ESP_OK) break;
-        if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(1000));
+        if (transport_error && (!owns_session || attempt < 3)) {
+            esp_err_t reopen_err = http_session_reopen(session);
+            if (reopen_err != ESP_OK) {
+                set_http_error("POST", diagnostic_path, "client reopen failed");
+                err = reopen_err;
+                break;
+            }
+        }
+        if (attempt < 3) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
+    if (owns_session) http_session_close(session);
     return err;
 }
 
@@ -604,11 +734,16 @@ static esp_err_t http_get_json(const char *path,
         set_http_error("GET", diagnostic_path, "invalid arguments");
         return ESP_ERR_INVALID_ARG;
     }
-    char url[256];
-    int url_len = snprintf(url, sizeof(url), "%s%s", g_store.apiUrl, path);
-    if (url_len < 0 || url_len >= (int)sizeof(url)) {
-        set_http_error("GET", diagnostic_path, "URL too long");
-        return ESP_ERR_INVALID_SIZE;
+    http_session_t owned_session;
+    http_session_t *session = http_active_session_for_current_task();
+    bool owns_session = session == NULL;
+    if (owns_session) {
+        esp_err_t open_err = http_session_open(&owned_session);
+        if (open_err != ESP_OK) {
+            set_http_error("GET", diagnostic_path, "client init failed");
+            return open_err;
+        }
+        session = &owned_session;
     }
 
     esp_err_t err = ESP_FAIL;
@@ -617,22 +752,16 @@ static esp_err_t http_get_json(const char *path,
         http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap,
                            .truncated = false };
 
-        esp_http_client_config_t cfg = {};
-        cfg.url               = url;
-        cfg.event_handler     = http_event_handler;
-        cfg.user_data         = &acc;
-        cfg.crt_bundle_attach = esp_crt_bundle_attach;
-        cfg.timeout_ms        = 12000;
-        esp_http_client_handle_t client = esp_http_client_init(&cfg);
-        if (!client) {
-            set_http_error("GET", diagnostic_path, "client init failed");
-            return ESP_ERR_NO_MEM;
-        }
-        esp_http_client_set_header(client, "x-api-key", g_store.apiKey);
-
-        err = esp_http_client_perform(client);
+        err = http_prepare_request(session, path, HTTP_METHOD_GET, NULL, &acc);
+        bool transport_error = false;
         if (err == ESP_OK) {
-            int status = esp_http_client_get_status_code(client);
+            err = esp_http_client_perform(session->client);
+            transport_error = err != ESP_OK;
+        }
+        if (session->client)
+            (void)esp_http_client_set_user_data(session->client, NULL);
+        if (err == ESP_OK) {
+            int status = esp_http_client_get_status_code(session->client);
             if (status < 200 || status >= 300) {
                 ESP_LOGW(TAG, "GET %s → HTTP %d", diagnostic_path, status);
                 char reason[32];
@@ -648,11 +777,20 @@ static esp_err_t http_get_json(const char *path,
             set_http_error("GET", diagnostic_path, "response truncated");
             err = ESP_ERR_INVALID_SIZE;
         }
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
         if (err == ESP_OK) break;
-        if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(1000));
+        if (transport_error && (!owns_session || attempt < 3)) {
+            esp_err_t reopen_err = http_session_reopen(session);
+            if (reopen_err != ESP_OK) {
+                set_http_error("GET", diagnostic_path, "client reopen failed");
+                err = reopen_err;
+                break;
+            }
+        }
+        if (attempt < 3) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
+    if (owns_session) http_session_close(session);
     return err;
 }
 
@@ -1641,7 +1779,7 @@ esp_err_t http_pull_verkaeufe(void)
     return ESP_OK;
 }
 
-esp_err_t http_sync_billing(void)
+static esp_err_t http_sync_billing_impl(void)
 {
     portENTER_CRITICAL(&s_error_lock);
     s_last_error[0] = '\0';
@@ -1682,7 +1820,7 @@ esp_err_t http_sync_billing(void)
 }
 
 // ── http_sync_all ─────────────────────────────────────────────
-esp_err_t http_sync_all(void)
+static esp_err_t http_sync_all_impl(void)
 {
     portENTER_CRITICAL(&s_error_lock);
     s_last_error[0] = '\0';
@@ -1816,4 +1954,41 @@ esp_err_t http_sync_all(void)
     }
     ESP_LOGI(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
     return overall;
+}
+
+static esp_err_t http_run_sync_cycle(const char *cycle_name,
+                                     esp_err_t (*sync_impl)(void))
+{
+    TickType_t started = xTaskGetTickCount();
+    http_session_t session;
+    esp_err_t err = http_session_open(&session);
+    if (err != ESP_OK) {
+        set_http_error("SYNC", cycle_name, "client init failed");
+        return err;
+    }
+    err = http_session_activate(&session);
+    if (err != ESP_OK) {
+        http_session_close(&session);
+        set_http_error("SYNC", cycle_name, "another HTTP sync cycle is active");
+        return err;
+    }
+
+    esp_err_t sync_err = sync_impl();
+    http_session_deactivate(&session);
+    http_session_close(&session);
+    TickType_t elapsed = xTaskGetTickCount() - started;
+    ESP_LOGI(TAG, "%s sync cycle duration=%ums result=%s", cycle_name,
+             (unsigned)(elapsed * portTICK_PERIOD_MS),
+             esp_err_to_name(sync_err));
+    return sync_err;
+}
+
+esp_err_t http_sync_billing(void)
+{
+    return http_run_sync_cycle("billing", http_sync_billing_impl);
+}
+
+esp_err_t http_sync_all(void)
+{
+    return http_run_sync_cycle("full", http_sync_all_impl);
 }

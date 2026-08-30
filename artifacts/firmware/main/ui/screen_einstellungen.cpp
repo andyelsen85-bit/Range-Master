@@ -116,20 +116,28 @@ static void catering_save_pin_cb(lv_event_t *)
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
-    if (store_set_catering_pin(lv_textarea_get_text(s_catering_pin))) {
+    const char *new_pin = lv_textarea_get_text(s_catering_pin);
+    size_t new_pin_len = strnlen(new_pin, 17);
+    if (new_pin_len < 4 || new_pin_len > 16) {
+        lv_label_set_text(s_catering_status, "PIN MUSS 4 BIS 16 ZIFFEREN HUN.");
+        lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
+    } else if (store_set_catering_pin(new_pin)) {
         lv_textarea_set_text(s_catering_pin, "");
         lv_textarea_set_text(s_catering_old_pin, "");
         lv_label_set_text(s_catering_status, "CATERING PIN GESPEICHERT.");
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_SUCCESS), 0);
     } else {
-        lv_label_set_text(s_catering_status, "PIN MUSS 4 BIS 16 ZIFFEREN HUN.");
+        lv_label_set_text(s_catering_status, "CATERING PIN NET GESPEICHERT.");
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
     }
 }
 static void catering_enter_cb(lv_event_t *)
 {
     if (!store_set_operating_mode(TERMINAL_MODE_CATERING)) {
-        lv_label_set_text(s_catering_status, "FIR D'RAUSCHT E PIN KONFIGUREIEREN.");
+        lv_label_set_text(s_catering_status,
+                          store_catering_pin_configured()
+                              ? "CATERING MODUS NET GESPEICHERT."
+                              : "FIR D'RAUSCHT E PIN KONFIGUREIEREN.");
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }

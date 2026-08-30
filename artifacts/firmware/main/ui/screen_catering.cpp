@@ -171,8 +171,12 @@ static void confirm_cb(lv_event_t *) {
 static void exit_pin_cb(lv_event_t *) {
     CateringPinVerifyResult result = store_verify_catering_pin(lv_textarea_get_text(s_pin));
     if (result == CATERING_PIN_OK) {
+        if (!store_set_operating_mode(TERMINAL_MODE_NORMAL)) {
+            lv_textarea_set_text(s_pin, "");
+            lv_label_set_text(s_status, "NORMAL MODUS NET GESPEICHERT.");
+            return;
+        }
         lv_obj_del(s_pin_modal); s_pin_modal = s_pin = s_pin_kb = NULL;
-        store_set_operating_mode(TERMINAL_MODE_NORMAL);
         ui_manager_show(SCREEN_DASHBOARD);
         return;
     }
