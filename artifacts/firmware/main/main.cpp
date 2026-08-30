@@ -193,17 +193,19 @@ static void lvgl_task(void *arg)
     // engine knows the physical layout when it initialises its internal state.
     lv_display_set_rotation(disp, DISPLAY_ROTATION);
 
-    // Partial render mode — the proven pattern for MIPI DSI panels in IDF.
-    // flush_cb receives each dirty tile in LOGICAL (1280×800) coordinates and
-    // rotates it to physical (800×1280) orientation on the PPA hardware block
+    // Partial render mode keeps small updates cheap. Full-screen buffers ensure
+    // that a complete invalidation (for example, switching to Settings) reaches
+    // flush_cb as one frame instead of ten strips written visibly one by one.
+    // flush_cb receives dirty areas in LOGICAL (1280×800) coordinates and
+    // rotates them to physical (800×1280) orientation on the PPA hardware block
     // before draw_bitmap — no CPU pixel transpose anywhere in the pipeline.
     //
-    // Two buffers of 1/10 screen area (~200 KB each) allow LVGL to prepare
-    // the next tile in buf2 while DMA2D is still copying buf1 to the panel FB.
+    // Two full-screen render buffers plus one rotation buffer consume about
+    // 6 MB of the board's 32 MB PSRAM.
     // buf_bytes must be a multiple of 64 for esp_cache_msync alignment.
-    // 800×128×2 = 204 800 = 0x32000, which divides evenly by 64. ✓
-    size_t buf_bytes = (size_t)DISPLAY_H_RES * (DISPLAY_V_RES / 10)
-                       * sizeof(lv_color16_t);   // 800×128×2 = 204 800 B
+    // 1280×800×2 = 2 048 000 = 0x1F4000, divisible by 64.
+    size_t buf_bytes = (size_t)DISPLAY_LOGICAL_W * DISPLAY_LOGICAL_H
+                       * sizeof(lv_color16_t);
 
     // heap_caps_malloc does NOT guarantee 64-byte cache-line alignment;
     // esp_cache_msync requires it.  Use heap_caps_aligned_alloc instead.
