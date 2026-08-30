@@ -2198,6 +2198,7 @@ static bool s_boot_sync_requested = false;
 static bool s_boot_sync_consumed = false;
 static bool s_sync_pending = false;
 static bool s_full_sync_deferred = false;
+static bool s_billing_sync_deferred = false;
 static bool s_sync_ui_ready = false;
 static bool s_sync_ui_paused = false;
 static bool s_sync_commit_requested = false;
@@ -2220,8 +2221,15 @@ static const char *sync_source_label(SyncRequestSource source)
     case SYNC_REQUEST_BOOT: return "boot";
     case SYNC_REQUEST_AUTO: return "auto";
     case SYNC_REQUEST_BILLING_AUTO: return "billing-auto";
+    case SYNC_REQUEST_BILLING_MANUAL: return "billing-manual";
     default: return "manual";
     }
+}
+
+static bool sync_source_is_billing(SyncRequestSource source)
+{
+    return source == SYNC_REQUEST_BILLING_AUTO ||
+           source == SYNC_REQUEST_BILLING_MANUAL;
 }
 
 static void publish_sync_failure(const char *error)
@@ -2274,7 +2282,7 @@ void store_create_workers(void)
                 continue;
             }
             SyncRequestSource source = (SyncRequestSource)dummy;
-            uint32_t interval = source == SYNC_REQUEST_BILLING_AUTO
+            uint32_t interval = sync_source_is_billing(source)
                 ? g_store.billingSyncSeconds : g_store.autoSyncSeconds;
             ESP_LOGI(TAG, "Sync worker started source=%s interval=%us",
                      sync_source_label(source),
@@ -2282,7 +2290,7 @@ void store_create_workers(void)
             char sync_error[sizeof(g_store.syncError)] = {};
             // SYNC_RUNNING is deliberately not a UI pause. Individual pull
             // publications request and acknowledge their own tiny windows.
-            esp_err_t err = source == SYNC_REQUEST_BILLING_AUTO
+            esp_err_t err = sync_source_is_billing(source)
                 ? http_sync_billing() : http_sync_all();
             if (err != ESP_OK && !sync_error[0]) {
                 http_sync_copy_last_error(sync_error, sizeof(sync_error));
@@ -2296,11 +2304,13 @@ void store_create_workers(void)
                      sync_error);
             s_sync_pending = false;
             bool run_deferred_full = s_full_sync_deferred;
+            bool run_deferred_billing = s_billing_sync_deferred;
             s_full_sync_deferred = false;
+            s_billing_sync_deferred = false;
             s_sync_ui_paused = false;
             s_sync_commit_requested = false;
             TickType_t completed_at = xTaskGetTickCount();
-            if (source == SYNC_REQUEST_BILLING_AUTO)
+            if (sync_source_is_billing(source))
                 s_next_billing_sync = completed_at +
                     pdMS_TO_TICKS(g_store.billingSyncSeconds * 1000u);
             else
@@ -2316,6 +2326,8 @@ void store_create_workers(void)
                      (unsigned)generation);
             if (run_deferred_full)
                 (void)store_sync_request(SYNC_REQUEST_MANUAL);
+            else if (run_deferred_billing)
+                (void)store_sync_request(SYNC_REQUEST_BILLING_MANUAL);
             queue_boot_sync_if_pending();
         }
     }, "sync_w", 24576, sync_queue, 5, NULL,
@@ -2633,10 +2645,12 @@ static SyncRequestResult store_sync_request(SyncRequestSource source)
 
     portENTER_CRITICAL(&s_sync_request_lock);
     if (s_sync_pending) {
-        if (source != SYNC_REQUEST_BILLING_AUTO)
+        if (source == SYNC_REQUEST_BILLING_MANUAL)
+            s_billing_sync_deferred = true;
+        else if (source != SYNC_REQUEST_BILLING_AUTO)
             s_full_sync_deferred = true;
         portEXIT_CRITICAL(&s_sync_request_lock);
-        uint32_t interval = source == SYNC_REQUEST_BILLING_AUTO
+        uint32_t interval = sync_source_is_billing(source)
             ? g_store.billingSyncSeconds : g_store.autoSyncSeconds;
         ESP_LOGI(TAG, "Sync request coalesced source=%s interval=%us",
                  sync_source_label(source), (unsigned)interval);
@@ -2664,7 +2678,7 @@ static SyncRequestResult store_sync_request(SyncRequestSource source)
                  sync_source_label(source));
         return SYNC_REQUEST_FAILED;
     }
-    uint32_t interval = source == SYNC_REQUEST_BILLING_AUTO
+    uint32_t interval = sync_source_is_billing(source)
         ? g_store.billingSyncSeconds : g_store.autoSyncSeconds;
     ESP_LOGI(TAG, "Sync request accepted source=%s interval=%us",
              sync_source_label(source), (unsigned)interval);
@@ -2674,6 +2688,13 @@ static SyncRequestResult store_sync_request(SyncRequestSource source)
 bool store_sync(void)
 {
     return store_sync_request(SYNC_REQUEST_MANUAL) == SYNC_REQUEST_ACCEPTED;
+}
+
+bool store_sync_billing(void)
+{
+    SyncRequestResult result =
+        store_sync_request(SYNC_REQUEST_BILLING_MANUAL);
+    return result != SYNC_REQUEST_FAILED;
 }
 
 bool store_sync_is_queued_or_running(void)

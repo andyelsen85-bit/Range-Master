@@ -160,7 +160,7 @@ static void paid_cb(lv_event_t *e)
     } else if (!store_queue_payment(spieler_id)) {
         lv_label_set_text(s_lbl_status, "BEZUELUNG KONNT NET GESPAECHERT GINN");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
-    } else if (store_sync()) {
+    } else if (store_sync_billing()) {
         lv_label_set_text(s_lbl_status, "BEZUELUNG GESPAECHERT - PORTAL SYNC...");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
     } else {

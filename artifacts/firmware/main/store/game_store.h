@@ -100,6 +100,7 @@ typedef enum {
     SYNC_REQUEST_BOOT,
     SYNC_REQUEST_AUTO,
     SYNC_REQUEST_BILLING_AUTO,
+    SYNC_REQUEST_BILLING_MANUAL,
 } SyncRequestSource;
 
 typedef struct {
@@ -490,6 +491,8 @@ bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_l
  * unavailable or its queue is busy; the caller must not treat it as a sync.
  */
 bool store_sync(void);
+/** Queue the focused credits/sales/payments/bills sync used by settlement actions. */
+bool store_sync_billing(void);
 bool store_sync_is_queued_or_running(void);
 bool store_set_auto_sync(bool enabled, uint32_t seconds);
 bool store_set_billing_sync(uint32_t seconds);
