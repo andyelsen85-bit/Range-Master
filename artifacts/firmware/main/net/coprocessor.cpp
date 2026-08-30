@@ -42,6 +42,7 @@ static char                s_wifi_status[80] = "WiFi not configured";
 
 typedef struct {
     bool disconnect;
+    bool reconnect;
     char ssid[TM_MAX_SSID_LEN];
     char pass[MAX_PASS_LEN];
 } WifiCommand;
@@ -59,7 +60,7 @@ static void set_wifi_state(CopWifiState state, const char *status)
 #define SCAN_DONE_BIT       BIT2
 #define WIFI_CONNECT_TIMEOUT_MS  20000   // 20 s — DHCP can be slow
 #define WIFI_SCAN_TIMEOUT_MS     30000   // 30 s — allow for slow RPC; reduce once C6 slave is at 2.12.12
-#define WIFI_BACKOFF_MIN_MS       2000u
+#define WIFI_BACKOFF_MIN_MS       5000u
 #define WIFI_BACKOFF_MAX_MS      60000u
 static_assert(WIFI_BACKOFF_MIN_MS < WIFI_BACKOFF_MAX_MS,
               "WiFi retry bounds must be ordered");
@@ -97,8 +98,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
                 s_ip_addr[0]     = '\0';
                 g_store.wifiConnected = false;
                 web_config_stop();
+                set_wifi_state(g_store.wifiSsid[0] ? COP_WIFI_RECONNECTING
+                                                   : COP_WIFI_NOT_CONFIGURED,
+                               g_store.wifiSsid[0] ? "Connection lost; retry pending"
+                                                   : "No stored SSID");
                 if (s_wifi_command_queue) {
                     WifiCommand wake = {};
+                    wake.reconnect = true;
                     xQueueSend(s_wifi_command_queue, &wake, 0);
                 }
                 // Signal failure so cop_wifi_connect() unblocks
@@ -206,9 +212,12 @@ static esp_err_t wifi_connect_attempt(const char *ssid, const char *pass)
     strncpy((char *)wifi_cfg.sta.password, pass, sizeof(wifi_cfg.sta.password) - 1);
     wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
-    // Disconnect first if already connected
-    esp_wifi_disconnect();
-    vTaskDelay(pdMS_TO_TICKS(200));
+    // A failed association is already disconnected. Calling disconnect again
+    // emits another remote DISCONNECTED event and needlessly wakes recovery.
+    if (s_wifi_connected) {
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
 
     // Clear both bits so WaitBits below starts fresh
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
@@ -425,6 +434,10 @@ static void wifi_supervisor(void *arg)
                 set_wifi_state(g_store.wifiSsid[0] ? COP_WIFI_FAILED
                                                    : COP_WIFI_NOT_CONFIGURED,
                                "Disconnected");
+                continue;
+            }
+            if (command.reconnect) {
+                retrying = true;
                 continue;
             }
             if (command.ssid[0]) {

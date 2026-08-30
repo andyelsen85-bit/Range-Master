@@ -23,3 +23,4 @@
 - [API route prefixes](api-route-prefixes.md) — accept both `/api/*` and rewritten root paths because development preserves the prefix while production ingress may strip it
 - [Catering terminal isolation](catering-terminal-isolation.md) — Catering is a persisted operating mode, not a game mode; enforce player/product authorization and PIN lockout below the UI
 - [Daily bill settlement](daily-bill-settlement.md) — derive bills from immutable ledgers; Paid is an idempotent closure event, and active players leave only after portal acceptance
+- [WiFi reconnect backoff](wifi-reconnect-backoff.md) — disconnect events wake the supervisor only to enter backoff; manual connection requests may retry immediately
