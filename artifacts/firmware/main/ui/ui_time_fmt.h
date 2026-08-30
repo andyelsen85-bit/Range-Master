@@ -46,7 +46,6 @@ static inline void fmt_local_time(const char *iso_utc,
     time_t t = utc_mktime(yr, mo, dy, hr, mn, sc);
     struct tm tml;
     localtime_r(&t, &tml);   // applies CET/CEST via TZ env
-    snprintf(dst, dst_len, "%02d.%02d.%04d %02d:%02d",
-             tml.tm_mday, tml.tm_mon + 1, tml.tm_year + 1900,
-             tml.tm_hour, tml.tm_min);
+    if (strftime(dst, dst_len, "%d.%m.%Y %H:%M", &tml) == 0)
+        dst[0] = '\0';
 }
