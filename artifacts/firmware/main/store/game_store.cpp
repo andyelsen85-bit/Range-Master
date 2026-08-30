@@ -498,9 +498,9 @@ bool store_queue_payment(int spieler_id)
     bool active = false;
     for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
         if (g_store.kreditPlayerIds[i] == spieler_id) { active = true; break; }
-    // A portal-accepted payment removes the daily credit roster. A later sale
-    // or USE is nevertheless a fresh open bill and must be settleable without
-    // first depending on that roster being rebuilt.
+    // A portal-accepted payment clears the current balance but keeps the daily
+    // roster entry. A later sale or USE is a fresh open bill and remains
+    // settleable immediately.
     if (!active && !has_pending_billable_activity(spieler_id, today)) {
         kredit_events_unlock();
         return false;
@@ -570,14 +570,14 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
             PaymentEvent *event = &g_store.pendingPaymentEvents[i];
             if (strcmp(event->externalId, snapshot[n].externalId)) continue;
             if (accepted) {
-                // Portal acceptance is the sole authorization to retire a
-                // Player of Day.  Sales/history remain append-only elsewhere.
+                // Portal acceptance settles the current operational balance,
+                // but the Player of Day remains available for later activity.
+                // Sales/history remain append-only elsewhere.
                 time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
                 char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
                 for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
                     if (strcmp(event->datum, today) == 0 &&
                         g_store.kreditPlayerIds[k] == event->spielerId) {
-                        g_store.kreditPlayerIds[k] = 0;
                         g_store.kredite[k] = (KreditStand){};
                         break;
                     }
@@ -762,15 +762,14 @@ void store_rebuild_bill_projection(void)
         g_store.billDay.uniquePlayers = g_store.billDay.playerCount;
     g_store.billDay.authoritative = g_store.billDayBaseline.authoritative;
 
-    // A portal-confirmed payment retires the player from the operational day
-    // roster, but never from immutable bill history. Pending activity wins:
+    // A portal-confirmed payment clears settled operational counters but keeps
+    // the Player of Day available for later activity. Pending activity wins:
     // it represents a new local balance that has not reached the portal yet.
     for (int i = 0; i < MAX_PORTAL_SPIELER; ++i) {
         int spieler_id = g_store.kreditPlayerIds[i];
         if (spieler_id > 0 &&
             bill_is_authoritatively_paid(spieler_id, today) &&
             !has_pending_day_activity(spieler_id, today)) {
-            g_store.kreditPlayerIds[i] = 0;
             g_store.kredite[i] = (KreditStand){};
             reset_munition_for_player(spieler_id);
         }
@@ -2522,10 +2521,8 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
     if (bill_is_authoritatively_paid(spieler_id, today) &&
         !has_pending_day_activity(spieler_id, today)) {
         reset_munition_for_player(spieler_id);
-        if (kreditSlot >= 0) {
-            g_store.kreditPlayerIds[kreditSlot] = 0;
+        if (kreditSlot >= 0)
             g_store.kredite[kreditSlot] = (KreditStand){};
-        }
         kredit_events_unlock();
         return;
     }

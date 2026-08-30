@@ -460,7 +460,13 @@ async function lockLedger(tx: any, scope: string): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${scope}, 0))`);
 }
 
-async function dayCreditsPayload(datum: string) {
+async function unsettledDayCreditsPayload(datum: string) {
+  const afterLatestPayment = sql<boolean>`${kreditEventsTable.createdAt} > COALESCE((
+    SELECT MAX(${billPaymentsTable.paidAt})
+    FROM ${billPaymentsTable}
+    WHERE ${billPaymentsTable.spielerId} = ${kreditEventsTable.spielerId}
+      AND ${billPaymentsTable.datum} = ${kreditEventsTable.datum}
+  ), '-infinity'::timestamptz)`;
   const rows = await db
     .select({
       spielerId: kreditEventsTable.spielerId,
@@ -468,7 +474,7 @@ async function dayCreditsPayload(datum: string) {
       verbraucht: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'USE' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
     })
     .from(kreditEventsTable)
-    .where(eq(kreditEventsTable.datum, datum))
+    .where(and(eq(kreditEventsTable.datum, datum), afterLatestPayment))
     .groupBy(kreditEventsTable.spielerId)
     .orderBy(kreditEventsTable.spielerId);
   return { datum, kredite: rows };
@@ -477,7 +483,7 @@ async function dayCreditsPayload(datum: string) {
 // GET /api/sync/kredite?datum=YYYY-MM-DD — aggregated per-player credits for one day
 router.get("/kredite", requireApiKey, async (req, res) => {
   const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
-  return res.json(await dayCreditsPayload(datum));
+  return res.json(await unsettledDayCreditsPayload(datum));
 });
 
 // POST /api/sync/kredite — idempotent push of grant/use events from the terminal
@@ -629,7 +635,7 @@ router.get("/manifest", requireApiKey, async (req, res): Promise<void> => {
     rosterPayload(),
     catalogue(true).then((items) => ({ products: items })),
     recentGamesPayload(gameHistoryLimit),
-    dayCreditsPayload(datum),
+    unsettledDayCreditsPayload(datum),
     unsettledDaySalesReport(datum),
     dayBillSummary(datum),
   ]);

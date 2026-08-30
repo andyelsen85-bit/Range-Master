@@ -1803,12 +1803,14 @@ static esp_err_t http_sync_billing_impl(void)
     if (sale_push != ESP_OK && overall == ESP_OK) overall = sale_push;
     esp_err_t payment_push = http_push_payment_events();
     if (payment_push != ESP_OK && overall == ESP_OK) overall = payment_push;
-    esp_err_t err = credit_push == ESP_OK ? http_pull_kredite() : ESP_OK;
+    // Cache the authoritative settlement state before applying portal credit
+    // totals, so a just-paid player's settled counters cannot be restored.
+    esp_err_t err = credit_push == ESP_OK && sale_push == ESP_OK && payment_push == ESP_OK
+        ? http_fetch_bill_day_summary() : ESP_OK;
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
+    err = credit_push == ESP_OK ? http_pull_kredite() : ESP_OK;
     if (err != ESP_OK && overall == ESP_OK) overall = err;
     err = sale_push == ESP_OK ? http_pull_verkaeufe() : ESP_OK;
-    if (err != ESP_OK && overall == ESP_OK) overall = err;
-    err = credit_push == ESP_OK && sale_push == ESP_OK && payment_push == ESP_OK
-        ? http_fetch_bill_day_summary() : ESP_OK;
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
     if (overall == ESP_OK) {
