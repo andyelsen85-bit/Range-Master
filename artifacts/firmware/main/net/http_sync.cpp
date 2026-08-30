@@ -231,7 +231,7 @@ static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
             out->customSequenzen[c][i] = (CustomSequenzEintrag){
                 .maschine = (Maschine)machine->valueint,
                 .partner = (Maschine)partner->valueint,
-                .isDoublette = cJSON_IsTrue(is_double),
+                .isDoublette = cJSON_IsTrue(is_double) != 0,
                 .delayMs = (uint16_t)delay->valueint,
             };
         }
@@ -976,7 +976,8 @@ esp_err_t http_push_payment_events(void)
 
     cJSON *root = cJSON_CreateObject(), *events = cJSON_CreateArray();
     if (!root || !events) {
-        if (root) cJSON_Delete(root); if (events) cJSON_Delete(events);
+        if (root) cJSON_Delete(root);
+        if (events) cJSON_Delete(events);
         store_finish_payment_sync(snapshot, count, NULL, 0, "Net genuch Speicher");
         free(snapshot); return ESP_ERR_NO_MEM;
     }
@@ -995,7 +996,9 @@ esp_err_t http_push_payment_events(void)
     if (body) cJSON_free(body);
     if (err != ESP_OK) {
         store_finish_payment_sync(snapshot, count, NULL, 0, "Portal/Netz Feeler");
-        if (response) free(response); free(snapshot); return err;
+        if (response) free(response);
+        free(snapshot);
+        return err;
     }
     cJSON *parsed = cJSON_Parse(response);
     free(response);
@@ -1355,7 +1358,8 @@ esp_err_t http_push_verkauf_events(void)
     char *resp = (char *)malloc(512);
     esp_err_t err = (!body || !resp) ? ESP_ERR_NO_MEM :
         http_post_json("/api/sync/sales", body, resp, 512);
-    if (body) free(body); if (resp) free(resp);
+    if (body) free(body);
+    if (resp) free(resp);
     // /sales accepts a batch atomically. Never partially acknowledge a
     // snapshot: a non-2xx leaves every externalId in the durable outbox for
     // an idempotent retry, while a 2xx removes the complete snapshot.

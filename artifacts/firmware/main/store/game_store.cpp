@@ -420,9 +420,10 @@ static bool catering_pin_digest(const char *pin, const uint8_t salt[16], uint8_t
 {
     size_t len = pin ? strnlen(pin, CATERING_PIN_MAX_LEN + 1) : 0;
     if (len < CATERING_PIN_MIN_LEN || len > CATERING_PIN_MAX_LEN) return false;
-    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    return md && mbedtls_pkcs5_pbkdf2_hmac(md, (const unsigned char *)pin, len,
-              salt, 16, CATERING_PIN_ITERATIONS, sizeof(g_store.cateringPinHash), out) == 0;
+    return mbedtls_pkcs5_pbkdf2_hmac_ext(
+               MBEDTLS_MD_SHA256, (const unsigned char *)pin, len,
+               salt, 16, CATERING_PIN_ITERATIONS,
+               sizeof(g_store.cateringPinHash), out) == 0;
 }
 
 bool store_set_catering_pin(const char *pin)

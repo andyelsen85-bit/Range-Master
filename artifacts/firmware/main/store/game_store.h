@@ -351,8 +351,8 @@ typedef struct {
     int         kreditPlayerIds[MAX_PORTAL_SPIELER]; // parallel array of ids
     MunitionStand munition[MAX_PORTAL_SPIELER]; // same daily player capacity
     char          verkaufDatum[11];             // date represented by munition[]
-    int           verkaufCal12Total;            // portal aggregate + local pending events
-    int           verkaufCal20Total;
+    int32_t       verkaufCal12Total;            // portal aggregate + local pending events
+    int32_t       verkaufCal20Total;
 
     // Cached catalog remains usable while offline. A successful catalog pull
     // replaces it wholesale, making portal prices authoritative.
