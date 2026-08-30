@@ -166,7 +166,7 @@ void screen_resultate_refresh(void)
         snprintf(cell, sizeof(cell), "%d", i + 1);
         lv_table_set_cell_value(s_table, i+1, 0, cell);
         lv_table_set_cell_value(s_table, i+1, 1, rows[i].name);
-        lv_table_add_cell_ctrl(s_table, i+1, 1, LV_TABLE_CELL_CTRL_TEXT_CROP);
+        lv_table_set_cell_ctrl(s_table, i+1, 1, LV_TABLE_CELL_CTRL_TEXT_CROP);
         snprintf(cell, sizeof(cell), "%d", rows[i].lauf1);
         lv_table_set_cell_value(s_table, i+1, 2, cell);
         snprintf(cell, sizeof(cell), "%d", rows[i].lauf2);

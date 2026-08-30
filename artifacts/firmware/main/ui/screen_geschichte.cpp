@@ -59,7 +59,7 @@ static void show_detail(int idx)
         snprintf(pp, sizeof(pp), "P%d", posten);
         snprintf(ps, sizeof(ps), "%d", pts);
         lv_table_set_cell_value(s_detail_table, p + 1, 0, fg->spielerNamen[p]);
-        lv_table_add_cell_ctrl(s_detail_table, p + 1, 0,
+        lv_table_set_cell_ctrl(s_detail_table, p + 1, 0,
                                LV_TABLE_CELL_CTRL_TEXT_CROP);
         lv_table_set_cell_value(s_detail_table, p + 1, 1, pp);
         lv_table_set_cell_value(s_detail_table, p + 1, 2, ps);

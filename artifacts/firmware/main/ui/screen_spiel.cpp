@@ -662,7 +662,7 @@ void screen_spiel_refresh(void)
             int cur_post = pos_of(s->spieler[i].startPosten);
             char rb[16];
             lv_table_set_cell_value(s_score_table, i + 1, 0, s->spieler[i].name);
-            lv_table_add_cell_ctrl(s_score_table, i + 1, 0,
+            lv_table_set_cell_ctrl(s_score_table, i + 1, 0,
                                    LV_TABLE_CELL_CTRL_TEXT_CROP);
             snprintf(rb, sizeof(rb), "P%d", cur_post);
             lv_table_set_cell_value(s_score_table, i + 1, 1, rb);
