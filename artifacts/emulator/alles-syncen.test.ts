@@ -1,8 +1,9 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { useGameStore } from './src/store/gameStore';
+import { todayStr, useGameStore } from './src/store/gameStore';
 
 describe('Alles Syncen E2E', () => {
+  const today = todayStr();
   let originalFetch: typeof globalThis.fetch;
 
   beforeEach(() => {
@@ -24,9 +25,9 @@ describe('Alles Syncen E2E', () => {
         }
       ],
       pendingPayments: [
-        { externalId: 'pay-accepted', spielerId: 10, datum: '2024-01-01' },
-        { externalId: 'pay-conflict', spielerId: 11, datum: '2024-01-01' },
-        { externalId: 'pay-skipped', spielerId: 12, datum: '2024-01-01' },
+        { externalId: 'pay-accepted', spielerId: 10, datum: today },
+        { externalId: 'pay-conflict', spielerId: 11, datum: today },
+        { externalId: 'pay-skipped', spielerId: 12, datum: today },
       ],
       kredite: {
         10: { gewaehrt: 5, verbraucht: 5 },
@@ -43,8 +44,8 @@ describe('Alles Syncen E2E', () => {
       pendingSpieler: [],
       pendingKredite: [],
       pendingVerkaeufe: [],
-      verkaufDatum: '2024-01-01',
-      kreditDatum: '2024-01-01',
+      verkaufDatum: today,
+      kreditDatum: today,
     });
   });
 
@@ -89,7 +90,7 @@ describe('Alles Syncen E2E', () => {
       if (url.includes('/api/sync/bills/day-summary')) {
         return {
           ok: true,
-          json: async () => ({ datum: '2024-01-01', players: [] })
+          json: async () => ({ datum: today, players: [] })
         } as any;
       }
 

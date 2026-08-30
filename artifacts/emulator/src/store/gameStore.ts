@@ -124,6 +124,8 @@ export interface PaymentEvent {
   datum: string;
   /** Local snapshot used to detect activity entered after an offline payment. */
   coveredActivityExternalIds?: string[];
+  /** Exact bill closed by this payment; retained after its outbox rows reconcile. */
+  coveredBillSnapshot?: DaySummary['players'][number];
 }
 
 export interface DaySummary {
@@ -520,6 +522,7 @@ const VERKAEUFE_KEY = 'rangemaster-verkaeufe';
 const PENDING_VERKAEUFE_KEY = 'rangemaster-pending-verkaeufe';
 const SERVER_VERKAEUFE_KEY = 'rangemaster-server-verkaeufe';
 const PENDING_PAYMENTS_KEY = 'rangemaster-pending-payments';
+const PAID_BILL_CACHE_KEY = 'rangemaster-paid-bill-cache';
 const DAY_SUMMARY_KEY = 'rangemaster-day-summary';
 const LINEUP_KEY = 'rangemaster-lineup';
 
@@ -569,6 +572,19 @@ function loadVerkaeufe(key: string): VerkaufEvent[] {
 
 function saveVerkaeufe(key: string, events: VerkaufEvent[]) {
   try { localStorage.setItem(key, JSON.stringify(events)); } catch {}
+}
+
+function loadPaidBillCache(datum: string): Record<number, DaySummary['players'][number]> {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PAID_BILL_CACHE_KEY) : null;
+    const parsed = raw ? JSON.parse(raw) as { datum?: unknown; players?: unknown } : null;
+    if (!parsed || parsed.datum !== datum || !parsed.players || typeof parsed.players !== 'object') return {};
+    return parsed.players as Record<number, DaySummary['players'][number]>;
+  } catch { return {}; }
+}
+
+function savePaidBillCache(datum: string, players: Record<number, DaySummary['players'][number]>) {
+  try { localStorage.setItem(PAID_BILL_CACHE_KEY, JSON.stringify({ datum, players })); } catch {}
 }
 
 function loadVerkaufsReport(): { datum: string; rows: VerkaufReportRow[] } {
@@ -894,7 +910,7 @@ export const useGameStore = create<GameState>((set, get) => {
     daySummary: loadDaySummary(),
     daySummaryLaden: false,
     pendingPayments: loadPendingPayments(),
-    paidBillCache: {},
+    paidBillCache: loadPaidBillCache(todayStr()),
 
     syncStatus: 'idle',
     lastSync: null,
@@ -1521,6 +1537,15 @@ export const useGameStore = create<GameState>((set, get) => {
         : undefined;
       const cached = state.paidBillCache[spielerId];
       const baseSource = serverPlayer || cached;
+      const hasPendingBillableActivity =
+        state.pendingKredite.some(event =>
+          event.spielerId === spielerId && event.datum === datum &&
+          event.typ === 'USE' && event.anzahl !== 0
+        ) ||
+        state.pendingVerkaeufe.some(event =>
+          event.spielerId === spielerId && event.datum === datum
+        );
+      const startsAfterSettlement = baseSource?.state === 'PAID' && hasPendingBillableActivity;
 
       const spieler = state.pendingSpieler.find(s => s.localId === spielerId) || state.spielerUpdates.find(s => s.spielerId === spielerId && s.status === 'pending');
       const baseName = baseSource?.spielerName || (spieler ? spieler.name : `Spiller ${spielerId}`) || `Spiller ${spielerId}`;
@@ -1529,9 +1554,9 @@ export const useGameStore = create<GameState>((set, get) => {
         spielerId,
         spielerName: baseName,
         mitgliedNr: baseSource?.mitgliedNr ?? null,
-        lines: baseSource ? [...baseSource.lines.map(l => ({ ...l }))] : [],
-        categorySubtotals: baseSource ? { ...baseSource.categorySubtotals } : {},
-        totalCents: baseSource?.totalCents ?? 0,
+        lines: baseSource && !startsAfterSettlement ? [...baseSource.lines.map(l => ({ ...l }))] : [],
+        categorySubtotals: baseSource && !startsAfterSettlement ? { ...baseSource.categorySubtotals } : {},
+        totalCents: baseSource && !startsAfterSettlement ? baseSource.totalCents : 0,
         credit: baseSource ? { ...baseSource.credit } : { granted: 0, used: 0, remaining: 0 },
         games: baseSource?.games ?? 0,
         completedGames: baseSource?.completedGames ?? 0,
@@ -1612,7 +1637,7 @@ export const useGameStore = create<GameState>((set, get) => {
 
       // Billable activity after a settled baseline reopens the bill.  A queued
       // payment itself is not activity and must not change this state.
-      if (projected.state === 'PAID' && (pendingCreditUses.length > 0 || pendingSales.length > 0)) {
+      if (projected.state === 'PAID' && hasPendingBillableActivity) {
         projected.state = 'OPEN';
         projected.paymentExternalId = null;
         projected.paidAt = null;
@@ -1712,6 +1737,7 @@ export const useGameStore = create<GameState>((set, get) => {
             .filter(e => e.spielerId === spielerId && e.datum === todayStr())
             .map(e => e.externalId),
         ],
+        coveredBillSnapshot: state.getProjectedDaySummary(spielerId) ?? undefined,
       };
       const pendingPayments = [...state.pendingPayments, event];
       savePendingPayments(pendingPayments);
@@ -1916,7 +1942,19 @@ export const useGameStore = create<GameState>((set, get) => {
           const remappedVerkaufEvents = s2.pendingVerkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedVerkaeufe = s2.verkaeufe.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedServerVerkaeufe = s2.serverVerkaeufe.map(row => ({ ...row, spielerId: remap(row.spielerId) }));
-          const remappedPayments = s2.pendingPayments.map(p => ({ ...p, spielerId: remap(p.spielerId) }));
+          const remappedPayments = s2.pendingPayments.map(p => ({
+            ...p,
+            spielerId: remap(p.spielerId),
+            coveredBillSnapshot: p.coveredBillSnapshot
+              ? { ...p.coveredBillSnapshot, spielerId: remap(p.coveredBillSnapshot.spielerId) }
+              : undefined,
+          }));
+          const remappedPaidBillCache = Object.fromEntries(
+            Object.entries(s2.paidBillCache).map(([id, bill]) => {
+              const spielerId = remap(Number(id));
+              return [spielerId, { ...bill, spielerId }];
+            })
+          ) as Record<number, DaySummary['players'][number]>;
           const remappedActiveCreditUses = s2.activeGameCreditUses.map(e => ({ ...e, spielerId: remap(e.spielerId) }));
           const remappedUpdates = s2.spielerUpdates.map(u => ({ ...u, spielerId: remap(u.spielerId) }));
           const remappedKredite = Object.fromEntries(
@@ -1935,6 +1973,7 @@ export const useGameStore = create<GameState>((set, get) => {
           saveVerkaeufe(PENDING_VERKAEUFE_KEY, remappedVerkaufEvents);
           saveVerkaeufe(VERKAEUFE_KEY, remappedVerkaeufe);
           savePendingPayments(remappedPayments);
+          savePaidBillCache(s2.verkaufDatum, remappedPaidBillCache);
           saveVerkaufsReport(s2.verkaufDatum, remappedServerVerkaeufe);
           saveKredite(s2.kreditDatum, remappedKredite);
           saveSpielerUpdates(remappedUpdates);
@@ -1954,6 +1993,7 @@ export const useGameStore = create<GameState>((set, get) => {
             activeGameCreditUses: remappedActiveCreditUses,
             kredite: remappedKredite,
             pendingPayments: remappedPayments,
+            paidBillCache: remappedPaidBillCache,
             spielerUpdates: remappedUpdates,
           });
         }
@@ -2097,12 +2137,12 @@ export const useGameStore = create<GameState>((set, get) => {
           const dataP = await resP.json() as { results: Array<{ externalId: string; status: string }> };
           const byId = new Map(dataP.results.map(r => [r.externalId, r]));
 
-          const successfulPlayerIds = new Set<number>();
+          const successfulPayments: PaymentEvent[] = [];
           // Remove accepted and skipped, keep conflict or failed
           const nextPending = get().pendingPayments.filter(p => {
             const status = byId.get(p.externalId)?.status;
             if (status === 'accepted' || status === 'skipped') {
-              successfulPlayerIds.add(p.spielerId);
+              successfulPayments.push(p);
               return false; // remove from pending
             }
             return true; // keep conflict or unacknowledged
@@ -2111,23 +2151,36 @@ export const useGameStore = create<GameState>((set, get) => {
           savePendingPayments(nextPending);
           set({ pendingPayments: nextPending });
 
-          if (successfulPlayerIds.size > 0) {
+          if (successfulPayments.length > 0) {
             // Remove successful payments from today's kredite & lineup (but bill history in day summary stays)
             const s = get();
             const newKredite = { ...s.kredite };
             const newCache = { ...s.paidBillCache };
-            for (const pId of successfulPlayerIds) {
-              const proj = s.getProjectedDaySummary(pId);
-              if (proj) {
-                proj.state = 'PAID';
-                proj.paidAt = new Date().toISOString();
-                newCache[pId] = proj;
+            const activeDayPlayerIds = new Set<number>();
+            for (const payment of successfulPayments) {
+              const pId = payment.spielerId;
+              const proj = payment?.coveredBillSnapshot ?? s.getProjectedDaySummary(pId);
+              if (proj && payment.datum === s.verkaufDatum) {
+                newCache[pId] = {
+                  ...proj,
+                  spielerId: pId,
+                  lines: proj.lines.map(line => ({ ...line })),
+                  categorySubtotals: { ...proj.categorySubtotals },
+                  credit: { ...proj.credit },
+                  state: 'PAID',
+                  paymentExternalId: payment?.externalId ?? proj.paymentExternalId,
+                  paidAt: new Date().toISOString(),
+                };
               }
-              delete newKredite[pId];
+              if (payment.datum === s.kreditDatum && payment.datum === todayStr()) {
+                activeDayPlayerIds.add(pId);
+                delete newKredite[pId];
+              }
             }
             saveKredite(s.kreditDatum, newKredite);
+            savePaidBillCache(s.verkaufDatum, newCache);
 
-            const newLineup = s.lineup.filter(l => !successfulPlayerIds.has(l.spielerId));
+            const newLineup = s.lineup.filter(l => !activeDayPlayerIds.has(l.spielerId));
             saveLineup(newLineup);
 
             set({
@@ -2325,6 +2378,7 @@ export const useGameStore = create<GameState>((set, get) => {
       const pendingVerkaeufe = [...state.pendingVerkaeufe, ...events];
       saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
       const rolledOver = state.verkaufDatum !== datum;
+      if (rolledOver) savePaidBillCache(datum, {});
       set({
         verkaufDatum: datum,
         pendingVerkaeufe,

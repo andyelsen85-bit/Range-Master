@@ -4,6 +4,16 @@ import { useGameStore } from './src/store/gameStore';
 
 describe('Local Bill & Payment Cache', () => {
   beforeEach(() => {
+    const storage = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+        clear: () => storage.clear(),
+      },
+    });
     useGameStore.setState({
       apiUrl: 'http://localhost',
       apiKey: 'test-key',
@@ -74,6 +84,17 @@ describe('Local Bill & Payment Cache', () => {
       assert.ok(proj2, 'Projected summary should be retained from cache');
       assert.strictEqual(proj2.state, 'PAID');
       assert.strictEqual(proj2.totalCents, 1000);
+
+      const persisted = JSON.parse(localStorage.getItem('rangemaster-paid-bill-cache') ?? '{}');
+      assert.strictEqual(persisted.players['99'].totalCents, 1000);
+
+      // A later purchase opens a fresh balance rather than charging the paid
+      // receipt again.
+      afterSync.addVerkauf(99, 10, 1);
+      const reopened = useGameStore.getState().getProjectedDaySummary(99);
+      assert.ok(reopened);
+      assert.strictEqual(reopened.state, 'OPEN');
+      assert.strictEqual(reopened.totalCents, 1000);
     } finally {
       globalThis.fetch = originalFetch;
     }
