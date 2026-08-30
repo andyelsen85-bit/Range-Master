@@ -23,6 +23,14 @@ CONFIG_SPIRAM_MODE_HEX=y
 # "experimental" means Espressif hadn't finished full validation — hardware is capable.
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_SPIRAM_SPEED_200M=y
+# MIPI-DPI continuously reads its 2 MB RGB565 framebuffer from PSRAM. Large
+# FAT cache writes during sync can otherwise starve that DMA transfer and the
+# JD9365 briefly shows the DSI bridge's blue/cyan underrun frame. These are
+# Espressif's recommended ESP32-P4 settings for MIPI-DSI PSRAM underruns.
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_CACHE_L2_CACHE_256KB=y
+CONFIG_CACHE_L2_CACHE_LINE_128B=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # SPIRAM_USE_MALLOC integrates PSRAM into the C-library heap so plain
 # malloc()/free() can draw from PSRAM when internal SRAM is low.
 # (CAPS_ALLOC only exposes PSRAM via heap_caps_malloc — plain malloc()
