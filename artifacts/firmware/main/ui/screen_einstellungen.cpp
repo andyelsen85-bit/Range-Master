@@ -26,6 +26,7 @@ static lv_obj_t *s_ta_price_credit;
 static lv_obj_t *s_ta_price_cal12;
 static lv_obj_t *s_ta_price_cal20;
 static lv_obj_t *s_lbl_api_status;
+static bool s_portal_check_pending;
 static bool s_gateway_check_pending;
 static lv_obj_t *s_lbl_machine_test_status;
 static bool s_machine_test_pending;
@@ -178,6 +179,18 @@ static void gateway_test_cb(lv_event_t *e)
     }
 }
 
+static void portal_test_cb(lv_event_t *e)
+{
+    (void)e;
+    save_api_settings();
+    if (store_sync()) {
+        s_portal_check_pending = true;
+        set_api_status("PORTAL CONNECTION GËTT GEPRÉIFT...", CLR_WARN);
+    } else {
+        set_api_status("PORTAL TEST NET GESTART: SYNC ASS SCHONN AKTIV", CLR_WARN);
+    }
+}
+
 static void config_backup_cb(lv_event_t *e)
 {
     (void)e;
@@ -274,6 +287,15 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_label_set_text(sl, LV_SYMBOL_SAVE " SPEICHERN");
     lv_obj_set_style_text_color(sl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sl);
+
+    lv_obj_t *portal_test_btn = lv_btn_create(action_row);
+    lv_obj_add_style(portal_test_btn, &g_style_btn_secondary, 0);
+    lv_obj_set_size(portal_test_btn, 220, 44);
+    lv_obj_add_event_cb(portal_test_btn, portal_test_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *portal_test_label = lv_label_create(portal_test_btn);
+    lv_label_set_text(portal_test_label, LV_SYMBOL_OK " PORTAL TESTEN");
+    lv_obj_set_style_text_color(portal_test_label, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(portal_test_label);
 
     lv_obj_t *test_btn = lv_btn_create(action_row);
     lv_obj_add_style(test_btn, &g_style_btn_secondary, 0);
@@ -881,7 +903,7 @@ static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
 }
 
 // ── Tab: Products & Bills ─────────────────────────────────────
-static lv_obj_t *build_products_bills_tab(lv_obj_t *parent)
+static lv_obj_t *build_products_tab(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 16, 0);
@@ -911,6 +933,18 @@ static lv_obj_t *build_products_bills_tab(lv_obj_t *parent)
         lv_obj_add_state(*price_fields[i].out, LV_STATE_DISABLED);
     }
 
+    return parent;
+}
+
+static lv_obj_t *build_day_stats_tab(lv_obj_t *parent)
+{
+    lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(parent, 16, 0);
+    lv_obj_set_style_pad_row(parent, 8, 0);
+    lv_obj_t *heading = lv_label_create(parent);
+    lv_label_set_text(heading, "DAY STATS");
+    lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(heading, lv_color_hex(CLR_PRIMARY), 0);
     s_bill_day_summary = lv_label_create(parent);
     lv_obj_set_style_text_font(s_bill_day_summary, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_TEXT), 0);
@@ -976,25 +1010,50 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_all(parent, 16, 0);
     lv_obj_set_style_pad_row(parent, 8, 0);
 
+    lv_obj_t *heading = lv_label_create(parent);
+    lv_label_set_text(heading, "PRODUCT & BILLING / CATERING");
+    lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(heading, lv_color_hex(CLR_PRIMARY), 0);
+    lv_obj_t *help = lv_label_create(parent);
+    lv_label_set_text(help,
+        "Catering ass de Self-Service Modus fir Gedrénks an Iessen.\n"
+        "Fir de Modus ze schützen, setz hei e PIN. Wann schonn e PIN besteet,\n"
+        "gëff fir d'éischt den ale PIN an. Duerno den neie PIN späicheren.\n"
+        "\"CATERING STARTEN\" wiesselt den Terminal direkt an de Catering Modus.");
+    lv_label_set_long_mode(help, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(help, LV_PCT(100));
+    lv_obj_set_style_text_color(help, lv_color_hex(CLR_MUTED), 0);
+
+    build_products_tab(parent);
+
     lv_obj_t *cat = lv_obj_create(parent);
-    lv_obj_set_size(cat, LV_PCT(100), 180);
+    lv_obj_set_size(cat, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_add_style(cat, &g_style_card, 0);
-    lv_obj_set_flex_flow(cat, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(cat, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_flow(cat, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(cat, 8, 0);
     lv_obj_t *cat_label = lv_label_create(cat);
-    lv_label_set_text(cat_label, "ALE PIN");
-    s_catering_old_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_old_pin, 140, 44);
+    lv_label_set_text(cat_label, "ALE PIN (nëmme wann e PIN schonn konfiguréiert ass)");
+    s_catering_old_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_old_pin, 260, 44);
     lv_textarea_set_one_line(s_catering_old_pin, true); lv_textarea_set_password_mode(s_catering_old_pin, true);
     lv_textarea_set_accepted_chars(s_catering_old_pin, "0123456789"); lv_textarea_set_max_length(s_catering_old_pin, 16);
     cat_label = lv_label_create(cat);
-    lv_label_set_text(cat_label, "NEI PIN (4-16)");
-    s_catering_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_pin, 180, 44);
+    lv_label_set_text(cat_label, "NEIE PIN (4-16 Zifferen)");
+    s_catering_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_pin, 260, 44);
     lv_textarea_set_one_line(s_catering_pin, true); lv_textarea_set_password_mode(s_catering_pin, true);
     lv_textarea_set_accepted_chars(s_catering_pin, "0123456789"); lv_textarea_set_max_length(s_catering_pin, 16);
-    lv_obj_t *pin_save = lv_btn_create(cat); lv_obj_add_style(pin_save, &g_style_btn_secondary, 0);
+    lv_obj_t *actions = lv_obj_create(cat);
+    lv_obj_set_size(actions, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(actions, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(actions, 0, 0);
+    lv_obj_set_style_pad_all(actions, 0, 0);
+    lv_obj_set_style_pad_column(actions, 12, 0);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+    lv_obj_t *pin_save = lv_btn_create(actions); lv_obj_add_style(pin_save, &g_style_btn_secondary, 0);
+    lv_obj_set_size(pin_save, 220, 44);
     lv_obj_add_event_cb(pin_save, catering_save_pin_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *pin_save_l = lv_label_create(pin_save); lv_label_set_text(pin_save_l, "PIN SPEICHERN"); lv_obj_center(pin_save_l);
-    lv_obj_t *enter = lv_btn_create(cat); lv_obj_add_style(enter, &g_style_btn_danger, 0);
+    lv_obj_t *enter = lv_btn_create(actions); lv_obj_add_style(enter, &g_style_btn_danger, 0);
+    lv_obj_set_size(enter, 240, 44);
     lv_obj_add_event_cb(enter, catering_enter_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *enter_l = lv_label_create(enter); lv_label_set_text(enter_l, "CATERING STARTEN"); lv_obj_center(enter_l);
     s_catering_status = lv_label_create(parent);
@@ -1137,30 +1196,31 @@ lv_obj_t *screen_einstellungen_create(void)
     s_tab_view = lv_tabview_create(s_scr);
     lv_obj_set_size(s_tab_view, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H - 70);
     lv_obj_align(s_tab_view, LV_ALIGN_TOP_LEFT, 0, 70);
-    lv_tabview_set_tab_bar_size(s_tab_view, 48);
+    lv_tabview_set_tab_bar_size(s_tab_view, 52);
     lv_obj_set_style_bg_color(s_tab_view, lv_color_hex(CLR_BG), 0);
     lv_obj_set_style_text_font(s_tab_view, &lv_font_montserrat_14, 0);
 
-    lv_obj_t *tab_conn     = lv_tabview_add_tab(s_tab_view, "Conn");
-    lv_obj_t *tab_products = lv_tabview_add_tab(s_tab_view, "Products & Bills");
+    lv_obj_t *tab_conn     = lv_tabview_add_tab(s_tab_view, "Portal & Gateway");
+    lv_obj_t *tab_machines = lv_tabview_add_tab(s_tab_view, "Machines");
     lv_obj_t *tab_catering = lv_tabview_add_tab(s_tab_view, "Catering");
+    lv_obj_t *tab_custom   = lv_tabview_add_tab(s_tab_view, "Custom GameModes");
     lv_obj_t *tab_sys      = lv_tabview_add_tab(s_tab_view, "System");
+    lv_obj_t *tab_stats    = lv_tabview_add_tab(s_tab_view, "Day Stats");
 
-    // Keep all settings reachable through four primary tabs.  The tab pages
-    // remain vertically scrollable because Conn and System contain several
-    // formerly separate pages.
     lv_obj_set_scroll_dir(tab_conn, LV_DIR_VER);
-    lv_obj_set_scroll_dir(tab_products, LV_DIR_VER);
+    lv_obj_set_scroll_dir(tab_machines, LV_DIR_VER);
     lv_obj_set_scroll_dir(tab_catering, LV_DIR_VER);
+    lv_obj_set_scroll_dir(tab_custom, LV_DIR_VER);
     lv_obj_set_scroll_dir(tab_sys, LV_DIR_VER);
+    lv_obj_set_scroll_dir(tab_stats, LV_DIR_VER);
 
     build_api_tab(tab_conn);
-    build_mach_tab(tab_conn);
     build_wifi_tab(tab_conn);
-    build_products_bills_tab(tab_products);
+    build_mach_tab(tab_machines);
     build_catering_tab(tab_catering);
+    build_custom_tab(tab_custom);
     build_system_tab(tab_sys);
-    build_custom_tab(tab_sys);
+    build_day_stats_tab(tab_stats);
 
     // ── On-screen keyboard ────────────────────────────────────────
     // Created last (after all tabs) so it renders on top.
@@ -1301,6 +1361,7 @@ void screen_einstellungen_refresh(void)
             lv_obj_clear_state(s_mach_sw[m], LV_STATE_CHECKED);
     }
     s_gateway_check_pending = false;
+    s_portal_check_pending = false;
     if (s_lbl_api_status) lv_label_set_text(s_lbl_api_status, "");
     s_machine_test_pending = false;
     if (s_lbl_machine_test_status) {
@@ -1313,6 +1374,21 @@ void screen_einstellungen_refresh(void)
 
 void screen_einstellungen_tick(void)
 {
+    if (s_portal_check_pending && s_lbl_api_status) {
+        SyncUiState sync_state = {};
+        store_get_sync_ui_state(&sync_state);
+        if (sync_state.status == SYNC_SUCCESS) {
+            set_api_status("PORTAL CONNECTION OK", CLR_SUCCESS);
+            s_portal_check_pending = false;
+        } else if (sync_state.status == SYNC_ERROR) {
+            char status[160];
+            snprintf(status, sizeof(status), "PORTAL CONNECTION FEELER: %.110s",
+                     sync_state.error);
+            set_api_status(status, CLR_DANGER);
+            s_portal_check_pending = false;
+        }
+    }
+
     if (s_gateway_check_pending && s_lbl_api_status) {
         char status[96];
         lora_copy_status_text(status, sizeof(status));

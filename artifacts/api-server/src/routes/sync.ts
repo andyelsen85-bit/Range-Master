@@ -484,7 +484,11 @@ router.get("/kredite", requireApiKey, async (req, res) => {
 router.post("/kredite", requireApiKey, async (req, res) => {
   const body = z.object({ events: z.array(KreditEventSchema) }).parse(req.body);
 
-  let synced = 0;
+  let result: {
+    synced: number;
+    skipped: number;
+    results: Array<{ externalId: string; status: "accepted" | "skipped" }>;
+  } = { synced: 0, skipped: 0, results: [] };
   if (body.events.length) {
     // Reject events for unknown players explicitly (avoid FK 500s)
     const ids = [...new Set(body.events.map((e) => e.spielerId))];
@@ -496,7 +500,7 @@ router.post("/kredite", requireApiKey, async (req, res) => {
     }
 
     try {
-      synced = await db.transaction(async (tx) => {
+      result = await db.transaction(async (tx) => {
         const scopes = [...new Set(body.events.map(event => `credit:${event.spielerId}:${event.datum}`))].sort();
         const billScopes = [...new Set(body.events.map(event => `${event.spielerId}:${event.datum}`))].sort();
         for (const scope of billScopes) {
@@ -542,14 +546,26 @@ router.post("/kredite", requireApiKey, async (req, res) => {
             .reduce((sum, event) => sum + (event.typ === "GRANT" ? event.anzahl : -event.anzahl), 0);
           if (Number(balance?.available ?? 0) + change < 0) throw new LedgerBalanceError("Credit balance cannot become negative");
         }
-        const inserted = await tx.insert(kreditEventsTable).values(candidates.map(event => {
-          const { occurredAt, priceRevisionId, unitPriceCents, ...creditEvent } = event;
-          return event.typ === "USE"
-            ? { ...creditEvent, occurredAt: new Date(occurredAt!), priceRevisionId: priceRevisionId!, unitPriceCents: unitPriceCents! }
-            : creditEvent;
-        }))
-          .onConflictDoNothing({ target: kreditEventsTable.externalId }).returning({ id: kreditEventsTable.id });
-        return inserted.length;
+        const inserted = candidates.length
+          ? await tx.insert(kreditEventsTable).values(candidates.map(event => {
+              const { occurredAt, priceRevisionId, unitPriceCents, ...creditEvent } = event;
+              return event.typ === "USE"
+                ? { ...creditEvent, occurredAt: new Date(occurredAt!), priceRevisionId: priceRevisionId!, unitPriceCents: unitPriceCents! }
+                : creditEvent;
+            }))
+              .onConflictDoNothing({ target: kreditEventsTable.externalId })
+              .returning({ externalId: kreditEventsTable.externalId })
+          : [];
+        const acceptedIds = new Set(inserted.map(row => row.externalId));
+        const results = body.events.map(event => ({
+          externalId: event.externalId,
+          status: acceptedIds.has(event.externalId) ? "accepted" as const : "skipped" as const,
+        }));
+        return {
+          synced: inserted.length,
+          skipped: body.events.length - inserted.length,
+          results,
+        };
       });
     } catch (error) {
       if (error instanceof LedgerBalanceError) return res.status(409).json({ error: error.message });
@@ -557,7 +573,7 @@ router.post("/kredite", requireApiKey, async (req, res) => {
     }
   }
 
-  return res.json({ synced, skipped: body.events.length - synced });
+  return res.json(result);
 });
 
 // ─── Product catalogue and sale events ───────────────────────────────────────
@@ -679,6 +695,7 @@ router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
       const scopes = [...new Set(parsed.data.events.map(event => `ammo:${event.spielerId}:${event.datum}:${event.productId}`))].sort();
       for (const scope of scopes) await lockLedger(tx, scope);
       const seen = new Set<string>();
+      const results: Array<{ externalId: string; status: "accepted" | "skipped" }> = [];
       let synced = 0;
       for (const event of parsed.data.events) {
         if (seen.has(event.externalId)) throw new SaleIdempotencyConflictError("duplicate externalId in batch");
@@ -692,6 +709,7 @@ router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
             prior.productId === event.productId && prior.quantity === event.quantity &&
             (event.quantity < 0 || prior.priceRevisionId === event.priceRevisionId);
           if (!matches) throw new SaleIdempotencyConflictError("externalId belongs to a different sale");
+          results.push({ externalId: event.externalId, status: "skipped" });
           continue;
         }
         if (event.quantity > 0) {
@@ -718,8 +736,9 @@ router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
           await tx.insert(saleEventsTable).values({ ...event, ...lot });
         }
         synced++;
+        results.push({ externalId: event.externalId, status: "accepted" });
       }
-      return { synced, skipped: parsed.data.events.length - synced };
+      return { synced, skipped: parsed.data.events.length - synced, results };
     });
     res.json(result);
   } catch (error) {

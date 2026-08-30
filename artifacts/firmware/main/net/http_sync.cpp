@@ -31,6 +31,21 @@ static esp_err_t http_post_json(const char *path, const char *body,
 static esp_err_t http_get_json(const char *path, char *resp_buf,
                                size_t resp_cap);
 
+static bool response_acknowledges_event(const cJSON *results, const char *external_id)
+{
+    if (!results || !cJSON_IsArray(results) || !external_id || !external_id[0]) return false;
+    cJSON *item;
+    cJSON_ArrayForEach(item, results) {
+        cJSON *id = cJSON_GetObjectItem(item, "externalId");
+        cJSON *status = cJSON_GetObjectItem(item, "status");
+        if (!cJSON_IsString(id) || !cJSON_IsString(status) ||
+            strcmp(id->valuestring, external_id)) continue;
+        return !strcmp(status->valuestring, "accepted") ||
+               !strcmp(status->valuestring, "skipped");
+    }
+    return false;
+}
+
 // HTTP parsing and all persistence deliberately happen outside this window.
 // It only serializes the small in-RAM publication with the LVGL timer.
 static bool sync_commit_begin(const char *dataset, TickType_t *started)
@@ -1142,10 +1157,21 @@ esp_err_t http_push_kredit_events(void)
         return finish_err == ESP_OK ? ESP_ERR_NO_MEM : finish_err;
     }
 
-    char *resp = (char *)malloc(512);
+    char *resp = (char *)malloc(8192);
     esp_err_t err = ESP_ERR_NO_MEM;
     if (resp) {
-        err = http_post_json("/api/sync/kredite", body, resp, 512);
+        err = http_post_json("/api/sync/kredite", body, resp, 8192);
+        if (err == ESP_OK) {
+            cJSON *ack = cJSON_Parse(resp);
+            cJSON *results = ack ? cJSON_GetObjectItem(ack, "results") : NULL;
+            for (int i = 0; i < snapshotCount && err == ESP_OK; ++i)
+                if (!response_acknowledges_event(results, snapshot[i].externalId))
+                    err = ESP_ERR_INVALID_RESPONSE;
+            if (ack) cJSON_Delete(ack);
+            if (err != ESP_OK)
+                set_http_error("POST", "/api/sync/kredite",
+                               "missing or invalid event acknowledgement");
+        }
         free(resp);
     }
     free(body);
@@ -1542,9 +1568,20 @@ esp_err_t http_push_verkauf_events(void)
         cJSON_AddItemToArray(arr, item);
     }
     char *body = cJSON_PrintUnformatted(root); cJSON_Delete(root);
-    char *resp = (char *)malloc(512);
+    char *resp = (char *)malloc(8192);
     esp_err_t err = (!body || !resp) ? ESP_ERR_NO_MEM :
-        http_post_json("/api/sync/sales", body, resp, 512);
+        http_post_json("/api/sync/sales", body, resp, 8192);
+    if (err == ESP_OK) {
+        cJSON *ack = cJSON_Parse(resp);
+        cJSON *results = ack ? cJSON_GetObjectItem(ack, "results") : NULL;
+        for (int i = 0; i < count && err == ESP_OK; ++i)
+            if (!response_acknowledges_event(results, snapshot[i].externalId))
+                err = ESP_ERR_INVALID_RESPONSE;
+        if (ack) cJSON_Delete(ack);
+        if (err != ESP_OK)
+            set_http_error("POST", "/api/sync/sales",
+                           "missing or invalid event acknowledgement");
+    }
     if (body) free(body);
     if (resp) free(resp);
     // /sales accepts a batch atomically. Never partially acknowledge a
@@ -1616,17 +1653,18 @@ esp_err_t http_sync_billing(void)
 
     ESP_LOGI(TAG, "Starting billing sync...");
     esp_err_t overall = ESP_OK;
-    esp_err_t err = http_push_kredit_events();
-    if (err != ESP_OK) overall = err;
-    err = http_push_verkauf_events();
+    esp_err_t credit_push = http_push_kredit_events();
+    if (credit_push != ESP_OK) overall = credit_push;
+    esp_err_t sale_push = http_push_verkauf_events();
+    if (sale_push != ESP_OK && overall == ESP_OK) overall = sale_push;
+    esp_err_t payment_push = http_push_payment_events();
+    if (payment_push != ESP_OK && overall == ESP_OK) overall = payment_push;
+    esp_err_t err = credit_push == ESP_OK ? http_pull_kredite() : ESP_OK;
     if (err != ESP_OK && overall == ESP_OK) overall = err;
-    err = http_push_payment_events();
+    err = sale_push == ESP_OK ? http_pull_verkaeufe() : ESP_OK;
     if (err != ESP_OK && overall == ESP_OK) overall = err;
-    err = http_pull_kredite();
-    if (err != ESP_OK && overall == ESP_OK) overall = err;
-    err = http_pull_verkaeufe();
-    if (err != ESP_OK && overall == ESP_OK) overall = err;
-    err = http_fetch_bill_day_summary();
+    err = credit_push == ESP_OK && sale_push == ESP_OK && payment_push == ESP_OK
+        ? http_fetch_bill_day_summary() : ESP_OK;
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
     if (overall == ESP_OK) {
@@ -1688,7 +1726,8 @@ esp_err_t http_sync_all(void)
     esp_err_t pve = http_push_verkauf_events();
     if (pve != ESP_OK && overall == ESP_OK) overall = pve;
     if (pve != ESP_OK) ESP_LOGW(TAG, "Sale push failed — queue retained");
-    bool pull_sales = manifest_changed(&manifest, OFFLINE_CACHE_SALES) || (had_sales && pve == ESP_OK);
+    bool pull_sales = pve == ESP_OK &&
+                      (manifest_changed(&manifest, OFFLINE_CACHE_SALES) || had_sales);
     esp_err_t plv = pull_sales ? http_pull_verkaeufe() : ESP_OK;
     if (pull_sales && plv == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_SALES);
     if (plv != ESP_OK && overall == ESP_OK) overall = plv;
@@ -1701,9 +1740,9 @@ esp_err_t http_sync_all(void)
     esp_err_t ppe = http_push_payment_events();
     if (ppe != ESP_OK && overall == ESP_OK) overall = ppe;
     if (ppe != ESP_OK) ESP_LOGW(TAG, "Payment events not fully accepted — retained");
-    bool pull_bills = manifest_changed(&manifest, OFFLINE_CACHE_BILLS) ||
-                      (had_sales && pve == ESP_OK) || (had_credits && pke == ESP_OK) ||
-                      (had_payments && ppe == ESP_OK);
+    bool pull_bills = pve == ESP_OK && pke == ESP_OK && ppe == ESP_OK &&
+                      (manifest_changed(&manifest, OFFLINE_CACHE_BILLS) ||
+                       had_sales || had_credits || had_payments);
     esp_err_t pbs = pull_bills ? http_fetch_bill_day_summary() : ESP_OK;
     if (pull_bills && pbs == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_BILLS);
     if (pbs != ESP_OK && overall == ESP_OK) overall = pbs;
@@ -1719,8 +1758,9 @@ esp_err_t http_sync_all(void)
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
     // Pull today's credit totals (non-critical — portal grants appear on terminal)
-    bool pull_credits = manifest_changed(&manifest, OFFLINE_CACHE_CREDITS) ||
-                        (had_credits && pke == ESP_OK) || (had_payments && ppe == ESP_OK);
+    bool pull_credits = pke == ESP_OK && ppe == ESP_OK &&
+                        (manifest_changed(&manifest, OFFLINE_CACHE_CREDITS) ||
+                         had_credits || had_payments);
     esp_err_t pck = pull_credits ? http_pull_kredite() : ESP_OK;
     if (pull_credits && pck == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_CREDITS);
     if (pck != ESP_OK && overall == ESP_OK) overall = pck;

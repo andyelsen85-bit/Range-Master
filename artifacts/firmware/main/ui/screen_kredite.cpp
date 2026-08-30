@@ -56,6 +56,7 @@ static void refresh_player_values(int spieler_id)
         PlayerRowRefs *refs = &s_row_refs[i];
         if (refs->spielerId != spieler_id) continue;
         int available = stand->gewaehrt - stand->verbraucht;
+        if (available < 0) available = 0;
         char text[48];
         snprintf(text, sizeof(text), "%d KREDITTER VERFUGBAR  (%d/%d VERBRAUCHT)",
                  available, stand->verbraucht, stand->gewaehrt);
@@ -205,6 +206,7 @@ static void bill_cb(lv_event_t *e)
     int granted = bill_data ? bill_data->creditGranted : stand.gewaehrt;
     int used = bill_data ? bill_data->creditUsed : stand.verbraucht;
     int remaining = bill_data ? bill_data->creditRemaining : granted - used;
+    if (remaining < 0) remaining = 0;
     snprintf(totals, sizeof(totals),
              "KREDITTER: %d GEWAEHRT  |  %d GENOTZT  |  %d RESCHT\n"
              "SPILLER: %d SPILLER / %d OFGESCHLOSS  |  %d CONFIRMED CLAYS",
@@ -491,6 +493,7 @@ static void build_player_list(void)
 
         char cred_buf[48];
         int avail = k->gewaehrt - k->verbraucht;
+        if (avail < 0) avail = 0;
         snprintf(cred_buf, sizeof(cred_buf),
                  "%d KREDITTER VERFUGBAR  (%d/%d VERBRAUCHT)",
                  avail, k->verbraucht, k->gewaehrt);
