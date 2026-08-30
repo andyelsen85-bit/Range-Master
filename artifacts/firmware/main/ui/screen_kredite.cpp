@@ -18,6 +18,18 @@ static lv_obj_t *s_dd_add;
 static lv_obj_t *s_lbl_status;
 static lv_obj_t *s_bill_modal;
 
+static void refresh_async(void *)
+{
+    screen_kredite_refresh();
+}
+
+static void request_refresh(void)
+{
+    // Rebuilding the list deletes the button that emitted the current event.
+    // Defer that work until LVGL has finished dispatching the click callback.
+    lv_async_call(refresh_async, NULL);
+}
+
 typedef struct {
     int spielerId;
     const char *produktCode;
@@ -194,25 +206,35 @@ static void munition_cb(lv_event_t *e)
     if (!action || !store_queue_verkauf(action->spielerId, action->produktCode,
                                         action->quantity))
         lv_label_set_text(s_lbl_status, "VERKAUF KONNT NET GESPAECHERT GINN");
-    screen_kredite_refresh();
+    request_refresh();
 }
 
 // ── Grant credit (+1) ─────────────────────────────────────────
 static void grant_cb(lv_event_t *e)
 {
-    const KreditAction *action = (const KreditAction *)lv_event_get_user_data(e);
-    if (!action || !store_adjust_kredite(action->spielerId, 1))
+    int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
+    if (!store_adjust_kredite(spieler_id, 1)) {
         lv_label_set_text(s_lbl_status, "KREDITT KONNT NET GESPAECHERT GINN");
-    screen_kredite_refresh();
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+    } else {
+        lv_label_set_text(s_lbl_status, "+1 KREDITT GESPAECHERT");
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
+    }
+    request_refresh();
 }
 
 // ── Revoke credit (-1, never below 0 available) ───────────────
 static void revoke_cb(lv_event_t *e)
 {
-    const KreditAction *action = (const KreditAction *)lv_event_get_user_data(e);
-    if (!action || !store_adjust_kredite(action->spielerId, -1))
+    int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
+    if (!store_adjust_kredite(spieler_id, -1)) {
         lv_label_set_text(s_lbl_status, "KREDITT KONNT NET GESPAECHERT GINN");
-    screen_kredite_refresh();
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+    } else {
+        lv_label_set_text(s_lbl_status, "-1 KREDITT GESPAECHERT");
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
+    }
+    request_refresh();
 }
 
 // ── Remove player from today's list ──────────────────────────
@@ -342,7 +364,8 @@ static void build_player_list(void)
         lv_obj_set_style_radius(btn_minus, 8, 0);
         lv_obj_set_style_border_width(btn_minus, 0, 0);
         set_disabled_appearance(btn_minus);
-        add_action(btn_minus, revoke_cb, sid, NULL, 0);
+        lv_obj_add_event_cb(btn_minus, revoke_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)sid);
         if (avail <= 0) lv_obj_add_state(btn_minus, LV_STATE_DISABLED);
         lv_obj_t *bml = lv_label_create(btn_minus);
         lv_label_set_text(bml, "-1");
@@ -354,7 +377,8 @@ static void build_player_list(void)
         lv_obj_t *btn_plus = lv_btn_create(btn_grp);
         lv_obj_add_style(btn_plus, &g_style_btn_primary, 0);
         lv_obj_set_size(btn_plus, 48, 44);
-        add_action(btn_plus, grant_cb, sid, NULL, 0);
+        lv_obj_add_event_cb(btn_plus, grant_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)sid);
         lv_obj_t *bpl = lv_label_create(btn_plus);
         lv_label_set_text(bpl, "+1");
         lv_obj_set_style_text_font(bpl, &lv_font_montserrat_16, 0);

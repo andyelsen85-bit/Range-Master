@@ -24,7 +24,9 @@
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_cache.h"           // esp_cache_msync — write-back CPU cache before DMA reads
+#include "esp_attr.h"
 #include "esp_lcd_panel_ops.h"   // esp_lcd_panel_draw_bitmap
+#include "esp_lcd_mipi_dsi.h"    // DPI transfer-complete callback
 #include "driver/ppa.h"          // PPA SRM — hardware rotate (ESP32-P4 Pixel Processing Accelerator)
 
 #include "lvgl.h"
@@ -79,6 +81,20 @@ static size_t    s_rot_buf_bytes = 0;
 // PPA client — registered once in lvgl_task, used every flush to rotate
 // each dirty tile in hardware instead of the old CPU transpose loop.
 static ppa_client_handle_t s_ppa_srm = nullptr;
+
+// DMA2D copies s_rot_buf into the DPI driver's framebuffer asynchronously.
+// LVGL may recycle its draw buffer, and the next flush may overwrite s_rot_buf,
+// only after this callback confirms that the copy has completed.
+static bool IRAM_ATTR lvgl_color_trans_done_cb(
+    esp_lcd_panel_handle_t panel,
+    esp_lcd_dpi_panel_event_data_t *edata,
+    void *user_ctx)
+{
+    (void)panel;
+    (void)edata;
+    lv_display_flush_ready((lv_display_t *)user_ctx);
+    return false;
+}
 
 static void lvgl_flush_cb(lv_display_t *disp,
                            const lv_area_t *area,
@@ -151,12 +167,16 @@ static void lvgl_flush_cb(lv_display_t *disp,
     int32_t phys_y1 = area->x1;
     int32_t phys_y2 = area->x2;
 
-    esp_lcd_panel_draw_bitmap(panel,
+    esp_err_t draw_err = esp_lcd_panel_draw_bitmap(panel,
         phys_x1, phys_y1,
         phys_x2 + 1, phys_y2 + 1,
         s_rot_buf);
-
-    lv_display_flush_ready(disp);
+    if (draw_err != ESP_OK) {
+        // A failed transfer produces no completion callback. Release LVGL here
+        // so the UI cannot deadlock, and leave an actionable diagnostic.
+        ESP_LOGE("flush", "panel draw failed: %s", esp_err_to_name(draw_err));
+        lv_display_flush_ready(disp);
+    }
 }
 
 // ── LVGL + UI task ────────────────────────────────────────────
@@ -227,6 +247,11 @@ static void lvgl_task(void *arg)
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
     lv_display_set_user_data(disp, s_panel);
+
+    esp_lcd_dpi_panel_event_callbacks_t panel_cbs = {};
+    panel_cbs.on_color_trans_done = lvgl_color_trans_done_cb;
+    ESP_ERROR_CHECK(esp_lcd_dpi_panel_register_event_callbacks(
+        s_panel, &panel_cbs, disp));
 
     ESP_LOGI(TAG, "LVGL display created — logical %dx%d (SW rotation 90°, partial mode)",
              DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);

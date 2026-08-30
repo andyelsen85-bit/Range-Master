@@ -70,6 +70,17 @@ static void kredit_events_unlock(void)
 static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anzahl);
 static bool save_kredit_state_unlocked(void);
 
+static esp_err_t set_credit_events_blob_unlocked(void)
+{
+    if (g_store.pendingKreditEventCount == 0) {
+        esp_err_t err = nvs_erase_key(s_nvs, "credit_events");
+        return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+    }
+    return nvs_set_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
+                        (size_t)g_store.pendingKreditEventCount *
+                            sizeof(g_store.pendingKreditEvents[0]));
+}
+
 // This is deliberately a single NVS transaction: the projected balance must
 // never be made durable without the immutable event which explains it.
 static bool save_kredit_state_unlocked(void)
@@ -80,9 +91,7 @@ static bool save_kredit_state_unlocked(void)
                            sizeof(g_store.kreditPlayerIds));
     if (err == ESP_OK)
         err = nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
-    if (err == ESP_OK)
-        err = nvs_set_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
-                           sizeof(g_store.pendingKreditEvents));
+    if (err == ESP_OK) err = set_credit_events_blob_unlocked();
     if (err == ESP_OK)
         err = nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
     if (err == ESP_OK) err = nvs_commit(s_nvs);
@@ -230,10 +239,8 @@ void store_cache_bill_day(const BillDaySummary *summary)
     if (!summary || summary->playerCount < 0 || summary->playerCount > MAX_DAY_BILLS)
         return;
     g_store.billDay = *summary;
-    // Keep the large offline snapshot out of game_store_save(): scoring and
-    // FIRE sequence commits must not rewrite ~20KB on the LVGL path.
-    nvs_set_blob(s_nvs, "bill_day", &g_store.billDay, sizeof(g_store.billDay));
-    nvs_commit(s_nvs);
+    // BillDaySummary is much larger than this board's 24 KiB NVS partition.
+    // Keep it as a runtime cache; persisting it starves credit/outbox writes.
 }
 
 static int munition_caliber_for_product(int produkt_id)
@@ -1863,8 +1870,7 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "credit_date", g_store.kreditDatum);
     nvs_set_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds, sizeof(g_store.kreditPlayerIds));
     nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
-    nvs_set_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
-                 sizeof(g_store.pendingKreditEvents));
+    (void)set_credit_events_blob_unlocked();
     nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
     // Cache roster and unsynced creates too: an offline reboot must still be
     // able to render the saved setup and later complete its create sync.
@@ -1929,15 +1935,20 @@ void game_store_init(void)
         memset(g_store.kreditPlayerIds, 0, sizeof(g_store.kreditPlayerIds));
         memset(g_store.kredite, 0, sizeof(g_store.kredite));
     }
-    size_t credit_events_size = sizeof(g_store.pendingKreditEvents);
     int32_t credit_event_count = 0;
-    if (nvs_get_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
-                     &credit_events_size) == ESP_OK &&
-        credit_events_size == sizeof(g_store.pendingKreditEvents) &&
-        nvs_get_i32(s_nvs, "credit_evt_cnt", &credit_event_count) == ESP_OK &&
+    size_t credit_events_size = sizeof(g_store.pendingKreditEvents);
+    if (nvs_get_i32(s_nvs, "credit_evt_cnt", &credit_event_count) == ESP_OK &&
         credit_event_count >= 0 && credit_event_count <= MAX_KREDIT_EVENTS) {
+        const size_t compact_size =
+            (size_t)credit_event_count * sizeof(g_store.pendingKreditEvents[0]);
+        bool loaded = credit_event_count == 0;
+        if (!loaded &&
+            nvs_get_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
+                         &credit_events_size) == ESP_OK)
+            loaded = credit_events_size == compact_size ||
+                     credit_events_size == sizeof(g_store.pendingKreditEvents);
         bool valid = true;
-        for (int i = 0; i < credit_event_count; ++i) {
+        for (int i = 0; loaded && i < credit_event_count; ++i) {
             const KreditEvent *event = &g_store.pendingKreditEvents[i];
             if (event->spielerId == 0 || event->anzahl == 0 ||
                 !memchr(event->externalId, '\0', sizeof(event->externalId)) ||
@@ -1946,7 +1957,7 @@ void game_store_init(void)
                 break;
             }
         }
-        if (valid) g_store.pendingKreditEventCount = credit_event_count;
+        if (loaded && valid) g_store.pendingKreditEventCount = credit_event_count;
         else memset(g_store.pendingKreditEvents, 0, sizeof(g_store.pendingKreditEvents));
     } else {
         memset(g_store.pendingKreditEvents, 0, sizeof(g_store.pendingKreditEvents));
@@ -2032,26 +2043,10 @@ void game_store_init(void)
                      sizeof(g_store.pendingPaymentEvents));
         nvs_commit(s_nvs);
     }
-    size_t bill_day_size = sizeof(g_store.billDay);
-    if (nvs_get_blob(s_nvs, "bill_day", &g_store.billDay, &bill_day_size) != ESP_OK ||
-        bill_day_size != sizeof(g_store.billDay) ||
-        g_store.billDay.playerCount < 0 || g_store.billDay.playerCount > MAX_DAY_BILLS ||
-        g_store.billDay.categoryCount < 0 ||
-        g_store.billDay.categoryCount > MAX_BILL_CATEGORIES ||
-        g_store.billDay.productCount < 0 ||
-        g_store.billDay.productCount > MAX_DAY_PRODUCTS) {
-        memset(&g_store.billDay, 0, sizeof(g_store.billDay));
-    } else {
-        bool nested_valid = true;
-        for (int i = 0; i < g_store.billDay.playerCount; ++i)
-            if (g_store.billDay.players[i].lineCount < 0 ||
-                g_store.billDay.players[i].lineCount > MAX_BILL_LINES ||
-                g_store.billDay.players[i].categoryCount < 0 ||
-                g_store.billDay.players[i].categoryCount > MAX_BILL_CATEGORIES)
-                nested_valid = false;
-        if (!nested_valid) memset(&g_store.billDay, 0, sizeof(g_store.billDay));
-        else g_store.billDay.authoritative = false; // valid portal snapshot, now offline cache
-    }
+    // Reclaim space consumed by firmware versions that attempted to persist
+    // the oversized bill-day runtime cache.
+    esp_err_t obsolete_bill = nvs_erase_key(s_nvs, "bill_day");
+    if (obsolete_bill == ESP_OK) nvs_commit(s_nvs);
     time_t today_now = time(NULL); struct tm today_tm; localtime_r(&today_now, &today_tm);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &today_tm);
     if (strcmp(g_store.verkaufDatum, today) != 0) {

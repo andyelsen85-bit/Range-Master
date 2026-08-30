@@ -1226,7 +1226,7 @@ esp_err_t http_fetch_bill_day_summary(void)
     time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
     char datum[11], path[80];
     strftime(datum, sizeof(datum), "%Y-%m-%d", &tm);
-    snprintf(path, sizeof(path), "/sync/bills/day-summary?datum=%s", datum);
+    snprintf(path, sizeof(path), "/api/sync/bills/day-summary?datum=%s", datum);
     char *response = (char *)malloc(HTTP_BUF_SIZE);
     if (!response) return ESP_ERR_NO_MEM;
     esp_err_t err = http_get_json(path, response, HTTP_BUF_SIZE);
@@ -1234,9 +1234,12 @@ esp_err_t http_fetch_bill_day_summary(void)
         cJSON *summary = cJSON_Parse(response);
         BillDaySummary *parsed = (BillDaySummary *)heap_caps_calloc(
             1, sizeof(BillDaySummary), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!summary || !parsed || !parse_bill_day_summary(summary, datum, parsed))
+        if (!summary || !parsed || !parse_bill_day_summary(summary, datum, parsed)) {
+            ESP_LOGW(TAG, "Bill day response was not valid JSON/schema (%u bytes)",
+                     (unsigned)strlen(response));
+            set_http_error("GET", path, "invalid bill summary response");
             err = ESP_ERR_INVALID_RESPONSE;
-        else {
+        } else {
             store_cache_bill_day(parsed);
         }
         if (parsed) heap_caps_free(parsed);
@@ -1449,7 +1452,8 @@ esp_err_t http_sync_all(void)
     if (ppe != ESP_OK) ESP_LOGW(TAG, "Payment events not fully accepted — retained");
     esp_err_t pbs = http_fetch_bill_day_summary();
     if (pbs != ESP_OK && overall == ESP_OK) overall = pbs;
-    if (pbs != ESP_OK) ESP_LOGW(TAG, "Bill day summary pull failed");
+    if (pbs != ESP_OK)
+        ESP_LOGW(TAG, "Bill day summary pull failed: %s", esp_err_to_name(pbs));
 
     esp_err_t err = http_push_pending_games();
     if (err != ESP_OK && overall == ESP_OK) overall = err;

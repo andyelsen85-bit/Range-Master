@@ -38,6 +38,20 @@ static lv_obj_t *s_catering_old_pin;
 static lv_obj_t *s_catering_status;
 static lv_obj_t *s_bill_day_summary;
 
+static void set_label_text_if_changed(lv_obj_t *label, const char *text)
+{
+    if (!label || !text) return;
+    const char *current = lv_label_get_text(label);
+    if (!current || strcmp(current, text) != 0) lv_label_set_text(label, text);
+}
+
+static void set_textarea_text_if_changed(lv_obj_t *textarea, const char *text)
+{
+    if (!textarea || !text) return;
+    const char *current = lv_textarea_get_text(textarea);
+    if (!current || strcmp(current, text) != 0) lv_textarea_set_text(textarea, text);
+}
+
 static void refresh_bill_day_summary(void)
 {
     if (!s_bill_day_summary) return;
@@ -78,7 +92,7 @@ static void refresh_bill_day_summary(void)
             used += (size_t)n;
         }
     }
-    lv_label_set_text(s_bill_day_summary, text);
+    set_label_text_if_changed(s_bill_day_summary, text);
 }
 
 static void catering_save_pin_cb(lv_event_t *)
@@ -126,6 +140,8 @@ static void save_api_settings(void)
 static void set_api_status(const char *text, uint32_t color)
 {
     if (!s_lbl_api_status) return;
+    const char *current = lv_label_get_text(s_lbl_api_status);
+    if (current && strcmp(current, text) == 0) return;
     lv_label_set_text(s_lbl_api_status, text);
     lv_obj_set_style_text_color(s_lbl_api_status, lv_color_hex(color), 0);
 }
@@ -1165,9 +1181,9 @@ lv_obj_t *screen_einstellungen_create(void)
 void screen_einstellungen_refresh(void)
 {
     refresh_bill_day_summary();
-    if (s_ta_url) lv_textarea_set_text(s_ta_url, g_store.apiUrl);
-    if (s_ta_key) lv_textarea_set_text(s_ta_key, g_store.apiKey);
-    if (s_ta_gateway) lv_textarea_set_text(s_ta_gateway, g_store.gatewayUrl);
+    set_textarea_text_if_changed(s_ta_url, g_store.apiUrl);
+    set_textarea_text_if_changed(s_ta_key, g_store.apiKey);
+    set_textarea_text_if_changed(s_ta_gateway, g_store.gatewayUrl);
     if (s_config_backup_status) {
         char backup_status[192];
         snprintf(backup_status, sizeof(backup_status), "%s%s%s",
@@ -1175,9 +1191,9 @@ void screen_einstellungen_refresh(void)
                                                : "NACH KEE BACKUP",
                  g_store.lastConfigBackupAt[0] ? "\nLESCHT BACKUP: " : "",
                  g_store.lastConfigBackupAt);
-        lv_label_set_text(s_config_backup_status, backup_status);
+        set_label_text_if_changed(s_config_backup_status, backup_status);
     }
-    if (s_ta_gateway_token) lv_textarea_set_text(s_ta_gateway_token, g_store.gatewayToken);
+    set_textarea_text_if_changed(s_ta_gateway_token, g_store.gatewayToken);
     if (s_auto_sync_switch) {
         if (g_store.autoSyncEnabled) lv_obj_add_state(s_auto_sync_switch, LV_STATE_CHECKED);
         else lv_obj_clear_state(s_auto_sync_switch, LV_STATE_CHECKED);
@@ -1186,7 +1202,7 @@ void screen_einstellungen_refresh(void)
         char value[12];
         snprintf(value, sizeof(value), "%lu",
                  (unsigned long)g_store.autoSyncSeconds);
-        lv_textarea_set_text(s_auto_sync_seconds, value);
+        set_textarea_text_if_changed(s_auto_sync_seconds, value);
     }
     lv_obj_t *price_inputs[] = {s_ta_price_credit, s_ta_price_cal12, s_ta_price_cal20};
     const char *price_ids[] = {"GAME_CREDIT", "AMMO_CAL12", "AMMO_CAL20"};
@@ -1194,7 +1210,7 @@ void screen_einstellungen_refresh(void)
         const Produkt *p = store_produkt(price_ids[i]); char value[16];
         snprintf(value, sizeof(value), "%d.%02d", p ? p->preisCent / 100 : 0,
                  p ? p->preisCent % 100 : 0);
-        lv_textarea_set_text(price_inputs[i], value);
+        set_textarea_text_if_changed(price_inputs[i], value);
     }
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         if (!s_mach_sw[m]) continue;
@@ -1236,9 +1252,12 @@ void screen_einstellungen_tick(void)
                    strstr(status, "invalid") || strstr(status, "unavailable")) {
             color = CLR_DANGER;
         }
-        lv_label_set_text(s_lbl_machine_test_status, status);
-        lv_obj_set_style_text_color(s_lbl_machine_test_status,
-                                    lv_color_hex(color), 0);
+        const char *current = lv_label_get_text(s_lbl_machine_test_status);
+        if (!current || strcmp(current, status) != 0) {
+            lv_label_set_text(s_lbl_machine_test_status, status);
+            lv_obj_set_style_text_color(s_lbl_machine_test_status,
+                                        lv_color_hex(color), 0);
+        }
         if (!lora_request_busy()) s_machine_test_pending = false;
     }
 }

@@ -28,11 +28,39 @@ static lv_obj_t *s_history_list;
 static lv_obj_t *s_shutdown_modal;
 static lv_obj_t *s_shutdown_message;
 static bool s_shutdown_sync_pending;
+static uint32_t s_history_signature = UINT32_MAX;
 
 #define SIDEBAR_W   320
 #define HEADER_H     80
 #define CONTENT_W   (DISPLAY_LOGICAL_W - SIDEBAR_W)
 #define CONTENT_H   (DISPLAY_LOGICAL_H - HEADER_H)
+
+static void set_label_text_if_changed(lv_obj_t *label, const char *text)
+{
+    if (!label || !text) return;
+    const char *current = lv_label_get_text(label);
+    if (!current || strcmp(current, text) != 0) lv_label_set_text(label, text);
+}
+
+static uint32_t current_history_signature(void)
+{
+    // Hash only stable fields that affect the five rendered rows. This avoids
+    // deleting/recreating the list every two seconds while still noticing a
+    // completed sync that changes history without changing its row count.
+    uint32_t hash = 2166136261u;
+    int count = g_store.historyCount;
+    hash = (hash ^ (uint32_t)count) * 16777619u;
+    for (int i = 0; i < count; ++i) {
+        const FinishedGame *fg = &g_store.history[i];
+        for (const char *p = fg->finishedAt; *p; ++p)
+            hash = (hash ^ (uint8_t)*p) * 16777619u;
+        hash = (hash ^ (uint32_t)fg->spieler_count) * 16777619u;
+        hash = (hash ^ (uint32_t)fg->base.ergebnisse_count) * 16777619u;
+        for (int r = 0; r < fg->base.ergebnisse_count; ++r)
+            hash = (hash ^ (uint32_t)fg->base.ergebnisse[r].punkte) * 16777619u;
+    }
+    return hash;
+}
 
 // ── Large primary nav button (full sidebar width) ─────────────
 static lv_obj_t *big_btn(lv_obj_t *parent, const char *sym,
@@ -416,37 +444,37 @@ void screen_dashboard_refresh(void)
     char buf[64];
     switch (g_store.syncStatus) {
         case SYNC_IDLE:
-            lv_label_set_text(s_lbl_sync_status, "BEREET");
+            set_label_text_if_changed(s_lbl_sync_status, "BEREET");
             break;
         case SYNC_RUNNING:
-            lv_label_set_text(s_lbl_sync_status,
-                              LV_SYMBOL_REFRESH " SYNCISIERT...");
+            set_label_text_if_changed(s_lbl_sync_status,
+                                      LV_SYMBOL_REFRESH " SYNCISIERT...");
             break;
         case SYNC_SUCCESS:
-            lv_label_set_text(s_lbl_sync_status,
-                              LV_SYMBOL_OK " SYNCISIERT");
+            set_label_text_if_changed(s_lbl_sync_status,
+                                      LV_SYMBOL_OK " SYNCISIERT");
             break;
         case SYNC_ERROR:
             snprintf(buf, sizeof(buf),
                      LV_SYMBOL_WARNING " Feeler: %.40s", g_store.syncError);
-            lv_label_set_text(s_lbl_sync_status, buf);
+            set_label_text_if_changed(s_lbl_sync_status, buf);
             break;
     }
 
     // Pending games
     snprintf(buf, sizeof(buf), "%d SPILLER AM WAARDRAUM",
              g_store.pendingGamesCount);
-    lv_label_set_text(s_lbl_pending, buf);
+    set_label_text_if_changed(s_lbl_pending, buf);
 
     // WiFi
     CopWifiState wifi_state = cop_wifi_state();
     if (wifi_state == COP_WIFI_CONNECTED) {
         snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI "  %s", g_store.wifiIp);
-        lv_label_set_text(s_lbl_wifi, buf);
+        set_label_text_if_changed(s_lbl_wifi, buf);
         lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_SUCCESS), 0);
     } else {
         snprintf(buf, sizeof(buf), "WIFI: %s", cop_wifi_state_label(wifi_state));
-        lv_label_set_text(s_lbl_wifi, buf);
+        set_label_text_if_changed(s_lbl_wifi, buf);
         uint32_t color = (wifi_state == COP_WIFI_CONNECTING ||
                           wifi_state == COP_WIFI_RECONNECTING) ? CLR_WARN :
                          wifi_state == COP_WIFI_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
@@ -456,14 +484,18 @@ void screen_dashboard_refresh(void)
         GatewayReachability gateway_state = lora_gateway_state();
         snprintf(buf, sizeof(buf), "GATEWAY: %s",
                  lora_gateway_state_label(gateway_state));
-        lv_label_set_text(s_lbl_gateway, buf);
+        set_label_text_if_changed(s_lbl_gateway, buf);
         uint32_t color = gateway_state == GATEWAY_REACHABLE ? CLR_SUCCESS :
                          gateway_state == GATEWAY_CHECKING ? CLR_WARN :
                          gateway_state == GATEWAY_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
         lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(color), 0);
     }
 
-    // History list (most-recent 5 entries) - proper-height rows
+    // History list (most-recent 5 entries) - proper-height rows. Do not
+    // destroy and rebuild it on the periodic status-only refresh.
+    uint32_t history_signature = current_history_signature();
+    if (history_signature == s_history_signature) return;
+    s_history_signature = history_signature;
     lv_obj_clean(s_history_list);
     if (g_store.historyCount == 0) {
         lv_obj_t *empty = lv_label_create(s_history_list);

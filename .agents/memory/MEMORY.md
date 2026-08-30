@@ -24,3 +24,4 @@
 - [Catering terminal isolation](catering-terminal-isolation.md) — Catering is a persisted operating mode, not a game mode; enforce player/product authorization and PIN lockout below the UI
 - [Daily bill settlement](daily-bill-settlement.md) — derive bills from immutable ledgers; Paid is an idempotent closure event, and active players leave only after portal acceptance
 - [WiFi reconnect backoff](wifi-reconnect-backoff.md) — disconnect events wake the supervisor only to enter backoff; manual connection requests may retry immediately
+- [NVS capacity for runtime caches](nvs-runtime-cache-capacity.md) — 24 KiB NVS cannot hold BillDaySummary; keep large rebuildable caches in RAM and compact persisted outboxes
