@@ -34,7 +34,7 @@ static inline time_t utc_mktime(int year, int mon, int mday,
 // Convert a UTC ISO timestamp "YYYY-MM-DDTHH:MM:SS.000Z" to the
 // local-time display string "DD.MM.YYYY HH:MM", honouring the TZ
 // env-var set by coprocessor (CET-1CEST for Luxembourg).
-// dst must be at least 18 bytes; set to "" on parse failure.
+// dst must be at least 24 bytes; set to "" on parse failure.
 static inline void fmt_local_time(const char *iso_utc,
                                    char *dst, size_t dst_len)
 {

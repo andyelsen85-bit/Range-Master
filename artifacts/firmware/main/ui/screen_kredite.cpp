@@ -293,7 +293,7 @@ static void bill_cb(lv_event_t *e)
         bill_data ? bill_data->categories : fallback_categories;
     int category_count = bill_data ? bill_data->categoryCount : fallback_category_count;
     for (int i = 0; i < category_count; ++i) {
-        lv_obj_t *category = lv_label_create(card); char text[96];
+        lv_obj_t *category = lv_label_create(card); char text[384];
         snprintf(text, sizeof(text), "%s TOTAL: %d.%02d EUR",
                  category_totals[i].name, category_totals[i].totalCent / 100,
                  abs(category_totals[i].totalCent % 100));

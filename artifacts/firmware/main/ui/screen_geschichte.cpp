@@ -33,7 +33,7 @@ static void show_detail(int idx)
              modus_label(fg->base.modus), fg->spieler_count);
     lv_label_set_text(s_detail_hdr, hdr);
     {   // UTC → local time (CET/CEST), formatted as "DD.MM.YYYY HH:MM"
-        char ts_disp[18];
+        char ts_disp[24];
         fmt_local_time(fg->finishedAt, ts_disp, sizeof(ts_disp));
         lv_label_set_text(s_detail_date, ts_disp[0] ? ts_disp : "-");
     }
@@ -126,7 +126,7 @@ static void build_history_rows(void)
 
         lv_obj_t *ts_lbl = lv_label_create(btn);
         {   // UTC → local time (CET/CEST), formatted as "DD.MM.YYYY HH:MM"
-            char ts_disp[18];
+            char ts_disp[24];
             fmt_local_time(fg->finishedAt, ts_disp, sizeof(ts_disp));
             lv_label_set_text(ts_lbl, ts_disp[0] ? ts_disp : "-");
         }

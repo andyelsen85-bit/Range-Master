@@ -351,8 +351,12 @@ static bool snapshot_original_sale_price(VerkaufEvent *event, int spieler_id,
             prior->quantity <= 0 || prior->preisRevisionId <= 0 ||
             strcmp(prior->datum, datum) || prior->unitPriceCent == VERKAUF_UNIT_PRICE_UNKNOWN)
             continue;
-        snprintf(event->produktName, sizeof(event->produktName), "%s", prior->produktName);
-        snprintf(event->category, sizeof(event->category), "%s", prior->category);
+        size_t product_name_len = strnlen(prior->produktName, sizeof(event->produktName) - 1);
+        memmove(event->produktName, prior->produktName, product_name_len);
+        event->produktName[product_name_len] = '\0';
+        size_t category_len = strnlen(prior->category, sizeof(event->category) - 1);
+        memmove(event->category, prior->category, category_len);
+        event->category[category_len] = '\0';
         event->unitPriceCent = prior->unitPriceCent;
         return true;
     }
@@ -592,7 +596,7 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
     if (strcmp(g_store.verkaufDatum, today) != 0) {
         memset(g_store.munition, 0, sizeof(g_store.munition));
         g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
-        strncpy(g_store.verkaufDatum, today, sizeof(g_store.verkaufDatum) - 1);
+        snprintf(g_store.verkaufDatum, sizeof(g_store.verkaufDatum), "%s", today);
     }
     if (g_store.pendingVerkaufEventCount >= MAX_PENDING_VERKAEUFE) {
         xSemaphoreGive(s_verkauf_events_mutex);
@@ -1447,7 +1451,9 @@ bool store_start_spiel(void)
         }
         Spieler *sp = &s->spieler[s->spielerCount++];
         sp->id = id; sp->startPosten = post + 1; sp->punkte = 0;
-        snprintf(sp->name, sizeof(sp->name), "%s", s->portalSpieler[pidx].name);
+        size_t name_len = strnlen(s->portalSpieler[pidx].name, sizeof(sp->name) - 1);
+        memmove(sp->name, s->portalSpieler[pidx].name, name_len);
+        sp->name[name_len] = '\0';
     }
     if (s->spielerCount == 0) {
         snprintf(s->lineupWarning, sizeof(s->lineupWarning), "Mindestens 1 SPILLER auswielen!");
@@ -1803,7 +1809,9 @@ static void _store_finish_game(void)
     // pending_game_to_json can send the real UTC timestamp (not midnight).
     if (s->pendingGamesCount < MAX_PENDING_GAMES) {
         fg.base.finishedAt[0] = '\0';
-        strncpy(fg.base.finishedAt, fg.finishedAt, sizeof(fg.base.finishedAt) - 1);
+        size_t finished_at_len = strnlen(fg.finishedAt, sizeof(fg.base.finishedAt) - 1);
+        memmove(fg.base.finishedAt, fg.finishedAt, finished_at_len);
+        fg.base.finishedAt[finished_at_len] = '\0';
         s->pendingGames[s->pendingGamesCount++] = fg.base;
     }
 
@@ -2568,7 +2576,7 @@ void game_store_init(void)
     if (strcmp(g_store.verkaufDatum, today) != 0) {
         memset(g_store.munition, 0, sizeof(g_store.munition));
         g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
-        strncpy(g_store.verkaufDatum, today, sizeof(g_store.verkaufDatum) - 1);
+        snprintf(g_store.verkaufDatum, sizeof(g_store.verkaufDatum), "%s", today);
     }
 
     int32_t modus = 0;

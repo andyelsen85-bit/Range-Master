@@ -556,7 +556,7 @@ void screen_dashboard_refresh(void)
                                   LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
             lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
-            char ts[18];
+            char ts[24];
             fmt_local_time(fg->finishedAt, ts, sizeof(ts));
             lv_obj_t *ts_lbl = lv_label_create(row);
             lv_label_set_text(ts_lbl, ts[0] ? ts : "-");

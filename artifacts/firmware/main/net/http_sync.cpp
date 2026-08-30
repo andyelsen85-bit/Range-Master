@@ -23,7 +23,7 @@ static const char *TAG = "http_sync";
 
 #define HTTP_BUF_SIZE  (32 * 1024)
 static portMUX_TYPE s_error_lock = portMUX_INITIALIZER_UNLOCKED;
-static char s_last_error[160];
+static char s_last_error[384];
 static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap);
 static esp_err_t http_get_json(const char *path, char *resp_buf,
@@ -1485,7 +1485,7 @@ esp_err_t http_pull_verkaeufe(void)
     cJSON *root = cJSON_Parse(resp); free(resp);
     if (!root) return ESP_ERR_INVALID_RESPONSE;
     memset(g_store.munition, 0, sizeof(g_store.munition));
-    strncpy(g_store.verkaufDatum, date, sizeof(g_store.verkaufDatum) - 1);
+    snprintf(g_store.verkaufDatum, sizeof(g_store.verkaufDatum), "%s", date);
     g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
     cJSON *arr = cJSON_GetObjectItem(root, "sales");
     if (!arr || !cJSON_IsArray(arr)) { cJSON_Delete(root); return ESP_ERR_INVALID_RESPONSE; }
