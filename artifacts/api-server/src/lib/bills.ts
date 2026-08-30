@@ -61,7 +61,7 @@ export async function dayBillSummary(datum: string) {
     LEFT JOIN bill_payments bp ON bp.spieler_id=a.spieler_id AND bp.datum=${datum} AND bp.status='PAID'
     LEFT JOIN spieler admin ON admin.id=bp.marked_by_admin_id
     LEFT JOIN api_keys key ON key.id=bp.marked_by_api_key_id
-    ORDER BY sp.name
+    ORDER BY sp.name, sp.id
   `);
   const players = (result.rows as any[]).map(row => ({
     spielerId: Number(row.spieler_id), spielerName: row.spieler_name, mitgliedNr: row.mitglied_nr,

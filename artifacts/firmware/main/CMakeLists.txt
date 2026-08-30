@@ -5,6 +5,7 @@ idf_component_register(
         "display/jd9365_panel.cpp"
         "display/gsl3680_touch.cpp"
         "store/game_store.cpp"
+        "store/offline_cache.cpp"
         "net/coprocessor.cpp"
         "net/http_sync.cpp"
         "ui/ui_manager.cpp"
@@ -45,6 +46,8 @@ idf_component_register(
         freertos
         log
         spi_flash
+        fatfs
+        wear_levelling
         esp_system
         esp_psram
         esp_mm

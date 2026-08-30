@@ -25,6 +25,7 @@
 #include "http_sync.h"
 #include "coprocessor.h"
 #include "app_config.h"
+#include "offline_cache.h"
 
 static const char *TAG = "game_store";
 static_assert(AUTO_SYNC_MIN_SECONDS <= AUTO_SYNC_DEFAULT_SECONDS &&
@@ -521,8 +522,8 @@ void store_cache_bill_day(const BillDaySummary *summary)
             summary->players[i].categoryCount > MAX_BILL_CATEGORIES)
             return;
     g_store.billDay = *summary;
-    // BillDaySummary is much larger than this board's 24 KiB NVS partition.
-    // Keep it as a runtime cache; persisting it starves credit/outbox writes.
+    // BillDaySummary is much larger than NVS; persist only to the FAT snapshot.
+    (void)offline_cache_save(OFFLINE_CACHE_BILLS);
 }
 
 static int munition_caliber_for_product(int produkt_id)
@@ -558,6 +559,7 @@ void store_replace_produkte(const Produkt *produkte, int count)
     memset(g_store.produkte, 0, sizeof(g_store.produkte));
     memcpy(g_store.produkte, produkte, count * sizeof(Produkt));
     g_store.produkteCount = count;
+    (void)offline_cache_save(OFFLINE_CACHE_PRODUCTS);
 }
 
 bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
@@ -1178,6 +1180,26 @@ static void reconcile_lineup_with_roster(void)
                  "Net existente Spiller aus Opstellung geläscht.");
 }
 
+void store_reconcile_lineup_after_cache_load(void)
+{
+    int before[MAX_SPIELER];
+    memcpy(before, g_store.lineupIds, sizeof(before));
+    reconcile_lineup_with_roster();
+    if (memcmp(before, g_store.lineupIds, sizeof(before)) != 0) {
+        // Persist only the derived lineup repair. Calling game_store_save()
+        // here would rewrite unrelated cache sections while cache loading is
+        // still deciding which envelopes are valid.
+        nvs_lock();
+        esp_err_t err = nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds,
+                                     sizeof(g_store.lineupIds));
+        if (err == ESP_OK) err = nvs_commit(s_nvs);
+        nvs_unlock();
+        if (err != ESP_OK)
+            ESP_LOGE(TAG, "Could not persist cached-roster lineup repair: %s",
+                     esp_err_to_name(err));
+    }
+}
+
 void store_apply_portal_roster(const PortalSpieler *spieler, int count)
 {
     if (!spieler || count < 0) return;
@@ -1201,6 +1223,7 @@ void store_apply_portal_roster(const PortalSpieler *spieler, int count)
     g_store.portalSpielerCount = count;
     reconcile_lineup_with_roster();
     game_store_save();
+    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
 }
 
 void store_remap_spieler_id(int old_id, int new_id)
@@ -2092,6 +2115,13 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
     kredit_events_unlock();
 }
 
+int store_pending_action_count(void)
+{
+    return g_store.pendingGamesCount + g_store.spielerUpdateCount +
+           g_store.pendingKreditEventCount + g_store.pendingVerkaufEventCount +
+           g_store.pendingPaymentEventCount;
+}
+
 void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv)
 {
     if (spieler_id < 0) {
@@ -2286,9 +2316,6 @@ void game_store_save(void)
                  sizeof(g_store.customSequenzLen));
     nvs_set_blob(s_nvs, "custom_run", g_store.customLaeufe,
                  sizeof(g_store.customLaeufe));
-    if (set_counted_blob("products", g_store.produkte, g_store.produkteCount,
-                         sizeof(g_store.produkte[0])) == ESP_OK)
-        nvs_set_i32(s_nvs, "prod_count", g_store.produkteCount);
     if (set_counted_blob("sales", g_store.pendingVerkaufEvents,
                          g_store.pendingVerkaufEventCount,
                          sizeof(g_store.pendingVerkaufEvents[0])) == ESP_OK)
@@ -2307,18 +2334,16 @@ void game_store_save(void)
     nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
     if (set_credit_events_blob_unlocked() == ESP_OK)
         nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
-    // Cache roster and unsynced creates too: an offline reboot must still be
-    // able to render the saved setup and later complete its create sync.
-    if (set_counted_blob("plrs", g_store.portalSpieler,
-                         g_store.portalSpielerCount,
-                         sizeof(g_store.portalSpieler[0])) == ESP_OK)
-        nvs_set_i32(s_nvs, "plr_cnt", g_store.portalSpielerCount);
     if (set_counted_blob("sp_updates", g_store.spielerUpdates,
                          g_store.spielerUpdateCount,
                          sizeof(g_store.spielerUpdates[0])) == ESP_OK)
         nvs_set_i32(s_nvs, "sp_up_cnt", g_store.spielerUpdateCount);
     nvs_commit(s_nvs);
     nvs_unlock();
+    // Rebuildable portal snapshots never consume scarce NVS. This also keeps
+    // terminal-local creates visible after a reboot once FAT is mounted.
+    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
+    (void)offline_cache_save(OFFLINE_CACHE_PRODUCTS);
 }
 
 // ── Init ─────────────────────────────────────────────────────
@@ -2420,9 +2445,10 @@ void game_store_init(void)
     if (nvs_get_blob(s_nvs, "lineup_ids", g_store.lineupIds, &lineup_size) != ESP_OK ||
         lineup_size != sizeof(g_store.lineupIds))
         memset(g_store.lineupIds, 0, sizeof(g_store.lineupIds));
+    // Read legacy snapshots once so the migration below can atomically copy
+    // them to FAT before freeing scarce NVS space.
     if (!load_counted_blob_compat("plrs", "plr_cnt", g_store.portalSpieler,
-                                  MAX_PORTAL_SPIELER,
-                                  sizeof(g_store.portalSpieler[0]),
+                                  MAX_PORTAL_SPIELER, sizeof(g_store.portalSpieler[0]),
                                   &g_store.portalSpielerCount)) {
         memset(g_store.portalSpieler, 0, sizeof(g_store.portalSpieler));
         g_store.portalSpielerCount = 0;
@@ -2434,11 +2460,9 @@ void game_store_init(void)
         memset(g_store.spielerUpdates, 0, sizeof(g_store.spielerUpdates));
         g_store.spielerUpdateCount = 0;
     }
-    reconcile_lineup_with_roster();
-    if (g_store.lineupWarning[0]) {
-        nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds, sizeof(g_store.lineupIds));
-        nvs_commit(s_nvs);
-    }
+    // Reconcile after the FAT roster cache is loaded; doing it here would
+    // erase a valid persisted lineup merely because NVS no longer stores the
+    // portal snapshot.
 
     size_t custom_seq_size = sizeof(g_store.customSequenzen);
     size_t custom_len_size = sizeof(g_store.customSequenzLen);
@@ -2499,43 +2523,47 @@ void game_store_init(void)
     int32_t nvs_layout = 0;
     nvs_get_i32(s_nvs, "nvs_layout", &nvs_layout);
     if (nvs_layout < NVS_LAYOUT_VERSION) {
-        nvs_erase_key(s_nvs, "bill_day");
-        nvs_erase_key(s_nvs, "plrs");
-        nvs_erase_key(s_nvs, "products");
-        nvs_commit(s_nvs);
+        // Never erase a legacy rebuildable cache until its FAT replacement is
+        // durable. A failed migration intentionally leaves the old blobs for
+        // the next boot rather than sacrificing offline operation.
+        bool roster_ok = g_store.portalSpielerCount == 0 ||
+                         offline_cache_save(OFFLINE_CACHE_ROSTER);
+        bool products_ok = g_store.produkteCount == 0 ||
+                           offline_cache_save(OFFLINE_CACHE_PRODUCTS);
+        if (!roster_ok || !products_ok) {
+            ESP_LOGE(TAG, "Legacy portal cache migration to FAT failed; retaining NVS");
+        } else {
+            // FAT snapshots are durable; the legacy copies can now be retired.
+            nvs_erase_key(s_nvs, "bill_day");
+            nvs_erase_key(s_nvs, "plrs");
+            nvs_erase_key(s_nvs, "products");
+            nvs_commit(s_nvs);
 
-        // Recreate the just-loaded caches at their active lengths. Do not call
-        // game_store_save() here: settings below have not been loaded yet.
-        esp_err_t migration = set_counted_blob(
-            "plrs", g_store.portalSpieler, g_store.portalSpielerCount,
-            sizeof(g_store.portalSpieler[0]));
-        if (migration == ESP_OK)
-            migration = set_counted_blob("products", g_store.produkte,
-                                         g_store.produkteCount,
-                                         sizeof(g_store.produkte[0]));
-        if (migration == ESP_OK)
-            migration = set_counted_blob("sales", g_store.pendingVerkaufEvents,
-                                         g_store.pendingVerkaufEventCount,
-                                         sizeof(g_store.pendingVerkaufEvents[0]));
-        if (migration == ESP_OK)
-            migration = set_counted_blob("payments", g_store.pendingPaymentEvents,
-                                         g_store.pendingPaymentEventCount,
-                                         sizeof(g_store.pendingPaymentEvents[0]));
-        if (migration == ESP_OK)
-            migration = set_counted_blob("sp_updates", g_store.spielerUpdates,
-                                         g_store.spielerUpdateCount,
-                                         sizeof(g_store.spielerUpdates[0]));
-        if (migration == ESP_OK) migration = set_credit_events_blob_unlocked();
-        if (migration == ESP_OK) migration = set_ammo_blob_unlocked();
-        if (migration == ESP_OK)
-            migration = nvs_set_i32(s_nvs, "nvs_layout", NVS_LAYOUT_VERSION);
-        if (migration == ESP_OK) migration = nvs_commit(s_nvs);
-        if (migration == ESP_OK)
-            ESP_LOGI(TAG, "Migrated NVS counted blobs to compact layout v%d",
-                     NVS_LAYOUT_VERSION);
-        else
-            ESP_LOGE(TAG, "NVS compact-layout migration failed: %s",
-                     esp_err_to_name(migration));
+            // Recreate only durable outboxes. Rebuildable portal snapshots moved
+            // to FAT and must not be written back into NVS.
+            esp_err_t migration = set_counted_blob("sales", g_store.pendingVerkaufEvents,
+                                             g_store.pendingVerkaufEventCount,
+                                             sizeof(g_store.pendingVerkaufEvents[0]));
+            if (migration == ESP_OK)
+                migration = set_counted_blob("payments", g_store.pendingPaymentEvents,
+                                             g_store.pendingPaymentEventCount,
+                                             sizeof(g_store.pendingPaymentEvents[0]));
+            if (migration == ESP_OK)
+                migration = set_counted_blob("sp_updates", g_store.spielerUpdates,
+                                             g_store.spielerUpdateCount,
+                                             sizeof(g_store.spielerUpdates[0]));
+            if (migration == ESP_OK) migration = set_credit_events_blob_unlocked();
+            if (migration == ESP_OK) migration = set_ammo_blob_unlocked();
+            if (migration == ESP_OK)
+                migration = nvs_set_i32(s_nvs, "nvs_layout", NVS_LAYOUT_VERSION);
+            if (migration == ESP_OK) migration = nvs_commit(s_nvs);
+            if (migration == ESP_OK)
+                ESP_LOGI(TAG, "Migrated NVS counted blobs to compact layout v%d",
+                         NVS_LAYOUT_VERSION);
+            else
+                ESP_LOGE(TAG, "NVS compact-layout migration failed: %s",
+                         esp_err_to_name(migration));
+        }
     }
     time_t today_now = time(NULL); struct tm today_tm; localtime_r(&today_now, &today_tm);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &today_tm);

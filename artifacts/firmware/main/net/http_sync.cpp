@@ -17,6 +17,7 @@
 #include "game_store.h"
 #include "app_config.h"
 #include "coprocessor.h"
+#include "offline_cache.h"
 
 static const char *TAG = "http_sync";
 
@@ -27,6 +28,58 @@ static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap);
 static esp_err_t http_get_json(const char *path, char *resp_buf,
                                size_t resp_cap);
+
+typedef struct {
+    bool available;
+    char token[OFFLINE_CACHE_SECTION_COUNT][CACHE_MANIFEST_TOKEN_LEN];
+} SyncManifest;
+
+static bool fetch_manifest(SyncManifest *manifest)
+{
+    if (!manifest) return false;
+    memset(manifest, 0, sizeof(*manifest));
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char date[11], path[80]; strftime(date, sizeof(date), "%Y-%m-%d", &tm);
+    snprintf(path, sizeof(path), "/api/sync/manifest?datum=%s", date);
+    char response[2048];
+    if (http_get_json(path, response, sizeof(response)) != ESP_OK) return false;
+    cJSON *root = cJSON_Parse(response);
+    cJSON *schema = root ? cJSON_GetObjectItemCaseSensitive(root, "schemaVersion") : NULL;
+    cJSON *revs = root ? cJSON_GetObjectItemCaseSensitive(root, "revisions") : NULL;
+    static const char *keys[OFFLINE_CACHE_SECTION_COUNT] = {
+        "roster", "productCatalog", "gameHistory", "dailyCredits", "dailySales", "dailyBillSummary"
+    };
+    bool ok = cJSON_IsNumber(schema) && schema->valueint == 1 && cJSON_IsObject(revs);
+    for (int i = 0; ok && i < OFFLINE_CACHE_SECTION_COUNT; ++i) {
+        cJSON *value = cJSON_GetObjectItemCaseSensitive(revs, keys[i]);
+        if (!cJSON_IsString(value) || strlen(value->valuestring) >= CACHE_MANIFEST_TOKEN_LEN)
+            ok = false;
+        else
+            snprintf(manifest->token[i], sizeof(manifest->token[i]), "%s", value->valuestring);
+    }
+    if (root) cJSON_Delete(root);
+    manifest->available = ok;
+    if (!ok) ESP_LOGW(TAG, "Sync manifest unavailable/incompatible; using full pulls");
+    return ok;
+}
+
+static bool manifest_changed(const SyncManifest *manifest, OfflineCacheSection section)
+{
+    if (section >= OFFLINE_CACHE_CREDITS) {
+        time_t now = time(NULL); struct tm tm; char date[11];
+        localtime_r(&now, &tm); strftime(date, sizeof(date), "%Y-%m-%d", &tm);
+        if (strcmp(g_store.cacheManifestDailyDate, date) != 0) return true;
+    }
+    return !manifest || !manifest->available ||
+           strcmp(g_store.cacheManifestTokens[section], manifest->token[section]) != 0;
+}
+
+static void commit_manifest_token(const SyncManifest *manifest, OfflineCacheSection section)
+{
+    if (manifest && manifest->available &&
+        !offline_cache_set_manifest_token(section, manifest->token[section]))
+        ESP_LOGW(TAG, "Snapshot cached but manifest token could not be committed");
+}
 
 static void redact_query(const char *path, char *out, size_t out_size)
 {
@@ -764,6 +817,11 @@ esp_err_t http_fetch_spielhistorie(void)
     }
 
     g_store.historyCount = count;
+    if (!offline_cache_save(OFFLINE_CACHE_HISTORY)) {
+        ESP_LOGE(TAG, "History pull rejected: FAT cache was not durable");
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
     cJSON_Delete(root);
     ESP_LOGI(TAG, "Fetched %d games from portal into history", count);
     return ESP_OK;
@@ -1276,6 +1334,7 @@ esp_err_t http_fetch_bill_day_summary(void)
             err = ESP_ERR_INVALID_RESPONSE;
         } else {
             store_cache_bill_day(parsed);
+            if (!offline_cache_save(OFFLINE_CACHE_BILLS)) err = ESP_FAIL;
         }
         if (parsed) heap_caps_free(parsed);
         if (summary) cJSON_Delete(summary);
@@ -1322,6 +1381,7 @@ esp_err_t http_pull_kredite(void)
         ESP_LOGI(TAG, "Pulled credits for %s", datum);
     }
     cJSON_Delete(root);
+    if (!offline_cache_save(OFFLINE_CACHE_CREDITS)) return ESP_FAIL;
     return ESP_OK;
 }
 
@@ -1363,7 +1423,14 @@ esp_err_t http_fetch_produkte(void)
             p->preisRevisionId = (int)revision->valuedouble;
         }
     }
-    if (count) { store_replace_produkte(products, count); game_store_save(); }
+    // An empty array is an authoritative catalog replacement, not "no update".
+    // Persist it before success so its manifest token cannot hide stale items.
+    store_replace_produkte(products, count);
+    game_store_save();
+    if (!offline_cache_save(OFFLINE_CACHE_PRODUCTS)) {
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
     cJSON_Delete(root);
     return ESP_OK;
 }
@@ -1444,6 +1511,7 @@ esp_err_t http_pull_verkaeufe(void)
             store_apply_portal_verkauf(ev->spielerId, ev->produktId, ev->quantity);
     }
     cJSON_Delete(root); game_store_save();
+    if (!offline_cache_save(OFFLINE_CACHE_SALES)) return ESP_FAIL;
     return ESP_OK;
 }
 
@@ -1459,22 +1527,42 @@ esp_err_t http_sync_all(void)
         return ESP_ERR_INVALID_STATE;
     }
     ESP_LOGI(TAG, "Starting full sync...");
+    // The manifest is optional for compatibility with older portals. It is
+    // fetched before any data endpoint, but outbox pushes below force their
+    // affected baseline pulls so locally accepted events are reconciled.
+    SyncManifest manifest;
+    if (!fetch_manifest(&manifest)) {
+        // Manifest is strictly an optimisation; its absence must not turn a
+        // successful compatibility full-sync into a stale UI error.
+        portENTER_CRITICAL(&s_error_lock);
+        s_last_error[0] = '\0';
+        portEXIT_CRITICAL(&s_error_lock);
+    }
     ESP_LOGI(TAG, "  URL: %s (authenticated)", g_store.apiUrl);
     ESP_LOGI(TAG, "  internal free=%u B  largest block=%u B",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     // Push queued player edits (non-critical)
     esp_err_t overall = ESP_OK;
+    const bool had_player_updates = g_store.spielerUpdateCount > 0;
+    const bool had_sales = g_store.pendingVerkaufEventCount > 0;
+    const bool had_credits = g_store.pendingKreditEventCount > 0;
+    const bool had_payments = g_store.pendingPaymentEventCount > 0;
+    const bool had_games = g_store.pendingGamesCount > 0;
     esp_err_t pue = http_push_spieler_updates();
     if (pue != ESP_OK) overall = pue;
     if (pue != ESP_OK) ESP_LOGW(TAG, "Spieler updates push failed — continuing sync");
-    esp_err_t ppr = http_fetch_produkte();
+    bool pull_products = manifest_changed(&manifest, OFFLINE_CACHE_PRODUCTS);
+    esp_err_t ppr = pull_products ? http_fetch_produkte() : ESP_OK;
+    if (pull_products && ppr == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_PRODUCTS);
     if (ppr != ESP_OK && overall == ESP_OK) overall = ppr;
     if (ppr != ESP_OK) ESP_LOGW(TAG, "Product pull failed — using cached catalog");
     esp_err_t pve = http_push_verkauf_events();
     if (pve != ESP_OK && overall == ESP_OK) overall = pve;
     if (pve != ESP_OK) ESP_LOGW(TAG, "Sale push failed — queue retained");
-    esp_err_t plv = http_pull_verkaeufe();
+    bool pull_sales = manifest_changed(&manifest, OFFLINE_CACHE_SALES) || (had_sales && pve == ESP_OK);
+    esp_err_t plv = pull_sales ? http_pull_verkaeufe() : ESP_OK;
+    if (pull_sales && plv == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_SALES);
     if (plv != ESP_OK && overall == ESP_OK) overall = plv;
     if (plv != ESP_OK) ESP_LOGW(TAG, "Sale pull failed — using local totals");
 
@@ -1485,7 +1573,11 @@ esp_err_t http_sync_all(void)
     esp_err_t ppe = http_push_payment_events();
     if (ppe != ESP_OK && overall == ESP_OK) overall = ppe;
     if (ppe != ESP_OK) ESP_LOGW(TAG, "Payment events not fully accepted — retained");
-    esp_err_t pbs = http_fetch_bill_day_summary();
+    bool pull_bills = manifest_changed(&manifest, OFFLINE_CACHE_BILLS) ||
+                      (had_sales && pve == ESP_OK) || (had_credits && pke == ESP_OK) ||
+                      (had_payments && ppe == ESP_OK);
+    esp_err_t pbs = pull_bills ? http_fetch_bill_day_summary() : ESP_OK;
+    if (pull_bills && pbs == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_BILLS);
     if (pbs != ESP_OK && overall == ESP_OK) overall = pbs;
     if (pbs != ESP_OK)
         ESP_LOGW(TAG, "Bill day summary pull failed: %s", esp_err_to_name(pbs));
@@ -1493,11 +1585,16 @@ esp_err_t http_sync_all(void)
     esp_err_t err = http_push_pending_games();
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
-    err = http_fetch_spielhistorie();
+    bool pull_history = manifest_changed(&manifest, OFFLINE_CACHE_HISTORY) || (had_games && err == ESP_OK);
+    err = pull_history ? http_fetch_spielhistorie() : ESP_OK;
+    if (pull_history && err == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_HISTORY);
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
     // Pull today's credit totals (non-critical — portal grants appear on terminal)
-    esp_err_t pck = http_pull_kredite();
+    bool pull_credits = manifest_changed(&manifest, OFFLINE_CACHE_CREDITS) ||
+                        (had_credits && pke == ESP_OK) || (had_payments && ppe == ESP_OK);
+    esp_err_t pck = pull_credits ? http_pull_kredite() : ESP_OK;
+    if (pull_credits && pck == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_CREDITS);
     if (pck != ESP_OK && overall == ESP_OK) overall = pck;
     if (pck != ESP_OK) ESP_LOGW(TAG, "Credit pull failed — continuing");
 
@@ -1510,9 +1607,19 @@ esp_err_t http_sync_all(void)
         set_http_error("SYNC", "spieler", "out of memory");
         return ESP_ERR_NO_MEM;
     }
-    err = http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count);
+    bool pull_roster = manifest_changed(&manifest, OFFLINE_CACHE_ROSTER) ||
+                       (had_player_updates && pue == ESP_OK);
+    err = pull_roster ? http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) : ESP_OK;
     if (err == ESP_OK) {
-        store_apply_portal_roster(buf, count);
+        if (pull_roster) {
+            store_apply_portal_roster(buf, count);
+            if (offline_cache_save(OFFLINE_CACHE_ROSTER))
+                commit_manifest_token(&manifest, OFFLINE_CACHE_ROSTER);
+            else {
+                ESP_LOGE(TAG, "Roster pull rejected: FAT cache was not durable");
+                err = ESP_FAIL;
+            }
+        }
     }
     free(buf);
     if (err != ESP_OK && overall == ESP_OK) overall = err;
@@ -1523,6 +1630,11 @@ esp_err_t http_sync_all(void)
     if (backup_err != ESP_OK)
         ESP_LOGW(TAG, "Configuration backup failed — operational sync remains valid");
 
+    if (overall == ESP_OK) {
+        g_store.lastSuccessfulSyncAt = time(NULL);
+        g_store.offlineCacheHealthy = true;
+        (void)offline_cache_save_metadata();
+    }
     ESP_LOGI(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
     return overall;
 }

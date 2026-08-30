@@ -8,6 +8,7 @@ import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmai
 import { catalogue, daySalesReport } from "../lib/products";
 import { dayBillSummary } from "../lib/bills";
 import { sameImmutableChildren } from "../lib/immutable-events";
+import { revisionToken, SYNC_MANIFEST_SCHEMA_VERSION } from "../lib/sync-manifest";
 import {
   decryptTerminalConfiguration,
   encryptTerminalConfiguration,
@@ -208,8 +209,7 @@ router.get("/status", requireApiKey, async (_req, res) => {
   });
 });
 
-// GET /api/sync/spieler
-router.get("/spieler", requireApiKey, async (_req, res) => {
+async function rosterPayload() {
   const rows = await db
     .select({
       id: spielerTable.id,
@@ -219,8 +219,13 @@ router.get("/spieler", requireApiKey, async (_req, res) => {
       portalAktiv: spielerTable.portalAktiv,
     })
     .from(spielerTable)
-    .orderBy(spielerTable.name);
-  return res.json({ spieler: rows });
+    .orderBy(spielerTable.name, spielerTable.id);
+  return { spieler: rows };
+}
+
+// GET /api/sync/spieler
+router.get("/spieler", requireApiKey, async (_req, res) => {
+  return res.json(await rosterPayload());
 });
 
 // POST /api/sync/spieler
@@ -271,10 +276,7 @@ router.post("/spieler", requireApiKey, async (req, res) => {
   return res.json({ synced, mappings });
 });
 
-// GET /api/sync/spiele?limit=N — pull recent games to terminal (newest first)
-router.get("/spiele", requireApiKey, async (req, res) => {
-  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
-
+async function recentGamesPayload(limit: number) {
   const recentSpiele = await db
     .select({
       id: spieleTable.id,
@@ -287,17 +289,18 @@ router.get("/spiele", requireApiKey, async (req, res) => {
     })
     .from(spieleTable)
     .where(isNotNull(spieleTable.externalId))
-    .orderBy(desc(spieleTable.datum))
+    .orderBy(desc(spieleTable.datum), desc(spieleTable.id))
     .limit(limit);
 
-  if (recentSpiele.length === 0) return res.json({ spiele: [] });
+  if (recentSpiele.length === 0) return { spiele: [] };
 
   const spielIds = recentSpiele.map(s => s.id);
 
   const teilnahmenRows = await db
     .select()
     .from(spielTeilnahmenTable)
-    .where(inArray(spielTeilnahmenTable.spielId, spielIds));
+    .where(inArray(spielTeilnahmenTable.spielId, spielIds))
+    .orderBy(spielTeilnahmenTable.spielId, spielTeilnahmenTable.spielerId, spielTeilnahmenTable.lauf);
 
   const spielerIds = [...new Set(teilnahmenRows.map(t => t.spielerId))];
   const spielerRows = spielerIds.length > 0
@@ -328,7 +331,13 @@ router.get("/spiele", requireApiKey, async (req, res) => {
     };
   });
 
-  return res.json({ spiele });
+  return { spiele };
+}
+
+// GET /api/sync/spiele?limit=N — pull recent games to terminal (newest first)
+router.get("/spiele", requireApiKey, async (req, res) => {
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+  return res.json(await recentGamesPayload(limit));
 });
 
 // POST /api/sync/spiele
@@ -437,9 +446,7 @@ async function lockLedger(tx: any, scope: string): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${scope}, 0))`);
 }
 
-// GET /api/sync/kredite?datum=YYYY-MM-DD — aggregated per-player credits for one day
-router.get("/kredite", requireApiKey, async (req, res) => {
-  const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
+async function dayCreditsPayload(datum: string) {
   const rows = await db
     .select({
       spielerId: kreditEventsTable.spielerId,
@@ -448,8 +455,15 @@ router.get("/kredite", requireApiKey, async (req, res) => {
     })
     .from(kreditEventsTable)
     .where(eq(kreditEventsTable.datum, datum))
-    .groupBy(kreditEventsTable.spielerId);
-  return res.json({ datum, kredite: rows });
+    .groupBy(kreditEventsTable.spielerId)
+    .orderBy(kreditEventsTable.spielerId);
+  return { datum, kredite: rows };
+}
+
+// GET /api/sync/kredite?datum=YYYY-MM-DD — aggregated per-player credits for one day
+router.get("/kredite", requireApiKey, async (req, res) => {
+  const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
+  return res.json(await dayCreditsPayload(datum));
 });
 
 // POST /api/sync/kredite — idempotent push of grant/use events from the terminal
@@ -538,6 +552,48 @@ router.get("/sales", requireApiKey, async (req, res): Promise<void> => {
   const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(req.query.datum);
   if (!datum.success) { res.status(400).json({ error: "datum must be YYYY-MM-DD" }); return; }
   res.json(await daySalesReport(datum.data));
+});
+
+// GET /api/sync/manifest?datum=YYYY-MM-DD — content-addressed revisions let an
+// offline terminal avoid downloading unchanged full snapshots. The hashes cover
+// exactly the corresponding established GET response, never this response's
+// timestamp, so polling does not itself invalidate a revision.
+router.get("/manifest", requireApiKey, async (req, res): Promise<void> => {
+  const parsed = z.object({ datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: "datum must be YYYY-MM-DD" });
+    return;
+  }
+
+  const datum = parsed.data.datum;
+  // Must match the firmware's MAX_HISTORY request exactly so the revision
+  // describes the snapshot that is durably cached.
+  const gameHistoryLimit = 20;
+  const [roster, products, gameHistory, dailyCredits, dailySales, dailyBillSummary] = await Promise.all([
+    rosterPayload(),
+    catalogue(true).then((items) => ({ products: items })),
+    recentGamesPayload(gameHistoryLimit),
+    dayCreditsPayload(datum),
+    daySalesReport(datum),
+    dayBillSummary(datum),
+  ]);
+  const timestamp = new Date().toISOString();
+
+  res.json({
+    schemaVersion: SYNC_MANIFEST_SCHEMA_VERSION,
+    timestamp,
+    serverDate: timestamp.slice(0, 10),
+    datum,
+    gameHistoryLimit,
+    revisions: {
+      roster: revisionToken(roster),
+      productCatalog: revisionToken(products),
+      gameHistory: revisionToken(gameHistory),
+      dailyCredits: revisionToken(dailyCredits),
+      dailySales: revisionToken(dailySales),
+      dailyBillSummary: revisionToken(dailyBillSummary),
+    },
+  });
 });
 
 // POST /api/sync/sales — offline terminal queue upload. A revision must belong

@@ -36,6 +36,7 @@
 #define AUTO_SYNC_MIN_SECONDS 10u
 #define AUTO_SYNC_MAX_SECONDS 86400u
 #define AUTO_SYNC_DEFAULT_SECONDS 300u
+#define CACHE_MANIFEST_TOKEN_LEN 65
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -353,6 +354,11 @@ typedef struct {
     // Sync
     SyncStatus syncStatus;
     char       syncError[128];
+    int64_t    lastSuccessfulSyncAt;
+    bool       offlineCacheHealthy;
+    bool       offlineCacheLoaded;
+    char       cacheManifestTokens[6][CACHE_MANIFEST_TOKEN_LEN];
+    char       cacheManifestDailyDate[11];
     char       lastConfigBackupAt[32];
     char       configBackupStatus[128];
 
@@ -426,6 +432,8 @@ void store_dismiss_resultate(void);
 void store_create_workers(void);       // call ONCE at boot (before screens are built)
 void store_load_portal_spieler(void);  // async via HTTP
 void store_apply_portal_roster(const PortalSpieler *spieler, int count);
+/** Reconcile persisted lineup IDs after side-effect-free FAT cache restoration. */
+void store_reconcile_lineup_after_cache_load(void);
 void store_remap_spieler_id(int old_id, int new_id);
 void store_add_lokal_spieler(const char *name, int *out_id);
 bool store_set_lineup_post(int post, int spieler_id);
@@ -512,3 +520,5 @@ bool store_set_operating_mode(TerminalOperatingMode mode);
 const char *maschine_label(Maschine m);
 const char *modus_label(Modus m);
 int  store_kredite_verfuegbar(int spieler_id);
+/** Total durable, idempotent actions waiting for portal acceptance. */
+int store_pending_action_count(void);

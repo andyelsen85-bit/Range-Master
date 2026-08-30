@@ -443,7 +443,7 @@ void screen_dashboard_refresh(void)
     if (!s_lbl_sync_status) return;
 
     // Sync status label
-    char buf[64];
+    char buf[128];
     switch (g_store.syncStatus) {
         case SYNC_IDLE:
             set_label_text_if_changed(s_lbl_sync_status, "BEREET");
@@ -464,8 +464,10 @@ void screen_dashboard_refresh(void)
     }
 
     // Pending games
-    snprintf(buf, sizeof(buf), "%d SPILLER AM WAARDRAUM",
-             g_store.pendingGamesCount);
+    snprintf(buf, sizeof(buf), "%d AKTIOUNEN | %s | LAST SYNC: %lld",
+             store_pending_action_count(),
+             g_store.offlineCacheLoaded ? "OFFLINE CACHE" : "NO CACHE",
+             (long long)g_store.lastSuccessfulSyncAt);
     set_label_text_if_changed(s_lbl_pending, buf);
 
     // WiFi

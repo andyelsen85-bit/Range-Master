@@ -36,6 +36,7 @@
 #include "gsl3680_touch.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "offline_cache.h"
 #include "coprocessor.h"
 #include "lora_stub.h"
 
@@ -297,6 +298,9 @@ extern "C" void app_main(void)
 
     // ── Game store (loads settings from NVS) ──────────────────
     game_store_init();
+    // Portal snapshots are independent from NVS outboxes. Load them before any
+    // LVGL screen is constructed so an offline boot has a usable roster/catalog.
+    offline_cache_load();
 
     // ── Backlight ─────────────────────────────────────────────
     backlight_init();

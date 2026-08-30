@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable, billPaymentsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
+import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, spielerUpdatesTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable, billPaymentsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
 import { buildTransport } from "../lib/mailer";
 import { and, desc, eq, lte, isNull, sql } from "drizzle-orm";
 import { authenticate, requireAdmin } from "./auth";
@@ -215,20 +215,49 @@ router.put("/spieler/:id", async (req, res) => {
 });
 
 // DELETE /api/admin/spieler/:id — delete player + all their data
-router.delete("/spieler/:id", async (req, res) => {
-  const id = Number(req.params.id);
+router.delete("/spieler/:id", async (req, res): Promise<void> => {
+  const parsedId = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!parsedId.success) {
+    res.status(400).json({ error: "Ungültige Spieler-ID" });
+    return;
+  }
+  const id = parsedId.data;
   const requestingUserId = (req as any).user.id;
 
   if (id === requestingUserId) {
-    return res.status(400).json({ error: "Kann den eegene Benotzer net läschen" });
+    res.status(400).json({ error: "Kann den eegene Benotzer net läschen" });
+    return;
   }
 
-  // Delete in dependency order (no cascade on spieler_id FK)
-  await db.delete(ergebnisseTable).where(eq(ergebnisseTable.spielerId, id));
-  await db.delete(spielTeilnahmenTable).where(eq(spielTeilnahmenTable.spielerId, id));
-  await db.delete(spielerTable).where(eq(spielerTable.id, id));
+  const deleted = await db.transaction(async (tx) => {
+    const [player] = await tx
+      .select({ id: spielerTable.id })
+      .from(spielerTable)
+      .where(eq(spielerTable.id, id))
+      .limit(1);
+    if (!player) return false;
 
-  return res.json({ deleted: true });
+    // Keep bill audit rows belonging to other players, but remove the
+    // optional admin attribution before deleting this player. All rows owned
+    // by the player are removed in FK dependency order.
+    await tx
+      .update(billPaymentsTable)
+      .set({ markedByAdminId: null })
+      .where(eq(billPaymentsTable.markedByAdminId, id));
+    await tx.delete(ergebnisseTable).where(eq(ergebnisseTable.spielerId, id));
+    await tx.delete(spielTeilnahmenTable).where(eq(spielTeilnahmenTable.spielerId, id));
+    await tx.delete(kreditEventsTable).where(eq(kreditEventsTable.spielerId, id));
+    await tx.delete(spielerUpdatesTable).where(eq(spielerUpdatesTable.spielerId, id));
+    await tx.delete(saleEventsTable).where(eq(saleEventsTable.spielerId, id));
+    await tx.delete(billPaymentsTable).where(eq(billPaymentsTable.spielerId, id));
+    await tx.delete(spielerTable).where(eq(spielerTable.id, id));
+    return true;
+  });
+  if (!deleted) {
+    res.status(404).json({ error: "Spieler nicht gefunden" });
+    return;
+  }
+  res.json({ deleted: true });
 });
 
 // PUT /api/admin/spieler/:id/passwort — reset any player's password
