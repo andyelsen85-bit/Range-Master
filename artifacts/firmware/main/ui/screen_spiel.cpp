@@ -29,6 +29,15 @@ static lv_obj_t *s_score_table;
 static lv_obj_t *s_btn_score[3];
 static lv_obj_t *s_quit_modal;
 static lv_obj_t *s_quit_message;
+static uint32_t s_grid_signature = UINT32_MAX;
+static uint32_t s_table_signature = UINT32_MAX;
+
+static void set_label_text_if_changed(lv_obj_t *label, const char *text)
+{
+    if (!label || !text) return;
+    const char *current = lv_label_get_text(label);
+    if (!current || strcmp(current, text) != 0) lv_label_set_text(label, text);
+}
 
 // ── Score button callbacks ────────────────────────────────────
 static void score_cb(lv_event_t *e)
@@ -420,7 +429,7 @@ void screen_spiel_refresh(void)
         char fire_status[64];
         snprintf(fire_status, sizeof(fire_status), "GATEWAY: %s",
                  lora_gateway_state_label(gateway));
-        lv_label_set_text(s_lbl_fire_status, fire_status);
+        set_label_text_if_changed(s_lbl_fire_status, fire_status);
         uint32_t color = gateway == GATEWAY_REACHABLE ? CLR_SUCCESS :
                          gateway == GATEWAY_CHECKING ? CLR_WARN :
                          gateway == GATEWAY_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
@@ -430,7 +439,7 @@ void screen_spiel_refresh(void)
         CopWifiState wifi = cop_wifi_state();
         char text[48];
         snprintf(text, sizeof(text), "WIFI: %s", cop_wifi_state_label(wifi));
-        lv_label_set_text(s_lbl_wifi_status, text);
+        set_label_text_if_changed(s_lbl_wifi_status, text);
         uint32_t color = wifi == COP_WIFI_CONNECTED ? CLR_SUCCESS :
                          (wifi == COP_WIFI_CONNECTING ||
                           wifi == COP_WIFI_RECONNECTING) ? CLR_WARN :
@@ -463,11 +472,11 @@ void screen_spiel_refresh(void)
 
     // ── Top bar ───────────────────────────────────────────
     char buf[64];
-    lv_label_set_text(s_lbl_modus, modus_label(s->modus));
+    set_label_text_if_changed(s_lbl_modus, modus_label(s->modus));
     snprintf(buf, sizeof(buf), "LAUF %d", s->lauf);
-    lv_label_set_text(s_lbl_lauf, buf);
+    set_label_text_if_changed(s_lbl_lauf, buf);
     snprintf(buf, sizeof(buf), "TAUBE %d / %d", s->taubeIndex + 1, s->sequenzLen);
-    lv_label_set_text(s_lbl_taube, buf);
+    set_label_text_if_changed(s_lbl_taube, buf);
 
     // ── Machine label: single / A-G pair / H1-H2 ───────────
     if (s->taubeIndex < s->sequenzLen) {
@@ -484,7 +493,7 @@ void screen_spiel_refresh(void)
             snprintf(ml, sizeof(ml), "%s", maschine_label(se->maschine));
             lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
         }
-        lv_label_set_text(s_lbl_maschine, ml);
+        set_label_text_if_changed(s_lbl_maschine, ml);
     }
 
     if (s_btn_fire && s_lbl_fire_button) {
@@ -502,16 +511,16 @@ void screen_spiel_refresh(void)
                 snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE MASCHINN %s",
                          maschine_label(se->maschine));
             }
-            lv_label_set_text(s_lbl_fire_button, fire_label);
+            set_label_text_if_changed(s_lbl_fire_button, fire_label);
             lv_obj_clear_state(s_btn_fire, LV_STATE_DISABLED);
         } else {
             if (isPairSecond)
-                lv_label_set_text(s_lbl_fire_button, "2. RESULTAT - KENG FIRE");
+                set_label_text_if_changed(s_lbl_fire_button, "2. RESULTAT - KENG FIRE");
             else if (s->currentFireSent)
-                lv_label_set_text(s_lbl_fire_button, "SCHON GESTART");
+                set_label_text_if_changed(s_lbl_fire_button, "SCHON GESTART");
             else
-                lv_label_set_text(s_lbl_fire_button,
-                                  s->taubeIndex < s->sequenzLen ? "GATEWAY BESCHAFT" : "KENG MASCHINN");
+                set_label_text_if_changed(s_lbl_fire_button,
+                    s->taubeIndex < s->sequenzLen ? "GATEWAY BESCHAFT" : "KENG MASCHINN");
             lv_obj_add_state(s_btn_fire, LV_STATE_DISABLED);
         }
     }
@@ -532,8 +541,23 @@ void screen_spiel_refresh(void)
     static const int POST_W = 186;
     static const int POST_H = 128;
 
-    lv_obj_clean(s_player_grid);
-    for (int post = 1; post <= 5; post++) {
+    uint32_t grid_signature = 2166136261u;
+    auto hash_grid = [&](uint32_t value) {
+        grid_signature ^= value;
+        grid_signature *= 16777619u;
+    };
+    hash_grid((uint32_t)active_post);
+    hash_grid((uint32_t)s->spielerIndex);
+    hash_grid((uint32_t)s->spielerCount);
+    hash_grid((uint32_t)logicalIdx);
+    for (int i = 0; i < s->spielerCount; ++i) {
+        hash_grid((uint32_t)s->spieler[i].id);
+        hash_grid((uint32_t)s->spieler[i].startPosten);
+        hash_grid((uint32_t)s->spieler[i].punkte);
+    }
+    if (grid_signature != s_grid_signature) {
+        lv_obj_clean(s_player_grid);
+        for (int post = 1; post <= 5; post++) {
         bool isActivePost = (post == active_post);
 
         lv_obj_t *col = lv_obj_create(s_player_grid);
@@ -599,30 +623,36 @@ void screen_spiel_refresh(void)
             lv_obj_set_style_text_font(dash, &lv_font_montserrat_18, 0);
             lv_obj_set_style_text_color(dash, lv_color_hex(CLR_BORDER), 0);
         }
+        }
+        s_grid_signature = grid_signature;
     }
 
     // ── Active shooter banner ─────────────────────────────
     if (s->spielerCount > 0 && s->spielerIndex < s->spielerCount) {
         Spieler *sp = &s->spieler[s->spielerIndex];
-        lv_label_set_text(s_lbl_active_name, sp->name);
+        set_label_text_if_changed(s_lbl_active_name, sp->name);
         char pb[8];
         snprintf(pb, sizeof(pb), "P%d", active_post);
-        lv_label_set_text(s_lbl_active_post, pb);
+        set_label_text_if_changed(s_lbl_active_post, pb);
         char ptb[16];
         snprintf(ptb, sizeof(ptb), "%d PKT", sp->punkte);
-        lv_label_set_text(s_lbl_active_pts, ptb);
+        set_label_text_if_changed(s_lbl_active_pts, ptb);
     }
 
     // ── Score table: show current (rotated) position ──────
-    lv_table_set_row_cnt(s_score_table, s->spielerCount + 1);
-    for (int i = 0; i < s->spielerCount; i++) {
-        int cur_post = pos_of(s->spieler[i].startPosten);
-        char rb[16];
-        lv_table_set_cell_value(s_score_table, i + 1, 0, s->spieler[i].name);
-        snprintf(rb, sizeof(rb), "P%d", cur_post);
-        lv_table_set_cell_value(s_score_table, i + 1, 1, rb);
-        snprintf(rb, sizeof(rb), "%d", s->spieler[i].punkte);
-        lv_table_set_cell_value(s_score_table, i + 1, 2, rb);
+    uint32_t table_signature = grid_signature ^ 0x9e3779b9u;
+    if (table_signature != s_table_signature) {
+        lv_table_set_row_cnt(s_score_table, s->spielerCount + 1);
+        for (int i = 0; i < s->spielerCount; i++) {
+            int cur_post = pos_of(s->spieler[i].startPosten);
+            char rb[16];
+            lv_table_set_cell_value(s_score_table, i + 1, 0, s->spieler[i].name);
+            snprintf(rb, sizeof(rb), "P%d", cur_post);
+            lv_table_set_cell_value(s_score_table, i + 1, 1, rb);
+            snprintf(rb, sizeof(rb), "%d", s->spieler[i].punkte);
+            lv_table_set_cell_value(s_score_table, i + 1, 2, rb);
+        }
+        s_table_signature = table_signature;
     }
 }
 

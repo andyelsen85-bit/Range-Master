@@ -7,9 +7,48 @@
 
 #define CATERING_IDLE_MS 60000u
 static lv_obj_t *s_scr, *s_players, *s_products, *s_total, *s_status, *s_pin_modal, *s_pin, *s_pin_kb;
+static lv_obj_t *s_player_buttons[MAX_PORTAL_SPIELER];
+static lv_obj_t *s_product_qty_labels[MAX_PRODUKTE];
 static int s_player_id, s_qty[MAX_PRODUKTE];
 static bool s_submitting, s_confirm_armed;
 static uint32_t s_last_touch;
+static uint32_t s_content_signature;
+static void reset_basket(void);
+static void rebuild(void);
+
+static uint32_t content_signature(void) {
+    uint32_t hash = 2166136261u;
+    auto add = [&](uint32_t value) { hash ^= value; hash *= 16777619u; };
+    auto add_text = [&](const char *text) {
+        if (!text) { add(0); return; }
+        while (*text) add((uint8_t)*text++);
+        add(0xffu);
+    };
+    add((uint32_t)g_store.portalSpielerCount);
+    for (int i = 0; i < g_store.portalSpielerCount; ++i) {
+        add((uint32_t)g_store.portalSpieler[i].id);
+        add(g_store.portalSpieler[i].portalAktiv ? 1u : 0u);
+        add_text(g_store.portalSpieler[i].name);
+    }
+    add((uint32_t)g_store.produkteCount);
+    for (int i = 0; i < g_store.produkteCount; ++i) {
+        add((uint32_t)g_store.produkte[i].id);
+        add((uint32_t)g_store.produkte[i].preisRevisionId);
+        add((uint32_t)g_store.produkte[i].preisCent);
+        add(g_store.produkte[i].active ? 1u : 0u);
+        add_text(g_store.produkte[i].name);
+        add_text(g_store.produkte[i].category);
+    }
+    return hash;
+}
+static bool ensure_current_content(void) {
+    if (content_signature() == s_content_signature) return true;
+    reset_basket();
+    rebuild();
+    lv_label_set_text(s_status,
+        "SYNC HUET D'LESCHT GEANNERT. WIEL NEES.");
+    return false;
+}
 
 static bool player_today(const PortalSpieler *p) {
     if (!p || !p->portalAktiv) return false;
@@ -30,20 +69,43 @@ static void refresh_total(void) {
                              cents / 100, cents % 100, count);
     lv_label_set_text(s_total, text);
 }
-static void rebuild(void);
+static void refresh_selection(void) {
+    for (int i = 0; i < g_store.portalSpielerCount; ++i) {
+        if (!s_player_buttons[i]) continue;
+        lv_obj_set_style_bg_color(s_player_buttons[i],
+            g_store.portalSpieler[i].id == s_player_id
+                ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_BORDER), 0);
+    }
+    for (int i = 0; i < g_store.produkteCount; ++i) {
+        if (!s_product_qty_labels[i]) continue;
+        char amount[8]; snprintf(amount, sizeof(amount), "%d", s_qty[i]);
+        lv_label_set_text(s_product_qty_labels[i], amount);
+    }
+    refresh_total();
+}
 static void product_cb(lv_event_t *e) {
-    int packed = (int)(intptr_t)lv_event_get_user_data(e), i = packed >> 1;
+    if (!ensure_current_content()) return;
+    intptr_t packed = (intptr_t)lv_event_get_user_data(e);
+    int product_id = (int)(packed >> 1), i = -1;
+    for (int candidate = 0; candidate < g_store.produkteCount; ++candidate)
+        if (g_store.produkte[candidate].id == product_id) {
+            i = candidate;
+            break;
+        }
     if (!s_player_id || s_submitting || i < 0 || i >= g_store.produkteCount) return;
     if ((packed & 1) && s_qty[i] < 99) s_qty[i]++;
     else if (!(packed & 1) && s_qty[i] > 0) s_qty[i]--;
-    s_confirm_armed = false; activity(); rebuild();
+    s_confirm_armed = false; activity(); refresh_selection();
 }
 static void player_cb(lv_event_t *e) {
+    if (!ensure_current_content()) return;
     s_player_id = (int)(intptr_t)lv_event_get_user_data(e);
-    memset(s_qty, 0, sizeof(s_qty)); s_confirm_armed = false; activity(); rebuild();
+    memset(s_qty, 0, sizeof(s_qty)); s_confirm_armed = false; activity();
+    refresh_selection();
 }
 static void confirm_cb(lv_event_t *) {
     if (!s_player_id || s_submitting) return;
+    if (!ensure_current_content()) return;
     int ids[MAX_PRODUKTE], qty[MAX_PRODUKTE], n = 0;
     for (int i = 0; i < g_store.produkteCount; ++i) if (s_qty[i]) {
         ids[n] = g_store.produkte[i].id; qty[n++] = s_qty[i];
@@ -69,8 +131,10 @@ static void confirm_cb(lv_event_t *) {
     bool ok = store_queue_catering_basket(s_player_id, ids, qty, n);
     lv_label_set_text(s_status, ok ? "VERKAAF GESPEICHERT." :
                       "VERKAAF NET GESPEICHERT: SPILLER/PRODUKT ODER QUEUE PRUEWEN.");
-    if (ok) reset_basket();
-    rebuild();
+    if (ok) {
+        reset_basket();
+        refresh_selection();
+    }
 }
 static void exit_pin_cb(lv_event_t *) {
     CateringPinVerifyResult result = store_verify_catering_pin(lv_textarea_get_text(s_pin));
@@ -130,6 +194,8 @@ static lv_obj_t *button(lv_obj_t *p, const char *text, lv_style_t *style) {
 static void rebuild(void) {
     if (!s_players) return;
     lv_obj_clean(s_players); lv_obj_clean(s_products);
+    memset(s_player_buttons, 0, sizeof(s_player_buttons));
+    memset(s_product_qty_labels, 0, sizeof(s_product_qty_labels));
     lv_obj_t *heading = lv_label_create(s_players);
     lv_label_set_text(heading, "SPILLER VUM DAG");
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
@@ -137,6 +203,7 @@ static void rebuild(void) {
     for (int i = 0; i < g_store.portalSpielerCount; ++i) if (player_today(&g_store.portalSpieler[i])) {
         lv_obj_t *b = button(s_players, g_store.portalSpieler[i].name,
                              g_store.portalSpieler[i].id == s_player_id ? &g_style_btn_primary : &g_style_btn_secondary);
+        s_player_buttons[i] = b;
         lv_obj_set_width(b, LV_PCT(100)); lv_obj_add_event_cb(b, player_cb, LV_EVENT_CLICKED,
                        (void *)(intptr_t)g_store.portalSpieler[i].id);
     }
@@ -155,14 +222,18 @@ static void rebuild(void) {
         lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
         lv_obj_set_flex_grow(l, 1);
         lv_obj_t *minus = button(row, "-", &g_style_btn_secondary); lv_obj_set_size(minus, 50, 44);
-        lv_obj_add_event_cb(minus, product_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(i << 1));
+        lv_obj_add_event_cb(minus, product_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)((((intptr_t)p->id) << 1)));
         char amount[8]; snprintf(amount, sizeof(amount), "%d", s_qty[i]);
         l = lv_label_create(row); lv_label_set_text(l, amount);
+        s_product_qty_labels[i] = l;
         lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
         lv_obj_t *plus = button(row, "+", &g_style_btn_primary); lv_obj_set_size(plus, 50, 44);
-        lv_obj_add_event_cb(plus, product_cb, LV_EVENT_CLICKED, (void *)(intptr_t)((i << 1) | 1));
+        lv_obj_add_event_cb(plus, product_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)((((intptr_t)p->id) << 1) | 1));
     }
     refresh_total();
+    s_content_signature = content_signature();
 }
 lv_obj_t *screen_catering_create(void) {
     s_scr = lv_obj_create(NULL); lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H); screen_base_init(s_scr);
@@ -175,12 +246,18 @@ lv_obj_t *screen_catering_create(void) {
     s_status = lv_label_create(s_scr); lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 100, -8);
     lv_obj_set_style_text_color(s_status, lv_color_hex(CLR_TEXT), 0);
     lv_obj_t *confirm = button(s_scr, "BESTAETEG VERKAAF", &g_style_btn_primary); lv_obj_set_size(confirm, 250, 70); lv_obj_align(confirm, LV_ALIGN_RIGHT_MID, -35, 30); lv_obj_add_event_cb(confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *cancel = button(s_scr, "OFBRIECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, 250, 55); lv_obj_align(cancel, LV_ALIGN_RIGHT_MID, -35, 115); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); rebuild(); }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel = button(s_scr, "OFBRIECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, 250, 55); lv_obj_align(cancel, LV_ALIGN_RIGHT_MID, -35, 115); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); refresh_selection(); }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *exit = button(s_scr, "CATERING VERLOOSSEN", &g_style_btn_danger); lv_obj_set_size(exit, 250, 55); lv_obj_align(exit, LV_ALIGN_RIGHT_MID, -35, -100); lv_obj_add_event_cb(exit, exit_open_cb, LV_EVENT_CLICKED, NULL);
     reset_basket(); rebuild(); return s_scr;
 }
 void screen_catering_refresh(void) { reset_basket(); rebuild(); }
 void screen_catering_tick(void) {
+    uint32_t current_signature = content_signature();
+    if (current_signature != s_content_signature) {
+        reset_basket();
+        rebuild();
+        return;
+    }
     if (s_pin_modal) {
         uint32_t remaining = store_catering_pin_lockout_remaining();
         if (remaining) {
@@ -190,5 +267,5 @@ void screen_catering_tick(void) {
             lv_label_set_text(s_status, message);
         }
     }
-    if (!s_pin_modal && lv_tick_elaps(s_last_touch) > CATERING_IDLE_MS && (s_player_id || s_submitting)) { reset_basket(); rebuild(); }
+    if (!s_pin_modal && lv_tick_elaps(s_last_touch) > CATERING_IDLE_MS && (s_player_id || s_submitting)) { reset_basket(); refresh_selection(); }
 }

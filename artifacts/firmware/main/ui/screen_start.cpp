@@ -20,6 +20,18 @@ static lv_obj_t *s_lbl_error;
 static int s_option_to_pidx[MAX_PORTAL_SPIELER + 1];
 static int s_options_count = 0;
 static bool s_refreshing_dropdowns;
+static int option_for_player_id(int id);
+
+static void refresh_lineup_selections(void)
+{
+    s_refreshing_dropdowns = true;
+    for (int i = 0; i < MAX_SPIELER; ++i)
+        if (s_player_dropdowns[i])
+            lv_dropdown_set_selected(s_player_dropdowns[i],
+                                     option_for_player_id(g_store.lineupIds[i]));
+    s_refreshing_dropdowns = false;
+    lv_label_set_text(s_lbl_error, "");
+}
 
 static int option_for_player_id(int id)
 {
@@ -121,7 +133,7 @@ static void dropdown_changed_cb(lv_event_t *e)
         if (pidx >= 0 && pidx < g_store.portalSpielerCount) id = g_store.portalSpieler[pidx].id;
     }
     store_set_lineup_post(post, id);
-    screen_start_refresh();
+    refresh_lineup_selections();
 }
 
 static void lineup_action_cb(lv_event_t *e)
@@ -134,7 +146,7 @@ static void lineup_action_cb(lv_event_t *e)
         int direction = (action & 0xff) == 1 ? -1 : 1;
         store_move_lineup(post, direction);
     }
-    screen_start_refresh();
+    refresh_lineup_selections();
 }
 
 // ── Modus button callback ─────────────────────────────────────

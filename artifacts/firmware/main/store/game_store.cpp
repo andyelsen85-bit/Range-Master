@@ -56,7 +56,7 @@ static SemaphoreHandle_t s_verkauf_events_mutex;
 #define CATERING_PIN_MAX_FAILURES 5
 #define CATERING_PIN_LOCK_SECONDS 30
 #define VALID_UNIX_TIME 1704067200LL /* 2024-01-01 */
-#define NVS_LAYOUT_VERSION 2
+#define NVS_LAYOUT_VERSION 3
 
 static void kredit_events_lock(void)
 {
@@ -128,6 +128,21 @@ static esp_err_t set_credit_events_blob_unlocked(void)
                             sizeof(g_store.pendingKreditEvents[0]));
 }
 
+static esp_err_t set_ammo_blob_unlocked(void)
+{
+    MunitionStand compact[MAX_PORTAL_SPIELER];
+    int count = 0;
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i) {
+        if (g_store.munition[i].spielerId <= 0) continue;
+        if (g_store.munition[i].cal12 == 0 && g_store.munition[i].cal20 == 0)
+            continue;
+        compact[count++] = g_store.munition[i];
+    }
+    esp_err_t err = set_counted_blob("ammo", compact, count, sizeof(compact[0]));
+    if (err == ESP_OK) err = nvs_set_i32(s_nvs, "ammo_count", count);
+    return err;
+}
+
 static esp_err_t save_sale_state_unlocked(void)
 {
     nvs_lock();
@@ -136,9 +151,7 @@ static esp_err_t save_sale_state_unlocked(void)
                                      sizeof(g_store.pendingVerkaufEvents[0]));
     if (err == ESP_OK)
         err = nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
-    if (err == ESP_OK)
-        err = nvs_set_blob(s_nvs, "ammo", g_store.munition,
-                           sizeof(g_store.munition));
+    if (err == ESP_OK) err = set_ammo_blob_unlocked();
     if (err == ESP_OK)
         err = nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
     if (err == ESP_OK)
@@ -1959,7 +1972,7 @@ void game_store_save(void)
                          g_store.pendingVerkaufEventCount,
                          sizeof(g_store.pendingVerkaufEvents[0])) == ESP_OK)
         nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
-    nvs_set_blob(s_nvs, "ammo", g_store.munition, sizeof(g_store.munition));
+    (void)set_ammo_blob_unlocked();
     nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
     nvs_set_i32(s_nvs, "sale_12", g_store.verkaufCal12Total);
     nvs_set_i32(s_nvs, "sale_20", g_store.verkaufCal20Total);
@@ -2118,7 +2131,6 @@ void game_store_init(void)
         custom_run_size == sizeof(g_store.customLaeufe);
     if (!custom_loaded) set_default_custom_sequences();
     sanitize_custom_sequences();
-    size_t ammo_size = sizeof(g_store.munition);
     if (!load_counted_blob_compat("products", "prod_count", g_store.produkte,
                                   MAX_PRODUKTE, sizeof(g_store.produkte[0]),
                                   &g_store.produkteCount))
@@ -2129,7 +2141,20 @@ void game_store_init(void)
                                   sizeof(g_store.pendingVerkaufEvents[0]),
                                   &g_store.pendingVerkaufEventCount))
         g_store.pendingVerkaufEventCount = 0;
-    nvs_get_blob(s_nvs, "ammo", g_store.munition, &ammo_size);
+    int ammo_count = 0;
+    int32_t stored_ammo_count = 0;
+    if (nvs_get_i32(s_nvs, "ammo_count", &stored_ammo_count) == ESP_OK) {
+        if (!load_counted_blob_compat("ammo", "ammo_count", g_store.munition,
+                                      MAX_PORTAL_SPIELER,
+                                      sizeof(g_store.munition[0]), &ammo_count))
+            memset(g_store.munition, 0, sizeof(g_store.munition));
+    } else {
+        size_t legacy_ammo_size = sizeof(g_store.munition);
+        if (nvs_get_blob(s_nvs, "ammo", g_store.munition,
+                         &legacy_ammo_size) != ESP_OK ||
+            legacy_ammo_size != sizeof(g_store.munition))
+            memset(g_store.munition, 0, sizeof(g_store.munition));
+    }
     nvs_load_str("sale_date", g_store.verkaufDatum, sizeof(g_store.verkaufDatum));
     nvs_get_i32(s_nvs, "sale_12", &g_store.verkaufCal12Total);
     nvs_get_i32(s_nvs, "sale_20", &g_store.verkaufCal20Total);
@@ -2184,6 +2209,7 @@ void game_store_init(void)
                                          g_store.spielerUpdateCount,
                                          sizeof(g_store.spielerUpdates[0]));
         if (migration == ESP_OK) migration = set_credit_events_blob_unlocked();
+        if (migration == ESP_OK) migration = set_ammo_blob_unlocked();
         if (migration == ESP_OK)
             migration = nvs_set_i32(s_nvs, "nvs_layout", NVS_LAYOUT_VERSION);
         if (migration == ESP_OK) migration = nvs_commit(s_nvs);
