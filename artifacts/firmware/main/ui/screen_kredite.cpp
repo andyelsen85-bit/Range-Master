@@ -57,7 +57,7 @@ static void refresh_player_values(int spieler_id)
         if (refs->spielerId != spieler_id) continue;
         int available = stand->gewaehrt - stand->verbraucht;
         if (available < 0) available = 0;
-        char text[48];
+        char text[80];
         snprintf(text, sizeof(text), "%d KREDITTER VERFUGBAR  (%d/%d VERBRAUCHT)",
                  available, stand->verbraucht, stand->gewaehrt);
         const char *current = lv_label_get_text(refs->creditLabel);
@@ -491,7 +491,7 @@ static void build_player_list(void)
         lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(name_lbl, LV_PCT(100));
 
-        char cred_buf[48];
+        char cred_buf[80];
         int avail = k->gewaehrt - k->verbraucht;
         if (avail < 0) avail = 0;
         snprintf(cred_buf, sizeof(cred_buf),
