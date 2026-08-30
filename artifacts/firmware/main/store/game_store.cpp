@@ -452,6 +452,17 @@ static bool has_pending_day_activity(int spieler_id, const char *today)
     return false;
 }
 
+static void reset_munition_for_player(int spieler_id)
+{
+    if (spieler_id <= 0) return;
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i) {
+        if (g_store.munition[i].spielerId != spieler_id) continue;
+        g_store.munition[i].cal12 = 0;
+        g_store.munition[i].cal20 = 0;
+        return;
+    }
+}
+
 static bool bill_is_authoritatively_paid(int spieler_id, const char *today)
 {
     if (!today || !g_store.billDay.authoritative ||
@@ -542,9 +553,11 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
     int prior_count = g_store.pendingPaymentEventCount;
     int prior_ids[MAX_PORTAL_SPIELER];
     KreditStand prior_credits[MAX_PORTAL_SPIELER];
+    MunitionStand prior_munition[MAX_PORTAL_SPIELER];
     memcpy(prior_events, g_store.pendingPaymentEvents, sizeof(prior_events));
     memcpy(prior_ids, g_store.kreditPlayerIds, sizeof(prior_ids));
     memcpy(prior_credits, g_store.kredite, sizeof(prior_credits));
+    memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
     for (int n = 0; n < count; ++n) {
         bool accepted = false;
         for (int a = 0; a < acceptedCount; ++a)
@@ -565,6 +578,8 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
                         g_store.kredite[k] = (KreditStand){};
                         break;
                     }
+                if (strcmp(event->datum, today) == 0)
+                    reset_munition_for_player(event->spielerId);
                 memmove(event, event + 1, (size_t)(g_store.pendingPaymentEventCount - i - 1) *
                                          sizeof(*event));
                 memset(&g_store.pendingPaymentEvents[--g_store.pendingPaymentEventCount],
@@ -582,6 +597,7 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
         g_store.pendingPaymentEventCount = prior_count;
         memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
         memcpy(g_store.kredite, prior_credits, sizeof(prior_credits));
+        memcpy(g_store.munition, prior_munition, sizeof(prior_munition));
         kredit_events_unlock();
         return false;
     }
@@ -753,6 +769,7 @@ void store_rebuild_bill_projection(void)
             !has_pending_day_activity(spieler_id, today)) {
             g_store.kreditPlayerIds[i] = 0;
             g_store.kredite[i] = (KreditStand){};
+            reset_munition_for_player(spieler_id);
         }
     }
 }
@@ -2439,6 +2456,7 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
     if (bill_is_authoritatively_paid(spieler_id, today) &&
         !has_pending_day_activity(spieler_id, today)) {
+        reset_munition_for_player(spieler_id);
         if (kreditSlot >= 0) {
             g_store.kreditPlayerIds[kreditSlot] = 0;
             g_store.kredite[kreditSlot] = (KreditStand){};
