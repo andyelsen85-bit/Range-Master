@@ -60,6 +60,16 @@ static const char *s_catering_error = "";
 #define VALID_UNIX_TIME 1704067200LL /* 2024-01-01 */
 #define NVS_LAYOUT_VERSION 4
 
+static bool valid_iso_day(const char *value)
+{
+    if (!value || strlen(value) != 10 || value[4] != '-' || value[7] != '-')
+        return false;
+    for (int i = 0; i < 10; ++i)
+        if (i != 4 && i != 7 && (value[i] < '0' || value[i] > '9'))
+            return false;
+    return true;
+}
+
 // Layout used by released firmware before VerkaufEvent gained local receipt
 // snapshots. Keep this private wire-format mirror so old compact and
 // maximum-capacity NVS blobs remain recoverable after the struct grows.
@@ -1243,8 +1253,24 @@ static int generate_sequenz(SequenzEintrag *out, Modus modus,
 }
 
 // ── Credit helpers ────────────────────────────────────────────
+static bool credit_day_is_current(void)
+{
+    time_t now = time(NULL);
+    if (now < VALID_UNIX_TIME)
+        return false;
+    struct tm tm;
+    localtime_r(&now, &tm);
+    char today[11];
+    strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    return strcmp(g_store.kreditDatum, today) == 0;
+}
+
 int store_kredite_verfuegbar(int spieler_id)
 {
+    // A restored daily roster is retained across a pre-SNTP boot, but it is
+    // not an entitlement until the trusted wall clock confirms the same day.
+    if (!credit_day_is_current())
+        return 0;
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
         if (g_store.kreditPlayerIds[i] == spieler_id) {
             KreditStand *k = &g_store.kredite[i];
@@ -1625,6 +1651,11 @@ bool store_start_spiel(void)
     GameStore *s = &g_store;
     if (s->operatingMode == TERMINAL_MODE_CATERING) return false;
     s->activeAcknowledgedClays = 0;
+    if (!credit_day_is_current()) {
+        snprintf(s->lineupWarning, sizeof(s->lineupWarning),
+                 "DATUM NET Bestaetegt - WAART OP ZAITSYNC.");
+        return false;
+    }
     // Snapshot the durable setup in post order. Never persist this active
     // game's points or second-run rotations back into lineupIds.
     s->spielerCount = 0;
@@ -2770,12 +2801,20 @@ void game_store_init(void)
     size_t credits_size = sizeof(g_store.kredite);
     char saved_credit_date[11] = {};
     nvs_load_str("credit_date", saved_credit_date, sizeof(saved_credit_date));
-    if (strcmp(saved_credit_date, g_store.kreditDatum) == 0 &&
+    bool credit_clock_valid = credit_now >= VALID_UNIX_TIME;
+    bool restore_saved_credits =
+        valid_iso_day(saved_credit_date) &&
+        (!credit_clock_valid || strcmp(saved_credit_date, g_store.kreditDatum) == 0);
+    if (restore_saved_credits &&
         nvs_get_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds, &credit_ids_size) == ESP_OK &&
         credit_ids_size == sizeof(g_store.kreditPlayerIds) &&
         nvs_get_blob(s_nvs, "credits", g_store.kredite, &credits_size) == ESP_OK &&
         credits_size == sizeof(g_store.kredite)) {
-        // Current day only; otherwise the zero defaults are deliberately retained.
+        // Before SNTP has supplied a trustworthy clock, retain the persisted
+        // dated allow-list. Catering still compares this date with the live
+        // day, so it becomes usable only if the corrected date matches.
+        if (!credit_clock_valid)
+            memcpy(g_store.kreditDatum, saved_credit_date, sizeof(g_store.kreditDatum));
     } else {
         memset(g_store.kreditPlayerIds, 0, sizeof(g_store.kreditPlayerIds));
         memset(g_store.kredite, 0, sizeof(g_store.kredite));

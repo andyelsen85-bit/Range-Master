@@ -7,4 +7,4 @@ Catering is a separate persisted terminal operating mode, never a value in the s
 
 **Why:** A stale callback, reboot, or future UI change must not expose shooting, credits, ammunition, or administration from the unattended bar kiosk.
 
-**How to apply:** Authorize every basket at the store boundary against the current persisted Players-of-the-Day roster and active FOOD/DRINK products with current immutable price revisions. Persist PIN failure/lockout state so reboot cannot bypass it, and enqueue the whole basket atomically or not at all.
+**How to apply:** Authorize every basket at the store boundary against the current persisted Players-of-the-Day roster and active FOOD/DRINK products with current immutable price revisions. A pre-SNTP boot may retain the dated roster, but no Catering purchase or game may consume its credits until a trusted wall clock confirms that date. Persist PIN failure/lockout state so reboot cannot bypass it, and enqueue the whole basket atomically or not at all.

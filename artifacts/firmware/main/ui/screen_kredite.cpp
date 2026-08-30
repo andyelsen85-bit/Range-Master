@@ -257,7 +257,7 @@ static void bill_cb(lv_event_t *e)
         lv_label_set_text(left, left_text);
         lv_obj_set_style_text_font(left, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(left,
-            pending ? lv_color_hex(CLR_WARN) : lv_color_hex(CLR_TEXT), 0);
+            pending ? lv_color_hex(CLR_WARN) : lv_color_hex(0x111827), 0);
         lv_obj_t *right = lv_label_create(line_row); char right_text[32];
         if (price_unknown) snprintf(right_text, sizeof(right_text), "RECONCILE");
         else snprintf(right_text, sizeof(right_text), "%d.%02d EUR",
