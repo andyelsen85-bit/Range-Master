@@ -129,8 +129,14 @@ static void confirm_cb(lv_event_t *) {
     }
     s_submitting = true; // prevents a second touch before store persistence returns
     bool ok = store_queue_catering_basket(s_player_id, ids, qty, n);
-    lv_label_set_text(s_status, ok ? "VERKAAF GESPEICHERT." :
-                      "VERKAAF NET GESPEICHERT: SPILLER/PRODUKT ODER QUEUE PRUEWEN.");
+    if (ok) {
+        lv_label_set_text(s_status, "VERKAAF GESPEICHERT.");
+    } else {
+        char message[160];
+        snprintf(message, sizeof(message), "VERKAAF NET GESPEICHERT: %s",
+                 store_last_catering_error());
+        lv_label_set_text(s_status, message);
+    }
     if (ok) {
         reset_basket();
         refresh_selection();

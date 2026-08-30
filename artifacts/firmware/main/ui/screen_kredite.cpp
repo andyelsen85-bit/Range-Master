@@ -26,6 +26,7 @@ typedef struct {
     lv_obj_t *minusButton;
     lv_obj_t *ammo12MinusButton;
     lv_obj_t *ammo20MinusButton;
+    bool creditPositive;
 } PlayerRowRefs;
 
 static PlayerRowRefs s_row_refs[MAX_PORTAL_SPIELER];
@@ -58,22 +59,29 @@ static void refresh_player_values(int spieler_id)
         char text[48];
         snprintf(text, sizeof(text), "%d KREDITTER VERFUGBAR  (%d/%d VERBRAUCHT)",
                  available, stand->verbraucht, stand->gewaehrt);
-        lv_label_set_text(refs->creditLabel, text);
-        lv_obj_set_style_text_color(refs->creditLabel,
-            available > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_DANGER), 0);
+        const char *current = lv_label_get_text(refs->creditLabel);
+        if (!current || strcmp(current, text) != 0)
+            lv_label_set_text(refs->creditLabel, text);
+        if (refs->creditPositive != (available > 0)) {
+            lv_obj_set_style_text_color(refs->creditLabel,
+                available > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_DANGER), 0);
+            refs->creditPositive = available > 0;
+        }
         snprintf(text, sizeof(text), "CAL.12: %d     CAL.20: %d",
                  store_munition_cal12(spieler_id), store_munition_cal20(spieler_id));
-        lv_label_set_text(refs->ammoLabel, text);
-        if (available > 0) lv_obj_clear_state(refs->minusButton, LV_STATE_DISABLED);
-        else lv_obj_add_state(refs->minusButton, LV_STATE_DISABLED);
-        if (store_munition_cal12(spieler_id) > 0)
-            lv_obj_clear_state(refs->ammo12MinusButton, LV_STATE_DISABLED);
-        else
-            lv_obj_add_state(refs->ammo12MinusButton, LV_STATE_DISABLED);
-        if (store_munition_cal20(spieler_id) > 0)
-            lv_obj_clear_state(refs->ammo20MinusButton, LV_STATE_DISABLED);
-        else
-            lv_obj_add_state(refs->ammo20MinusButton, LV_STATE_DISABLED);
+        current = lv_label_get_text(refs->ammoLabel);
+        if (!current || strcmp(current, text) != 0)
+            lv_label_set_text(refs->ammoLabel, text);
+        auto set_disabled = [](lv_obj_t *button, bool disabled) {
+            bool current_disabled = lv_obj_has_state(button, LV_STATE_DISABLED);
+            if (disabled != current_disabled) {
+                if (disabled) lv_obj_add_state(button, LV_STATE_DISABLED);
+                else lv_obj_clear_state(button, LV_STATE_DISABLED);
+            }
+        };
+        set_disabled(refs->minusButton, available <= 0);
+        set_disabled(refs->ammo12MinusButton, store_munition_cal12(spieler_id) <= 0);
+        set_disabled(refs->ammo20MinusButton, store_munition_cal20(spieler_id) <= 0);
         break;
     }
     if (s_totals_label) {
@@ -81,7 +89,9 @@ static void refresh_player_values(int spieler_id)
         snprintf(text, sizeof(text),
                  "CREDITS                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
                  g_store.verkaufCal12Total, g_store.verkaufCal20Total);
-        lv_label_set_text(s_totals_label, text);
+        const char *current = lv_label_get_text(s_totals_label);
+        if (!current || strcmp(current, text) != 0)
+            lv_label_set_text(s_totals_label, text);
     }
 }
 
@@ -454,6 +464,7 @@ static void build_player_list(void)
         refs->minusButton = btn_minus;
         refs->ammo12MinusButton = NULL;
         refs->ammo20MinusButton = NULL;
+        refs->creditPositive = avail > 0;
 
         const struct {
             const char *label;

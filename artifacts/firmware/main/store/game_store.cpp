@@ -49,6 +49,7 @@ static nvs_handle_t s_nvs;
 static SemaphoreHandle_t s_nvs_mutex;
 static SemaphoreHandle_t s_kredit_events_mutex;
 static SemaphoreHandle_t s_verkauf_events_mutex;
+static const char *s_catering_error = "";
 
 #define CATERING_PIN_MIN_LEN 4
 #define CATERING_PIN_MAX_LEN 16
@@ -161,6 +162,31 @@ static esp_err_t save_sale_state_unlocked(void)
     if (err == ESP_OK) err = nvs_commit(s_nvs);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Could not persist sale state: %s", esp_err_to_name(err));
+        nvs_reopen_after_failure();
+    }
+    nvs_unlock();
+    return err;
+}
+
+static esp_err_t save_catering_state_unlocked(bool persist_daily_reset)
+{
+    nvs_lock();
+    esp_err_t err = set_counted_blob("sales", g_store.pendingVerkaufEvents,
+                                     g_store.pendingVerkaufEventCount,
+                                     sizeof(g_store.pendingVerkaufEvents[0]));
+    if (err == ESP_OK)
+        err = nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
+    if (err == ESP_OK)
+        err = nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
+    if (err == ESP_OK && persist_daily_reset)
+        err = set_ammo_blob_unlocked();
+    if (err == ESP_OK && persist_daily_reset)
+        err = nvs_set_i32(s_nvs, "sale_12", g_store.verkaufCal12Total);
+    if (err == ESP_OK && persist_daily_reset)
+        err = nvs_set_i32(s_nvs, "sale_20", g_store.verkaufCal20Total);
+    if (err == ESP_OK) err = nvs_commit(s_nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not persist Catering sale: %s", esp_err_to_name(err));
         nvs_reopen_after_failure();
     }
     nvs_unlock();
@@ -466,12 +492,18 @@ static bool catering_player_is_active(int spieler_id)
 bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
                                  const int *quantities, int line_count)
 {
-    if (!produkt_ids || !quantities || line_count < 1 || line_count > MAX_PRODUKTE)
+    s_catering_error = "";
+    if (!produkt_ids || !quantities || line_count < 1 || line_count > MAX_PRODUKTE) {
+        s_catering_error = "ONGULTEGE WEENCHEN";
         return false;
+    }
     kredit_events_lock();
     bool authorized = catering_player_is_active(spieler_id);
     kredit_events_unlock();
-    if (!authorized) return false;
+    if (!authorized) {
+        s_catering_error = "SPILLER NET FIR HAUT AUTORISEIERT";
+        return false;
+    }
     time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tmi);
     xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
@@ -488,16 +520,22 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
             if (g_store.produkte[i].id == produkt_ids[line]) { p = &g_store.produkte[i]; break; }
         if (!p || !p->active || p->preisRevisionId <= 0 || quantities[line] <= 0 ||
             (strcmp(p->category, "FOOD") && strcmp(p->category, "DRINK"))) {
+            s_catering_error = !p ? "PRODUKT NET FONNT" :
+                !p->active ? "PRODUKT NET AKTIV" :
+                p->preisRevisionId <= 0 ? "PRODUKT HUET KEE PRAIS" :
+                "ONGULTEGE PRODUKT-DATEN";
             xSemaphoreGive(s_verkauf_events_mutex);
             return false;
         }
     }
     // Reserve all slots before writing any event: a full outbox is all-or-nothing.
     if (g_store.pendingVerkaufEventCount + line_count > MAX_PENDING_VERKAEUFE) {
+        s_catering_error = "VERKAAF-QUEUE ASS VOLL - EISCHT SYNC";
         xSemaphoreGive(s_verkauf_events_mutex);
         return false;
     }
-    if (strcmp(g_store.verkaufDatum, today) != 0) {
+    bool daily_reset = strcmp(g_store.verkaufDatum, today) != 0;
+    if (daily_reset) {
         memset(g_store.munition, 0, sizeof(g_store.munition));
         g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
         snprintf(g_store.verkaufDatum, sizeof(g_store.verkaufDatum), "%s", today);
@@ -518,8 +556,10 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
     // failure remove the entire just-created basket from RAM as well, so a
     // caller can never observe a partially accepted basket.
     int first_event = g_store.pendingVerkaufEventCount - line_count;
-    esp_err_t persist = save_sale_state_unlocked();
+    esp_err_t persist = save_catering_state_unlocked(daily_reset);
     if (persist != ESP_OK) {
+        s_catering_error = persist == ESP_ERR_NVS_NOT_ENOUGH_SPACE
+            ? "NVS ASS VOLL" : "NVS SCHREIF-FEELER";
         memset(&g_store.pendingVerkaufEvents[first_event], 0,
                (size_t)line_count * sizeof(VerkaufEvent));
         g_store.pendingVerkaufEventCount = first_event;
@@ -530,6 +570,11 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
     }
     xSemaphoreGive(s_verkauf_events_mutex);
     return persist == ESP_OK;
+}
+
+const char *store_last_catering_error(void)
+{
+    return s_catering_error;
 }
 
 static bool catering_pin_digest(const char *pin, const uint8_t salt[16], uint8_t out[32])

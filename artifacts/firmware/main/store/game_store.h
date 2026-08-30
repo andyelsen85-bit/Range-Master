@@ -463,6 +463,7 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
 /** Atomically validates and appends every line of a catering basket. */
 bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
                                  const int *quantities, int line_count);
+const char *store_last_catering_error(void);
 int  store_begin_verkauf_sync(VerkaufEvent *snapshot, int capacity);
 void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool delivered);
 void store_apply_portal_verkauf(int spieler_id, int produkt_id, int quantity);
