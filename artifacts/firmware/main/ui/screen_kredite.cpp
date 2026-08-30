@@ -3,6 +3,7 @@
 // Mirrors KrediteScreen.tsx
 // ============================================================
 #include <stdio.h>
+#include <inttypes.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -256,7 +257,7 @@ static void build_player_list(void)
     lv_obj_t *columns = lv_label_create(s_player_list);
     char columns_text[96];
     snprintf(columns_text, sizeof(columns_text),
-             "CREDITS                 CAL.12: %d       CAL.20: %d",
+             "CREDITS                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
              g_store.verkaufCal12Total, g_store.verkaufCal20Total);
     lv_label_set_text(columns, columns_text);
     lv_obj_set_style_text_font(columns, &lv_font_montserrat_12, 0);
