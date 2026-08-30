@@ -36,7 +36,9 @@
 #define AUTO_SYNC_MIN_SECONDS 10u
 #define AUTO_SYNC_MAX_SECONDS 86400u
 #define AUTO_SYNC_DEFAULT_SECONDS 300u
-#define CACHE_MANIFEST_TOKEN_LEN 65
+// Current API tokens are "sha256:" plus 64 hex characters. Keep headroom for
+// future opaque revision-token formats and the terminating NUL.
+#define CACHE_MANIFEST_TOKEN_LEN 96
 
 // ── Types ────────────────────────────────────────────────────
 

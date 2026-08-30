@@ -26,3 +26,4 @@
 - [WiFi reconnect backoff](wifi-reconnect-backoff.md) — disconnect events wake the supervisor only to enter backoff; manual connection requests may retry immediately
 - [NVS capacity for runtime caches](nvs-runtime-cache-capacity.md) — 24 KiB NVS cannot hold BillDaySummary; keep large rebuildable caches in RAM and compact persisted outboxes
 - [FAT cache mount safety](fat-cache-mount-safety.md) — initialize the reserved FAT partition once; latch mount failures and avoid cache writes from generic store saves
+- [Sync manifest token sizing](sync-manifest-token-sizing.md) — revision tokens include the hash algorithm prefix; firmware buffers must treat them as opaque strings
