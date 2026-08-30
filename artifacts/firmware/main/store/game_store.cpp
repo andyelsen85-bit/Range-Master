@@ -46,6 +46,7 @@ EXT_RAM_BSS_ATTR GameStore g_store;
 
 // ── NVS helpers ──────────────────────────────────────────────
 static nvs_handle_t s_nvs;
+static SemaphoreHandle_t s_nvs_mutex;
 static SemaphoreHandle_t s_kredit_events_mutex;
 static SemaphoreHandle_t s_verkauf_events_mutex;
 
@@ -55,6 +56,7 @@ static SemaphoreHandle_t s_verkauf_events_mutex;
 #define CATERING_PIN_MAX_FAILURES 5
 #define CATERING_PIN_LOCK_SECONDS 30
 #define VALID_UNIX_TIME 1704067200LL /* 2024-01-01 */
+#define NVS_LAYOUT_VERSION 2
 
 static void kredit_events_lock(void)
 {
@@ -67,24 +69,96 @@ static void kredit_events_unlock(void)
     xSemaphoreGive(s_kredit_events_mutex);
 }
 
+static void nvs_lock(void)
+{
+    configASSERT(s_nvs_mutex);
+    xSemaphoreTake(s_nvs_mutex, portMAX_DELAY);
+}
+
+static void nvs_unlock(void)
+{
+    xSemaphoreGive(s_nvs_mutex);
+}
+
+static void nvs_reopen_after_failure(void)
+{
+    nvs_close(s_nvs);
+    s_nvs = 0;
+    ESP_ERROR_CHECK(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &s_nvs));
+}
+
 static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anzahl);
 static bool save_kredit_state_unlocked(void);
 
-static esp_err_t set_credit_events_blob_unlocked(void)
+static esp_err_t set_counted_blob(const char *key, const void *data,
+                                  int count, size_t item_size)
 {
-    if (g_store.pendingKreditEventCount == 0) {
-        esp_err_t err = nvs_erase_key(s_nvs, "credit_events");
+    if (count == 0) {
+        esp_err_t err = nvs_erase_key(s_nvs, key);
         return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
     }
-    return nvs_set_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
-                        (size_t)g_store.pendingKreditEventCount *
+    return nvs_set_blob(s_nvs, key, data, (size_t)count * item_size);
+}
+
+static bool load_counted_blob_compat(const char *key, const char *count_key,
+                                     void *data, int capacity, size_t item_size,
+                                     int *count)
+{
+    int32_t saved_count = 0;
+    if (nvs_get_i32(s_nvs, count_key, &saved_count) != ESP_OK ||
+        saved_count < 0 || saved_count > capacity)
+        return false;
+    if (saved_count == 0) {
+        *count = 0;
+        return true;
+    }
+    size_t size = (size_t)capacity * item_size;
+    if (nvs_get_blob(s_nvs, key, data, &size) != ESP_OK ||
+        (size != (size_t)saved_count * item_size &&
+         size != (size_t)capacity * item_size))
+        return false;
+    *count = saved_count;
+    return true;
+}
+
+static esp_err_t set_credit_events_blob_unlocked(void)
+{
+    return set_counted_blob("credit_events", g_store.pendingKreditEvents,
+                            g_store.pendingKreditEventCount,
                             sizeof(g_store.pendingKreditEvents[0]));
+}
+
+static esp_err_t save_sale_state_unlocked(void)
+{
+    nvs_lock();
+    esp_err_t err = set_counted_blob("sales", g_store.pendingVerkaufEvents,
+                                     g_store.pendingVerkaufEventCount,
+                                     sizeof(g_store.pendingVerkaufEvents[0]));
+    if (err == ESP_OK)
+        err = nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "ammo", g_store.munition,
+                           sizeof(g_store.munition));
+    if (err == ESP_OK)
+        err = nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
+    if (err == ESP_OK)
+        err = nvs_set_i32(s_nvs, "sale_12", g_store.verkaufCal12Total);
+    if (err == ESP_OK)
+        err = nvs_set_i32(s_nvs, "sale_20", g_store.verkaufCal20Total);
+    if (err == ESP_OK) err = nvs_commit(s_nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not persist sale state: %s", esp_err_to_name(err));
+        nvs_reopen_after_failure();
+    }
+    nvs_unlock();
+    return err;
 }
 
 // This is deliberately a single NVS transaction: the projected balance must
 // never be made durable without the immutable event which explains it.
 static bool save_kredit_state_unlocked(void)
 {
+    nvs_lock();
     esp_err_t err = nvs_set_str(s_nvs, "credit_date", g_store.kreditDatum);
     if (err == ESP_OK)
         err = nvs_set_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds,
@@ -95,7 +169,11 @@ static bool save_kredit_state_unlocked(void)
     if (err == ESP_OK)
         err = nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
     if (err == ESP_OK) err = nvs_commit(s_nvs);
-    if (err != ESP_OK) ESP_LOGE(TAG, "Could not persist credit state: %s", esp_err_to_name(err));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not persist credit state: %s", esp_err_to_name(err));
+        nvs_reopen_after_failure();
+    }
+    nvs_unlock();
     return err == ESP_OK;
 }
 
@@ -302,6 +380,12 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
     time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tmi);
     xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
+    MunitionStand prior_munition[MAX_PORTAL_SPIELER];
+    memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
+    char prior_date[sizeof(g_store.verkaufDatum)];
+    memcpy(prior_date, g_store.verkaufDatum, sizeof(prior_date));
+    int prior_cal12_total = g_store.verkaufCal12Total;
+    int prior_cal20_total = g_store.verkaufCal20Total;
     if (strcmp(g_store.verkaufDatum, today) != 0) {
         memset(g_store.munition, 0, sizeof(g_store.munition));
         g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
@@ -338,9 +422,17 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
     event->quantity = quantity;
     strftime(event->datum, sizeof(event->datum), "%Y-%m-%d", &tmi);
     store_apply_portal_verkauf(spieler_id, produkt->id, quantity);
+    esp_err_t persist = save_sale_state_unlocked();
+    if (persist != ESP_OK) {
+        memcpy(g_store.munition, prior_munition, sizeof(prior_munition));
+        memcpy(g_store.verkaufDatum, prior_date, sizeof(prior_date));
+        g_store.verkaufCal12Total = prior_cal12_total;
+        g_store.verkaufCal20Total = prior_cal20_total;
+        memset(event, 0, sizeof(*event));
+        g_store.pendingVerkaufEventCount--;
+    }
     xSemaphoreGive(s_verkauf_events_mutex);
-    game_store_save();
-    return true;
+    return persist == ESP_OK;
 }
 
 static bool catering_player_is_active(int spieler_id)
@@ -370,6 +462,12 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
     time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tmi);
     xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
+    MunitionStand prior_munition[MAX_PORTAL_SPIELER];
+    memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
+    char prior_date[sizeof(g_store.verkaufDatum)];
+    memcpy(prior_date, g_store.verkaufDatum, sizeof(prior_date));
+    int prior_cal12_total = g_store.verkaufCal12Total;
+    int prior_cal20_total = g_store.verkaufCal20Total;
     // Revalidate the cached catalog under the same lock as reservation.
     for (int line = 0; line < line_count; ++line) {
         const Produkt *p = NULL;
@@ -407,17 +505,15 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
     // failure remove the entire just-created basket from RAM as well, so a
     // caller can never observe a partially accepted basket.
     int first_event = g_store.pendingVerkaufEventCount - line_count;
-    esp_err_t persist = nvs_set_blob(s_nvs, "sales", g_store.pendingVerkaufEvents,
-                                     sizeof(g_store.pendingVerkaufEvents));
-    if (persist == ESP_OK)
-        persist = nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
-    if (persist == ESP_OK)
-        persist = nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
-    if (persist == ESP_OK) persist = nvs_commit(s_nvs);
+    esp_err_t persist = save_sale_state_unlocked();
     if (persist != ESP_OK) {
         memset(&g_store.pendingVerkaufEvents[first_event], 0,
                (size_t)line_count * sizeof(VerkaufEvent));
         g_store.pendingVerkaufEventCount = first_event;
+        memcpy(g_store.munition, prior_munition, sizeof(prior_munition));
+        memcpy(g_store.verkaufDatum, prior_date, sizeof(prior_date));
+        g_store.verkaufCal12Total = prior_cal12_total;
+        g_store.verkaufCal20Total = prior_cal20_total;
     }
     xSemaphoreGive(s_verkauf_events_mutex);
     return persist == ESP_OK;
@@ -1827,6 +1923,7 @@ static void queue_boot_sync_if_pending(void)
 // ── Persistence (JSON in NVS) ─────────────────────────────────
 void game_store_save(void)
 {
+    nvs_lock();
     // Save key settings & pending queue to NVS as JSON strings.
     // Full game history is large; store in FAT partition in production.
     // For phase 1 we store the essentials.
@@ -1855,36 +1952,47 @@ void game_store_save(void)
                  sizeof(g_store.customSequenzLen));
     nvs_set_blob(s_nvs, "custom_run", g_store.customLaeufe,
                  sizeof(g_store.customLaeufe));
-    nvs_set_blob(s_nvs, "products", g_store.produkte, sizeof(g_store.produkte));
-    nvs_set_i32(s_nvs, "prod_count", g_store.produkteCount);
-    nvs_set_blob(s_nvs, "sales", g_store.pendingVerkaufEvents, sizeof(g_store.pendingVerkaufEvents));
-    nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
+    if (set_counted_blob("products", g_store.produkte, g_store.produkteCount,
+                         sizeof(g_store.produkte[0])) == ESP_OK)
+        nvs_set_i32(s_nvs, "prod_count", g_store.produkteCount);
+    if (set_counted_blob("sales", g_store.pendingVerkaufEvents,
+                         g_store.pendingVerkaufEventCount,
+                         sizeof(g_store.pendingVerkaufEvents[0])) == ESP_OK)
+        nvs_set_i32(s_nvs, "sale_count", g_store.pendingVerkaufEventCount);
     nvs_set_blob(s_nvs, "ammo", g_store.munition, sizeof(g_store.munition));
     nvs_set_str(s_nvs, "sale_date", g_store.verkaufDatum);
     nvs_set_i32(s_nvs, "sale_12", g_store.verkaufCal12Total);
     nvs_set_i32(s_nvs, "sale_20", g_store.verkaufCal20Total);
-    nvs_set_blob(s_nvs, "payments", g_store.pendingPaymentEvents,
-                 sizeof(g_store.pendingPaymentEvents));
-    nvs_set_i32(s_nvs, "payment_cnt", g_store.pendingPaymentEventCount);
+    if (set_counted_blob("payments", g_store.pendingPaymentEvents,
+                         g_store.pendingPaymentEventCount,
+                         sizeof(g_store.pendingPaymentEvents[0])) == ESP_OK)
+        nvs_set_i32(s_nvs, "payment_cnt", g_store.pendingPaymentEventCount);
     nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds, sizeof(g_store.lineupIds));
     nvs_set_str(s_nvs, "credit_date", g_store.kreditDatum);
     nvs_set_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds, sizeof(g_store.kreditPlayerIds));
     nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
-    (void)set_credit_events_blob_unlocked();
-    nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
+    if (set_credit_events_blob_unlocked() == ESP_OK)
+        nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
     // Cache roster and unsynced creates too: an offline reboot must still be
     // able to render the saved setup and later complete its create sync.
-    nvs_set_blob(s_nvs, "plrs", g_store.portalSpieler, sizeof(g_store.portalSpieler));
-    nvs_set_i32(s_nvs, "plr_cnt", g_store.portalSpielerCount);
-    nvs_set_blob(s_nvs, "sp_updates", g_store.spielerUpdates, sizeof(g_store.spielerUpdates));
-    nvs_set_i32(s_nvs, "sp_up_cnt", g_store.spielerUpdateCount);
+    if (set_counted_blob("plrs", g_store.portalSpieler,
+                         g_store.portalSpielerCount,
+                         sizeof(g_store.portalSpieler[0])) == ESP_OK)
+        nvs_set_i32(s_nvs, "plr_cnt", g_store.portalSpielerCount);
+    if (set_counted_blob("sp_updates", g_store.spielerUpdates,
+                         g_store.spielerUpdateCount,
+                         sizeof(g_store.spielerUpdates[0])) == ESP_OK)
+        nvs_set_i32(s_nvs, "sp_up_cnt", g_store.spielerUpdateCount);
     nvs_commit(s_nvs);
+    nvs_unlock();
 }
 
 // ── Init ─────────────────────────────────────────────────────
 void game_store_init(void)
 {
     memset(&g_store, 0, sizeof(g_store));
+    s_nvs_mutex = xSemaphoreCreateMutex();
+    configASSERT(s_nvs_mutex);
     s_kredit_events_mutex = xSemaphoreCreateMutex();
     configASSERT(s_kredit_events_mutex);
     s_verkauf_events_mutex = xSemaphoreCreateMutex();
@@ -1978,20 +2086,20 @@ void game_store_init(void)
     if (nvs_get_blob(s_nvs, "lineup_ids", g_store.lineupIds, &lineup_size) != ESP_OK ||
         lineup_size != sizeof(g_store.lineupIds))
         memset(g_store.lineupIds, 0, sizeof(g_store.lineupIds));
-    size_t portal_size = sizeof(g_store.portalSpieler);
-    size_t update_size = sizeof(g_store.spielerUpdates);
-    int32_t portal_count = 0, update_count = 0;
-    if (nvs_get_blob(s_nvs, "plrs", g_store.portalSpieler, &portal_size) != ESP_OK ||
-        portal_size != sizeof(g_store.portalSpieler) ||
-        nvs_get_i32(s_nvs, "plr_cnt", &portal_count) != ESP_OK ||
-        portal_count < 0 || portal_count > MAX_PORTAL_SPIELER) {
+    if (!load_counted_blob_compat("plrs", "plr_cnt", g_store.portalSpieler,
+                                  MAX_PORTAL_SPIELER,
+                                  sizeof(g_store.portalSpieler[0]),
+                                  &g_store.portalSpielerCount)) {
         memset(g_store.portalSpieler, 0, sizeof(g_store.portalSpieler));
-    } else g_store.portalSpielerCount = portal_count;
-    if (nvs_get_blob(s_nvs, "sp_updates", g_store.spielerUpdates, &update_size) == ESP_OK &&
-        update_size == sizeof(g_store.spielerUpdates) &&
-        nvs_get_i32(s_nvs, "sp_up_cnt", &update_count) == ESP_OK &&
-        update_count >= 0 && update_count <= MAX_SPIELER_UPDATES)
-        g_store.spielerUpdateCount = update_count;
+        g_store.portalSpielerCount = 0;
+    }
+    if (!load_counted_blob_compat("sp_updates", "sp_up_cnt",
+                                  g_store.spielerUpdates, MAX_SPIELER_UPDATES,
+                                  sizeof(g_store.spielerUpdates[0]),
+                                  &g_store.spielerUpdateCount)) {
+        memset(g_store.spielerUpdates, 0, sizeof(g_store.spielerUpdates));
+        g_store.spielerUpdateCount = 0;
+    }
     reconcile_lineup_with_roster();
     if (g_store.lineupWarning[0]) {
         nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds, sizeof(g_store.lineupIds));
@@ -2010,27 +2118,27 @@ void game_store_init(void)
         custom_run_size == sizeof(g_store.customLaeufe);
     if (!custom_loaded) set_default_custom_sequences();
     sanitize_custom_sequences();
-    size_t products_size = sizeof(g_store.produkte), sales_size = sizeof(g_store.pendingVerkaufEvents);
-    size_t ammo_size = sizeof(g_store.munition); int32_t product_count = 0, sale_count = 0;
-    if (nvs_get_blob(s_nvs, "products", g_store.produkte, &products_size) == ESP_OK &&
-        products_size == sizeof(g_store.produkte) &&
-        nvs_get_i32(s_nvs, "prod_count", &product_count) == ESP_OK &&
-        product_count >= 0 && product_count <= MAX_PRODUKTE) g_store.produkteCount = product_count;
-    if (nvs_get_blob(s_nvs, "sales", g_store.pendingVerkaufEvents, &sales_size) == ESP_OK &&
-        sales_size == sizeof(g_store.pendingVerkaufEvents) &&
-        nvs_get_i32(s_nvs, "sale_count", &sale_count) == ESP_OK &&
-        sale_count >= 0 && sale_count <= MAX_PENDING_VERKAEUFE) g_store.pendingVerkaufEventCount = sale_count;
+    size_t ammo_size = sizeof(g_store.munition);
+    if (!load_counted_blob_compat("products", "prod_count", g_store.produkte,
+                                  MAX_PRODUKTE, sizeof(g_store.produkte[0]),
+                                  &g_store.produkteCount))
+        g_store.produkteCount = 0;
+    if (!load_counted_blob_compat("sales", "sale_count",
+                                  g_store.pendingVerkaufEvents,
+                                  MAX_PENDING_VERKAEUFE,
+                                  sizeof(g_store.pendingVerkaufEvents[0]),
+                                  &g_store.pendingVerkaufEventCount))
+        g_store.pendingVerkaufEventCount = 0;
     nvs_get_blob(s_nvs, "ammo", g_store.munition, &ammo_size);
     nvs_load_str("sale_date", g_store.verkaufDatum, sizeof(g_store.verkaufDatum));
     nvs_get_i32(s_nvs, "sale_12", &g_store.verkaufCal12Total);
     nvs_get_i32(s_nvs, "sale_20", &g_store.verkaufCal20Total);
-    size_t payments_size = sizeof(g_store.pendingPaymentEvents);
-    int32_t payment_count = 0;
-    if (nvs_get_blob(s_nvs, "payments", g_store.pendingPaymentEvents, &payments_size) == ESP_OK &&
-        payments_size == sizeof(g_store.pendingPaymentEvents) &&
-        nvs_get_i32(s_nvs, "payment_cnt", &payment_count) == ESP_OK &&
-        payment_count >= 0 && payment_count <= MAX_PENDING_PAYMENTS)
-        g_store.pendingPaymentEventCount = payment_count;
+    if (!load_counted_blob_compat("payments", "payment_cnt",
+                                  g_store.pendingPaymentEvents,
+                                  MAX_PENDING_PAYMENTS,
+                                  sizeof(g_store.pendingPaymentEvents[0]),
+                                  &g_store.pendingPaymentEventCount))
+        g_store.pendingPaymentEventCount = 0;
     // A power loss can occur after inFlight was committed but before an HTTP
     // response reached us. Reset it at boot and retry its stable externalId.
     bool reset_payment_flights = false;
@@ -2039,14 +2147,53 @@ void game_store_init(void)
         g_store.pendingPaymentEvents[i].inFlight = false;
     }
     if (reset_payment_flights) {
-        nvs_set_blob(s_nvs, "payments", g_store.pendingPaymentEvents,
-                     sizeof(g_store.pendingPaymentEvents));
+        (void)set_counted_blob("payments", g_store.pendingPaymentEvents,
+                               g_store.pendingPaymentEventCount,
+                               sizeof(g_store.pendingPaymentEvents[0]));
         nvs_commit(s_nvs);
     }
-    // Reclaim space consumed by firmware versions that attempted to persist
-    // the oversized bill-day runtime cache.
-    esp_err_t obsolete_bill = nvs_erase_key(s_nvs, "bill_day");
-    if (obsolete_bill == ESP_OK) nvs_commit(s_nvs);
+    // One-time migration: load legacy maximum-capacity blobs first, then free
+    // the two large rebuildable caches and rewrite all counted records compactly.
+    int32_t nvs_layout = 0;
+    nvs_get_i32(s_nvs, "nvs_layout", &nvs_layout);
+    if (nvs_layout < NVS_LAYOUT_VERSION) {
+        nvs_erase_key(s_nvs, "bill_day");
+        nvs_erase_key(s_nvs, "plrs");
+        nvs_erase_key(s_nvs, "products");
+        nvs_commit(s_nvs);
+
+        // Recreate the just-loaded caches at their active lengths. Do not call
+        // game_store_save() here: settings below have not been loaded yet.
+        esp_err_t migration = set_counted_blob(
+            "plrs", g_store.portalSpieler, g_store.portalSpielerCount,
+            sizeof(g_store.portalSpieler[0]));
+        if (migration == ESP_OK)
+            migration = set_counted_blob("products", g_store.produkte,
+                                         g_store.produkteCount,
+                                         sizeof(g_store.produkte[0]));
+        if (migration == ESP_OK)
+            migration = set_counted_blob("sales", g_store.pendingVerkaufEvents,
+                                         g_store.pendingVerkaufEventCount,
+                                         sizeof(g_store.pendingVerkaufEvents[0]));
+        if (migration == ESP_OK)
+            migration = set_counted_blob("payments", g_store.pendingPaymentEvents,
+                                         g_store.pendingPaymentEventCount,
+                                         sizeof(g_store.pendingPaymentEvents[0]));
+        if (migration == ESP_OK)
+            migration = set_counted_blob("sp_updates", g_store.spielerUpdates,
+                                         g_store.spielerUpdateCount,
+                                         sizeof(g_store.spielerUpdates[0]));
+        if (migration == ESP_OK) migration = set_credit_events_blob_unlocked();
+        if (migration == ESP_OK)
+            migration = nvs_set_i32(s_nvs, "nvs_layout", NVS_LAYOUT_VERSION);
+        if (migration == ESP_OK) migration = nvs_commit(s_nvs);
+        if (migration == ESP_OK)
+            ESP_LOGI(TAG, "Migrated NVS counted blobs to compact layout v%d",
+                     NVS_LAYOUT_VERSION);
+        else
+            ESP_LOGE(TAG, "NVS compact-layout migration failed: %s",
+                     esp_err_to_name(migration));
+    }
     time_t today_now = time(NULL); struct tm today_tm; localtime_r(&today_now, &today_tm);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &today_tm);
     if (strcmp(g_store.verkaufDatum, today) != 0) {

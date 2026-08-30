@@ -29,6 +29,8 @@ static lv_obj_t *s_shutdown_modal;
 static lv_obj_t *s_shutdown_message;
 static bool s_shutdown_sync_pending;
 static uint32_t s_history_signature = UINT32_MAX;
+static CopWifiState s_rendered_wifi_state = (CopWifiState)-1;
+static GatewayReachability s_rendered_gateway_state = (GatewayReachability)-1;
 
 #define SIDEBAR_W   320
 #define HEADER_H     80
@@ -471,24 +473,30 @@ void screen_dashboard_refresh(void)
     if (wifi_state == COP_WIFI_CONNECTED) {
         snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI "  %s", g_store.wifiIp);
         set_label_text_if_changed(s_lbl_wifi, buf);
-        lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_SUCCESS), 0);
     } else {
         snprintf(buf, sizeof(buf), "WIFI: %s", cop_wifi_state_label(wifi_state));
         set_label_text_if_changed(s_lbl_wifi, buf);
-        uint32_t color = (wifi_state == COP_WIFI_CONNECTING ||
+    }
+    if (wifi_state != s_rendered_wifi_state) {
+        uint32_t color = wifi_state == COP_WIFI_CONNECTED ? CLR_SUCCESS :
+                         (wifi_state == COP_WIFI_CONNECTING ||
                           wifi_state == COP_WIFI_RECONNECTING) ? CLR_WARN :
                          wifi_state == COP_WIFI_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
         lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(color), 0);
+        s_rendered_wifi_state = wifi_state;
     }
     if (s_lbl_gateway) {
         GatewayReachability gateway_state = lora_gateway_state();
         snprintf(buf, sizeof(buf), "GATEWAY: %s",
                  lora_gateway_state_label(gateway_state));
         set_label_text_if_changed(s_lbl_gateway, buf);
-        uint32_t color = gateway_state == GATEWAY_REACHABLE ? CLR_SUCCESS :
-                         gateway_state == GATEWAY_CHECKING ? CLR_WARN :
-                         gateway_state == GATEWAY_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
-        lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(color), 0);
+        if (gateway_state != s_rendered_gateway_state) {
+            uint32_t color = gateway_state == GATEWAY_REACHABLE ? CLR_SUCCESS :
+                             gateway_state == GATEWAY_CHECKING ? CLR_WARN :
+                             gateway_state == GATEWAY_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
+            lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(color), 0);
+            s_rendered_gateway_state = gateway_state;
+        }
     }
 
     // History list (most-recent 5 entries) - proper-height rows. Do not

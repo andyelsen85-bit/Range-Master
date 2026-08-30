@@ -17,6 +17,19 @@ static lv_obj_t *s_player_list;
 static lv_obj_t *s_dd_add;
 static lv_obj_t *s_lbl_status;
 static lv_obj_t *s_bill_modal;
+static lv_obj_t *s_totals_label;
+
+typedef struct {
+    int spielerId;
+    lv_obj_t *creditLabel;
+    lv_obj_t *ammoLabel;
+    lv_obj_t *minusButton;
+    lv_obj_t *ammo12MinusButton;
+    lv_obj_t *ammo20MinusButton;
+} PlayerRowRefs;
+
+static PlayerRowRefs s_row_refs[MAX_PORTAL_SPIELER];
+static int s_row_ref_count;
 
 static void refresh_async(void *)
 {
@@ -28,6 +41,48 @@ static void request_refresh(void)
     // Rebuilding the list deletes the button that emitted the current event.
     // Defer that work until LVGL has finished dispatching the click callback.
     lv_async_call(refresh_async, NULL);
+}
+
+static void refresh_player_values(int spieler_id)
+{
+    KreditStand *stand = NULL;
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
+        if (g_store.kreditPlayerIds[i] == spieler_id) {
+            stand = &g_store.kredite[i];
+            break;
+        }
+    for (int i = 0; stand && i < s_row_ref_count; ++i) {
+        PlayerRowRefs *refs = &s_row_refs[i];
+        if (refs->spielerId != spieler_id) continue;
+        int available = stand->gewaehrt - stand->verbraucht;
+        char text[48];
+        snprintf(text, sizeof(text), "%d KREDITTER VERFUGBAR  (%d/%d VERBRAUCHT)",
+                 available, stand->verbraucht, stand->gewaehrt);
+        lv_label_set_text(refs->creditLabel, text);
+        lv_obj_set_style_text_color(refs->creditLabel,
+            available > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_DANGER), 0);
+        snprintf(text, sizeof(text), "CAL.12: %d     CAL.20: %d",
+                 store_munition_cal12(spieler_id), store_munition_cal20(spieler_id));
+        lv_label_set_text(refs->ammoLabel, text);
+        if (available > 0) lv_obj_clear_state(refs->minusButton, LV_STATE_DISABLED);
+        else lv_obj_add_state(refs->minusButton, LV_STATE_DISABLED);
+        if (store_munition_cal12(spieler_id) > 0)
+            lv_obj_clear_state(refs->ammo12MinusButton, LV_STATE_DISABLED);
+        else
+            lv_obj_add_state(refs->ammo12MinusButton, LV_STATE_DISABLED);
+        if (store_munition_cal20(spieler_id) > 0)
+            lv_obj_clear_state(refs->ammo20MinusButton, LV_STATE_DISABLED);
+        else
+            lv_obj_add_state(refs->ammo20MinusButton, LV_STATE_DISABLED);
+        break;
+    }
+    if (s_totals_label) {
+        char text[96];
+        snprintf(text, sizeof(text),
+                 "CREDITS                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
+                 g_store.verkaufCal12Total, g_store.verkaufCal20Total);
+        lv_label_set_text(s_totals_label, text);
+    }
 }
 
 typedef struct {
@@ -204,9 +259,14 @@ static void munition_cb(lv_event_t *e)
 {
     const KreditAction *action = (const KreditAction *)lv_event_get_user_data(e);
     if (!action || !store_queue_verkauf(action->spielerId, action->produktCode,
-                                        action->quantity))
+                                         action->quantity)) {
         lv_label_set_text(s_lbl_status, "VERKAUF KONNT NET GESPAECHERT GINN");
-    request_refresh();
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+        return;
+    }
+    lv_label_set_text(s_lbl_status, "VERKAAF GESPEICHERT");
+    lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
+    refresh_player_values(action->spielerId);
 }
 
 // ── Grant credit (+1) ─────────────────────────────────────────
@@ -220,7 +280,7 @@ static void grant_cb(lv_event_t *e)
         lv_label_set_text(s_lbl_status, "+1 KREDITT GESPAECHERT");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     }
-    request_refresh();
+    refresh_player_values(spieler_id);
 }
 
 // ── Revoke credit (-1, never below 0 available) ───────────────
@@ -234,7 +294,7 @@ static void revoke_cb(lv_event_t *e)
         lv_label_set_text(s_lbl_status, "-1 KREDITT GESPAECHERT");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     }
-    request_refresh();
+    refresh_player_values(spieler_id);
 }
 
 // ── Remove player from today's list ──────────────────────────
@@ -272,11 +332,13 @@ static void add_player_cb(lv_event_t *e)
 static void build_player_list(void)
 {
     lv_obj_clean(s_player_list);
+    s_row_ref_count = 0;
 
     int count = 0;
     // The canonical sales GET is a day aggregate (not player-attributed), so
     // expose its reconciled totals once above the locally attributed rows.
     lv_obj_t *columns = lv_label_create(s_player_list);
+    s_totals_label = columns;
     char columns_text[96];
     snprintf(columns_text, sizeof(columns_text),
              "CREDITS                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
@@ -385,6 +447,14 @@ static void build_player_list(void)
         lv_obj_set_style_text_color(bpl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(bpl);
 
+        PlayerRowRefs *refs = &s_row_refs[s_row_ref_count++];
+        refs->spielerId = sid;
+        refs->creditLabel = cred_lbl;
+        refs->ammoLabel = ammo_lbl;
+        refs->minusButton = btn_minus;
+        refs->ammo12MinusButton = NULL;
+        refs->ammo20MinusButton = NULL;
+
         const struct {
             const char *label;
             const char *product;
@@ -403,6 +473,8 @@ static void build_player_list(void)
             set_disabled_appearance(ammo);
             add_action(ammo, munition_cb, sid, ammo_actions[action].product,
                        ammo_actions[action].quantity);
+            if (action == 0) refs->ammo12MinusButton = ammo;
+            if (action == 2) refs->ammo20MinusButton = ammo;
             if (ammo_actions[action].quantity < 0 && ammo_actions[action].available <= 0)
                 lv_obj_add_state(ammo, LV_STATE_DISABLED);
             lv_obj_t *al = lv_label_create(ammo);

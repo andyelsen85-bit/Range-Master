@@ -123,7 +123,9 @@ static void exit_open_cb(lv_event_t *) {
 }
 static lv_obj_t *button(lv_obj_t *p, const char *text, lv_style_t *style) {
     lv_obj_t *b = lv_btn_create(p); lv_obj_add_style(b, style, 0);
-    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, text); lv_obj_center(l); return b;
+    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, text);
+    lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(l); return b;
 }
 static void rebuild(void) {
     if (!s_players) return;
@@ -149,10 +151,14 @@ static void rebuild(void) {
         lv_obj_set_style_bg_opa(row, LV_OPA_0, 0); lv_obj_set_style_border_width(row, 0, 0);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW); lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         char name[64]; snprintf(name, sizeof(name), "%s  %d.%02d", p->name, p->preisCent / 100, p->preisCent % 100);
-        lv_obj_t *l = lv_label_create(row); lv_label_set_text(l, name); lv_obj_set_flex_grow(l, 1);
+        lv_obj_t *l = lv_label_create(row); lv_label_set_text(l, name);
+        lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_set_flex_grow(l, 1);
         lv_obj_t *minus = button(row, "-", &g_style_btn_secondary); lv_obj_set_size(minus, 50, 44);
         lv_obj_add_event_cb(minus, product_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(i << 1));
-        char amount[8]; snprintf(amount, sizeof(amount), "%d", s_qty[i]); l = lv_label_create(row); lv_label_set_text(l, amount);
+        char amount[8]; snprintf(amount, sizeof(amount), "%d", s_qty[i]);
+        l = lv_label_create(row); lv_label_set_text(l, amount);
+        lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
         lv_obj_t *plus = button(row, "+", &g_style_btn_primary); lv_obj_set_size(plus, 50, 44);
         lv_obj_add_event_cb(plus, product_cb, LV_EVENT_CLICKED, (void *)(intptr_t)((i << 1) | 1));
     }
@@ -160,11 +166,14 @@ static void rebuild(void) {
 }
 lv_obj_t *screen_catering_create(void) {
     s_scr = lv_obj_create(NULL); lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H); screen_base_init(s_scr);
+    lv_obj_set_style_text_color(s_scr, lv_color_hex(CLR_TEXT), 0);
     lv_obj_t *title = lv_label_create(s_scr); lv_label_set_text(title, "CATERING"); lv_obj_add_style(title, &g_style_label_title, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
     s_players = lv_obj_create(s_scr); lv_obj_set_size(s_players, 300, 590); lv_obj_align(s_players, LV_ALIGN_LEFT_MID, 18, 30); lv_obj_add_style(s_players, &g_style_card, 0); lv_obj_set_flex_flow(s_players, LV_FLEX_FLOW_COLUMN);
     s_products = lv_obj_create(s_scr); lv_obj_set_size(s_products, 620, 590); lv_obj_align(s_products, LV_ALIGN_CENTER, 40, 30); lv_obj_add_style(s_products, &g_style_card, 0); lv_obj_set_flex_flow(s_products, LV_FLEX_FLOW_COLUMN);
     s_total = lv_label_create(s_scr); lv_obj_align(s_total, LV_ALIGN_BOTTOM_MID, 100, -36); lv_obj_set_style_text_font(s_total, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(s_total, lv_color_hex(CLR_TEXT), 0);
     s_status = lv_label_create(s_scr); lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 100, -8);
+    lv_obj_set_style_text_color(s_status, lv_color_hex(CLR_TEXT), 0);
     lv_obj_t *confirm = button(s_scr, "BESTAETEG VERKAAF", &g_style_btn_primary); lv_obj_set_size(confirm, 250, 70); lv_obj_align(confirm, LV_ALIGN_RIGHT_MID, -35, 30); lv_obj_add_event_cb(confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cancel = button(s_scr, "OFBRIECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, 250, 55); lv_obj_align(cancel, LV_ALIGN_RIGHT_MID, -35, 115); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); rebuild(); }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *exit = button(s_scr, "CATERING VERLOOSSEN", &g_style_btn_danger); lv_obj_set_size(exit, 250, 55); lv_obj_align(exit, LV_ALIGN_RIGHT_MID, -35, -100); lv_obj_add_event_cb(exit, exit_open_cb, LV_EVENT_CLICKED, NULL);
