@@ -4,6 +4,10 @@ export type Maschine = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
 export type Modus = 'NORMAL' | 'HARAKIRI' | 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4';
 export type Screen = 'dashboard' | 'start' | 'spiel' | 'einstellungen' | 'resultate' | 'geschichte' | 'kredite' | 'spillerverwaltung';
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
+export const AUTO_SYNC_DEFAULT_SECONDS = 300;
+export const BILLING_SYNC_MIN_SECONDS = 20;
+export const BILLING_SYNC_MAX_SECONDS = 30;
+export const BILLING_SYNC_DEFAULT_SECONDS = 30;
 
 export interface Spieler {
   id: number;
@@ -232,6 +236,9 @@ interface Settings {
   kioskPinSalt: string | null;
   kioskFailedAttempts: number;
   kioskLockoutUntil: number | null;
+  autoSyncEnabled: boolean;
+  autoSyncSeconds: number;
+  billingSyncSeconds: number;
 }
 
 interface GameState extends Settings {
@@ -266,6 +273,8 @@ interface GameState extends Settings {
 
   syncStatus: SyncStatus;
   lastSync: string | null;
+  lastFullSync: string | null;
+  lastBillingSync: string | null;
 
   // Local game history (last 50, persisted)
   gameHistory: FinishedGame[];
@@ -310,9 +319,11 @@ interface GameState extends Settings {
   ofbriechenSpiel: () => boolean;
   werfenTaube: () => void;
   setApiSettings: (url: string, key: string) => void;
+  setSyncSettings: (enabled: boolean, fullSeconds: number, billingSeconds: number) => boolean;
   /** Create a new local player (negative id) and queue them for portal upload on next sync */
   addLocalSpieler: (name: string) => PortalSpieler;
   syncAllPending: () => Promise<void>;
+  syncBillingPending: () => Promise<void>;
   ladeSpielerVomPortal: () => Promise<void>;
   getAktivenSpieler: () => Spieler | undefined;
   saveSettings: () => void;
@@ -511,6 +522,7 @@ function assignPostenToSpieler(spieler: Spieler[]): Spieler[] {
 // ─── localStorage persistence ─────────────────────────────────────────────────
 
 const SETTINGS_KEY = 'rangemaster-emulator-settings';
+const SYNC_SETTINGS_KEY = 'rangemaster-emulator-sync-settings';
 const PENDING_KEY = 'rangemaster-pending-games';
 const CACHED_SPIELER_KEY = 'rangemaster-cached-spieler';
 const HISTORY_KEY = 'rangemaster-game-history';
@@ -740,15 +752,62 @@ function loadSettings(): Partial<Settings> {
   }
 }
 
-function saveToStorage(settings: Omit<Settings, 'produkte'> & Partial<Pick<Settings, 'produkte'>>) {
+function saveToStorage(settings: Partial<Settings>) {
   try {
     // Legacy settings actions only update game/network preferences. Retain the
     // independently edited catalogue instead of accidentally dropping it.
+    const existing = loadSettings();
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      ...existing,
       ...settings,
       produkte: settings.produkte ?? normalizeProdukte(loadSettings().produkte),
     }));
   } catch {}
+}
+
+function loadSyncSettings(): Partial<Pick<Settings, 'autoSyncEnabled' | 'autoSyncSeconds' | 'billingSyncSeconds'>> {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SYNC_SETTINGS_KEY) : null;
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSyncSettings(enabled: boolean, fullSeconds: number, billingSeconds: number) {
+  try {
+    localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify({
+      autoSyncEnabled: enabled,
+      autoSyncSeconds: fullSeconds,
+      billingSyncSeconds: billingSeconds,
+    }));
+  } catch {}
+}
+
+type SyncKind = 'full' | 'billing';
+let activeSync: Promise<void> | null = null;
+let queuedFullSync = false;
+let queuedBillingSync = false;
+
+async function runSerializedSync(kind: SyncKind, execute: (kind: SyncKind) => Promise<void>) {
+  if (activeSync) {
+    if (kind === 'full') queuedFullSync = true;
+    else queuedBillingSync = true;
+    return activeSync;
+  }
+
+  activeSync = execute(kind).finally(() => {
+    activeSync = null;
+    if (queuedFullSync) {
+      queuedFullSync = false;
+      queuedBillingSync = false;
+      window.setTimeout(() => void useGameStore.getState().syncAllPending(), 0);
+    } else if (queuedBillingSync) {
+      queuedBillingSync = false;
+      window.setTimeout(() => void useGameStore.getState().syncBillingPending(), 0);
+    }
+  });
+  return activeSync;
 }
 
 function loadPendingGames(): PendingGame[] {
@@ -820,6 +879,7 @@ function normalizeCustomSequenzen(
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 const saved = loadSettings();
+const savedSyncSettings = loadSyncSettings();
 const savedVerkaufsReport = loadVerkaufsReport();
 
 const INIT_SPIELER: Spieler[] = [];
@@ -844,6 +904,17 @@ export const useGameStore = create<GameState>((set, get) => {
   const kioskMode = saved.kioskMode ?? 'GAME';
   const kioskPinHash = saved.kioskPinHash ?? null;
   const kioskPinSalt = saved.kioskPinSalt ?? null;
+  const persistedAutoSyncEnabled = savedSyncSettings.autoSyncEnabled ?? saved.autoSyncEnabled;
+  const persistedAutoSyncSeconds = savedSyncSettings.autoSyncSeconds ?? saved.autoSyncSeconds;
+  const persistedBillingSyncSeconds = savedSyncSettings.billingSyncSeconds ?? saved.billingSyncSeconds;
+  const autoSyncEnabled = persistedAutoSyncEnabled ?? true;
+  const autoSyncSeconds = Number.isInteger(persistedAutoSyncSeconds) &&
+    (persistedAutoSyncSeconds ?? 0) >= 10 && (persistedAutoSyncSeconds ?? 0) <= 86400
+      ? persistedAutoSyncSeconds! : AUTO_SYNC_DEFAULT_SECONDS;
+  const billingSyncSeconds = Number.isInteger(persistedBillingSyncSeconds) &&
+    (persistedBillingSyncSeconds ?? 0) >= BILLING_SYNC_MIN_SECONDS &&
+    (persistedBillingSyncSeconds ?? 0) <= BILLING_SYNC_MAX_SECONDS
+      ? persistedBillingSyncSeconds! : BILLING_SYNC_DEFAULT_SECONDS;
   let kioskFailedAttempts = saved.kioskFailedAttempts ?? 0;
   let kioskLockoutUntil = saved.kioskLockoutUntil ?? null;
 
@@ -867,6 +938,9 @@ export const useGameStore = create<GameState>((set, get) => {
     kioskPinSalt,
     kioskFailedAttempts,
     kioskLockoutUntil,
+    autoSyncEnabled,
+    autoSyncSeconds,
+    billingSyncSeconds,
 
     // Volatile
     screen: 'dashboard',
@@ -914,6 +988,8 @@ export const useGameStore = create<GameState>((set, get) => {
 
     syncStatus: 'idle',
     lastSync: null,
+    lastFullSync: null,
+    lastBillingSync: null,
 
     saveSettings: () => {
       const s = get();
@@ -930,7 +1006,11 @@ export const useGameStore = create<GameState>((set, get) => {
         kioskPinSalt: s.kioskPinSalt,
         kioskFailedAttempts: s.kioskFailedAttempts,
         kioskLockoutUntil: s.kioskLockoutUntil,
+        autoSyncEnabled: s.autoSyncEnabled,
+        autoSyncSeconds: s.autoSyncSeconds,
+        billingSyncSeconds: s.billingSyncSeconds,
       });
+      saveSyncSettings(s.autoSyncEnabled, s.autoSyncSeconds, s.billingSyncSeconds);
     },
 
     setScreen: (screen) => set({ screen }),
@@ -1377,6 +1457,38 @@ export const useGameStore = create<GameState>((set, get) => {
       set({ apiUrl, apiKey });
       const s = get();
       saveToStorage({ modus: s.modus, maschinenAktiv: s.maschinenAktiv, apiUrl, apiKey, customSequenzen: s.customSequenzen, customLaeufe: s.customLaeufe, kioskMode: s.kioskMode, kioskPinHash: s.kioskPinHash, kioskPinSalt: s.kioskPinSalt, kioskFailedAttempts: s.kioskFailedAttempts, kioskLockoutUntil: s.kioskLockoutUntil });
+    },
+
+    setSyncSettings: (enabled, fullSeconds, billingSeconds) => {
+      if (!Number.isInteger(fullSeconds) || fullSeconds < 10 || fullSeconds > 86400 ||
+          !Number.isInteger(billingSeconds) ||
+          billingSeconds < BILLING_SYNC_MIN_SECONDS ||
+          billingSeconds > BILLING_SYNC_MAX_SECONDS) return false;
+      set({
+        autoSyncEnabled: enabled,
+        autoSyncSeconds: fullSeconds,
+        billingSyncSeconds,
+      });
+      const current = get();
+      saveToStorage({
+        modus: current.modus,
+        maschinenAktiv: current.maschinenAktiv,
+        apiUrl: current.apiUrl,
+        apiKey: current.apiKey,
+        customSequenzen: current.customSequenzen,
+        customLaeufe: current.customLaeufe,
+        produkte: current.produkte,
+        kioskMode: current.kioskMode,
+        kioskPinHash: current.kioskPinHash,
+        kioskPinSalt: current.kioskPinSalt,
+        kioskFailedAttempts: current.kioskFailedAttempts,
+        kioskLockoutUntil: current.kioskLockoutUntil,
+        autoSyncEnabled: enabled,
+        autoSyncSeconds: fullSeconds,
+        billingSyncSeconds,
+      });
+      saveSyncSettings(enabled, fullSeconds, billingSeconds);
+      return true;
     },
 
     addLocalSpieler: (name) => {
@@ -1897,7 +2009,140 @@ export const useGameStore = create<GameState>((set, get) => {
       }
     },
 
-    syncAllPending: async () => {
+    syncBillingPending: async () => runSerializedSync('billing', async () => {
+      const state = get();
+      if (!state.apiUrl || !state.apiKey) {
+        set({ syncStatus: 'error' });
+        return;
+      }
+      set({ syncStatus: 'syncing' });
+      let hasError = false;
+      const headers = { 'Content-Type': 'application/json', 'x-api-key': state.apiKey };
+
+      try {
+        const credits = get().pendingKredite.filter(event => event.spielerId > 0);
+        if (credits.length) {
+          const response = await fetch(`${state.apiUrl}/api/sync/kredite`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ events: credits }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const submitted = new Set(credits.map(event => event.externalId));
+          set(current => {
+            const pendingKredite = current.pendingKredite.filter(event => !submitted.has(event.externalId));
+            savePendingKredite(pendingKredite);
+            return { pendingKredite };
+          });
+        }
+      } catch (error) {
+        console.error('Billing credits push failed:', error);
+        hasError = true;
+      }
+
+      try {
+        const sales = get().pendingVerkaeufe.filter(event => event.spielerId > 0);
+        if (sales.length) {
+          const response = await fetch(`${state.apiUrl}/api/sync/sales`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ events: sales }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const submitted = new Set(sales.map(event => event.externalId));
+          set(current => {
+            const pendingVerkaeufe = current.pendingVerkaeufe.filter(event => !submitted.has(event.externalId));
+            saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
+            return { pendingVerkaeufe };
+          });
+        }
+      } catch (error) {
+        console.error('Billing sales push failed:', error);
+        hasError = true;
+      }
+
+      try {
+        const payments = [...get().pendingPayments];
+        if (payments.length) {
+          const response = await fetch(`${state.apiUrl}/api/sync/payments`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              events: payments.map(({ externalId, spielerId, datum }) => ({
+                externalId, spielerId, datum,
+              })),
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json() as {
+            results: Array<{ externalId: string; status: string }>;
+          };
+          const byId = new Map(data.results.map(result => [result.externalId, result]));
+          const accepted: PaymentEvent[] = [];
+          const pendingPayments = get().pendingPayments.filter(payment => {
+            const status = byId.get(payment.externalId)?.status;
+            if (status === 'accepted' || status === 'skipped') {
+              accepted.push(payment);
+              return false;
+            }
+            return true;
+          });
+          savePendingPayments(pendingPayments);
+          set({ pendingPayments });
+
+          if (accepted.length) {
+            const current = get();
+            const kredite = { ...current.kredite };
+            const paidBillCache = { ...current.paidBillCache };
+            const retired = new Set<number>();
+            for (const payment of accepted) {
+              const bill = payment.coveredBillSnapshot ??
+                current.getProjectedDaySummary(payment.spielerId);
+              if (bill && payment.datum === current.verkaufDatum) {
+                paidBillCache[payment.spielerId] = {
+                  ...bill,
+                  lines: bill.lines.map(line => ({ ...line })),
+                  categorySubtotals: { ...bill.categorySubtotals },
+                  credit: { ...bill.credit },
+                  state: 'PAID',
+                  paymentExternalId: payment.externalId,
+                  paidAt: new Date().toISOString(),
+                };
+              }
+              if (payment.datum === current.kreditDatum && payment.datum === todayStr()) {
+                retired.add(payment.spielerId);
+                delete kredite[payment.spielerId];
+              }
+            }
+            const lineup = current.lineup.filter(entry => !retired.has(entry.spielerId));
+            saveKredite(current.kreditDatum, kredite);
+            savePaidBillCache(current.verkaufDatum, paidBillCache);
+            saveLineup(lineup);
+            set({ kredite, paidBillCache, lineup });
+          }
+        }
+      } catch (error) {
+        console.error('Billing payments push failed:', error);
+        hasError = true;
+      }
+
+      await get().ladeKredite();
+      await get().ladeVerkaeufe();
+      await get().ladeDaySummary();
+      const completedAt = new Date().toLocaleTimeString('de-LU', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      });
+      set({
+        syncStatus: hasError ? 'error' : 'success',
+        lastSync: completedAt,
+        lastBillingSync: completedAt,
+      });
+    }),
+
+    syncAllPending: async () => runSerializedSync('full', async () => {
       const state = get();
       if (!state.apiUrl || !state.apiKey) {
         set({ syncStatus: 'error' });
@@ -2243,8 +2488,11 @@ export const useGameStore = create<GameState>((set, get) => {
         lastSync: new Date().toLocaleTimeString('de-LU', {
           hour: '2-digit', minute: '2-digit', second: '2-digit',
         }),
+        lastFullSync: new Date().toLocaleTimeString('de-LU', {
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        }),
       });
-    },
+    }),
 
     setKioskMode: (mode) => {
       set({ kioskMode: mode });

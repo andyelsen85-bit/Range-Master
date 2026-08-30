@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { useGameStore, Maschine, CustomSequenz, CustomSequenzEintrag, MASCHINEN_LIST } from '@/store/gameStore';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  useGameStore, Maschine, CustomSequenz, CustomSequenzEintrag, MASCHINEN_LIST,
+  BILLING_SYNC_MIN_SECONDS, BILLING_SYNC_MAX_SECONDS,
+} from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import {
   ArrowLeft, Save, RefreshCw, CheckCircle2, AlertTriangle, GripVertical, Plus, X,
@@ -247,6 +250,12 @@ export function EinstellungenScreen() {
   const store = useGameStore();
   const [url, setUrl] = useState(store.apiUrl);
   const [key, setKey] = useState(store.apiKey);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(store.autoSyncEnabled);
+  const [fullSyncSeconds, setFullSyncSeconds] = useState(String(store.autoSyncSeconds));
+  const [billingSyncSeconds, setBillingSyncSeconds] = useState(String(store.billingSyncSeconds));
+  const fullSyncSecondsRef = useRef<HTMLInputElement>(null);
+  const billingSyncSecondsRef = useRef<HTMLInputElement>(null);
+  const [syncSettingsMessage, setSyncSettingsMessage] = useState('');
   const [activeTab, setActiveTab] = useState<'api' | 'produkte' | 'schanzen' | 'custom' | 'wifi' | 'bluetooth' | 'system' | 'kiosk' | 'daySummary'>('api');
 
   const [oldPin, setOldPin] = useState('');
@@ -261,6 +270,15 @@ export function EinstellungenScreen() {
   const testSync = async () => {
     save();
     await store.syncAllPending();
+  };
+
+  const saveSyncSettings = () => {
+    const fullSeconds = Number(fullSyncSecondsRef.current?.value ?? fullSyncSeconds);
+    const billingSeconds = Number(billingSyncSecondsRef.current?.value ?? billingSyncSeconds);
+    const saved = store.setSyncSettings(autoSyncEnabled, fullSeconds, billingSeconds);
+    setSyncSettingsMessage(saved
+      ? 'Cadencen gespäichert'
+      : `Feeler: Full 10–86400s · Billing ${BILLING_SYNC_MIN_SECONDS}–${BILLING_SYNC_MAX_SECONDS}s`);
   };
 
   return (
@@ -357,6 +375,57 @@ export function EinstellungenScreen() {
                   {store.syncStatus === 'syncing' && <><RefreshCw className="w-5 h-5 animate-spin" /> Verbënnt...</>}
                 </div>
               )}
+
+              <div className="border-t-2 border-border pt-5 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-bold uppercase tracking-wider">Automatesch Syncs</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Billing bleift séier, ouni de komplette Portal-Sync ze beschleunegen.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={autoSyncEnabled}
+                    onChange={event => setAutoSyncEnabled(event.target.checked)}
+                    className="h-6 w-6 accent-primary"
+                    aria-label="Automatesch Syncs aktivéieren"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Full Sync (Sekonnen)
+                    <input
+                      ref={fullSyncSecondsRef}
+                      type="number"
+                      min={10}
+                      max={86400}
+                      value={fullSyncSeconds}
+                      onChange={event => setFullSyncSeconds(event.target.value)}
+                      className="mt-2 w-full h-12 rounded-lg border-2 border-border bg-background px-3 font-mono text-foreground focus:border-primary focus:outline-none"
+                    />
+                  </label>
+                  <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Billing Sync (Sekonnen)
+                    <input
+                      ref={billingSyncSecondsRef}
+                      type="number"
+                      min={BILLING_SYNC_MIN_SECONDS}
+                      max={BILLING_SYNC_MAX_SECONDS}
+                      value={billingSyncSeconds}
+                      onChange={event => setBillingSyncSeconds(event.target.value)}
+                      className="mt-2 w-full h-12 rounded-lg border-2 border-border bg-background px-3 font-mono text-foreground focus:border-primary focus:outline-none"
+                    />
+                  </label>
+                </div>
+                <TouchButton variant="outline" className="h-11" onClick={saveSyncSettings}>
+                  {syncSettingsMessage || 'Cadencen späicheren'}
+                </TouchButton>
+                <div className="grid grid-cols-2 gap-3 text-xs font-mono text-muted-foreground">
+                  <span>Full: {store.lastFullSync ?? 'nach net'}</span>
+                  <span>Billing: {store.lastBillingSync ?? 'nach net'}</span>
+                </div>
+              </div>
             </div>
 
             {/* Last sync info */}

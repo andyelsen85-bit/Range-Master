@@ -36,6 +36,9 @@
 #define AUTO_SYNC_MIN_SECONDS 10u
 #define AUTO_SYNC_MAX_SECONDS 86400u
 #define AUTO_SYNC_DEFAULT_SECONDS 300u
+#define BILLING_SYNC_MIN_SECONDS 20u
+#define BILLING_SYNC_MAX_SECONDS 30u
+#define BILLING_SYNC_DEFAULT_SECONDS 30u
 // Current API tokens are "sha256:" plus 64 hex characters. Keep headroom for
 // future opaque revision-token formats and the terminating NUL.
 #define CACHE_MANIFEST_TOKEN_LEN 96
@@ -96,6 +99,7 @@ typedef enum {
     SYNC_REQUEST_MANUAL = 1,
     SYNC_REQUEST_BOOT,
     SYNC_REQUEST_AUTO,
+    SYNC_REQUEST_BILLING_AUTO,
 } SyncRequestSource;
 
 typedef struct {
@@ -339,6 +343,7 @@ typedef struct {
     char    wifiPass[MAX_PASS_LEN];
     bool    autoSyncEnabled;
     uint32_t autoSyncSeconds;
+    uint32_t billingSyncSeconds;
     CustomSequenzEintrag customSequenzen[4][CUSTOM_SEQ_MAX];
     int      customSequenzLen[4];
     int      customLaeufe[4];        // 1 or 2
@@ -487,6 +492,7 @@ bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_l
 bool store_sync(void);
 bool store_sync_is_queued_or_running(void);
 bool store_set_auto_sync(bool enabled, uint32_t seconds);
+bool store_set_billing_sync(uint32_t seconds);
 void store_get_sync_ui_state(SyncUiState *state);
 void store_sync_set_ui_ready(void);
 /** Worker-only: acquire/release a bounded UI publication window. */

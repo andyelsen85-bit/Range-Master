@@ -20,6 +20,7 @@ export const terminalConfigurationSchema = z.object({
   wifiPass: boundedString(128),
   autoSyncEnabled: z.boolean(),
   autoSyncSeconds: z.number().int().min(10).max(86400),
+  billingSyncSeconds: z.number().int().min(20).max(30).default(30),
   clickSoundEnabled: z.boolean(),
   customSequenzen: z.array(z.array(z.object({
     maschine: z.number().int().min(0).max(7),

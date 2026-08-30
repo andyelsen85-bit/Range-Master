@@ -30,6 +30,8 @@ esp_err_t http_fetch_bill_day_summary(void);
 
 /** Run the full sync sequence (push + pull). */
 esp_err_t http_sync_all(void);
+/** Push billing outboxes, then refresh today's credits, sales, and bills. */
+esp_err_t http_sync_billing(void);
 
 /** Copy the last bounded, credential-free HTTP diagnostic. */
 void http_sync_copy_last_error(char *out, size_t out_len);

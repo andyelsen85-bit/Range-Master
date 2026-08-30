@@ -31,6 +31,7 @@ static lv_obj_t *s_lbl_machine_test_status;
 static bool s_machine_test_pending;
 static lv_obj_t *s_auto_sync_switch;
 static lv_obj_t *s_auto_sync_seconds;
+static lv_obj_t *s_billing_sync_seconds;
 static lv_obj_t *s_auto_sync_feedback;
 static lv_obj_t *s_config_backup_status;
 static lv_obj_t *s_catering_pin;
@@ -943,6 +944,7 @@ static bool read_auto_sync_seconds(uint32_t *seconds)
 
 static void auto_sync_changed(lv_event_t *e)
 {
+    (void)e;
     uint32_t seconds;
     if (!read_auto_sync_seconds(&seconds)) {
         lv_label_set_text(s_auto_sync_feedback, "10..86400 SEKONNEN NOUTWENDIG");
@@ -950,8 +952,20 @@ static void auto_sync_changed(lv_event_t *e)
         return;
     }
     bool enabled = lv_obj_has_state(s_auto_sync_switch, LV_STATE_CHECKED);
+    const char *billing_text = s_billing_sync_seconds
+        ? lv_textarea_get_text(s_billing_sync_seconds) : "";
+    char *billing_end = NULL;
+    unsigned long billing_seconds = strtoul(billing_text, &billing_end, 10);
+    if (!billing_text[0] || *billing_end ||
+        billing_seconds < BILLING_SYNC_MIN_SECONDS ||
+        billing_seconds > BILLING_SYNC_MAX_SECONDS) {
+        lv_label_set_text(s_auto_sync_feedback, "BILLING: 20..30 SEKONNEN NOUTWENDIG");
+        lv_obj_set_style_text_color(s_auto_sync_feedback, lv_color_hex(CLR_DANGER), 0);
+        return;
+    }
     store_set_auto_sync(enabled, seconds);
-    lv_label_set_text(s_auto_sync_feedback, "AUTO SYNC GESPEICHERT");
+    store_set_billing_sync((uint32_t)billing_seconds);
+    lv_label_set_text(s_auto_sync_feedback, "FULL + BILLING SYNC GESPEICHERT");
     lv_obj_set_style_text_color(s_auto_sync_feedback, lv_color_hex(CLR_SUCCESS), 0);
 }
 
@@ -1014,17 +1028,17 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_obj_add_event_cb(snd_sw, click_sound_sw_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *sync_row = lv_obj_create(parent);
-    lv_obj_set_size(sync_row, LV_PCT(100), 64);
+    lv_obj_set_size(sync_row, LV_PCT(100), 112);
     lv_obj_set_style_bg_color(sync_row, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_width(sync_row, 0, 0);
     lv_obj_set_style_radius(sync_row, 8, 0);
     lv_obj_set_style_pad_hor(sync_row, 12, 0);
-    lv_obj_set_flex_flow(sync_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_flow(sync_row, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(sync_row, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(sync_row, 16, 0);
     lv_obj_t *sync_label = lv_label_create(sync_row);
-    lv_label_set_text(sync_label, "AUTO SYNC");
+    lv_label_set_text(sync_label, "AUTO FULL SYNC");
     lv_obj_set_style_text_color(sync_label, lv_color_hex(CLR_TEXT), 0);
     s_auto_sync_switch = lv_switch_create(sync_row);
     if (g_store.autoSyncEnabled) lv_obj_add_state(s_auto_sync_switch, LV_STATE_CHECKED);
@@ -1040,11 +1054,27 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_obj_t *seconds_label = lv_label_create(sync_row);
     lv_label_set_text(seconds_label, "SEK. (10..86400)");
     lv_obj_set_style_text_color(seconds_label, lv_color_hex(CLR_MUTED), 0);
+    lv_obj_t *billing_label = lv_label_create(sync_row);
+    lv_label_set_text(billing_label, "BILLING SYNC");
+    lv_obj_set_style_text_color(billing_label, lv_color_hex(CLR_TEXT), 0);
+    s_billing_sync_seconds = lv_textarea_create(sync_row);
+    lv_obj_set_size(s_billing_sync_seconds, 100, 44);
+    lv_textarea_set_one_line(s_billing_sync_seconds, true);
+    lv_textarea_set_accepted_chars(s_billing_sync_seconds, "0123456789");
+    lv_textarea_set_max_length(s_billing_sync_seconds, 2);
+    snprintf(seconds_text, sizeof(seconds_text), "%lu",
+             (unsigned long)g_store.billingSyncSeconds);
+    lv_textarea_set_text(s_billing_sync_seconds, seconds_text);
+    lv_obj_t *billing_seconds_label = lv_label_create(sync_row);
+    lv_label_set_text(billing_seconds_label, "SEK. (20..30)");
+    lv_obj_set_style_text_color(billing_seconds_label, lv_color_hex(CLR_MUTED), 0);
     s_auto_sync_feedback = lv_label_create(parent);
     lv_label_set_text(s_auto_sync_feedback, "");
     lv_obj_add_event_cb(s_auto_sync_switch, auto_sync_changed,
                         LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_auto_sync_seconds, auto_sync_changed,
+                        LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(s_billing_sync_seconds, auto_sync_changed,
                         LV_EVENT_VALUE_CHANGED, NULL);
 
     // ── Firmware / board info ─────────────────────────────────
@@ -1198,6 +1228,13 @@ lv_obj_t *screen_einstellungen_create(void)
             lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
         }, LV_EVENT_FOCUSED, NULL);
     }
+    if (s_billing_sync_seconds) {
+        lv_obj_add_event_cb(s_billing_sync_seconds, [](lv_event_t *e) {
+            lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_NUMBER);
+            lv_keyboard_set_textarea(s_kb, s_billing_sync_seconds);
+            lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_FOCUSED, NULL);
+    }
     if (s_catering_pin) {
         lv_obj_add_event_cb(s_catering_pin, [](lv_event_t *) {
             lv_keyboard_set_mode(s_kb, LV_KEYBOARD_MODE_NUMBER);
@@ -1241,6 +1278,12 @@ void screen_einstellungen_refresh(void)
         snprintf(value, sizeof(value), "%lu",
                  (unsigned long)g_store.autoSyncSeconds);
         set_textarea_text_if_changed(s_auto_sync_seconds, value);
+    }
+    if (s_billing_sync_seconds) {
+        char value[12];
+        snprintf(value, sizeof(value), "%lu",
+                 (unsigned long)g_store.billingSyncSeconds);
+        set_textarea_text_if_changed(s_billing_sync_seconds, value);
     }
     lv_obj_t *price_inputs[] = {s_ta_price_credit, s_ta_price_cal12, s_ta_price_cal20};
     const char *price_ids[] = {"GAME_CREDIT", "AMMO_CAL12", "AMMO_CAL20"};

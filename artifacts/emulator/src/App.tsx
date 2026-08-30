@@ -14,6 +14,9 @@ import { SimControls } from '@/components/SimControls';
 export default function App() {
   const screen = useGameStore(s => s.screen);
   const kioskMode = useGameStore(s => s.kioskMode);
+  const autoSyncEnabled = useGameStore(s => s.autoSyncEnabled);
+  const autoSyncSeconds = useGameStore(s => s.autoSyncSeconds);
+  const billingSyncSeconds = useGameStore(s => s.billingSyncSeconds);
   const [scale, setScale] = useState(1);
 
   // Auto-scale to fit window while preserving exactly 1280x800 layout
@@ -28,6 +31,24 @@ export default function App() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useEffect(() => {
+    if (!autoSyncEnabled) return;
+    const timer = window.setInterval(() => {
+      const store = useGameStore.getState();
+      if (store.apiUrl && store.apiKey) void store.syncAllPending();
+    }, autoSyncSeconds * 1000);
+    return () => window.clearInterval(timer);
+  }, [autoSyncEnabled, autoSyncSeconds]);
+
+  useEffect(() => {
+    if (!autoSyncEnabled) return;
+    const timer = window.setInterval(() => {
+      const store = useGameStore.getState();
+      if (store.apiUrl && store.apiKey) void store.syncBillingPending();
+    }, billingSyncSeconds * 1000);
+    return () => window.clearInterval(timer);
+  }, [autoSyncEnabled, billingSyncSeconds]);
   
   return (
     <div className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden">

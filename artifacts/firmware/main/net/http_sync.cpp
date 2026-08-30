@@ -168,6 +168,7 @@ typedef struct {
     char wifiPass[MAX_PASS_LEN];
     bool autoSyncEnabled;
     uint32_t autoSyncSeconds;
+    uint32_t billingSyncSeconds;
     bool clickSoundEnabled;
     CustomSequenzEintrag customSequenzen[4][CUSTOM_SEQ_MAX];
     int customSequenzLen[4];
@@ -217,6 +218,7 @@ static cJSON *config_snapshot_to_json(void)
     cJSON_AddStringToObject(cfg, "wifiPass", g_store.wifiPass);
     cJSON_AddBoolToObject(cfg, "autoSyncEnabled", g_store.autoSyncEnabled);
     cJSON_AddNumberToObject(cfg, "autoSyncSeconds", g_store.autoSyncSeconds);
+    cJSON_AddNumberToObject(cfg, "billingSyncSeconds", g_store.billingSyncSeconds);
     cJSON_AddBoolToObject(cfg, "clickSoundEnabled", g_store.clickSoundEnabled);
     cJSON *all_custom = cJSON_AddArrayToObject(cfg, "customSequenzen");
     for (int c = 0; c < 4; ++c) {
@@ -313,6 +315,7 @@ static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
     cJSON *machines = cJSON_GetObjectItemCaseSensitive(cfg, "maschinenAktiv");
     cJSON *auto_enabled = cJSON_GetObjectItemCaseSensitive(cfg, "autoSyncEnabled");
     cJSON *auto_seconds = cJSON_GetObjectItemCaseSensitive(cfg, "autoSyncSeconds");
+    cJSON *billing_seconds = cJSON_GetObjectItemCaseSensitive(cfg, "billingSyncSeconds");
     cJSON *sound = cJSON_GetObjectItemCaseSensitive(cfg, "clickSoundEnabled");
     cJSON *sequences = cJSON_GetObjectItemCaseSensitive(cfg, "customSequenzen");
     cJSON *runs = cJSON_GetObjectItemCaseSensitive(cfg, "customLaeufe");
@@ -321,6 +324,9 @@ static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
         !cJSON_IsBool(auto_enabled) || !cJSON_IsNumber(auto_seconds) ||
         auto_seconds->valuedouble < AUTO_SYNC_MIN_SECONDS ||
         auto_seconds->valuedouble > AUTO_SYNC_MAX_SECONDS ||
+        (billing_seconds && (!cJSON_IsNumber(billing_seconds) ||
+         billing_seconds->valuedouble < BILLING_SYNC_MIN_SECONDS ||
+         billing_seconds->valuedouble > BILLING_SYNC_MAX_SECONDS)) ||
         !cJSON_IsBool(sound) || !cJSON_IsArray(sequences) ||
         cJSON_GetArraySize(sequences) != 4 || !cJSON_IsArray(runs) ||
         cJSON_GetArraySize(runs) != 4) return false;
@@ -332,6 +338,9 @@ static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
     out->modus = (Modus)modus->valueint;
     out->autoSyncEnabled = cJSON_IsTrue(auto_enabled);
     out->autoSyncSeconds = (uint32_t)auto_seconds->valuedouble;
+    out->billingSyncSeconds = billing_seconds
+        ? (uint32_t)billing_seconds->valuedouble
+        : BILLING_SYNC_DEFAULT_SECONDS;
     out->clickSoundEnabled = cJSON_IsTrue(sound);
     for (int i = 0; i < MASCHINE_COUNT; ++i) {
         cJSON *active = cJSON_GetArrayItem(machines, i);
@@ -380,6 +389,7 @@ static void apply_config_snapshot(const TerminalConfigSnapshot *cfg)
     snprintf(g_store.wifiPass, sizeof(g_store.wifiPass), "%s", cfg->wifiPass);
     g_store.autoSyncEnabled = cfg->autoSyncEnabled;
     g_store.autoSyncSeconds = cfg->autoSyncSeconds;
+    g_store.billingSyncSeconds = cfg->billingSyncSeconds;
     g_store.clickSoundEnabled = cfg->clickSoundEnabled;
     memcpy(g_store.customSequenzen, cfg->customSequenzen, sizeof(g_store.customSequenzen));
     memcpy(g_store.customSequenzLen, cfg->customSequenzLen, sizeof(g_store.customSequenzLen));
@@ -1592,6 +1602,45 @@ esp_err_t http_pull_verkaeufe(void)
     cJSON_Delete(root); game_store_save();
     if (!offline_cache_save(OFFLINE_CACHE_SALES)) return ESP_FAIL;
     return ESP_OK;
+}
+
+esp_err_t http_sync_billing(void)
+{
+    portENTER_CRITICAL(&s_error_lock);
+    s_last_error[0] = '\0';
+    portEXIT_CRITICAL(&s_error_lock);
+    if (!cop_wifi_is_connected()) {
+        set_http_error("SYNC", "billing", "WiFi not connected");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "Starting billing sync...");
+    esp_err_t overall = ESP_OK;
+    esp_err_t err = http_push_kredit_events();
+    if (err != ESP_OK) overall = err;
+    err = http_push_verkauf_events();
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
+    err = http_push_payment_events();
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
+    err = http_pull_kredite();
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
+    err = http_pull_verkaeufe();
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
+    err = http_fetch_bill_day_summary();
+    if (err != ESP_OK && overall == ESP_OK) overall = err;
+
+    if (overall == ESP_OK) {
+        TickType_t commit_started;
+        if (!sync_commit_begin("billing-sync-metadata", &commit_started))
+            return ESP_ERR_TIMEOUT;
+        g_store.lastSuccessfulSyncAt = time(NULL);
+        g_store.offlineCacheHealthy = true;
+        sync_commit_end("billing-sync-metadata", commit_started);
+        (void)offline_cache_save_metadata();
+    }
+    ESP_LOGI(TAG, "Billing sync complete (%s)",
+             overall == ESP_OK ? "success" : "partial failure");
+    return overall;
 }
 
 // ── http_sync_all ─────────────────────────────────────────────

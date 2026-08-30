@@ -20,6 +20,7 @@ const configuration = terminalConfigurationSchema.parse({
   wifiPass: "wifi-secret",
   autoSyncEnabled: true,
   autoSyncSeconds: 300,
+  billingSyncSeconds: 30,
   clickSoundEnabled: false,
   customSequenzen: [
     [{ maschine: 0, isDoublette: true, partner: 1, delayMs: 500 }],
@@ -52,8 +53,15 @@ test("restore codes are fixed-length and only persisted as hashes", () => {
 
 test("configuration schema rejects fields outside firmware bounds", () => {
   assert.equal(terminalConfigurationSchema.safeParse({ ...configuration, autoSyncSeconds: 9 }).success, false);
+  assert.equal(terminalConfigurationSchema.safeParse({ ...configuration, billingSyncSeconds: 19 }).success, false);
+  assert.equal(terminalConfigurationSchema.safeParse({ ...configuration, billingSyncSeconds: 31 }).success, false);
   assert.equal(terminalConfigurationSchema.safeParse({
     ...configuration,
     customSequenzen: [[{ maschine: 0, isDoublette: true, partner: 1, delayMs: 10001 }], [], [], []],
   }).success, false);
+});
+
+test("legacy configuration defaults the billing cadence to 30 seconds", () => {
+  const { billingSyncSeconds: _billingSyncSeconds, ...legacy } = configuration;
+  assert.equal(terminalConfigurationSchema.parse(legacy).billingSyncSeconds, 30);
 });

@@ -31,6 +31,9 @@ static const char *TAG = "game_store";
 static_assert(AUTO_SYNC_MIN_SECONDS <= AUTO_SYNC_DEFAULT_SECONDS &&
               AUTO_SYNC_DEFAULT_SECONDS <= AUTO_SYNC_MAX_SECONDS,
               "Auto-sync default must remain within persisted validation bounds");
+static_assert(BILLING_SYNC_MIN_SECONDS <= BILLING_SYNC_DEFAULT_SECONDS &&
+              BILLING_SYNC_DEFAULT_SECONDS <= BILLING_SYNC_MAX_SECONDS,
+              "Billing-sync default must remain within persisted validation bounds");
 static_assert(MAX_KREDIT_EVENTS > 0,
               "Credit event persistence requires a non-empty outbox");
 static_assert(sizeof(((KreditEvent *)0)->externalId) >= 16,
@@ -2165,11 +2168,13 @@ static portMUX_TYPE s_sync_request_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_boot_sync_requested = false;
 static bool s_boot_sync_consumed = false;
 static bool s_sync_pending = false;
+static bool s_full_sync_deferred = false;
 static bool s_sync_ui_ready = false;
 static bool s_sync_ui_paused = false;
 static bool s_sync_commit_requested = false;
 static uint32_t s_sync_publication_generation = 0;
 static TickType_t s_next_auto_sync;
+static TickType_t s_next_billing_sync;
 
 typedef enum {
     SYNC_REQUEST_ACCEPTED,
@@ -2185,6 +2190,7 @@ static const char *sync_source_label(SyncRequestSource source)
     switch (source) {
     case SYNC_REQUEST_BOOT: return "boot";
     case SYNC_REQUEST_AUTO: return "auto";
+    case SYNC_REQUEST_BILLING_AUTO: return "billing-auto";
     default: return "manual";
     }
 }
@@ -2226,22 +2232,29 @@ void store_create_workers(void)
                 portENTER_CRITICAL(&s_sync_request_lock);
                 ui_ready = s_sync_ui_ready;
                 portEXIT_CRITICAL(&s_sync_request_lock);
-                bool due = g_store.autoSyncEnabled &&
-                           (int32_t)(xTaskGetTickCount() - s_next_auto_sync) >= 0;
-                if (ui_ready && due && cop_wifi_is_connected() &&
-                    !store_sync_is_queued_or_running()) {
-                    store_sync_request(SYNC_REQUEST_AUTO);
+                TickType_t now = xTaskGetTickCount();
+                bool full_due = g_store.autoSyncEnabled &&
+                                (int32_t)(now - s_next_auto_sync) >= 0;
+                bool billing_due = g_store.autoSyncEnabled &&
+                                   (int32_t)(now - s_next_billing_sync) >= 0;
+                if (ui_ready && (full_due || billing_due) &&
+                    cop_wifi_is_connected() && !store_sync_is_queued_or_running()) {
+                    store_sync_request(full_due ? SYNC_REQUEST_AUTO
+                                                : SYNC_REQUEST_BILLING_AUTO);
                 }
                 continue;
             }
             SyncRequestSource source = (SyncRequestSource)dummy;
+            uint32_t interval = source == SYNC_REQUEST_BILLING_AUTO
+                ? g_store.billingSyncSeconds : g_store.autoSyncSeconds;
             ESP_LOGI(TAG, "Sync worker started source=%s interval=%us",
                      sync_source_label(source),
-                     (unsigned)g_store.autoSyncSeconds);
+                     (unsigned)interval);
             char sync_error[sizeof(g_store.syncError)] = {};
             // SYNC_RUNNING is deliberately not a UI pause. Individual pull
             // publications request and acknowledge their own tiny windows.
-            esp_err_t err = http_sync_all();
+            esp_err_t err = source == SYNC_REQUEST_BILLING_AUTO
+                ? http_sync_billing() : http_sync_all();
             if (err != ESP_OK && !sync_error[0]) {
                 http_sync_copy_last_error(sync_error, sizeof(sync_error));
                 if (!sync_error[0])
@@ -2253,10 +2266,17 @@ void store_create_workers(void)
             snprintf(g_store.syncError, sizeof(g_store.syncError), "%s",
                      sync_error);
             s_sync_pending = false;
+            bool run_deferred_full = s_full_sync_deferred;
+            s_full_sync_deferred = false;
             s_sync_ui_paused = false;
             s_sync_commit_requested = false;
-            s_next_auto_sync = xTaskGetTickCount() +
-                pdMS_TO_TICKS(g_store.autoSyncSeconds * 1000u);
+            TickType_t completed_at = xTaskGetTickCount();
+            if (source == SYNC_REQUEST_BILLING_AUTO)
+                s_next_billing_sync = completed_at +
+                    pdMS_TO_TICKS(g_store.billingSyncSeconds * 1000u);
+            else
+                s_next_auto_sync = completed_at +
+                    pdMS_TO_TICKS(g_store.autoSyncSeconds * 1000u);
             ++s_sync_publication_generation;
             uint32_t generation = s_sync_publication_generation;
             portEXIT_CRITICAL(&s_sync_request_lock);
@@ -2265,9 +2285,11 @@ void store_create_workers(void)
                      sync_source_label(source),
                      err == ESP_OK ? "success" : "error",
                      (unsigned)generation);
+            if (run_deferred_full)
+                (void)store_sync_request(SYNC_REQUEST_MANUAL);
             queue_boot_sync_if_pending();
         }
-    }, "sync_w", 16384, sync_queue, 5, NULL,
+    }, "sync_w", 24576, sync_queue, 5, NULL,
        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (task_created != pdPASS) {
         vQueueDelete(sync_queue);
@@ -2280,6 +2302,8 @@ void store_create_workers(void)
     s_sync_queue = sync_queue;
     s_next_auto_sync = xTaskGetTickCount() +
         pdMS_TO_TICKS(g_store.autoSyncSeconds * 1000u);
+    s_next_billing_sync = xTaskGetTickCount() +
+        pdMS_TO_TICKS(g_store.billingSyncSeconds * 1000u);
     portEXIT_CRITICAL(&s_sync_request_lock);
 
     ESP_LOGI(TAG, "Store workers created. Internal RAM remaining: %u",
@@ -2580,9 +2604,13 @@ static SyncRequestResult store_sync_request(SyncRequestSource source)
 
     portENTER_CRITICAL(&s_sync_request_lock);
     if (s_sync_pending) {
+        if (source != SYNC_REQUEST_BILLING_AUTO)
+            s_full_sync_deferred = true;
         portEXIT_CRITICAL(&s_sync_request_lock);
+        uint32_t interval = source == SYNC_REQUEST_BILLING_AUTO
+            ? g_store.billingSyncSeconds : g_store.autoSyncSeconds;
         ESP_LOGI(TAG, "Sync request coalesced source=%s interval=%us",
-                 sync_source_label(source), (unsigned)g_store.autoSyncSeconds);
+                 sync_source_label(source), (unsigned)interval);
         return SYNC_REQUEST_COALESCED;
     }
     s_sync_pending = true;
@@ -2607,8 +2635,10 @@ static SyncRequestResult store_sync_request(SyncRequestSource source)
                  sync_source_label(source));
         return SYNC_REQUEST_FAILED;
     }
+    uint32_t interval = source == SYNC_REQUEST_BILLING_AUTO
+        ? g_store.billingSyncSeconds : g_store.autoSyncSeconds;
     ESP_LOGI(TAG, "Sync request accepted source=%s interval=%us",
-             sync_source_label(source), (unsigned)g_store.autoSyncSeconds);
+             sync_source_label(source), (unsigned)interval);
     return SYNC_REQUEST_ACCEPTED;
 }
 
@@ -2710,6 +2740,18 @@ bool store_set_auto_sync(bool enabled, uint32_t seconds)
     return true;
 }
 
+bool store_set_billing_sync(uint32_t seconds)
+{
+    if (seconds < BILLING_SYNC_MIN_SECONDS || seconds > BILLING_SYNC_MAX_SECONDS)
+        return false;
+    g_store.billingSyncSeconds = seconds;
+    portENTER_CRITICAL(&s_sync_request_lock);
+    s_next_billing_sync = xTaskGetTickCount() + pdMS_TO_TICKS(seconds * 1000u);
+    portEXIT_CRITICAL(&s_sync_request_lock);
+    game_store_save();
+    return true;
+}
+
 void store_sync_after_boot_wifi_connected(void)
 {
     bool coalesced = false;
@@ -2721,6 +2763,7 @@ void store_sync_after_boot_wifi_connected(void)
         if (s_sync_pending) {
             s_boot_sync_requested = false;
             s_boot_sync_consumed = true;
+            s_full_sync_deferred = true;
             coalesced = true;
         } else {
             s_boot_sync_requested = true;
@@ -2793,6 +2836,7 @@ void game_store_save(void)
     nvs_set_i32(s_nvs, "click_snd", g_store.clickSoundEnabled ? 1 : 0);
     nvs_set_i32(s_nvs, "auto_sync", g_store.autoSyncEnabled ? 1 : 0);
     nvs_set_u32(s_nvs, "auto_secs", g_store.autoSyncSeconds);
+    nvs_set_u32(s_nvs, "bill_secs", g_store.billingSyncSeconds);
     nvs_set_str(s_nvs, "cfg_backup_at", g_store.lastConfigBackupAt);
     nvs_set_str(s_nvs, "cfg_backup_st", g_store.configBackupStatus);
     nvs_set_blob(s_nvs, "custom_seq", g_store.customSequenzen,
@@ -2849,6 +2893,7 @@ void game_store_init(void)
     g_store.screen = SCREEN_DASHBOARD;
     g_store.autoSyncEnabled = true;
     g_store.autoSyncSeconds = AUTO_SYNC_DEFAULT_SECONDS;
+    g_store.billingSyncSeconds = BILLING_SYNC_DEFAULT_SECONDS;
     time_t credit_now = time(NULL); struct tm credit_tm; localtime_r(&credit_now, &credit_tm);
     strftime(g_store.kreditDatum, sizeof(g_store.kreditDatum), "%Y-%m-%d", &credit_tm);
 
@@ -3122,12 +3167,17 @@ void game_store_init(void)
 
     int32_t auto_sync = 1;
     uint32_t auto_secs = AUTO_SYNC_DEFAULT_SECONDS;
+    uint32_t billing_secs = BILLING_SYNC_DEFAULT_SECONDS;
     if (nvs_get_i32(s_nvs, "auto_sync", &auto_sync) == ESP_OK)
         g_store.autoSyncEnabled = auto_sync != 0;
     if (nvs_get_u32(s_nvs, "auto_secs", &auto_secs) == ESP_OK &&
         auto_secs >= AUTO_SYNC_MIN_SECONDS &&
         auto_secs <= AUTO_SYNC_MAX_SECONDS)
         g_store.autoSyncSeconds = auto_secs;
+    if (nvs_get_u32(s_nvs, "bill_secs", &billing_secs) == ESP_OK &&
+        billing_secs >= BILLING_SYNC_MIN_SECONDS &&
+        billing_secs <= BILLING_SYNC_MAX_SECONDS)
+        g_store.billingSyncSeconds = billing_secs;
 
     ESP_LOGI(TAG, "Store initialised. API: %s modus: %s",
              g_store.apiUrl, modus_label(g_store.modus));

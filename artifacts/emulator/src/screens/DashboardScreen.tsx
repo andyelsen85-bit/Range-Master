@@ -158,7 +158,7 @@ export function DashboardScreen() {
           {/* Offline Queue / Sync Panel */}
           <div className="mt-auto border-2 border-border rounded-xl overflow-hidden">
             {/* Header row with pending count badge */}
-            <div className="bg-secondary/30 border-b-2 border-border px-5 py-3 flex items-center justify-between">
+            <div className="bg-secondary/30 border-b-2 border-border px-3 py-1.5 flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">
                 Offline Queue
               </span>
@@ -173,13 +173,13 @@ export function DashboardScreen() {
               </span>
             </div>
 
-            <div className="p-5 flex flex-col gap-4">
+            <div className="p-2 flex flex-col gap-1">
               {/* Sync button */}
               <button
                 onClick={() => store.syncAllPending()}
                 disabled={!hasApiConfig || isSyncing}
                 className={cn(
-                  "w-full h-16 rounded-xl border-2 font-bold text-base flex items-center justify-center gap-3 transition-all active:scale-95",
+                  "w-full h-10 rounded-lg border-2 font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95",
                   hasApiConfig && !isSyncing
                     ? "border-primary/60 bg-primary/10 text-primary hover:bg-primary/20"
                     : "border-border/40 bg-background/50 text-muted-foreground/40 cursor-not-allowed"
@@ -198,29 +198,9 @@ export function DashboardScreen() {
                 )}
               </button>
 
-              {/* Status line */}
-              <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-                {store.syncStatus === 'success' ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
-                    <span className="text-green-400">Synced {store.lastSync}</span>
-                  </>
-                ) : store.syncStatus === 'error' ? (
-                  <>
-                    <WifiOff className="w-4 h-4 text-red-500 shrink-0" />
-                    <span className="text-red-400">Sync fehlgeschloen</span>
-                  </>
-                ) : store.lastSync ? (
-                  <>
-                    <Clock className="w-4 h-4 shrink-0" />
-                    <span>Läschte Sync: {store.lastSync}</span>
-                  </>
-                ) : (
-                  <>
-                    <Clock className="w-4 h-4 shrink-0 opacity-40" />
-                    <span className="opacity-40">Nach net verbonnen</span>
-                  </>
-                )}
+              <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-muted-foreground/70">
+                <span>Full {store.autoSyncSeconds}s · {store.lastFullSync ?? '—'}</span>
+                <span>Billing {store.billingSyncSeconds}s · {store.lastBillingSync ?? '—'}</span>
               </div>
 
               {/* Cache hint when player list was loaded from cache */}
