@@ -25,6 +25,9 @@ static bool s_mounted;
 static bool s_mount_attempted;
 #define CACHE_MAGIC 0x544D4348u
 #define CACHE_SCHEMA 1u
+// Increment only when the FAT partition moves. A layout migration may format
+// the new partition once; an established partition must never be auto-formatted.
+#define CACHE_FAT_LAYOUT 2u
 typedef struct { uint32_t magic; uint16_t schema, section; uint32_t payload_len, crc32; } CacheEnvelope;
 static_assert(sizeof(CacheEnvelope) == 16, "stable cache envelope");
 typedef struct { int count; PortalSpieler value[MAX_PORTAL_SPIELER]; } RosterPayload;
@@ -149,14 +152,14 @@ bool offline_cache_mount(void) {
     s_mount_attempted = true;
 
     nvs_handle_t n = 0;
-    uint8_t initialized = 0;
+    uint8_t initialized_layout = 0;
     esp_err_t nvs_err = nvs_open("tm_cache", NVS_READWRITE, &n);
     esp_err_t marker_err = nvs_err == ESP_OK
-        ? nvs_get_u8(n, "fat_init", &initialized)
+        ? nvs_get_u8(n, "fat_layout", &initialized_layout)
         : nvs_err;
-    const bool marker = marker_err == ESP_OK && initialized == 1;
     const bool may_initialize = nvs_err == ESP_OK &&
-        marker_err == ESP_ERR_NVS_NOT_FOUND;
+        (marker_err == ESP_ERR_NVS_NOT_FOUND ||
+         (marker_err == ESP_OK && initialized_layout != CACHE_FAT_LAYOUT));
 
     esp_vfs_fat_mount_config_t cfg = {};
     cfg.format_if_mount_failed = may_initialize;
@@ -165,10 +168,11 @@ bool offline_cache_mount(void) {
     esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(
         "/fatfs", "storage", &cfg, &s_wl);
 
-    // "storage" is reserved for this cache. On its first initialization the
-    // raw flash may contain non-FF residue and still report FR_NO_FILESYSTEM.
-    // Once the marker exists, format_if_mount_failed remains false so a
-    // damaged established cache is never silently erased.
+    // "storage" is reserved for this cache. On first initialization or an
+    // intentional partition-layout migration, raw flash may contain non-FF
+    // residue and still report FR_NO_FILESYSTEM. Once the current layout marker
+    // exists, format_if_mount_failed remains false so a damaged established
+    // cache is never silently erased.
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "FAT unavailable (%s); cache disabled until reboot",
                  esp_err_to_name(err));
@@ -183,7 +187,7 @@ bool offline_cache_mount(void) {
         ESP_LOGW(TAG, "Could not create cache directory: errno=%d", errno);
     }
     if (nvs_err == ESP_OK) {
-        nvs_set_u8(n, "fat_init", 1);
+        nvs_set_u8(n, "fat_layout", CACHE_FAT_LAYOUT);
         nvs_commit(n);
         nvs_close(n);
     }

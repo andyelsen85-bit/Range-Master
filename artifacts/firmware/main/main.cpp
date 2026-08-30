@@ -75,9 +75,11 @@ static void backlight_init(void)
 
 // ── LVGL flush callback ───────────────────────────────────────
 // Rotation buffer — allocated once in lvgl_task, used every flush.
-// Must be 64-byte aligned so esp_cache_msync() accepts it.
+// CONFIG_CACHE_L2_CACHE_LINE_128B requires 128-byte alignment for PPA
+// cache maintenance on external-memory output buffers.
 static uint16_t *s_rot_buf = nullptr;
 static size_t    s_rot_buf_bytes = 0;
+static constexpr size_t DISPLAY_CACHE_LINE_BYTES = 128;
 
 // PPA client — registered once in lvgl_task, used every flush to rotate
 // each dirty tile in hardware instead of the old CPU transpose loop.
@@ -223,17 +225,20 @@ static void lvgl_task(void *arg)
     //
     // Two full-screen render buffers plus one rotation buffer consume about
     // 6 MB of the board's 32 MB PSRAM.
-    // buf_bytes must be a multiple of 64 for esp_cache_msync alignment.
-    // 1280×800×2 = 2 048 000 = 0x1F4000, divisible by 64.
+    // buf_bytes must be a multiple of the configured 128-byte L2 cache line.
+    // 1280×800×2 = 2 048 000 = 0x1F4000, divisible by 128.
     size_t buf_bytes = (size_t)DISPLAY_LOGICAL_W * DISPLAY_LOGICAL_H
                        * sizeof(lv_color16_t);
 
-    // heap_caps_malloc does NOT guarantee 64-byte cache-line alignment;
+    // heap_caps_malloc does not guarantee L2 cache-line alignment;
     // esp_cache_msync requires it.  Use heap_caps_aligned_alloc instead.
-    void *buf1 = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
-    void *buf2 = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
+    void *buf1 = heap_caps_aligned_alloc(
+        DISPLAY_CACHE_LINE_BYTES, buf_bytes, MALLOC_CAP_SPIRAM);
+    void *buf2 = heap_caps_aligned_alloc(
+        DISPLAY_CACHE_LINE_BYTES, buf_bytes, MALLOC_CAP_SPIRAM);
     s_rot_buf  = (uint16_t *)
-                 heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM);
+                 heap_caps_aligned_alloc(
+                     DISPLAY_CACHE_LINE_BYTES, buf_bytes, MALLOC_CAP_SPIRAM);
     s_rot_buf_bytes = buf_bytes;
 
     if (!buf1 || !buf2 || !s_rot_buf) {
@@ -241,8 +246,9 @@ static void lvgl_task(void *arg)
                  (unsigned)buf_bytes);
         vTaskDelete(NULL);
     }
-    ESP_LOGI(TAG, "LVGL buffers: buf1=%p  buf2=%p  rot=%p  (%u B each, 64-byte aligned)",
-             buf1, buf2, (void *)s_rot_buf, (unsigned)buf_bytes);
+    ESP_LOGI(TAG, "LVGL buffers: buf1=%p  buf2=%p  rot=%p  (%u B each, %u-byte aligned)",
+             buf1, buf2, (void *)s_rot_buf, (unsigned)buf_bytes,
+             (unsigned)DISPLAY_CACHE_LINE_BYTES);
 
     lv_display_set_buffers(disp, buf1, buf2, buf_bytes,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
