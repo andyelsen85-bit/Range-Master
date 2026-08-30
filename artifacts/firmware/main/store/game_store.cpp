@@ -478,12 +478,16 @@ static bool spieler_fuer_tag_aktiv_unlocked(int spieler_id, const char *today)
 {
     if (spieler_id <= 0 || !today) return false;
     if (strcmp(g_store.kreditDatum, today) != 0) return false;
+    bool exists = false;
     for (int i = 0; i < g_store.portalSpielerCount; ++i) {
-        if (g_store.portalSpieler[i].id != spieler_id ||
-            !g_store.portalSpieler[i].portalAktiv) continue;
-        for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
-            if (g_store.kreditPlayerIds[k] == spieler_id) return true;
+        if (g_store.portalSpieler[i].id == spieler_id) {
+            exists = true;
+            break;
+        }
     }
+    if (!exists) return false;
+    for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
+        if (g_store.kreditPlayerIds[k] == spieler_id) return true;
     return false;
 }
 

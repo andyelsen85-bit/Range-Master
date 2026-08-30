@@ -132,12 +132,6 @@ static void add_day_cb(lv_event_t *e)
         s_selected_pidx >= g_store.portalSpielerCount) return;
 
     PortalSpieler *ps = &g_store.portalSpieler[s_selected_pidx];
-    if (!ps->portalAktiv) {
-        lv_label_set_text(s_lbl_edit_status,
-                          LV_SYMBOL_WARNING " EISCHT PORTAL AKTIVÉIEREN AN SPÄICHEREN");
-        lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_DANGER), 0);
-        return;
-    }
     if (player_is_registered_for_day(ps->id)) {
         lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  SCHON SPILLER VUM DAAG");
         lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_MUTED), 0);
