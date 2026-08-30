@@ -29,3 +29,4 @@
 - [Sync manifest token sizing](sync-manifest-token-sizing.md) — revision tokens include the hash algorithm prefix; firmware buffers must treat them as opaque strings
 - [MIPI DSI PSRAM underruns](mipi-dsi-psram-underruns.md) — full-screen cyan flashes during FAT writes are DSI framebuffer underruns, not LVGL redraw tearing
 - [Non-blocking sync publication](nonblocking-sync-publication.md) — HTTP and persistence must never pause the UI; only acknowledged, bounded RAM swaps may briefly gate touch
+- [Firmware warning policy](firmware-build-werror.md) — Windows ESP-IDF builds use -Werror=all; keep snprintf inputs provably bounded and avoid same-object restrict overlap

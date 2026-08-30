@@ -596,8 +596,15 @@ static PlayerBill *projection_bill_for_player(BillDaySummary *summary, int spiel
     bill->spielerId = spieler_id;
     for (int i = 0; i < g_store.portalSpielerCount; ++i)
         if (g_store.portalSpieler[i].id == spieler_id) {
-            snprintf(bill->spielerName, sizeof(bill->spielerName), "%s",
+            // Keep source and destination in separate objects.  A bill may
+            // be projected into g_store itself, so GCC's restrict analysis
+            // quite correctly rejects formatting directly from another
+            // member of the same GameStore object.
+            char player_name[MAX_NAME_LEN];
+            snprintf(player_name, sizeof(player_name), "%s",
                      g_store.portalSpieler[i].name);
+            snprintf(bill->spielerName, sizeof(bill->spielerName), "%s",
+                     player_name);
             break;
         }
     return bill;
@@ -2259,11 +2266,25 @@ static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anz
             ev->unitPriceCent = credit->preisCent;
         }
         struct tm utc; gmtime_r(&now, &utc);
+        // Format the fixed-width UTC portion with strftime, then append the
+        // bounded millisecond suffix.  This avoids -Wformat-truncation under
+        // the firmware's -Werror=all build while retaining the 24-byte ISO
+        // representation used by the portal.
+        size_t used = strftime(ev->occurredAt, sizeof(ev->occurredAt),
+                               "%Y-%m-%dT%H:%M:%S", &utc);
         int millis = (int)(tv.tv_usec / 1000);
-        snprintf(ev->occurredAt, sizeof(ev->occurredAt),
-                 "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-                 utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
-                 utc.tm_hour, utc.tm_min, utc.tm_sec, millis);
+        if (millis < 0) millis = 0;
+        if (millis > 999) millis = 999;
+        if (used > 0 && used + 5 < sizeof(ev->occurredAt)) {
+            ev->occurredAt[used++] = '.';
+            ev->occurredAt[used++] = (char)('0' + millis / 100);
+            ev->occurredAt[used++] = (char)('0' + (millis / 10) % 10);
+            ev->occurredAt[used++] = (char)('0' + millis % 10);
+            ev->occurredAt[used++] = 'Z';
+            ev->occurredAt[used] = '\0';
+        } else {
+            ev->occurredAt[0] = '\0';
+        }
     }
     return true;
 }
