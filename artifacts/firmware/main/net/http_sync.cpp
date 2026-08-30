@@ -650,8 +650,12 @@ static esp_err_t http_prepare_request(http_session_t *session, const char *path,
         if (err != ESP_OK) return err;
         return esp_http_client_set_post_field(session->client, body, strlen(body));
     }
+    // ESP-IDF clears the post body before trying to remove Content-Type, but
+    // returns ESP_ERR_NOT_FOUND when that header is already absent. The body
+    // reset is still valid in that case; do not turn it into a fake GET error.
     (void)esp_http_client_delete_header(session->client, "Content-Type");
-    return esp_http_client_set_post_field(session->client, NULL, 0);
+    (void)esp_http_client_set_post_field(session->client, NULL, 0);
+    return ESP_OK;
 }
 
 // ── Generic POST helper (with retry) ─────────────────────────
