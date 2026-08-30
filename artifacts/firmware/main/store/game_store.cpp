@@ -522,8 +522,6 @@ void store_cache_bill_day(const BillDaySummary *summary)
             summary->players[i].categoryCount > MAX_BILL_CATEGORIES)
             return;
     g_store.billDay = *summary;
-    // BillDaySummary is much larger than NVS; persist only to the FAT snapshot.
-    (void)offline_cache_save(OFFLINE_CACHE_BILLS);
 }
 
 static int munition_caliber_for_product(int produkt_id)
@@ -559,7 +557,6 @@ void store_replace_produkte(const Produkt *produkte, int count)
     memset(g_store.produkte, 0, sizeof(g_store.produkte));
     memcpy(g_store.produkte, produkte, count * sizeof(Produkt));
     g_store.produkteCount = count;
-    (void)offline_cache_save(OFFLINE_CACHE_PRODUCTS);
 }
 
 bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
@@ -1223,7 +1220,6 @@ void store_apply_portal_roster(const PortalSpieler *spieler, int count)
     g_store.portalSpielerCount = count;
     reconcile_lineup_with_roster();
     game_store_save();
-    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
 }
 
 void store_remap_spieler_id(int old_id, int new_id)
@@ -1268,6 +1264,11 @@ void store_remap_spieler_id(int old_id, int new_id)
     for (int u = 0; u < g_store.spielerUpdateCount; ++u) if (g_store.spielerUpdates[u].spielerId == old_id) g_store.spielerUpdates[u].spielerId = new_id;
     // Keep the persisted daily player authorization in step with ID remaps.
     game_store_save();
+    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
+    (void)offline_cache_save(OFFLINE_CACHE_HISTORY);
+    (void)offline_cache_save(OFFLINE_CACHE_CREDITS);
+    (void)offline_cache_save(OFFLINE_CACHE_SALES);
+    (void)offline_cache_save(OFFLINE_CACHE_BILLS);
 }
 
 void store_register_spieler_fuer_tag(int spieler_id)
@@ -2004,6 +2005,7 @@ void store_add_lokal_spieler(const char *name, int *out_id)
     }
 
     game_store_save();
+    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
 }
 
 // ── Player update queue ──────────────────────────────────────
@@ -2340,10 +2342,6 @@ void game_store_save(void)
         nvs_set_i32(s_nvs, "sp_up_cnt", g_store.spielerUpdateCount);
     nvs_commit(s_nvs);
     nvs_unlock();
-    // Rebuildable portal snapshots never consume scarce NVS. This also keeps
-    // terminal-local creates visible after a reboot once FAT is mounted.
-    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
-    (void)offline_cache_save(OFFLINE_CACHE_PRODUCTS);
 }
 
 // ── Init ─────────────────────────────────────────────────────

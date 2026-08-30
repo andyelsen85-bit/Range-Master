@@ -44,6 +44,11 @@ export async function daySalesReport(datum: string) {
     .innerJoin(spielerTable, eq(saleEventsTable.spielerId, spielerTable.id))
     .where(eq(saleEventsTable.datum, datum))
     .groupBy(saleEventsTable.spielerId, spielerTable.name, saleEventsTable.productId, productsTable.name)
-    .orderBy(spielerTable.name, spielerTable.id, productsTable.name, productsTable.id);
+    .orderBy(
+      spielerTable.name,
+      saleEventsTable.spielerId,
+      productsTable.name,
+      saleEventsTable.productId,
+    );
   return { datum, sales, totalCents: sales.reduce((sum, sale) => sum + Number(sale.totalCents), 0) };
 }

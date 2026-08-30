@@ -12,7 +12,6 @@
 #include "esp_heap_caps.h"
 #include "esp_vfs_fat.h"
 #include "wear_levelling.h"
-#include "esp_partition.h"
 #include "esp_rom_crc.h"
 #include "nvs.h"
 #include "game_store.h"
@@ -23,6 +22,7 @@ static const char *ROOT = "/fatfs/tmcache";
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
 static SemaphoreHandle_t s_mutex;
 static bool s_mounted;
+static bool s_mount_attempted;
 #define CACHE_MAGIC 0x544D4348u
 #define CACHE_SCHEMA 1u
 typedef struct { uint32_t magic; uint16_t schema, section; uint32_t payload_len, crc32; } CacheEnvelope;
@@ -87,19 +87,59 @@ static bool read_file(const char *name,uint16_t section,void *p,size_t n) {
     char path[64]; snprintf(path,sizeof(path),"%s/%s.bin",ROOT,name); int fd=open(path,O_RDONLY); if(fd<0)return false;
     CacheEnvelope h; bool ok=read_all(fd,&h,sizeof(h))&&h.magic==CACHE_MAGIC&&h.schema==CACHE_SCHEMA&&h.section==section&&h.payload_len==n&&read_all(fd,p,n)&&esp_rom_crc32_le(0,(const uint8_t *)p,n)==h.crc32; close(fd); return ok;
 }
-static bool partition_blank(void) {
-    const esp_partition_t *p=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_FAT,"storage"); if(!p)return false;
-    uint8_t *b=(uint8_t *)heap_caps_malloc(512,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT); if(!b)return false;
-    bool blank=true; for(size_t off=0;blank&&off<p->size;off+=512){size_t n=(p->size-off)<512?p->size-off:512; if(esp_partition_read(p,off,b,n)!=ESP_OK){blank=false;break;} for(size_t i=0;i<n;i++)if(b[i]!=0xff){blank=false;break;}} heap_caps_free(b); return blank;
-}
 bool offline_cache_mount(void) {
-    lock_cache(); if(s_mounted){unlock_cache();return true;}
-    nvs_handle_t n=0; uint8_t initialized=0; bool marker=nvs_open("tm_cache",NVS_READWRITE,&n)==ESP_OK && nvs_get_u8(n,"fat_init",&initialized)==ESP_OK && initialized==1;
-    esp_vfs_fat_mount_config_t cfg={.format_if_mount_failed=false,.max_files=12,.allocation_unit_size=4096};
-    esp_err_t err=esp_vfs_fat_spiflash_mount_rw_wl("/fatfs","storage",&cfg,&s_wl);
-    if(err!=ESP_OK && !marker && partition_blank()) { cfg.format_if_mount_failed=true; err=esp_vfs_fat_spiflash_mount_rw_wl("/fatfs","storage",&cfg,&s_wl); }
-    if(err!=ESP_OK){ESP_LOGW(TAG,"FAT unavailable (%s), preserving storage",esp_err_to_name(err));g_store.offlineCacheHealthy=false;if(n)nvs_close(n);unlock_cache();return false;}
-    s_mounted=true; mkdir(ROOT,0755); if(n){nvs_set_u8(n,"fat_init",1);nvs_commit(n);nvs_close(n);} unlock_cache(); return true;
+    lock_cache();
+    if (s_mounted) {
+        unlock_cache();
+        return true;
+    }
+    if (s_mount_attempted) {
+        unlock_cache();
+        return false;
+    }
+    s_mount_attempted = true;
+
+    nvs_handle_t n = 0;
+    uint8_t initialized = 0;
+    esp_err_t nvs_err = nvs_open("tm_cache", NVS_READWRITE, &n);
+    esp_err_t marker_err = nvs_err == ESP_OK
+        ? nvs_get_u8(n, "fat_init", &initialized)
+        : nvs_err;
+    const bool marker = marker_err == ESP_OK && initialized == 1;
+    const bool may_initialize = nvs_err == ESP_OK &&
+        marker_err == ESP_ERR_NVS_NOT_FOUND;
+
+    esp_vfs_fat_mount_config_t cfg = {};
+    cfg.format_if_mount_failed = may_initialize;
+    cfg.max_files = 12;
+    cfg.allocation_unit_size = 4096;
+    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(
+        "/fatfs", "storage", &cfg, &s_wl);
+
+    // "storage" is reserved for this cache. On its first initialization the
+    // raw flash may contain non-FF residue and still report FR_NO_FILESYSTEM.
+    // Once the marker exists, format_if_mount_failed remains false so a
+    // damaged established cache is never silently erased.
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "FAT unavailable (%s); cache disabled until reboot",
+                 esp_err_to_name(err));
+        g_store.offlineCacheHealthy = false;
+        if (nvs_err == ESP_OK) nvs_close(n);
+        unlock_cache();
+        return false;
+    }
+
+    s_mounted = true;
+    if (mkdir(ROOT, 0755) != 0 && errno != EEXIST) {
+        ESP_LOGW(TAG, "Could not create cache directory: errno=%d", errno);
+    }
+    if (nvs_err == ESP_OK) {
+        nvs_set_u8(n, "fat_init", 1);
+        nvs_commit(n);
+        nvs_close(n);
+    }
+    unlock_cache();
+    return true;
 }
 bool offline_cache_save(OfflineCacheSection s) {
     size_t n=payload_size(s); if(!s_mounted&&!offline_cache_mount())return false; if(!n)return false;
