@@ -208,8 +208,10 @@ static esp_err_t wifi_connect_attempt(const char *ssid, const char *pass)
     if (!ssid || !ssid[0]) return ESP_ERR_INVALID_ARG;
 
     wifi_config_t wifi_cfg = {};
-    snprintf((char *)wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), "%s", ssid);
-    snprintf((char *)wifi_cfg.sta.password, sizeof(wifi_cfg.sta.password), "%s", pass);
+    size_t ssid_len = strnlen(ssid, sizeof(wifi_cfg.sta.ssid));
+    memcpy(wifi_cfg.sta.ssid, ssid, ssid_len);
+    size_t pass_len = strnlen(pass, sizeof(wifi_cfg.sta.password));
+    memcpy(wifi_cfg.sta.password, pass, pass_len);
     wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     // A failed association is already disconnected. Calling disconnect again
