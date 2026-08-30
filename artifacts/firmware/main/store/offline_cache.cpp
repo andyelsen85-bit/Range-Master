@@ -75,17 +75,66 @@ static void snapshot(OfflineCacheSection s, void *p) {
 static bool write_all(int fd,const void *p,size_t n) { const uint8_t *b=(const uint8_t *)p; while(n){ ssize_t r=write(fd,b,n); if(r<0&&errno==EINTR)continue; if(r<=0)return false; b+=r;n-=(size_t)r;} return true; }
 static bool read_all(int fd,void *p,size_t n) { uint8_t *b=(uint8_t *)p; while(n){ ssize_t r=read(fd,b,n); if(r<0&&errno==EINTR)continue; if(r<=0)return false; b+=r;n-=(size_t)r;} return true; }
 static bool write_file(const char *name,uint16_t section,const void *p,size_t n) {
-    char path[64],tmp[64]; snprintf(path,sizeof(path),"%s/%s.bin",ROOT,name); snprintf(tmp,sizeof(tmp),"%s/%s.tmp",ROOT,name);
-    int fd=open(tmp,O_WRONLY|O_CREAT|O_TRUNC,0644); if(fd<0)return false;
+    char path[64],tmp[64],backup[64];
+    snprintf(path,sizeof(path),"%s/%s.bin",ROOT,name);
+    snprintf(tmp,sizeof(tmp),"%s/%s.tmp",ROOT,name);
+    snprintf(backup,sizeof(backup),"%s/%s.bak",ROOT,name);
+    int fd=open(tmp,O_WRONLY|O_CREAT|O_TRUNC,0644);
+    if(fd<0){ESP_LOGE(TAG,"Could not open cache temp file %s: errno=%d",name,errno);return false;}
     CacheEnvelope h={CACHE_MAGIC,CACHE_SCHEMA,section,(uint32_t)n,esp_rom_crc32_le(0,(const uint8_t *)p,n)};
     bool ok=write_all(fd,&h,sizeof(h))&&write_all(fd,p,n)&&fsync(fd)==0; if(close(fd)<0)ok=false;
-    if(!ok||rename(tmp,path)!=0){unlink(tmp);return false;}
-    int dir=open(ROOT,O_RDONLY); if(dir>=0){ if(fsync(dir)!=0 && errno!=EINVAL && errno!=ENOTSUP) ESP_LOGW(TAG,"cache directory fsync failed"); close(dir); }
+    if(!ok){ESP_LOGE(TAG,"Could not write cache temp file %s: errno=%d",name,errno);unlink(tmp);return false;}
+
+    // FatFs rename does not replace an existing destination. Preserve the old
+    // envelope as a backup while swapping in the fully-fsynced temp file.
+    unlink(backup);
+    bool had_old=access(path,F_OK)==0;
+    if(had_old&&rename(path,backup)!=0){
+        ESP_LOGE(TAG,"Could not stage old cache file %s: errno=%d",name,errno);
+        unlink(tmp);
+        return false;
+    }
+    if(rename(tmp,path)!=0){
+        ESP_LOGE(TAG,"Could not install cache file %s: errno=%d",name,errno);
+        if(had_old)rename(backup,path);
+        unlink(tmp);
+        return false;
+    }
+    int dir=open(ROOT,O_RDONLY);
+    if(dir>=0){
+        if(fsync(dir)!=0&&errno!=EINVAL&&errno!=ENOTSUP)
+            ESP_LOGW(TAG,"cache directory fsync failed");
+        close(dir);
+    }
+    if(had_old){
+        unlink(backup);
+        dir=open(ROOT,O_RDONLY);
+        if(dir>=0){
+            if(fsync(dir)!=0&&errno!=EINVAL&&errno!=ENOTSUP)
+                ESP_LOGW(TAG,"cache directory fsync failed");
+            close(dir);
+        }
+    }
     return true;
 }
+static bool read_envelope(const char *path,uint16_t section,void *p,size_t n) {
+    int fd=open(path,O_RDONLY); if(fd<0)return false;
+    CacheEnvelope h;
+    bool ok=read_all(fd,&h,sizeof(h))&&h.magic==CACHE_MAGIC&&h.schema==CACHE_SCHEMA&&h.section==section&&h.payload_len==n&&read_all(fd,p,n)&&esp_rom_crc32_le(0,(const uint8_t *)p,n)==h.crc32;
+    close(fd);
+    return ok;
+}
 static bool read_file(const char *name,uint16_t section,void *p,size_t n) {
-    char path[64]; snprintf(path,sizeof(path),"%s/%s.bin",ROOT,name); int fd=open(path,O_RDONLY); if(fd<0)return false;
-    CacheEnvelope h; bool ok=read_all(fd,&h,sizeof(h))&&h.magic==CACHE_MAGIC&&h.schema==CACHE_SCHEMA&&h.section==section&&h.payload_len==n&&read_all(fd,p,n)&&esp_rom_crc32_le(0,(const uint8_t *)p,n)==h.crc32; close(fd); return ok;
+    char path[64],backup[64];
+    snprintf(path,sizeof(path),"%s/%s.bin",ROOT,name);
+    snprintf(backup,sizeof(backup),"%s/%s.bak",ROOT,name);
+    if(read_envelope(path,section,p,n))return true;
+    if(!read_envelope(backup,section,p,n))return false;
+    // Recover a backup left by power loss between the two rename operations.
+    unlink(path);
+    if(rename(backup,path)!=0)
+        ESP_LOGW(TAG,"Loaded backup for %s but could not restore it: errno=%d",name,errno);
+    return true;
 }
 bool offline_cache_mount(void) {
     lock_cache();
