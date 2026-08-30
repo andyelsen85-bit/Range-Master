@@ -143,6 +143,13 @@ static void close_bill_modal(void)
     s_bill_modal = NULL;
 }
 
+static bool is_today(const char *datum)
+{
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    return datum && strcmp(datum, today) == 0;
+}
+
 static void paid_cb(lv_event_t *e)
 {
     int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
@@ -184,8 +191,8 @@ static void bill_cb(lv_event_t *e)
     lv_obj_set_size(card, 760, 620);
     lv_obj_center(card); lv_obj_add_style(card, &g_style_card, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(card, 14, 0);
-    lv_obj_set_scroll_dir(card, LV_DIR_VER);
+    lv_obj_set_style_pad_row(card, 8, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *title = lv_label_create(card);
     char title_text[100]; snprintf(title_text, sizeof(title_text), "RECHNUNG - %s", name);
     lv_label_set_text(title, title_text); lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
@@ -203,39 +210,111 @@ static void bill_cb(lv_event_t *e)
     lv_obj_t *summary = lv_label_create(card); lv_label_set_text(summary, totals);
     lv_obj_set_style_text_font(summary, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(summary, lv_color_hex(CLR_TEXT), 0);
-    if (bill_data) for (int i = 0; i < bill_data->lineCount; ++i) {
-        const BillLine *line = &bill_data->lines[i];
-        lv_obj_t *line_label = lv_label_create(card);
-        char text[160];
-        snprintf(text, sizeof(text), "%s%s  [%s]\n%d x %d.%02d EUR = %d.%02d EUR",
-                 line->localPending ? "PENDING  " : "", line->produktName,
-                 line->category, line->quantity, line->unitPriceCent / 100,
-                 abs(line->unitPriceCent % 100), line->lineTotalCent / 100,
-                 abs(line->lineTotalCent % 100));
-        lv_label_set_text(line_label, text);
-        lv_obj_set_style_text_font(line_label, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(line_label,
-            line->localPending ? lv_color_hex(CLR_WARN) : lv_color_hex(CLR_TEXT), 0);
+    // The item list alone scrolls: settlement controls stay visible even for
+    // a long Catering bill.
+    lv_obj_t *items = lv_obj_create(card);
+    lv_obj_set_size(items, LV_PCT(100), 210);
+    lv_obj_set_style_bg_opa(items, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(items, 0, 0);
+    lv_obj_set_style_pad_all(items, 0, 0);
+    lv_obj_set_style_pad_row(items, 5, 0);
+    lv_obj_set_flex_flow(items, LV_FLEX_FLOW_COLUMN);
+    int fallback_total = 0, fallback_line_count = 0;
+    BillCategoryTotal fallback_categories[MAX_BILL_CATEGORIES] = {};
+    int fallback_category_count = 0;
+    auto add_fallback_category = [&](const char *category, int cents) {
+        for (int i = 0; i < fallback_category_count; ++i)
+            if (!strcmp(fallback_categories[i].name, category)) {
+                fallback_categories[i].totalCent += cents; return;
+            }
+        if (fallback_category_count < MAX_BILL_CATEGORIES) {
+            snprintf(fallback_categories[fallback_category_count].name,
+                     sizeof(fallback_categories[0].name), "%s", category);
+            fallback_categories[fallback_category_count++].totalCent = cents;
+        }
+    };
+    auto add_item_row = [&](const char *product, const char *category, int quantity,
+                             int unit_cent, int line_cent, bool pending) {
+        lv_obj_t *line_row = lv_obj_create(items);
+        lv_obj_set_size(line_row, LV_PCT(100), 48);
+        lv_obj_set_style_pad_hor(line_row, 8, 0);
+        lv_obj_set_style_pad_ver(line_row, 4, 0);
+        lv_obj_set_flex_flow(line_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(line_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_t *left = lv_label_create(line_row); char left_text[96];
+        bool price_unknown = unit_cent == VERKAUF_UNIT_PRICE_UNKNOWN;
+        if (price_unknown)
+            snprintf(left_text, sizeof(left_text), "PENDING  %s [%s]\n%d x PRAIS ONBEKANNT",
+                     product, category, quantity);
+        else
+            snprintf(left_text, sizeof(left_text), "%s%s [%s]\n%d x %d.%02d EUR",
+                     pending ? "PENDING  " : "", product, category, quantity,
+                     unit_cent / 100, abs(unit_cent % 100));
+        lv_label_set_text(left, left_text);
+        lv_obj_set_style_text_font(left, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(left,
+            pending ? lv_color_hex(CLR_WARN) : lv_color_hex(CLR_TEXT), 0);
+        lv_obj_t *right = lv_label_create(line_row); char right_text[32];
+        if (price_unknown) snprintf(right_text, sizeof(right_text), "RECONCILE");
+        else snprintf(right_text, sizeof(right_text), "%d.%02d EUR",
+                      line_cent / 100, abs(line_cent % 100));
+        lv_label_set_text(right, right_text);
+        lv_obj_set_style_text_font(right, &lv_font_montserrat_14, 0);
+    };
+    if (bill_data) {
+        for (int i = 0; i < bill_data->lineCount; ++i) {
+            const BillLine *line = &bill_data->lines[i];
+            add_item_row(line->produktName, line->category, line->quantity,
+                         line->unitPriceCent, line->lineTotalCent, line->localPending);
+        }
+    } else {
+        // Before a bill GET is cached, retained sale events are still a useful
+        // local receipt. This includes both Catering and ammunition events.
+        for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i) {
+            const VerkaufEvent *event = &g_store.pendingVerkaufEvents[i];
+            if (event->spielerId != sid || !is_today(event->datum)) continue;
+            bool price_unknown = event->unitPriceCent == VERKAUF_UNIT_PRICE_UNKNOWN;
+            int cents = price_unknown ? 0 : event->quantity * event->unitPriceCent;
+            add_item_row(event->produktName[0] ? event->produktName : "ONBEKANNT",
+                         event->category[0] ? event->category : "ONBEKANNT",
+                         event->quantity, event->unitPriceCent, cents, true);
+            fallback_line_count++;
+            fallback_total += cents;
+            add_fallback_category(event->category[0] ? event->category : "ONBEKANNT", cents);
+        }
+        if (fallback_line_count == 0) {
+            lv_obj_t *empty = lv_label_create(items);
+            lv_label_set_text(empty, "KENG LOKAL VERKAAF-EVENT FIR DESSE SPILLER");
+            lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
+        }
     }
-    if (bill_data) for (int i = 0; i < bill_data->categoryCount; ++i) {
+    const BillCategoryTotal *category_totals =
+        bill_data ? bill_data->categories : fallback_categories;
+    int category_count = bill_data ? bill_data->categoryCount : fallback_category_count;
+    for (int i = 0; i < category_count; ++i) {
         lv_obj_t *category = lv_label_create(card); char text[96];
         snprintf(text, sizeof(text), "%s TOTAL: %d.%02d EUR",
-                 bill_data->categories[i].name,
-                 bill_data->categories[i].totalCent / 100,
-                 abs(bill_data->categories[i].totalCent % 100));
+                 category_totals[i].name, category_totals[i].totalCent / 100,
+                 abs(category_totals[i].totalCent % 100));
         lv_label_set_text(category, text);
         lv_obj_set_style_text_color(category, lv_color_hex(CLR_MUTED), 0);
     }
     lv_obj_t *general = lv_label_create(card); char general_text[128];
     snprintf(general_text, sizeof(general_text), "GENERAL TOTAL: %d.%02d EUR  |  STATUS: %s",
-             bill_data ? bill_data->totalCent / 100 : 0,
-             bill_data ? abs(bill_data->totalCent % 100) : 0,
+              bill_data ? bill_data->totalCent / 100 : fallback_total / 100,
+              bill_data ? abs(bill_data->totalCent % 100) : abs(fallback_total % 100),
              store_payment_pending(sid) ? "PAID PENDING" :
              bill_data && bill_data->state == BILL_PAID ? "PAID" :
              bill_data && bill_data->state == BILL_PENDING_NEUTRAL ? "PENDING NEUTRAL" : "OPEN");
     lv_label_set_text(general, general_text);
     lv_obj_set_style_text_font(general, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(general, lv_color_hex(CLR_PRIMARY), 0);
+    if (bill_data && bill_data->lineOverflow) {
+        lv_obj_t *overflow = lv_label_create(card);
+        lv_label_set_text(overflow, "RECHNUNG ZEILENLIMIT ERREECHT - PORTALDETAILER PRUEWEN");
+        lv_obj_set_style_text_color(overflow, lv_color_hex(CLR_DANGER), 0);
+    }
     lv_obj_t *hint = lv_label_create(card);
     char audit[160];
     snprintf(audit, sizeof(audit), "%s%s%s",
@@ -311,12 +390,13 @@ static void revoke_cb(lv_event_t *e)
 static void remove_player_cb(lv_event_t *e)
 {
     int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
-    for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
-        if (g_store.kreditPlayerIds[i] != spieler_id) continue;
-        g_store.kreditPlayerIds[i] = 0;
-        g_store.kredite[i]         = (KreditStand){0, 0};
-        game_store_save();
-        break;
+    char reason[64];
+    if (!store_remove_spieler_fuer_tag(spieler_id, reason, sizeof(reason))) {
+        char message[112];
+        snprintf(message, sizeof(message), "NET GELOSCHT: %s", reason);
+        lv_label_set_text(s_lbl_status, message);
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+        return;
     }
     lv_label_set_text(s_lbl_status, "SPILLER GELOSCHT");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
@@ -371,7 +451,9 @@ static void build_player_list(void)
         }
 
         lv_obj_t *row = lv_obj_create(s_player_list);
-        lv_obj_set_size(row, LV_PCT(100), 64);
+        // Each player gets enough vertical room for the labelled control
+        // groups; compact single-row controls clipped on the touch display.
+        lv_obj_set_size(row, LV_PCT(100), 116);
         lv_obj_add_style(row, &g_style_card, 0);
         lv_obj_set_style_pad_all(row, 10, 0);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -381,7 +463,7 @@ static void build_player_list(void)
 
         // Name + the three independent daily counters.
         lv_obj_t *info = lv_obj_create(row);
-        lv_obj_set_size(info, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_size(info, 245, LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(info, LV_OPA_0, 0);
         lv_obj_set_style_border_width(info, 0, 0);
         lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
@@ -409,28 +491,48 @@ static void build_player_list(void)
         lv_obj_set_style_text_font(ammo_lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(ammo_lbl, lv_color_hex(CLR_PRIMARY), 0);
 
-        // Compact controls: credits [-1] [+1], then one signed control pair
-        // for each caliber, followed by the daily-list remove action.
+        // Keep every operation in an explicitly labelled group.  This makes
+        // the two ammunition calibers unambiguous and leaves tap spacing.
         lv_obj_t *btn_grp = lv_obj_create(row);
-        lv_obj_set_size(btn_grp, LV_SIZE_CONTENT, 44);
+        lv_obj_set_size(btn_grp, 480, 88);
         lv_obj_set_style_bg_opa(btn_grp, LV_OPA_0, 0);
         lv_obj_set_style_border_width(btn_grp, 0, 0);
         lv_obj_set_style_pad_all(btn_grp, 0, 0);
         lv_obj_set_flex_flow(btn_grp, LV_FLEX_FLOW_ROW);
-        lv_obj_set_style_pad_column(btn_grp, 8, 0);
+        lv_obj_set_style_pad_column(btn_grp, 10, 0);
+        auto control_group = [&](const char *caption, int width) {
+            lv_obj_t *group = lv_obj_create(btn_grp);
+            lv_obj_set_size(group, width, 84);
+            lv_obj_set_style_bg_opa(group, LV_OPA_0, 0);
+            lv_obj_set_style_border_width(group, 0, 0);
+            lv_obj_set_style_pad_all(group, 0, 0);
+            lv_obj_set_flex_flow(group, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_style_pad_row(group, 3, 0);
+            lv_obj_t *label = lv_label_create(group);
+            lv_label_set_text(label, caption);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(label, lv_color_hex(CLR_MUTED), 0);
+            return group;
+        };
 
-        lv_obj_t *bill = lv_btn_create(btn_grp);
+        lv_obj_t *bill_group = control_group("BILL", 78);
+        lv_obj_t *bill = lv_btn_create(bill_group);
         lv_obj_add_style(bill, &g_style_btn_secondary, 0);
-        lv_obj_set_size(bill, 86, 44);
+        lv_obj_set_size(bill, 76, 52);
         lv_obj_add_event_cb(bill, bill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)sid);
         lv_obj_t *bill_label = lv_label_create(bill);
         lv_label_set_text(bill_label, store_payment_pending(sid) ? "PENDING" : "BILL");
         lv_obj_set_style_text_font(bill_label, &lv_font_montserrat_12, 0);
         lv_obj_center(bill_label);
 
+        lv_obj_t *credit_group = control_group("KREDIT", 92);
+        lv_obj_t *credit_buttons = lv_obj_create(credit_group);
+        lv_obj_set_size(credit_buttons, 92, 54); lv_obj_set_style_bg_opa(credit_buttons, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(credit_buttons, 0, 0); lv_obj_set_style_pad_all(credit_buttons, 0, 0);
+        lv_obj_set_flex_flow(credit_buttons, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(credit_buttons, 4, 0);
         // -1
-        lv_obj_t *btn_minus = lv_btn_create(btn_grp);
-        lv_obj_set_size(btn_minus, 48, 44);
+        lv_obj_t *btn_minus = lv_btn_create(credit_buttons);
+        lv_obj_set_size(btn_minus, 44, 52);
         lv_obj_set_style_bg_color(btn_minus, lv_color_hex(CLR_WARN), 0);
         lv_obj_set_style_bg_opa(btn_minus, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(btn_minus, 8, 0);
@@ -446,9 +548,9 @@ static void build_player_list(void)
         lv_obj_center(bml);
 
         // +1
-        lv_obj_t *btn_plus = lv_btn_create(btn_grp);
+        lv_obj_t *btn_plus = lv_btn_create(credit_buttons);
         lv_obj_add_style(btn_plus, &g_style_btn_primary, 0);
-        lv_obj_set_size(btn_plus, 48, 44);
+        lv_obj_set_size(btn_plus, 44, 52);
         lv_obj_add_event_cb(btn_plus, grant_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)sid);
         lv_obj_t *bpl = lv_label_create(btn_plus);
@@ -466,20 +568,29 @@ static void build_player_list(void)
         refs->ammo20MinusButton = NULL;
         refs->creditPositive = avail > 0;
 
+        lv_obj_t *ammo_buttons[2] = {NULL, NULL};
         const struct {
             const char *label;
             const char *product;
             int quantity;
             int available;
         } ammo_actions[] = {
-            {"12 -1", "AMMO_CAL12", -1, store_munition_cal12(sid)},
-            {"12 +1", "AMMO_CAL12",  1, store_munition_cal12(sid)},
-            {"20 -1", "AMMO_CAL20", -1, store_munition_cal20(sid)},
-            {"20 +1", "AMMO_CAL20",  1, store_munition_cal20(sid)},
+            {"-1", "AMMO_CAL12", -1, store_munition_cal12(sid)},
+            {"+1", "AMMO_CAL12",  1, store_munition_cal12(sid)},
+            {"-1", "AMMO_CAL20", -1, store_munition_cal20(sid)},
+            {"+1", "AMMO_CAL20",  1, store_munition_cal20(sid)},
         };
         for (size_t action = 0; action < sizeof(ammo_actions) / sizeof(ammo_actions[0]); ++action) {
-            lv_obj_t *ammo = lv_btn_create(btn_grp);
-            lv_obj_set_size(ammo, 54, 44);
+            if (action == 0 || action == 2) {
+                lv_obj_t *ammo_group = control_group(action == 0 ? "CAL.12" : "CAL.20", 92);
+                lv_obj_t *buttons = lv_obj_create(ammo_group);
+                lv_obj_set_size(buttons, 92, 54); lv_obj_set_style_bg_opa(buttons, LV_OPA_0, 0);
+                lv_obj_set_style_border_width(buttons, 0, 0); lv_obj_set_style_pad_all(buttons, 0, 0);
+                lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(buttons, 4, 0);
+                ammo_buttons[action / 2] = buttons;
+            }
+            lv_obj_t *ammo = lv_btn_create(ammo_buttons[action / 2]);
+            lv_obj_set_size(ammo, 44, 52);
             lv_obj_add_style(ammo, &g_style_btn_secondary, 0);
             set_disabled_appearance(ammo);
             add_action(ammo, munition_cb, sid, ammo_actions[action].product,
@@ -496,8 +607,9 @@ static void build_player_list(void)
         }
 
         // X (remove from today's list)
-        lv_obj_t *btn_del = lv_btn_create(btn_grp);
-        lv_obj_set_size(btn_del, 52, 44);
+        lv_obj_t *remove_group = control_group("REMOVE", 78);
+        lv_obj_t *btn_del = lv_btn_create(remove_group);
+        lv_obj_set_size(btn_del, 76, 52);
         lv_obj_set_style_bg_color(btn_del, lv_color_hex(CLR_DANGER), 0);
         lv_obj_set_style_bg_opa(btn_del, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(btn_del, 8, 0);

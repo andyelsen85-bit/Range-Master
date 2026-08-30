@@ -57,7 +57,20 @@ static const char *s_catering_error = "";
 #define CATERING_PIN_MAX_FAILURES 5
 #define CATERING_PIN_LOCK_SECONDS 30
 #define VALID_UNIX_TIME 1704067200LL /* 2024-01-01 */
-#define NVS_LAYOUT_VERSION 3
+#define NVS_LAYOUT_VERSION 4
+
+// Layout used by released firmware before VerkaufEvent gained local receipt
+// snapshots. Keep this private wire-format mirror so old compact and
+// maximum-capacity NVS blobs remain recoverable after the struct grows.
+typedef struct {
+    char externalId[40];
+    int  spielerId;
+    char datum[11];
+    int  produktId;
+    int  preisRevisionId;
+    int  quantity;
+    bool inFlight;
+} LegacyVerkaufEvent;
 
 static void kredit_events_lock(void)
 {
@@ -90,6 +103,94 @@ static void nvs_reopen_after_failure(void)
 
 static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anzahl);
 static bool save_kredit_state_unlocked(void);
+static esp_err_t set_counted_blob(const char *key, const void *data,
+                                  int count, size_t item_size);
+
+// Payments and the active-day roster are one state transition: a portal
+// acceptance must never survive locally without retiring the player, nor may a
+// player be retired before the durable acceptance transition commits.
+static bool save_payment_state_unlocked(void)
+{
+    nvs_lock();
+    esp_err_t err = set_counted_blob("payments", g_store.pendingPaymentEvents,
+                                     g_store.pendingPaymentEventCount,
+                                     sizeof(g_store.pendingPaymentEvents[0]));
+    if (err == ESP_OK)
+        err = nvs_set_i32(s_nvs, "payment_cnt", g_store.pendingPaymentEventCount);
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds,
+                           sizeof(g_store.kreditPlayerIds));
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
+    if (err == ESP_OK) err = nvs_commit(s_nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not persist payment state: %s", esp_err_to_name(err));
+        nvs_reopen_after_failure();
+    }
+    nvs_unlock();
+    return err == ESP_OK;
+}
+
+static bool load_sales_blob_compat(void)
+{
+    int32_t saved_count = 0;
+    if (nvs_get_i32(s_nvs, "sale_count", &saved_count) != ESP_OK ||
+        saved_count < 0 || saved_count > MAX_PENDING_VERKAEUFE) return false;
+    if (saved_count == 0) {
+        g_store.pendingVerkaufEventCount = 0;
+        return true;
+    }
+    size_t bytes = 0;
+    if (nvs_get_blob(s_nvs, "sales", NULL, &bytes) != ESP_OK) return false;
+    const size_t current_compact = (size_t)saved_count * sizeof(VerkaufEvent);
+    const size_t current_full = sizeof(g_store.pendingVerkaufEvents);
+    if (bytes == current_compact || bytes == current_full) {
+        size_t capacity = current_full;
+        if (nvs_get_blob(s_nvs, "sales", g_store.pendingVerkaufEvents, &capacity) != ESP_OK)
+            return false;
+        g_store.pendingVerkaufEventCount = saved_count;
+        return true;
+    }
+    const size_t legacy_compact = (size_t)saved_count * sizeof(LegacyVerkaufEvent);
+    const size_t legacy_full = (size_t)MAX_PENDING_VERKAEUFE * sizeof(LegacyVerkaufEvent);
+    if (bytes != legacy_compact && bytes != legacy_full) return false;
+    static EXT_RAM_BSS_ATTR LegacyVerkaufEvent legacy[MAX_PENDING_VERKAEUFE];
+    size_t capacity = sizeof(legacy);
+    if (nvs_get_blob(s_nvs, "sales", legacy, &capacity) != ESP_OK) return false;
+    memset(g_store.pendingVerkaufEvents, 0, sizeof(g_store.pendingVerkaufEvents));
+    for (int i = 0; i < saved_count; ++i) {
+        VerkaufEvent *out = &g_store.pendingVerkaufEvents[i];
+        const LegacyVerkaufEvent *old = &legacy[i];
+        memcpy(out->externalId, old->externalId, sizeof(out->externalId));
+        out->spielerId = old->spielerId;
+        memcpy(out->datum, old->datum, sizeof(out->datum));
+        out->produktId = old->produktId;
+        out->preisRevisionId = old->preisRevisionId;
+        out->quantity = old->quantity;
+        out->inFlight = old->inFlight;
+        // Old records have no trustworthy receipt data. Enrich only from an
+        // exact cached revision; otherwise retain an explicit unknown line.
+        out->unitPriceCent = VERKAUF_UNIT_PRICE_UNKNOWN;
+        const Produkt *product = NULL;
+        for (int p = 0; out->preisRevisionId > VERKAUF_PRICE_REVISION_UNALLOCATED &&
+                        p < g_store.produkteCount; ++p)
+            if (g_store.produkte[p].id == out->produktId &&
+                g_store.produkte[p].preisRevisionId == out->preisRevisionId) {
+                product = &g_store.produkte[p]; break;
+            }
+        if (product) {
+            snprintf(out->produktName, sizeof(out->produktName), "%s", product->name);
+            snprintf(out->category, sizeof(out->category), "%s", product->category);
+            out->unitPriceCent = product->preisCent;
+        } else {
+            snprintf(out->produktName, sizeof(out->produktName), "ONBEKANNT");
+            snprintf(out->category, sizeof(out->category), "ONBEKANNT");
+        }
+    }
+    g_store.pendingVerkaufEventCount = saved_count;
+    ESP_LOGW(TAG, "Migrated %d legacy sale records without receipt snapshots", (int)saved_count);
+    return true;
+}
 
 static esp_err_t set_counted_blob(const char *key, const void *data,
                                   int count, size_t item_size)
@@ -229,6 +330,34 @@ static int find_munition_slot(int spieler_id)
     return -1;
 }
 
+static void snapshot_sale_product(VerkaufEvent *event, const Produkt *product)
+{
+    configASSERT(event && product);
+    snprintf(event->produktName, sizeof(event->produktName), "%s", product->name);
+    snprintf(event->category, sizeof(event->category), "%s", product->category);
+    event->unitPriceCent = product->preisCent;
+}
+
+static bool snapshot_original_sale_price(VerkaufEvent *event, int spieler_id,
+                                         int produkt_id, const char *datum)
+{
+    // An unallocated correction is priced by the portal against its original
+    // lot.  Only reuse a prior positive event's immutable receipt snapshot;
+    // the current catalog is explicitly not evidence of that historic price.
+    for (int i = g_store.pendingVerkaufEventCount - 1; i >= 0; --i) {
+        const VerkaufEvent *prior = &g_store.pendingVerkaufEvents[i];
+        if (prior->spielerId != spieler_id || prior->produktId != produkt_id ||
+            prior->quantity <= 0 || prior->preisRevisionId <= 0 ||
+            strcmp(prior->datum, datum) || prior->unitPriceCent == VERKAUF_UNIT_PRICE_UNKNOWN)
+            continue;
+        snprintf(event->produktName, sizeof(event->produktName), "%s", prior->produktName);
+        snprintf(event->category, sizeof(event->category), "%s", prior->category);
+        event->unitPriceCent = prior->unitPriceCent;
+        return true;
+    }
+    return false;
+}
+
 const Produkt *store_produkt(const char *produkt_code)
 {
     if (!produkt_code) return NULL;
@@ -288,15 +417,23 @@ bool store_queue_payment(int spieler_id)
              spieler_id, (unsigned)esp_random());
     event->spielerId = spieler_id;
     strftime(event->datum, sizeof(event->datum), "%Y-%m-%d", &tm);
+    if (!save_payment_state_unlocked()) {
+        memset(event, 0, sizeof(*event));
+        --g_store.pendingPaymentEventCount;
+        kredit_events_unlock();
+        return false;
+    }
     kredit_events_unlock();
-    game_store_save();
     return true;
 }
 
-int store_begin_payment_sync(PaymentEvent *snapshot, int capacity)
+bool store_begin_payment_sync(PaymentEvent *snapshot, int capacity, int *out_count)
 {
-    if (!snapshot || capacity <= 0) return 0;
+    if (out_count) *out_count = 0;
+    if (!snapshot || capacity <= 0 || !out_count) return false;
     kredit_events_lock();
+    PaymentEvent prior[MAX_PENDING_PAYMENTS];
+    memcpy(prior, g_store.pendingPaymentEvents, sizeof(prior));
     int count = 0;
     for (int i = 0; i < g_store.pendingPaymentEventCount && count < capacity; ++i) {
         PaymentEvent *event = &g_store.pendingPaymentEvents[i];
@@ -304,17 +441,29 @@ int store_begin_payment_sync(PaymentEvent *snapshot, int capacity)
         event->inFlight = true;
         snapshot[count++] = *event;
     }
+    if (count && !save_payment_state_unlocked()) {
+        memcpy(g_store.pendingPaymentEvents, prior, sizeof(prior));
+        kredit_events_unlock();
+        return false;
+    }
+    *out_count = count;
     kredit_events_unlock();
-    game_store_save();
-    return count;
+    return true;
 }
 
-void store_finish_payment_sync(const PaymentEvent *snapshot, int count,
+bool store_finish_payment_sync(const PaymentEvent *snapshot, int count,
                                const char *const *acceptedIds, int acceptedCount,
                                const char *error)
 {
-    if (!snapshot || count <= 0) return;
+    if (!snapshot || count <= 0) return true;
     kredit_events_lock();
+    PaymentEvent prior_events[MAX_PENDING_PAYMENTS];
+    int prior_count = g_store.pendingPaymentEventCount;
+    int prior_ids[MAX_PORTAL_SPIELER];
+    KreditStand prior_credits[MAX_PORTAL_SPIELER];
+    memcpy(prior_events, g_store.pendingPaymentEvents, sizeof(prior_events));
+    memcpy(prior_ids, g_store.kreditPlayerIds, sizeof(prior_ids));
+    memcpy(prior_credits, g_store.kredite, sizeof(prior_credits));
     for (int n = 0; n < count; ++n) {
         bool accepted = false;
         for (int a = 0; a < acceptedCount; ++a)
@@ -347,14 +496,30 @@ void store_finish_payment_sync(const PaymentEvent *snapshot, int count,
             break;
         }
     }
+    if (!save_payment_state_unlocked()) {
+        memcpy(g_store.pendingPaymentEvents, prior_events, sizeof(prior_events));
+        g_store.pendingPaymentEventCount = prior_count;
+        memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
+        memcpy(g_store.kredite, prior_credits, sizeof(prior_credits));
+        kredit_events_unlock();
+        return false;
+    }
     kredit_events_unlock();
-    game_store_save();
+    return true;
 }
 
 void store_cache_bill_day(const BillDaySummary *summary)
 {
-    if (!summary || summary->playerCount < 0 || summary->playerCount > MAX_DAY_BILLS)
+    if (!summary || summary->playerCount < 0 || summary->playerCount > MAX_DAY_BILLS ||
+        summary->categoryCount < 0 || summary->categoryCount > MAX_BILL_CATEGORIES ||
+        summary->productCount < 0 || summary->productCount > MAX_DAY_PRODUCTS)
         return;
+    for (int i = 0; i < summary->playerCount; ++i)
+        if (summary->players[i].lineCount < 0 ||
+            summary->players[i].lineCount > MAX_BILL_LINES ||
+            summary->players[i].categoryCount < 0 ||
+            summary->players[i].categoryCount > MAX_BILL_CATEGORIES)
+            return;
     g_store.billDay = *summary;
     // BillDaySummary is much larger than this board's 24 KiB NVS partition.
     // Keep it as a runtime cache; persisting it starves credit/outbox writes.
@@ -460,6 +625,17 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
                                           : produkt->preisRevisionId;
     event->quantity = quantity;
     strftime(event->datum, sizeof(event->datum), "%Y-%m-%d", &tmi);
+    if (quantity < 0) {
+        if (!snapshot_original_sale_price(event, spieler_id, produkt->id, event->datum)) {
+            // Keep product identity useful, but do not silently value an
+            // unknown historic lot at today's catalog price.
+            snprintf(event->produktName, sizeof(event->produktName), "%s", produkt->name);
+            snprintf(event->category, sizeof(event->category), "%s", produkt->category);
+            event->unitPriceCent = VERKAUF_UNIT_PRICE_UNKNOWN;
+        }
+    } else {
+        snapshot_sale_product(event, produkt);
+    }
     store_apply_portal_verkauf(spieler_id, produkt->id, quantity);
     esp_err_t persist = save_sale_state_unlocked();
     if (persist != ESP_OK) {
@@ -554,6 +730,7 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
                  spieler_id, (unsigned)esp_random());
         event->spielerId = spieler_id; event->produktId = p->id;
         event->preisRevisionId = p->preisRevisionId; event->quantity = quantities[line];
+        snapshot_sale_product(event, p);
         snprintf(event->datum, sizeof(event->datum), "%s", today);
     }
     // Commit while the outbox remains locked. The NVS commit is atomic; on a
@@ -1104,6 +1281,67 @@ void store_register_spieler_fuer_tag(int spieler_id)
         }
     }
     kredit_events_unlock();
+}
+
+bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_len)
+{
+    if (reason && reason_len) reason[0] = '\0';
+    if (spieler_id <= 0) {
+        if (reason && reason_len) snprintf(reason, reason_len, "ONGULTEGE SPILLER");
+        return false;
+    }
+    // Match Catering's lock order. This makes the complete decision and roster
+    // change indivisible with sale and credit/payment sync state transitions.
+    xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
+    kredit_events_lock();
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    int slot = find_kredit_slot(&g_store, spieler_id);
+    const char *unsettled = NULL;
+    if (slot < 0 || strcmp(g_store.kreditDatum, today))
+        unsettled = "SPILLER NET AKTIV";
+    else if (g_store.kredite[slot].gewaehrt || g_store.kredite[slot].verbraucht)
+        unsettled = "KREDIT";
+    else {
+        for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
+            if (g_store.munition[i].spielerId == spieler_id &&
+                (g_store.munition[i].cal12 || g_store.munition[i].cal20)) {
+                unsettled = "MUNITION"; break;
+            }
+        for (int i = 0; !unsettled && i < g_store.pendingVerkaufEventCount; ++i)
+            if (g_store.pendingVerkaufEvents[i].spielerId == spieler_id &&
+                !strcmp(g_store.pendingVerkaufEvents[i].datum, today)) {
+                unsettled = "PENDING VERKAAF"; break;
+            }
+        for (int i = 0; !unsettled && i < g_store.pendingKreditEventCount; ++i)
+            if (g_store.pendingKreditEvents[i].spielerId == spieler_id &&
+                !strcmp(g_store.pendingKreditEvents[i].datum, today)) {
+                unsettled = "PENDING KREDITT"; break;
+            }
+        for (int i = 0; !unsettled && i < g_store.pendingPaymentEventCount; ++i)
+            if (g_store.pendingPaymentEvents[i].spielerId == spieler_id &&
+                !strcmp(g_store.pendingPaymentEvents[i].datum, today)) {
+                unsettled = "PENDING BEZUELUNG"; break;
+            }
+    }
+    if (unsettled) {
+        if (reason && reason_len) snprintf(reason, reason_len, "%s", unsettled);
+        kredit_events_unlock();
+        xSemaphoreGive(s_verkauf_events_mutex);
+        return false;
+    }
+    KreditStand previous = g_store.kredite[slot];
+    g_store.kreditPlayerIds[slot] = 0;
+    g_store.kredite[slot] = (KreditStand){};
+    bool persisted = save_kredit_state_unlocked();
+    if (!persisted) {
+        g_store.kreditPlayerIds[slot] = spieler_id;
+        g_store.kredite[slot] = previous;
+        if (reason && reason_len) snprintf(reason, reason_len, "NVS SCHREIF-FEELER");
+    }
+    kredit_events_unlock();
+    xSemaphoreGive(s_verkauf_events_mutex);
+    return persisted;
 }
 
 void store_add_kredite(int spieler_id, int anzahl)
@@ -2218,11 +2456,7 @@ void game_store_init(void)
                                   MAX_PRODUKTE, sizeof(g_store.produkte[0]),
                                   &g_store.produkteCount))
         g_store.produkteCount = 0;
-    if (!load_counted_blob_compat("sales", "sale_count",
-                                  g_store.pendingVerkaufEvents,
-                                  MAX_PENDING_VERKAEUFE,
-                                  sizeof(g_store.pendingVerkaufEvents[0]),
-                                  &g_store.pendingVerkaufEventCount))
+    if (!load_sales_blob_compat())
         g_store.pendingVerkaufEventCount = 0;
     int ammo_count = 0;
     int32_t stored_ammo_count = 0;
@@ -2255,10 +2489,10 @@ void game_store_init(void)
         g_store.pendingPaymentEvents[i].inFlight = false;
     }
     if (reset_payment_flights) {
-        (void)set_counted_blob("payments", g_store.pendingPaymentEvents,
-                               g_store.pendingPaymentEventCount,
-                               sizeof(g_store.pendingPaymentEvents[0]));
-        nvs_commit(s_nvs);
+        kredit_events_lock();
+        if (!save_payment_state_unlocked())
+            ESP_LOGE(TAG, "Could not durably reset payment in-flight markers");
+        kredit_events_unlock();
     }
     // One-time migration: load legacy maximum-capacity blobs first, then free
     // the two large rebuildable caches and rewrite all counted records compactly.

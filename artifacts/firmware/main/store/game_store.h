@@ -4,6 +4,7 @@
 // ============================================================
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #define MAX_SPIELER         6
 #define MAX_SEQUENZ         50
@@ -18,11 +19,15 @@
 #define MAX_PRODUKTE        12   // deliberately small: cached catalog for offline sales
 #define MAX_PENDING_VERKAEUFE 64 // durable, idempotent sale-event outbox
 #define VERKAUF_PRICE_REVISION_UNALLOCATED 0 // server allocates correction to original lot
+#define VERKAUF_UNIT_PRICE_UNKNOWN INT32_MIN // local-only: do not include in money totals
 #define MAX_PENDING_PAYMENTS 64  // durable Paid confirmations awaiting portal acceptance
 #define MAX_DAY_BILLS       24   // bounded offline cache for one authoritative day
-#define MAX_BILL_LINES       8
-#define MAX_BILL_CATEGORIES  8
-#define MAX_DAY_PRODUCTS     12
+// A bill can contain the current catalog's grouped lines plus every retained
+// outbox event at a no-longer-current price revision.  This is deliberately
+// derived from the two bounded sources rather than being a UI-sized limit.
+#define MAX_BILL_LINES       (MAX_PRODUKTE + MAX_PENDING_VERKAEUFE)
+#define MAX_BILL_CATEGORIES  MAX_PRODUKTE
+#define MAX_DAY_PRODUCTS     MAX_BILL_LINES
 #define MAX_URL_LEN         128
 #define MAX_KEY_LEN         65
 #define TM_MAX_SSID_LEN     33
@@ -73,7 +78,6 @@ typedef enum {
     SCREEN_SPILLER,
     SCREEN_EINSTELLUNGEN,
     SCREEN_WIFI,
-    SCREEN_BLUETOOTH,
     SCREEN_CATERING,
     SCREEN_COUNT
 } Screen;
@@ -184,6 +188,11 @@ typedef struct {
     // original lot instead of applying today's cached price.
     int  preisRevisionId;
     int  quantity;           // signed (+ sale, - correction)
+    // Display/audit snapshots. These are local-only and intentionally never
+    // added to the established /api/sync/sales event contract.
+    char produktName[32];
+    char category[24];
+    int  unitPriceCent;
     bool inFlight;
 } VerkaufEvent;
 
@@ -225,6 +234,7 @@ typedef struct {
     char spielerName[MAX_NAME_LEN];
     BillLine lines[MAX_BILL_LINES];
     int  lineCount;
+    bool lineOverflow; // source exceeded supported bounded bill capacity
     BillCategoryTotal categories[MAX_BILL_CATEGORIES];
     int  categoryCount;
     int  totalCent;
@@ -248,6 +258,7 @@ typedef struct {
     int categoryCount;
     BillLine products[MAX_DAY_PRODUCTS];
     int productCount;
+    bool productOverflow;
     int generalTotalCent;
     int uniquePlayers;
     int paidPlayers;
@@ -432,6 +443,8 @@ void store_add_kredite(int spieler_id, int anzahl);
 bool store_adjust_kredite(int spieler_id, int delta);
 bool store_spieler_fuer_tag_aktiv(int spieler_id);
 void store_register_spieler_fuer_tag(int spieler_id);
+/** Atomically rejects unsettled players or removes the active-day roster entry. */
+bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_len);
 
 // ── Sync ─────────────────────────────────────────────────────
 /**
@@ -476,10 +489,14 @@ int  store_munition_cal20(int spieler_id);
 // ── Day settlement / payments ─────────────────────────────────
 bool store_queue_payment(int spieler_id);
 bool store_payment_pending(int spieler_id);
-int  store_begin_payment_sync(PaymentEvent *snapshot, int capacity);
+// Returns false only when marking the selected events in-flight could not be
+// durably committed.  On success, count receives the number selected.
+bool store_begin_payment_sync(PaymentEvent *snapshot, int capacity, int *count);
 // acceptedIds contains only portal-accepted external IDs. Other events remain
 // visible and queued (with inFlight cleared), including conflicts.
-void store_finish_payment_sync(const PaymentEvent *snapshot, int count,
+// Returns false when accepting/clearing the events could not be durably
+// committed; in that case the pre-finish queue and roster remain in RAM.
+bool store_finish_payment_sync(const PaymentEvent *snapshot, int count,
                                const char *const *acceptedIds, int acceptedCount,
                                const char *error);
 void store_cache_bill_day(const BillDaySummary *summary);

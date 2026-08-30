@@ -7,15 +7,34 @@
 #include "screen_catering.h"
 
 #define CATERING_IDLE_MS 60000u
-static lv_obj_t *s_scr, *s_players, *s_products, *s_total, *s_status, *s_pin_modal, *s_pin, *s_pin_kb;
+static lv_obj_t *s_scr, *s_players, *s_products, *s_checkout, *s_total, *s_status, *s_wifi_status, *s_pin_modal, *s_pin, *s_pin_kb;
 static lv_obj_t *s_player_buttons[MAX_PORTAL_SPIELER];
 static lv_obj_t *s_product_qty_labels[MAX_PRODUKTE];
 static int s_player_id, s_qty[MAX_PRODUKTE];
 static bool s_submitting, s_confirm_armed;
 static uint32_t s_last_touch;
 static uint32_t s_content_signature;
+static char s_rendered_wifi_status[32];
 static void reset_basket(void);
 static void rebuild(void);
+
+static void refresh_wifi_status(void) {
+    if (!s_wifi_status) return;
+    char text[sizeof(s_rendered_wifi_status)];
+    if (g_store.wifiConnected) {
+        if (g_store.wifiIp[0])
+            snprintf(text, sizeof(text), LV_SYMBOL_WIFI "  %s", g_store.wifiIp);
+        else
+            snprintf(text, sizeof(text), "WIFI: VERBONNEN");
+    } else {
+        snprintf(text, sizeof(text), "WIFI: NET VERBONNEN");
+    }
+    if (!strcmp(text, s_rendered_wifi_status)) return;
+    lv_label_set_text(s_wifi_status, text);
+    lv_obj_set_style_text_color(s_wifi_status,
+        lv_color_hex(g_store.wifiConnected ? CLR_SUCCESS : CLR_MUTED), 0);
+    snprintf(s_rendered_wifi_status, sizeof(s_rendered_wifi_status), "%s", text);
+}
 
 static uint32_t content_signature(void) {
     uint32_t hash = 2166136261u;
@@ -140,6 +159,9 @@ static void confirm_cb(lv_event_t *) {
         snprintf(message, sizeof(message), "VERKAAF NET GESPEICHERT: %s",
                  store_last_catering_error());
         lv_label_set_text(s_status, message);
+        // Keep the basket available for a retry after a transient persistence
+        // failure; only the in-flight guard must be released.
+        s_submitting = false;
     }
     if (ok) {
         reset_basket();
@@ -248,20 +270,32 @@ static void rebuild(void) {
 lv_obj_t *screen_catering_create(void) {
     s_scr = lv_obj_create(NULL); lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H); screen_base_init(s_scr);
     lv_obj_set_style_text_color(s_scr, lv_color_hex(CLR_TEXT), 0);
-    lv_obj_t *title = lv_label_create(s_scr); lv_label_set_text(title, "CATERING"); lv_obj_add_style(title, &g_style_label_title, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
-    s_players = lv_obj_create(s_scr); lv_obj_set_size(s_players, 300, 590); lv_obj_align(s_players, LV_ALIGN_LEFT_MID, 18, 30); lv_obj_add_style(s_players, &g_style_card, 0); lv_obj_set_flex_flow(s_players, LV_FLEX_FLOW_COLUMN);
-    s_products = lv_obj_create(s_scr); lv_obj_set_size(s_products, 620, 590); lv_obj_align(s_products, LV_ALIGN_CENTER, 40, 30); lv_obj_add_style(s_products, &g_style_card, 0); lv_obj_set_flex_flow(s_products, LV_FLEX_FLOW_COLUMN);
-    s_total = lv_label_create(s_scr); lv_obj_align(s_total, LV_ALIGN_BOTTOM_MID, 100, -36); lv_obj_set_style_text_font(s_total, &lv_font_montserrat_20, 0);
+    lv_obj_t *title = lv_label_create(s_scr); lv_label_set_text(title, "CATERING"); lv_obj_add_style(title, &g_style_label_title, 0); lv_obj_align(title, LV_ALIGN_TOP_LEFT, 18, 18);
+    s_wifi_status = lv_label_create(s_scr); lv_obj_set_style_text_font(s_wifi_status, &lv_font_montserrat_14, 0);
+    lv_obj_align(s_wifi_status, LV_ALIGN_TOP_RIGHT, -285, 34);
+    s_rendered_wifi_status[0] = '\0'; refresh_wifi_status();
+    lv_obj_t *exit = button(s_scr, "CATERING VERLOOSSEN", &g_style_btn_danger);
+    lv_obj_set_size(exit, 260, 52); lv_obj_align(exit, LV_ALIGN_TOP_RIGHT, -18, 16);
+    lv_obj_add_event_cb(exit, exit_open_cb, LV_EVENT_CLICKED, NULL);
+
+    s_players = lv_obj_create(s_scr); lv_obj_set_size(s_players, 290, 670); lv_obj_align(s_players, LV_ALIGN_TOP_LEFT, 18, 92); lv_obj_add_style(s_players, &g_style_card, 0); lv_obj_set_flex_flow(s_players, LV_FLEX_FLOW_COLUMN);
+    s_products = lv_obj_create(s_scr); lv_obj_set_size(s_products, 620, 670); lv_obj_align(s_products, LV_ALIGN_TOP_LEFT, 326, 92); lv_obj_add_style(s_products, &g_style_card, 0); lv_obj_set_flex_flow(s_products, LV_FLEX_FLOW_COLUMN);
+    s_checkout = lv_obj_create(s_scr); lv_obj_set_size(s_checkout, 298, 670); lv_obj_align(s_checkout, LV_ALIGN_TOP_LEFT, 964, 92); lv_obj_add_style(s_checkout, &g_style_card, 0);
+    lv_obj_t *checkout_heading = lv_label_create(s_checkout); lv_label_set_text(checkout_heading, "BESTELLUNG");
+    lv_obj_set_style_text_font(checkout_heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(checkout_heading, lv_color_hex(CLR_MUTED), 0);
+    lv_obj_align(checkout_heading, LV_ALIGN_TOP_LEFT, 0, 0);
+    s_total = lv_label_create(s_checkout); lv_obj_align(s_total, LV_ALIGN_TOP_LEFT, 0, 42); lv_obj_set_style_text_font(s_total, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(s_total, lv_color_hex(CLR_TEXT), 0);
-    s_status = lv_label_create(s_scr); lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 100, -8);
+    s_status = lv_label_create(s_checkout); lv_obj_set_width(s_status, LV_PCT(100)); lv_obj_align(s_status, LV_ALIGN_TOP_LEFT, 0, 82);
     lv_obj_set_style_text_color(s_status, lv_color_hex(CLR_TEXT), 0);
-    lv_obj_t *confirm = button(s_scr, "BESTAETEG VERKAAF", &g_style_btn_primary); lv_obj_set_size(confirm, 250, 70); lv_obj_align(confirm, LV_ALIGN_RIGHT_MID, -35, 30); lv_obj_add_event_cb(confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *cancel = button(s_scr, "OFBRIECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, 250, 55); lv_obj_align(cancel, LV_ALIGN_RIGHT_MID, -35, 115); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); refresh_selection(); }, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *exit = button(s_scr, "CATERING VERLOOSSEN", &g_style_btn_danger); lv_obj_set_size(exit, 250, 55); lv_obj_align(exit, LV_ALIGN_RIGHT_MID, -35, -100); lv_obj_add_event_cb(exit, exit_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *confirm = button(s_checkout, "BESTAETEG VERKAAF", &g_style_btn_primary); lv_obj_set_size(confirm, LV_PCT(100), 70); lv_obj_align(confirm, LV_ALIGN_TOP_LEFT, 0, 210); lv_obj_add_event_cb(confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel = button(s_checkout, "OFBRIECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, LV_PCT(100), 55); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 0, 296); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); refresh_selection(); }, LV_EVENT_CLICKED, NULL);
     reset_basket(); rebuild(); return s_scr;
 }
 void screen_catering_refresh(void) { reset_basket(); rebuild(); }
 void screen_catering_tick(void) {
+    refresh_wifi_status();
     uint32_t current_signature = content_signature();
     if (current_signature != s_content_signature) {
         reset_basket();

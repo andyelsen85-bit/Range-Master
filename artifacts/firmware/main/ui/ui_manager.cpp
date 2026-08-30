@@ -18,7 +18,6 @@
 #include "screen_einstellungen.h"
 #include "screen_spiller.h"
 #include "screen_wifi.h"
-#include "screen_bluetooth.h"
 #include "screen_catering.h"
 
 static const char *TAG = "ui_manager";
@@ -115,12 +114,11 @@ void ui_manager_init(void)
     styles_init();
 
     // Create persistent WiFi worker tasks NOW, before any screen_*_create()
-    // call consumes internal RAM.  After all 10 screens are built, internal
+    // call consumes internal RAM.  After all 9 screens are built, internal
     // RAM drops to ~52 bytes — far too little for a FreeRTOS TCB (~200 B).
     // Workers created here (while ~93 KB is still free) block on queues and
     // cost no allocations when scan_cb / connect_cb fire at tap time.
     screen_wifi_create_workers();
-    screen_bluetooth_create_workers();
     store_create_workers();
 
     // Yield 5 ms between each screen build so FreeRTOS IDLE1 can run and
@@ -136,7 +134,6 @@ void ui_manager_init(void)
     s_screens[SCREEN_SPILLER]      = screen_spiller_create();      vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_EINSTELLUNGEN]= screen_einstellungen_create();vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_WIFI]         = screen_wifi_create();         vTaskDelay(pdMS_TO_TICKS(5));
-    s_screens[SCREEN_BLUETOOTH]    = screen_bluetooth_create();
     s_screens[SCREEN_CATERING]     = screen_catering_create();
 
     // Register a timer to poll store.screen changes
@@ -171,7 +168,6 @@ void ui_manager_show(Screen s)
         case SCREEN_SPILLER:      screen_spiller_refresh();      break;
         case SCREEN_EINSTELLUNGEN:screen_einstellungen_refresh();break;
         case SCREEN_WIFI:         screen_wifi_refresh();         break;
-        case SCREEN_BLUETOOTH:    screen_bluetooth_refresh();    break;
         case SCREEN_CATERING:     screen_catering_refresh();     break;
         default: break;
     }

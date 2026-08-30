@@ -1,6 +1,6 @@
 // ============================================================
-// ASTELLUNGEN screen - settings: API, machines, custom seqs,
-//                     WiFi tab, Bluetooth tab, system info
+// ASTELLUNGEN screen - settings: connections, machines, custom seqs,
+//                     WiFi, products/bills, catering, system info
 // Mirrors EinstellungenScreen.tsx
 // ============================================================
 #include <stdio.h>
@@ -17,7 +17,7 @@ static lv_obj_t *s_scr;
 static lv_obj_t *s_tab_view;
 static lv_obj_t *s_kb;
 
-// ── Tab: Portal API ───────────────────────────────────────────
+// ── Tab: Conn ─────────────────────────────────────────────────
 static lv_obj_t *s_ta_url;
 static lv_obj_t *s_ta_key;
 static lv_obj_t *s_ta_gateway;
@@ -79,17 +79,27 @@ static void refresh_bill_day_summary(void)
             used += (size_t)n;
         }
         for (int i = 0; i < day->productCount && used < sizeof(text); ++i) {
-            int n = snprintf(text + used, sizeof(text) - used,
+            const BillLine *line = &day->products[i];
+            int n;
+            if (line->unitPriceCent == VERKAUF_UNIT_PRICE_UNKNOWN)
+                n = snprintf(text + used, sizeof(text) - used,
+                             "\nPENDING %s: %d x PRAIS ONBEKANNT (RECONCILIATION)",
+                             line->produktName, line->quantity);
+            else
+                n = snprintf(text + used, sizeof(text) - used,
                              "\n%s%s: %d x %d.%02d = %d.%02d EUR",
-                             day->products[i].localPending ? "PENDING " : "",
-                             day->products[i].produktName,
-                             day->products[i].quantity,
-                             day->products[i].unitPriceCent / 100,
-                             abs(day->products[i].unitPriceCent % 100),
-                             day->products[i].lineTotalCent / 100,
-                             abs(day->products[i].lineTotalCent % 100));
+                             line->localPending ? "PENDING " : "",
+                             line->produktName, line->quantity,
+                             line->unitPriceCent / 100,
+                             abs(line->unitPriceCent % 100),
+                             line->lineTotalCent / 100,
+                             abs(line->lineTotalCent % 100));
             if (n < 0 || (size_t)n >= sizeof(text) - used) break;
             used += (size_t)n;
+        }
+        if (day->productOverflow && used < sizeof(text)) {
+            snprintf(text + used, sizeof(text) - used,
+                     "\nDETAIL-LIMIT ERREECHT - PORTALDETAILER PRUEWEN");
         }
     }
     set_label_text_if_changed(s_bill_day_summary, text);
@@ -187,6 +197,11 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_row(parent, 12, 0);
     lv_obj_set_style_pad_all(parent, 16, 0);
 
+    lv_obj_t *section = lv_label_create(parent);
+    lv_label_set_text(section, "CONNECTION");
+    lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
+
     lv_obj_t *url_lbl = lv_label_create(parent);
     lv_label_set_text(url_lbl, "PORTAL API URL");
     lv_obj_set_style_text_font(url_lbl, &lv_font_montserrat_14, 0);
@@ -240,30 +255,6 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_text_font(s_ta_gateway_token, &lv_font_montserrat_14, 0);
     lv_obj_set_style_bg_color(s_ta_gateway_token, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_gateway_token, lv_color_hex(CLR_TEXT), 0);
-
-    struct PriceField { const char *label; const char *id; lv_obj_t **out; } price_fields[] = {
-        {"PREIS SPIELKREDIT (EUR)", "GAME_CREDIT", &s_ta_price_credit},
-        {"PREIS CAL.12 (EUR)", "AMMO_CAL12", &s_ta_price_cal12},
-        {"PREIS CAL.20 (EUR)", "AMMO_CAL20", &s_ta_price_cal20},
-    };
-    for (unsigned i = 0; i < sizeof(price_fields)/sizeof(price_fields[0]); ++i) {
-        lv_obj_t *label = lv_label_create(parent);
-        lv_label_set_text(label, price_fields[i].label);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(CLR_TEXT), 0);
-        *price_fields[i].out = lv_textarea_create(parent);
-        lv_obj_set_size(*price_fields[i].out, 180, 50);
-        lv_textarea_set_one_line(*price_fields[i].out, true);
-        const Produkt *p = store_produkt(price_fields[i].id);
-        char price[16]; snprintf(price, sizeof(price), "%d.%02d",
-                                 p ? p->preisCent / 100 : 0, p ? p->preisCent % 100 : 0);
-        lv_textarea_set_text(*price_fields[i].out, price);
-        lv_obj_set_style_bg_color(*price_fields[i].out, lv_color_hex(CLR_BORDER), 0);
-        lv_obj_set_style_text_color(*price_fields[i].out, lv_color_hex(CLR_TEXT), 0);
-        // Price revisions are issued by the portal. Cached values remain
-        // visible offline but must not be edited into a non-existent revision.
-        lv_obj_add_state(*price_fields[i].out, LV_STATE_DISABLED);
-    }
 
     lv_obj_t *action_row = lv_obj_create(parent);
     lv_obj_set_size(action_row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -319,7 +310,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     return parent;
 }
 
-// ── Tab: MASCHINNEN ───────────────────────────────────────────
+// ── Connection section: MASCHINNEN ────────────────────────────
 static lv_obj_t *s_mach_sw[MASCHINE_COUNT];
 
 static void mach_sw_cb(lv_event_t *e)
@@ -364,6 +355,11 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_row(parent, 8, 0);
     lv_obj_set_style_pad_all(parent, 16, 0);
 
+    lv_obj_t *section = lv_label_create(parent);
+    lv_label_set_text(section, "MASCHINN CONFIGURATION");
+    lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
+
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         lv_obj_t *row = lv_obj_create(parent);
         lv_obj_set_size(row, LV_PCT(100), 50);
@@ -406,7 +402,7 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
     return parent;
 }
 
-// ── Tab: CUSTOM SEQUENZEN ─────────────────────────────────────
+// ── System section: CUSTOM SEQUENZEN ──────────────────────────
 // Ordered sequence builder: A-G may be added as single machines. A-G
 // doublettes require a first machine, a partner, and a seconds delay; H is a
 // special one-relay H1/H2 doublette with no partner selector.
@@ -537,6 +533,11 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 14, 0);
     lv_obj_set_style_pad_row(parent, 12, 0);
+
+    lv_obj_t *section = lv_label_create(parent);
+    lv_label_set_text(section, "CUSTOM GAME CONFIGURATION");
+    lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
     for (int ci = 0; ci < 4; ci++) {
 
@@ -844,11 +845,16 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
     return parent;
 }
 
-// ── Tab: WiFi ─────────────────────────────────────────────────
+// ── Connection section: WiFi ──────────────────────────────────
 static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 16, 0);
+
+    lv_obj_t *section = lv_label_create(parent);
+    lv_label_set_text(section, "WIFI");
+    lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *info = lv_label_create(parent);
     lv_label_set_text(info, "WiFi ASTELLUNGEN kann op der WiFi-SAit geAnnert ginn.");
@@ -868,27 +874,41 @@ static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
     return parent;
 }
 
-// ── Tab: Bluetooth ────────────────────────────────────────────
-static lv_obj_t *build_bt_tab(lv_obj_t *parent)
+// ── Tab: Products & Bills ─────────────────────────────────────
+static lv_obj_t *build_products_bills_tab(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 16, 0);
+    lv_obj_set_style_pad_row(parent, 8, 0);
 
-    lv_obj_t *info = lv_label_create(parent);
-    lv_label_set_text(info, "BLUETOOTH HID KEYBOARD KOPPLUNG.");
-    lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(info, lv_color_hex(CLR_MUTED), 0);
+    struct PriceField { const char *label; const char *id; lv_obj_t **out; } price_fields[] = {
+        {"PREIS SPIELKREDIT (EUR)", "GAME_CREDIT", &s_ta_price_credit},
+        {"PREIS CAL.12 (EUR)", "AMMO_CAL12", &s_ta_price_cal12},
+        {"PREIS CAL.20 (EUR)", "AMMO_CAL20", &s_ta_price_cal20},
+    };
+    for (unsigned i = 0; i < sizeof(price_fields)/sizeof(price_fields[0]); ++i) {
+        lv_obj_t *label = lv_label_create(parent);
+        lv_label_set_text(label, price_fields[i].label);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(CLR_TEXT), 0);
+        *price_fields[i].out = lv_textarea_create(parent);
+        lv_obj_set_size(*price_fields[i].out, 180, 50);
+        lv_textarea_set_one_line(*price_fields[i].out, true);
+        const Produkt *p = store_produkt(price_fields[i].id);
+        char price[16]; snprintf(price, sizeof(price), "%d.%02d",
+                                 p ? p->preisCent / 100 : 0, p ? p->preisCent % 100 : 0);
+        lv_textarea_set_text(*price_fields[i].out, price);
+        lv_obj_set_style_bg_color(*price_fields[i].out, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_text_color(*price_fields[i].out, lv_color_hex(CLR_TEXT), 0);
+        // Price revisions are issued by the portal. Cached values remain
+        // visible offline but must not be edited into a non-existent revision.
+        lv_obj_add_state(*price_fields[i].out, LV_STATE_DISABLED);
+    }
 
-    lv_obj_t *btn = lv_btn_create(parent);
-    lv_obj_add_style(btn, &g_style_btn_primary, 0);
-    lv_obj_set_size(btn, 240, 44);
-    lv_obj_add_event_cb(btn, [](lv_event_t *e) {
-        ui_manager_show(SCREEN_BLUETOOTH);
-    }, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *bl = lv_label_create(btn);
-    lv_label_set_text(bl, LV_SYMBOL_BLUETOOTH "  BLUETOOTH SAEIT");
-    lv_obj_set_style_text_color(bl, lv_color_hex(CLR_TEXT), 0);
-    lv_obj_center(bl);
+    s_bill_day_summary = lv_label_create(parent);
+    lv_obj_set_style_text_font(s_bill_day_summary, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_TEXT), 0);
+    refresh_bill_day_summary();
     return parent;
 }
 
@@ -926,6 +946,39 @@ static void auto_sync_changed(lv_event_t *e)
     store_set_auto_sync(enabled, seconds);
     lv_label_set_text(s_auto_sync_feedback, "AUTO SYNC GESPEICHERT");
     lv_obj_set_style_text_color(s_auto_sync_feedback, lv_color_hex(CLR_SUCCESS), 0);
+}
+
+// ── Tab: Catering ─────────────────────────────────────────────
+static lv_obj_t *build_catering_tab(lv_obj_t *parent)
+{
+    lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(parent, 16, 0);
+    lv_obj_set_style_pad_row(parent, 8, 0);
+
+    lv_obj_t *cat = lv_obj_create(parent);
+    lv_obj_set_size(cat, LV_PCT(100), 180);
+    lv_obj_add_style(cat, &g_style_card, 0);
+    lv_obj_set_flex_flow(cat, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(cat, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *cat_label = lv_label_create(cat);
+    lv_label_set_text(cat_label, "ALE PIN");
+    s_catering_old_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_old_pin, 140, 44);
+    lv_textarea_set_one_line(s_catering_old_pin, true); lv_textarea_set_password_mode(s_catering_old_pin, true);
+    lv_textarea_set_accepted_chars(s_catering_old_pin, "0123456789"); lv_textarea_set_max_length(s_catering_old_pin, 16);
+    cat_label = lv_label_create(cat);
+    lv_label_set_text(cat_label, "NEI PIN (4-16)");
+    s_catering_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_pin, 180, 44);
+    lv_textarea_set_one_line(s_catering_pin, true); lv_textarea_set_password_mode(s_catering_pin, true);
+    lv_textarea_set_accepted_chars(s_catering_pin, "0123456789"); lv_textarea_set_max_length(s_catering_pin, 16);
+    lv_obj_t *pin_save = lv_btn_create(cat); lv_obj_add_style(pin_save, &g_style_btn_secondary, 0);
+    lv_obj_add_event_cb(pin_save, catering_save_pin_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *pin_save_l = lv_label_create(pin_save); lv_label_set_text(pin_save_l, "PIN SPEICHERN"); lv_obj_center(pin_save_l);
+    lv_obj_t *enter = lv_btn_create(cat); lv_obj_add_style(enter, &g_style_btn_danger, 0);
+    lv_obj_add_event_cb(enter, catering_enter_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *enter_l = lv_label_create(enter); lv_label_set_text(enter_l, "CATERING STARTEN"); lv_obj_center(enter_l);
+    s_catering_status = lv_label_create(parent);
+    lv_label_set_text(s_catering_status, g_store.cateringPinConfigured ? "CATERING PIN ASS KONFIGUREIERT." : "KENG CATERING PIN KONFIGUREIERT.");
+    return parent;
 }
 
 static lv_obj_t *build_system_tab(lv_obj_t *parent)
@@ -986,35 +1039,6 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
                         LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_auto_sync_seconds, auto_sync_changed,
                         LV_EVENT_VALUE_CHANGED, NULL);
-
-    s_bill_day_summary = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_bill_day_summary, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_TEXT), 0);
-    refresh_bill_day_summary();
-
-    lv_obj_t *cat = lv_obj_create(parent);
-    lv_obj_set_size(cat, LV_PCT(100), 180);
-    lv_obj_add_style(cat, &g_style_card, 0);
-    lv_obj_set_flex_flow(cat, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(cat, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *cat_label = lv_label_create(cat);
-    lv_label_set_text(cat_label, "ALE PIN");
-    s_catering_old_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_old_pin, 140, 44);
-    lv_textarea_set_one_line(s_catering_old_pin, true); lv_textarea_set_password_mode(s_catering_old_pin, true);
-    lv_textarea_set_accepted_chars(s_catering_old_pin, "0123456789"); lv_textarea_set_max_length(s_catering_old_pin, 16);
-    cat_label = lv_label_create(cat);
-    lv_label_set_text(cat_label, "NEI PIN (4-16)");
-    s_catering_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_pin, 180, 44);
-    lv_textarea_set_one_line(s_catering_pin, true); lv_textarea_set_password_mode(s_catering_pin, true);
-    lv_textarea_set_accepted_chars(s_catering_pin, "0123456789"); lv_textarea_set_max_length(s_catering_pin, 16);
-    lv_obj_t *pin_save = lv_btn_create(cat); lv_obj_add_style(pin_save, &g_style_btn_secondary, 0);
-    lv_obj_add_event_cb(pin_save, catering_save_pin_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *pin_save_l = lv_label_create(pin_save); lv_label_set_text(pin_save_l, "PIN SPEICHERN"); lv_obj_center(pin_save_l);
-    lv_obj_t *enter = lv_btn_create(cat); lv_obj_add_style(enter, &g_style_btn_danger, 0);
-    lv_obj_add_event_cb(enter, catering_enter_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *enter_l = lv_label_create(enter); lv_label_set_text(enter_l, "CATERING STARTEN"); lv_obj_center(enter_l);
-    s_catering_status = lv_label_create(parent);
-    lv_label_set_text(s_catering_status, g_store.cateringPinConfigured ? "CATERING PIN ASS KONFIGUREIERT." : "KENG CATERING PIN KONFIGUREIERT.");
 
     // ── Firmware / board info ─────────────────────────────────
     static const char *info_rows[] = {
@@ -1080,19 +1104,26 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_set_style_bg_color(s_tab_view, lv_color_hex(CLR_BG), 0);
     lv_obj_set_style_text_font(s_tab_view, &lv_font_montserrat_14, 0);
 
-    lv_obj_t *tab_api    = lv_tabview_add_tab(s_tab_view, "Portal API");
-    lv_obj_t *tab_mach   = lv_tabview_add_tab(s_tab_view, "MASCHINNEN");
-    lv_obj_t *tab_custom = lv_tabview_add_tab(s_tab_view, "CUSTOM");
-    lv_obj_t *tab_wifi   = lv_tabview_add_tab(s_tab_view, "WiFi");
-    lv_obj_t *tab_bt     = lv_tabview_add_tab(s_tab_view, "Bluetooth");
-    lv_obj_t *tab_sys    = lv_tabview_add_tab(s_tab_view, "System");
+    lv_obj_t *tab_conn     = lv_tabview_add_tab(s_tab_view, "Conn");
+    lv_obj_t *tab_products = lv_tabview_add_tab(s_tab_view, "Products & Bills");
+    lv_obj_t *tab_catering = lv_tabview_add_tab(s_tab_view, "Catering");
+    lv_obj_t *tab_sys      = lv_tabview_add_tab(s_tab_view, "System");
 
-    build_api_tab(tab_api);
-    build_mach_tab(tab_mach);
-    build_custom_tab(tab_custom);
-    build_wifi_tab(tab_wifi);
-    build_bt_tab(tab_bt);
+    // Keep all settings reachable through four primary tabs.  The tab pages
+    // remain vertically scrollable because Conn and System contain several
+    // formerly separate pages.
+    lv_obj_set_scroll_dir(tab_conn, LV_DIR_VER);
+    lv_obj_set_scroll_dir(tab_products, LV_DIR_VER);
+    lv_obj_set_scroll_dir(tab_catering, LV_DIR_VER);
+    lv_obj_set_scroll_dir(tab_sys, LV_DIR_VER);
+
+    build_api_tab(tab_conn);
+    build_mach_tab(tab_conn);
+    build_wifi_tab(tab_conn);
+    build_products_bills_tab(tab_products);
+    build_catering_tab(tab_catering);
     build_system_tab(tab_sys);
+    build_custom_tab(tab_sys);
 
     // ── On-screen keyboard ────────────────────────────────────────
     // Created last (after all tabs) so it renders on top.

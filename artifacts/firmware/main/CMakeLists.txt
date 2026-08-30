@@ -17,7 +17,6 @@ idf_component_register(
         "ui/screen_einstellungen.cpp"
         "ui/screen_spiller.cpp"
         "ui/screen_wifi.cpp"
-        "ui/screen_bluetooth.cpp"
         "ui/screen_catering.cpp"
         "lora_stub/lora_stub.cpp"
         "net/web_config.cpp"

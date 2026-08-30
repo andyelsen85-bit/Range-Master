@@ -964,22 +964,34 @@ esp_err_t http_push_kredit_events(void)
 }
 
 // ── http_push_payment_events ───────────────────────────────────
-// Contract: POST /sync/payments {events:[{externalId,spielerId,datum}]} and
+// Contract: POST /api/sync/payments {events:[{externalId,spielerId,datum}]} and
 // top-level results with externalId/status (accepted, skipped, conflict).
 esp_err_t http_push_payment_events(void)
 {
     PaymentEvent *snapshot = (PaymentEvent *)malloc(
         MAX_PENDING_PAYMENTS * sizeof(PaymentEvent));
     if (!snapshot) return ESP_ERR_NO_MEM;
-    int count = store_begin_payment_sync(snapshot, MAX_PENDING_PAYMENTS);
+    int count = 0;
+    if (!store_begin_payment_sync(snapshot, MAX_PENDING_PAYMENTS, &count)) {
+        free(snapshot);
+        set_http_error("POST", "/api/sync/payments", "payment queue persistence failed");
+        return ESP_FAIL;
+    }
     if (!count) { free(snapshot); return ESP_OK; }
 
     cJSON *root = cJSON_CreateObject(), *events = cJSON_CreateArray();
     if (!root || !events) {
         if (root) cJSON_Delete(root);
         if (events) cJSON_Delete(events);
-        store_finish_payment_sync(snapshot, count, NULL, 0, "Net genuch Speicher");
-        free(snapshot); return ESP_ERR_NO_MEM;
+        bool restored = store_finish_payment_sync(snapshot, count, NULL, 0,
+                                                  "Net genuch Speicher");
+        free(snapshot);
+        if (!restored) {
+            set_http_error("POST", "/api/sync/payments",
+                           "payment queue restore persistence failed");
+            return ESP_FAIL;
+        }
+        return ESP_ERR_NO_MEM;
     }
     cJSON_AddItemToObject(root, "events", events);
     for (int i = 0; i < count; ++i) {
@@ -992,10 +1004,11 @@ esp_err_t http_push_payment_events(void)
     char *body = cJSON_PrintUnformatted(root); cJSON_Delete(root);
     char *response = (char *)malloc(4096);
     esp_err_t err = (!body || !response) ? ESP_ERR_NO_MEM :
-        http_post_json("/sync/payments", body, response, 4096);
+        http_post_json("/api/sync/payments", body, response, 4096);
     if (body) cJSON_free(body);
     if (err != ESP_OK) {
-        store_finish_payment_sync(snapshot, count, NULL, 0, "Portal/Netz Feeler");
+        if (!store_finish_payment_sync(snapshot, count, NULL, 0, "Portal/Netz Feeler"))
+            err = ESP_FAIL;
         if (response) free(response);
         free(snapshot);
         return err;
@@ -1003,8 +1016,15 @@ esp_err_t http_push_payment_events(void)
     cJSON *parsed = cJSON_Parse(response);
     free(response);
     if (!parsed) {
-        store_finish_payment_sync(snapshot, count, NULL, 0, "Onliesbar Portal-Äntwert");
-        free(snapshot); return ESP_ERR_INVALID_RESPONSE;
+        bool restored = store_finish_payment_sync(snapshot, count, NULL, 0,
+                                                  "Onliesbar Portal-Äntwert");
+        free(snapshot);
+        if (!restored) {
+            set_http_error("POST", "/api/sync/payments",
+                           "payment queue restore persistence failed");
+            return ESP_FAIL;
+        }
+        return ESP_ERR_INVALID_RESPONSE;
     }
     cJSON *outcomes = cJSON_GetObjectItemCaseSensitive(parsed, "results");
     const char *accepted[MAX_PENDING_PAYMENTS] = {};
@@ -1020,13 +1040,13 @@ esp_err_t http_push_payment_events(void)
                  !strcmp(status->valuestring, "skipped")))
                 if (accepted_count < MAX_PENDING_PAYMENTS) accepted[accepted_count++] = id->valuestring;
     }
-    store_finish_payment_sync(snapshot, count, accepted, accepted_count,
-                              "Portal conflict / net acceptéiert");
+    bool finish_saved = store_finish_payment_sync(snapshot, count, accepted, accepted_count,
+                                                  "Portal conflict / net acceptéiert");
     cJSON_Delete(parsed);
     free(snapshot);
     // A 2xx with a conflict/rejection is not delivery success: preserve a
     // visible sync error and retry the unchanged externalId later.
-    return accepted_count == count ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+    return finish_saved && accepted_count == count ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
 static int json_int(cJSON *object, const char *key)
@@ -1036,16 +1056,17 @@ static int json_int(cJSON *object, const char *key)
     return cJSON_IsNumber(value) ? (int)value->valuedouble : 0;
 }
 
-static void bill_add_category(BillCategoryTotal *totals, int *count,
+static bool bill_add_category(BillCategoryTotal *totals, int *count,
                               const char *name, int cents)
 {
-    if (!name || !name[0] || !cents) return;
+    if (!name || !name[0] || !cents) return true;
     for (int i = 0; i < *count; ++i)
-        if (!strcmp(totals[i].name, name)) { totals[i].totalCent += cents; return; }
-    if (*count >= MAX_BILL_CATEGORIES) return;
+        if (!strcmp(totals[i].name, name)) { totals[i].totalCent += cents; return true; }
+    if (*count >= MAX_BILL_CATEGORIES) return false;
     BillCategoryTotal *total = &totals[(*count)++];
     snprintf(total->name, sizeof(total->name), "%s", name);
     total->totalCent = cents;
+    return true;
 }
 
 static PlayerBill *bill_find_or_add(BillDaySummary *summary, int spieler_id)
@@ -1070,7 +1091,7 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
     cJSON *datum = cJSON_GetObjectItemCaseSensitive(root, "datum");
     cJSON *players = cJSON_GetObjectItemCaseSensitive(root, "players");
     if (!cJSON_IsString(datum) || strcmp(datum->valuestring, requested) ||
-        !cJSON_IsArray(players)) return false;
+        !cJSON_IsArray(players) || cJSON_GetArraySize(players) > MAX_DAY_BILLS) return false;
     memset(summary, 0, sizeof(*summary));
     snprintf(summary->datum, sizeof(summary->datum), "%s", datum->valuestring);
     summary->generalTotalCent = json_int(root, "generalTotalCents");
@@ -1081,17 +1102,23 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
     summary->confirmedClays = json_int(root, "confirmedClays");
     cJSON *day_categories = cJSON_GetObjectItemCaseSensitive(root, "categorySubtotals");
     if (cJSON_IsObject(day_categories)) {
+        if (cJSON_GetArraySize(day_categories) > MAX_BILL_CATEGORIES) return false;
         cJSON *category;
         cJSON_ArrayForEach(category, day_categories)
             if (cJSON_IsNumber(category))
-                bill_add_category(summary->categories, &summary->categoryCount,
-                                  category->string, (int)category->valuedouble);
+                if (!bill_add_category(summary->categories, &summary->categoryCount,
+                                       category->string, (int)category->valuedouble))
+                    return false;
     }
     cJSON *day_products = cJSON_GetObjectItemCaseSensitive(root, "productTotals");
     if (cJSON_IsObject(day_products)) {
+        if (cJSON_GetArraySize(day_products) > MAX_DAY_PRODUCTS) return false;
         cJSON *item;
         cJSON_ArrayForEach(item, day_products) {
-            if (!cJSON_IsObject(item) || summary->productCount >= MAX_DAY_PRODUCTS) continue;
+            if (!cJSON_IsObject(item)) continue;
+            if (summary->productCount >= MAX_DAY_PRODUCTS) {
+                return false;
+            }
             BillLine *out = &summary->products[summary->productCount++];
             out->produktId = json_int(item, "productId");
             out->preisRevisionId = json_int(item, "priceRevisionId");
@@ -1113,7 +1140,7 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
         cJSON *sid = cJSON_GetObjectItemCaseSensitive(player, "spielerId");
         if (!cJSON_IsNumber(sid)) continue;
         PlayerBill *bill = bill_find_or_add(summary, (int)sid->valuedouble);
-        if (!bill) break;
+        if (!bill) return false;
         cJSON *name = cJSON_GetObjectItemCaseSensitive(player, "spielerName");
         if (cJSON_IsString(name))
             utf8_to_display(bill->spielerName, name->valuestring, sizeof(bill->spielerName));
@@ -1138,8 +1165,12 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
                              sizeof(bill->paymentSource));
         }
         cJSON *lines = cJSON_GetObjectItemCaseSensitive(player, "lines"), *line;
+        if (cJSON_IsArray(lines) && cJSON_GetArraySize(lines) > MAX_BILL_LINES)
+            return false;
         if (cJSON_IsArray(lines)) cJSON_ArrayForEach(line, lines) {
-            if (bill->lineCount >= MAX_BILL_LINES) break;
+            if (bill->lineCount >= MAX_BILL_LINES) {
+                return false;
+            }
             BillLine *out = &bill->lines[bill->lineCount++];
             out->produktId = json_int(line, "productId");
             out->preisRevisionId = json_int(line, "priceRevisionId");
@@ -1153,8 +1184,9 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
                                 sizeof(out->produktName));
             if (cJSON_IsString(category))
                 snprintf(out->category, sizeof(out->category), "%s", category->valuestring);
-            bill_add_category(bill->categories, &bill->categoryCount,
-                              out->category, out->lineTotalCent);
+            if (!bill_add_category(bill->categories, &bill->categoryCount,
+                                   out->category, out->lineTotalCent))
+                return false;
         }
     }
     // Project only events absent from the authoritative baseline. Successful
@@ -1162,33 +1194,36 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
     for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i) {
         VerkaufEvent *event = &g_store.pendingVerkaufEvents[i];
         if (strcmp(event->datum, requested)) continue;
-        const Produkt *product = NULL;
-        for (int p = 0; p < g_store.produkteCount; ++p)
-            if (g_store.produkte[p].id == event->produktId &&
-                g_store.produkte[p].preisRevisionId == event->preisRevisionId)
-                { product = &g_store.produkte[p]; break; }
-        if (!product) continue; // never invent a price for an unknown revision
         PlayerBill *bill = bill_find_or_add(summary, event->spielerId);
-        if (!bill) continue;
+        if (!bill) return false;
         BillLine *line = NULL;
         for (int l = 0; l < bill->lineCount; ++l)
             if (bill->lines[l].localPending &&
                 bill->lines[l].produktId == event->produktId &&
-                bill->lines[l].preisRevisionId == event->preisRevisionId)
+                bill->lines[l].preisRevisionId == event->preisRevisionId &&
+                bill->lines[l].unitPriceCent == event->unitPriceCent)
                 { line = &bill->lines[l]; break; }
         if (!line && bill->lineCount < MAX_BILL_LINES) {
             line = &bill->lines[bill->lineCount++];
-            line->produktId = product->id; line->preisRevisionId = product->preisRevisionId;
-            line->unitPriceCent = product->preisCent; line->localPending = true;
-            snprintf(line->produktName, sizeof(line->produktName), "%s", product->name);
-            snprintf(line->category, sizeof(line->category), "%s", product->category);
+            line->produktId = event->produktId;
+            line->preisRevisionId = event->preisRevisionId;
+            line->unitPriceCent = event->unitPriceCent;
+            line->localPending = true;
+            snprintf(line->produktName, sizeof(line->produktName), "%s",
+                     event->produktName[0] ? event->produktName : "ONBEKANNT");
+            snprintf(line->category, sizeof(line->category), "%s",
+                     event->category[0] ? event->category : "ONBEKANNT");
         }
-        if (!line) continue;
-        int cents = event->quantity * line->unitPriceCent;
+        if (!line) {
+            return false;
+        }
+        bool price_known = line->unitPriceCent != VERKAUF_UNIT_PRICE_UNKNOWN;
+        int cents = price_known ? event->quantity * line->unitPriceCent : 0;
         line->quantity += event->quantity; line->lineTotalCent += cents;
         bill->totalCent += cents; summary->generalTotalCent += cents;
-        bill_add_category(bill->categories, &bill->categoryCount, line->category, cents);
-        bill_add_category(summary->categories, &summary->categoryCount, line->category, cents);
+        if (!bill_add_category(bill->categories, &bill->categoryCount, line->category, cents) ||
+            !bill_add_category(summary->categories, &summary->categoryCount, line->category, cents))
+            return false;
         BillLine *day_line = NULL;
         for (int p = 0; p < summary->productCount; ++p)
             if (summary->products[p].produktId == line->produktId &&
@@ -1204,7 +1239,7 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
             day_line->quantity += event->quantity;
             day_line->lineTotalCent += cents;
             day_line->localPending = true;
-        }
+        } else return false;
     }
     if (summary->uniquePlayers < summary->playerCount)
         summary->uniquePlayers = summary->playerCount;
@@ -1212,7 +1247,7 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
         KreditEvent *event = &g_store.pendingKreditEvents[i];
         if (strcmp(event->datum, requested)) continue;
         PlayerBill *bill = bill_find_or_add(summary, event->spielerId);
-        if (!bill) continue;
+        if (!bill) return false;
         if (!strcmp(event->typ, "GRANT")) bill->creditGranted += event->anzahl;
         else if (!strcmp(event->typ, "USE")) bill->creditUsed += event->anzahl;
         bill->creditRemaining = bill->creditGranted - bill->creditUsed;
