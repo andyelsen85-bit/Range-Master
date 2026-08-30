@@ -22,6 +22,7 @@ import AdminOfrechnung from '@/pages/admin-ofrechnung';
 import AdminSpielrProfil from '@/pages/admin-spieler-profil';
 import AdminTerminalConfig from '@/pages/admin-terminal-config';
 import Profil from '@/pages/profil';
+import Kaef from '@/pages/kaef';
 import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
@@ -72,6 +73,7 @@ function Router() {
             <Route path="/resultater" component={() => <PrivateRoute component={Resultater} />} />
             <Route path="/rangliste" component={() => <PrivateRoute component={Rangliste} />} />
             <Route path="/statistiken" component={() => <PrivateRoute component={Statistiken} />} />
+            <Route path="/akeef" component={() => <PrivateRoute component={Kaef} />} />
             <Route path="/profil" component={() => <PrivateRoute component={Profil} />} />
             <Route path="/admin" component={() => <AdminRoute component={Admin} />} />
             <Route path="/admin/spieler/:id" component={(props) => <AdminRoute component={AdminSpielrProfil} {...props} />} />

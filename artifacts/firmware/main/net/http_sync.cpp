@@ -992,6 +992,14 @@ esp_err_t http_push_kredit_events(void)
         cJSON_AddStringToObject(item, "datum",      ev->datum);
         cJSON_AddStringToObject(item, "typ",        ev->typ);
         cJSON_AddNumberToObject(item, "anzahl",     (double)ev->anzahl);
+        // Receipt fields are ignored by older portals but retained on the
+        // wire for audit-capable endpoints and deterministic reconciliation.
+        if (!strcmp(ev->typ, "USE")) {
+            if (ev->occurredAt[0])
+                cJSON_AddStringToObject(item, "occurredAt", ev->occurredAt);
+            cJSON_AddNumberToObject(item, "priceRevisionId", ev->preisRevisionId);
+            cJSON_AddNumberToObject(item, "unitPriceCents", ev->unitPriceCent);
+        }
         cJSON_AddItemToArray(arr, item);
     }
 
@@ -1127,21 +1135,6 @@ static bool bill_add_category(BillCategoryTotal *totals, int *count,
     return true;
 }
 
-static PlayerBill *bill_find_or_add(BillDaySummary *summary, int spieler_id)
-{
-    for (int i = 0; i < summary->playerCount; ++i)
-        if (summary->players[i].spielerId == spieler_id) return &summary->players[i];
-    if (summary->playerCount >= MAX_DAY_BILLS) return NULL;
-    PlayerBill *bill = &summary->players[summary->playerCount++];
-    memset(bill, 0, sizeof(*bill)); bill->spielerId = spieler_id;
-    for (int i = 0; i < g_store.portalSpielerCount; ++i)
-        if (g_store.portalSpieler[i].id == spieler_id) {
-            snprintf(bill->spielerName, sizeof(bill->spielerName), "%s",
-                     g_store.portalSpieler[i].name); break;
-        }
-    return bill;
-}
-
 static bool parse_bill_day_summary(cJSON *root, const char *requested,
                                    BillDaySummary *summary)
 {
@@ -1197,8 +1190,10 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
     cJSON_ArrayForEach(player, players) {
         cJSON *sid = cJSON_GetObjectItemCaseSensitive(player, "spielerId");
         if (!cJSON_IsNumber(sid)) continue;
-        PlayerBill *bill = bill_find_or_add(summary, (int)sid->valuedouble);
-        if (!bill) return false;
+        if (summary->playerCount >= MAX_DAY_BILLS) return false;
+        PlayerBill *bill = &summary->players[summary->playerCount++];
+        memset(bill, 0, sizeof(*bill));
+        bill->spielerId = (int)sid->valuedouble;
         cJSON *name = cJSON_GetObjectItemCaseSensitive(player, "spielerName");
         if (cJSON_IsString(name))
             utf8_to_display(bill->spielerName, name->valuestring, sizeof(bill->spielerName));
@@ -1246,69 +1241,6 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
                                    out->category, out->lineTotalCent))
                 return false;
         }
-    }
-    // Project only events absent from the authoritative baseline. Successful
-    // uploads were removed before this GET, so this cannot double count.
-    for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i) {
-        VerkaufEvent *event = &g_store.pendingVerkaufEvents[i];
-        if (strcmp(event->datum, requested)) continue;
-        PlayerBill *bill = bill_find_or_add(summary, event->spielerId);
-        if (!bill) return false;
-        BillLine *line = NULL;
-        for (int l = 0; l < bill->lineCount; ++l)
-            if (bill->lines[l].localPending &&
-                bill->lines[l].produktId == event->produktId &&
-                bill->lines[l].preisRevisionId == event->preisRevisionId &&
-                bill->lines[l].unitPriceCent == event->unitPriceCent)
-                { line = &bill->lines[l]; break; }
-        if (!line && bill->lineCount < MAX_BILL_LINES) {
-            line = &bill->lines[bill->lineCount++];
-            line->produktId = event->produktId;
-            line->preisRevisionId = event->preisRevisionId;
-            line->unitPriceCent = event->unitPriceCent;
-            line->localPending = true;
-            snprintf(line->produktName, sizeof(line->produktName), "%s",
-                     event->produktName[0] ? event->produktName : "ONBEKANNT");
-            snprintf(line->category, sizeof(line->category), "%s",
-                     event->category[0] ? event->category : "ONBEKANNT");
-        }
-        if (!line) {
-            return false;
-        }
-        bool price_known = line->unitPriceCent != VERKAUF_UNIT_PRICE_UNKNOWN;
-        int cents = price_known ? event->quantity * line->unitPriceCent : 0;
-        line->quantity += event->quantity; line->lineTotalCent += cents;
-        bill->totalCent += cents; summary->generalTotalCent += cents;
-        if (!bill_add_category(bill->categories, &bill->categoryCount, line->category, cents) ||
-            !bill_add_category(summary->categories, &summary->categoryCount, line->category, cents))
-            return false;
-        BillLine *day_line = NULL;
-        for (int p = 0; p < summary->productCount; ++p)
-            if (summary->products[p].produktId == line->produktId &&
-                summary->products[p].preisRevisionId == line->preisRevisionId &&
-                summary->products[p].unitPriceCent == line->unitPriceCent)
-                { day_line = &summary->products[p]; break; }
-        if (!day_line && summary->productCount < MAX_DAY_PRODUCTS) {
-            day_line = &summary->products[summary->productCount++];
-            *day_line = *line;
-            day_line->quantity = 0; day_line->lineTotalCent = 0;
-        }
-        if (day_line) {
-            day_line->quantity += event->quantity;
-            day_line->lineTotalCent += cents;
-            day_line->localPending = true;
-        } else return false;
-    }
-    if (summary->uniquePlayers < summary->playerCount)
-        summary->uniquePlayers = summary->playerCount;
-    for (int i = 0; i < g_store.pendingKreditEventCount; ++i) {
-        KreditEvent *event = &g_store.pendingKreditEvents[i];
-        if (strcmp(event->datum, requested)) continue;
-        PlayerBill *bill = bill_find_or_add(summary, event->spielerId);
-        if (!bill) return false;
-        if (!strcmp(event->typ, "GRANT")) bill->creditGranted += event->anzahl;
-        else if (!strcmp(event->typ, "USE")) bill->creditUsed += event->anzahl;
-        bill->creditRemaining = bill->creditGranted - bill->creditUsed;
     }
     summary->authoritative = true;
     return true;

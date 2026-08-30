@@ -16,8 +16,15 @@ function BillModal({ spielerId, summary, onClose }: { spielerId: number; summary
     onClose();
   };
 
-  const isPending = store.pendingPayments.some(p => p.spielerId === spielerId && p.datum === store.verkaufDatum);
-  const isPaid = summary.state === 'PAID' || isPending;
+  const pendingPayment = store.pendingPayments.find(p => p.spielerId === spielerId && p.datum === store.verkaufDatum);
+  const covered = pendingPayment?.coveredActivityExternalIds;
+  const hasActivityAfterPayment = !!pendingPayment && !!covered && (
+    store.pendingKredite.some(event => event.spielerId === spielerId && event.datum === store.kreditDatum && event.typ === 'USE' && !covered.includes(event.externalId)) ||
+    store.pendingVerkaeufe.some(event => event.spielerId === spielerId && event.datum === store.verkaufDatum && !covered.includes(event.externalId))
+  );
+  const isPending = !!pendingPayment;
+  // A queued payment does not settle sales/uses entered afterwards.
+  const isPaid = summary.state === 'PAID' || (isPending && !hasActivityAfterPayment);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -68,7 +75,10 @@ function BillModal({ spielerId, summary, onClose }: { spielerId: number; summary
                     summary.lines.map((line, i) => (
                       <tr key={i}>
                         <td className="p-3">
-                          <div className="font-bold font-sans">{line.productName}</div>
+                          <div className="font-bold font-sans flex items-center gap-2">
+                            {line.productName}
+                            {line.pending && <span className="text-[9px] font-bold text-amber-400 border border-amber-500/40 rounded px-1 py-0.5">PENDING</span>}
+                          </div>
                           <div className="text-[10px] text-muted-foreground">{line.category}</div>
                         </td>
                         <td className="p-3">{line.quantity}</td>
@@ -141,9 +151,27 @@ export function KrediteScreen() {
   const cal20 = store.produkte.find(p => p.code === 'AMMO_CAL20' || p.category === 'AMMO_CAL20');
 
   // Collect all players from store.kredite AND store.daySummary
+  const hasPendingBillableActivity = (spielerId: number) =>
+    store.pendingKredite.some(event =>
+      event.spielerId === spielerId && event.datum === store.kreditDatum &&
+      event.typ === 'USE' && event.anzahl !== 0
+    ) ||
+    store.pendingVerkaeufe.some(event =>
+      event.spielerId === spielerId && event.datum === store.verkaufDatum &&
+      event.quantity !== 0
+    );
   const combinedPlayerIds = new Set(Object.keys(store.kredite).map(Number));
-  store.daySummary?.players.forEach(p => combinedPlayerIds.add(p.spielerId));
-  Object.keys(store.paidBillCache).forEach(pId => combinedPlayerIds.add(Number(pId)));
+  // Settled authoritative rows are history, not active daily billing work.
+  // A later queued sale/use immediately brings the player back into the roster.
+  store.daySummary?.players.forEach(p => {
+    if (p.state !== 'PAID' || hasPendingBillableActivity(p.spielerId)) {
+      combinedPlayerIds.add(p.spielerId);
+    }
+  });
+  Object.keys(store.paidBillCache).forEach(pId => {
+    const spielerId = Number(pId);
+    if (hasPendingBillableActivity(spielerId)) combinedPlayerIds.add(spielerId);
+  });
 
   const eintraege = Array.from(combinedPlayerIds)
     .map(spielerId => {
@@ -161,9 +189,18 @@ export function KrediteScreen() {
         cal20: store.getProduktAnzahl(spielerId, cal20?.id ?? -3),
         pending: store.pendingVerkaeufe.some(v => v.spielerId === spielerId),
         daySummaryRow: projectedSummary,
-        isPaid: projectedSummary?.state === 'PAID' || store.pendingPayments.some(p => p.spielerId === spielerId && p.datum === store.verkaufDatum),
+        isPaid: (() => {
+          const payment = store.pendingPayments.find(p => p.spielerId === spielerId && p.datum === store.verkaufDatum);
+          const covered = payment?.coveredActivityExternalIds;
+          const laterActivity = !!payment && !!covered && (
+            store.pendingKredite.some(event => event.spielerId === spielerId && event.datum === store.kreditDatum && event.typ === 'USE' && !covered.includes(event.externalId)) ||
+            store.pendingVerkaeufe.some(event => event.spielerId === spielerId && event.datum === store.verkaufDatum && !covered.includes(event.externalId))
+          );
+          return projectedSummary?.state === 'PAID' || (!!payment && !laterActivity);
+        })(),
       };
     })
+    .filter(entry => entry.daySummaryRow?.state !== 'PAID' || hasPendingBillableActivity(entry.spielerId))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const mitRest = eintraege.filter(e => e.rest > 0);

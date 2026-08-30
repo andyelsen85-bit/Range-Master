@@ -6,7 +6,7 @@ import { requireApiKey } from "./auth";
 import { z } from "zod";
 import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmail } from "../lib/mailer";
 import { catalogue, daySalesReport } from "../lib/products";
-import { dayBillSummary } from "../lib/bills";
+import { billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSettlement } from "../lib/bills";
 import { sameImmutableChildren } from "../lib/immutable-events";
 import { revisionToken, SYNC_MANIFEST_SCHEMA_VERSION } from "../lib/sync-manifest";
 import {
@@ -408,22 +408,27 @@ router.post("/payments", requireApiKey, async (req, res) => {
   if (playerIds.some(id => !known.has(id))) return res.status(400).json({ error: "Unknown player in payment batch" });
   const results = await db.transaction(async tx => {
     const outcome: Array<{ externalId: string; status: "accepted" | "skipped" | "conflict"; error?: string }> = [];
+    const scopes = [...new Set(parsed.data.events.map(event => `${event.spielerId}:${event.datum}`))].sort();
+    for (const scope of scopes) {
+      const [spielerId, datum] = scope.split(":");
+      await lockBillSettlement(tx, Number(spielerId), datum);
+    }
     for (const event of parsed.data.events) {
       if (duplicateIds.has(event.externalId)) { outcome.push({ externalId: event.externalId, status: "conflict", error: "duplicate externalId in batch" }); continue; }
       const [byExternal] = await tx.select().from(billPaymentsTable).where(eq(billPaymentsTable.externalId, event.externalId)).limit(1);
       if (byExternal) {
         outcome.push({ externalId: event.externalId, status: byExternal.spielerId === event.spielerId && byExternal.datum === event.datum ? "skipped" : "conflict", ...(byExternal.spielerId === event.spielerId && byExternal.datum === event.datum ? {} : { error: "externalId belongs to a different payment" }) }); continue;
       }
-      const [existingPaid] = await tx.select({ id: billPaymentsTable.id }).from(billPaymentsTable).where(and(eq(billPaymentsTable.spielerId, event.spielerId), eq(billPaymentsTable.datum, event.datum))).limit(1);
-      if (existingPaid) { outcome.push({ externalId: event.externalId, status: "conflict", error: "bill is already paid" }); continue; }
-      // No target deliberately covers both unique externalId and the partial
-      // one-paid-closure index if another terminal wins this race.
+      const settlement = await billSettlementStatus(tx, event.spielerId, event.datum);
+      if (isSettlementRedundant(settlement)) {
+        outcome.push({ externalId: event.externalId, status: "skipped" }); continue;
+      }
       const inserted = await tx.insert(billPaymentsTable).values({
         ...event, source: "TERMINAL", markedByApiKeyId: (req as any).apiKeyId ?? null,
       }).onConflictDoNothing().returning({ id: billPaymentsTable.id });
       outcome.push(inserted.length
         ? { externalId: event.externalId, status: "accepted" }
-        : { externalId: event.externalId, status: "conflict", error: "payment conflicts with an existing closure" });
+        : { externalId: event.externalId, status: "conflict", error: "payment conflicts with an existing payment" });
     }
     return outcome;
   });
@@ -438,6 +443,15 @@ const KreditEventSchema = z.object({
   datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   typ: z.enum(["GRANT", "USE"]),
   anzahl: z.number().int().min(-100).max(100).refine(n => n !== 0, "anzahl darf net 0 sinn"),
+  occurredAt: z.string().datetime().optional(),
+  priceRevisionId: z.number().int().positive().optional(),
+  unitPriceCents: z.number().int().min(0).optional(),
+}).superRefine((event, ctx) => {
+  if (event.typ === "USE") {
+    for (const field of ["occurredAt", "priceRevisionId", "unitPriceCents"] as const) {
+      if (event[field] == null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `${field} is required for credit use events` });
+    }
+  }
 });
 class LedgerBalanceError extends Error {}
 
@@ -484,7 +498,28 @@ router.post("/kredite", requireApiKey, async (req, res) => {
     try {
       synced = await db.transaction(async (tx) => {
         const scopes = [...new Set(body.events.map(event => `credit:${event.spielerId}:${event.datum}`))].sort();
+        const billScopes = [...new Set(body.events.map(event => `${event.spielerId}:${event.datum}`))].sort();
+        for (const scope of billScopes) {
+          const [spielerId, datum] = scope.split(":");
+          await lockBillSettlement(tx, Number(spielerId), datum);
+        }
         for (const scope of scopes) await lockLedger(tx, scope);
+        const useEvents = body.events.filter(event => event.typ === "USE");
+        const [gameCredit] = useEvents.length
+          ? await tx.select({ id: productsTable.id }).from(productsTable).where(eq(productsTable.code, "GAME_CREDIT")).limit(1)
+          : [];
+        if (useEvents.length && !gameCredit) throw new LedgerBalanceError("GAME_CREDIT product is not configured");
+        const revisionIds = [...new Set(useEvents.map(event => event.priceRevisionId!))];
+        const revisions = revisionIds.length
+          ? await tx.select().from(productPriceRevisionsTable).where(inArray(productPriceRevisionsTable.id, revisionIds))
+          : [];
+        const revisionById = new Map(revisions.map(revision => [revision.id, revision]));
+        for (const event of useEvents) {
+          const revision = revisionById.get(event.priceRevisionId!);
+          if (!revision || revision.productId !== gameCredit!.id || revision.unitPriceCents !== event.unitPriceCents) {
+            throw new LedgerBalanceError("GAME_CREDIT price revision or price does not match");
+          }
+        }
 
         // Already-stored IDs and duplicate IDs in this upload are no-ops, just
         // like the former bulk ON CONFLICT upload.
@@ -507,7 +542,12 @@ router.post("/kredite", requireApiKey, async (req, res) => {
             .reduce((sum, event) => sum + (event.typ === "GRANT" ? event.anzahl : -event.anzahl), 0);
           if (Number(balance?.available ?? 0) + change < 0) throw new LedgerBalanceError("Credit balance cannot become negative");
         }
-        const inserted = await tx.insert(kreditEventsTable).values(candidates)
+        const inserted = await tx.insert(kreditEventsTable).values(candidates.map(event => {
+          const { occurredAt, priceRevisionId, unitPriceCents, ...creditEvent } = event;
+          return event.typ === "USE"
+            ? { ...creditEvent, occurredAt: new Date(occurredAt!), priceRevisionId: priceRevisionId!, unitPriceCents: unitPriceCents! }
+            : creditEvent;
+        }))
           .onConflictDoNothing({ target: kreditEventsTable.externalId }).returning({ id: kreditEventsTable.id });
         return inserted.length;
       });
@@ -630,6 +670,11 @@ router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
         if (event.quantity > 0 && (!revision || revision.productId !== event.productId)) {
           throw new SaleBatchValidationError(`Unknown price revision for product: ${event.priceRevisionId}`);
         }
+      }
+      const billScopes = [...new Set(parsed.data.events.map(event => `${event.spielerId}:${event.datum}`))].sort();
+      for (const scope of billScopes) {
+        const [spielerId, datum] = scope.split(":");
+        await lockBillSettlement(tx, Number(spielerId), datum);
       }
       const scopes = [...new Set(parsed.data.events.map(event => `ammo:${event.spielerId}:${event.datum}:${event.productId}`))].sort();
       for (const scope of scopes) await lockLedger(tx, scope);

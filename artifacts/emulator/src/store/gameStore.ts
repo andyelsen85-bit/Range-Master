@@ -93,6 +93,10 @@ export interface KreditEvent {
   datum: string; // YYYY-MM-DD
   typ: 'GRANT' | 'USE';
   anzahl: number;
+  /** Immutable billing snapshot required for a billable USE (absent on GRANTs). */
+  occurredAt?: string;
+  priceRevisionId?: number;
+  unitPriceCents?: number;
 }
 
 export interface Produkt {
@@ -118,6 +122,8 @@ export interface PaymentEvent {
   externalId: string;
   spielerId: number;
   datum: string;
+  /** Local snapshot used to detect activity entered after an offline payment. */
+  coveredActivityExternalIds?: string[];
 }
 
 export interface DaySummary {
@@ -134,6 +140,8 @@ export interface DaySummary {
       unitPriceCents: number;
       quantity: number;
       totalCents: number;
+      /** Locally queued activity which is not yet part of the authoritative bill. */
+      pending?: boolean;
     }>;
     categorySubtotals: Record<string, number>;
     totalCents: number;
@@ -1020,6 +1028,13 @@ export const useGameStore = create<GameState>((set, get) => {
         }));
       if (!lineupSpieler.length)
         return { lineupWarning: 'Mindestens ee Spiller auswielen.' };
+      const gameCredit = state.produkte.find(product =>
+        (product.code === PRODUKT_IDS.kredit || product.category === PRODUKT_IDS.kredit) &&
+        product.id > 0 && product.currentPrice
+      );
+      if (!gameCredit?.currentPrice) {
+        return { lineupWarning: 'De Präis fir Game credits ass net konfiguréiert.' };
+      }
       // ── Deduct one day credit per participating player ────────────────────
       const { kreditDatum, kredite } = rolledKredite(state);
       if (state.pendingKredite.length + lineupSpieler.length >
@@ -1030,6 +1045,7 @@ export const useGameStore = create<GameState>((set, get) => {
       }
       const nextKredite = { ...kredite };
       const newEvents: KreditEvent[] = [];
+      const occurredAt = new Date().toISOString();
       for (const s of lineupSpieler) {
         const stand = nextKredite[s.id] ?? { gewaehrt: 0, verbraucht: 0 };
         nextKredite[s.id] = { ...stand, verbraucht: stand.verbraucht + 1 };
@@ -1039,6 +1055,9 @@ export const useGameStore = create<GameState>((set, get) => {
           datum: kreditDatum,
           typ: 'USE',
           anzahl: 1,
+          occurredAt,
+          priceRevisionId: gameCredit.currentPrice.id,
+          unitPriceCents: gameCredit.currentPrice.unitPriceCents,
         });
       }
       const pendingKredite = [...state.pendingKredite, ...newEvents];
@@ -1467,12 +1486,18 @@ export const useGameStore = create<GameState>((set, get) => {
         externalId: generateSpielId(), spielerId, datum: todayStr(), productId,
         priceRevisionId: product.currentPrice.id, quantity,
       };
-      const pendingVerkaeufe = [...state.pendingVerkaeufe, event];
-      const verkaeufe = [...state.verkaeufe, event];
       const verkaufDatum = todayStr();
+      // A terminal can remain open across midnight.  Keep the durable pending
+      // queue intact (it contains dated events), but rebuild the day cache.
+      const pendingVerkaeufe = [...state.pendingVerkaeufe, event];
+      const verkaeufe = [...state.verkaeufe.filter(v => v.datum === verkaufDatum), event];
       saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
       saveVerkaeufe(VERKAEUFE_KEY, verkaeufe);
-      return { verkaufDatum, pendingVerkaeufe, verkaeufe };
+      return {
+        verkaufDatum, pendingVerkaeufe, verkaeufe,
+        serverVerkaeufe: state.verkaufDatum === verkaufDatum ? state.serverVerkaeufe : [],
+        paidBillCache: state.verkaufDatum === verkaufDatum ? state.paidBillCache : {},
+      };
     }),
 
     getProduktAnzahl: (spielerId, productId) => {
@@ -1489,11 +1514,14 @@ export const useGameStore = create<GameState>((set, get) => {
 
     getProjectedDaySummary: (spielerId) => {
       const state = get();
-      const serverPlayer = state.daySummary?.players.find(p => p.spielerId === spielerId);
+      const datum = todayStr();
+      // Never project yesterday's cached summary after a local date rollover.
+      const serverPlayer = state.daySummary?.datum === datum
+        ? state.daySummary.players.find(p => p.spielerId === spielerId)
+        : undefined;
       const cached = state.paidBillCache[spielerId];
       const baseSource = serverPlayer || cached;
 
-      const datum = todayStr();
       const spieler = state.pendingSpieler.find(s => s.localId === spielerId) || state.spielerUpdates.find(s => s.spielerId === spielerId && s.status === 'pending');
       const baseName = baseSource?.spielerName || (spieler ? spieler.name : `Spiller ${spielerId}`) || `Spiller ${spielerId}`;
 
@@ -1513,7 +1541,8 @@ export const useGameStore = create<GameState>((set, get) => {
         paidAt: baseSource?.paidAt ?? null,
       };
 
-      // 1. Layer credits
+      // 1. Layer credit counts. GRANTs and unused credits are informational;
+      // only individual USE events are billable below.
       const k = state.kredite[spielerId];
       if (k) {
         projected.credit.granted = k.gewaehrt;
@@ -1521,36 +1550,75 @@ export const useGameStore = create<GameState>((set, get) => {
         projected.credit.remaining = Math.max(0, k.gewaehrt - k.verbraucht);
       }
 
-      // 2. Layer sales
-      const pendingSales = (baseSource ? state.pendingVerkaeufe : state.verkaeufe).filter(v => v.spielerId === spielerId && v.datum === datum);
+      // 2. Layer pending credit consumption at the currently configured game
+      // credit price.  Do not use the aggregate credit tally here: it contains
+      // grants and may already include authoritative consumption.
+      const pendingCreditUses = state.pendingKredite.filter(event =>
+        event.spielerId === spielerId && event.datum === datum &&
+        event.typ === 'USE' && event.anzahl !== 0
+      );
+      const creditProduct = state.produkte.find(product =>
+        product.code === PRODUKT_IDS.kredit || product.category === PRODUKT_IDS.kredit
+      );
+      if (creditProduct?.currentPrice) {
+        for (const use of pendingCreditUses) {
+          // Older persisted events did not have a snapshot.  Keep them
+          // billable using today's price, but never replace a real snapshot.
+          const unitPriceCents = use.unitPriceCents ?? creditProduct.currentPrice.unitPriceCents;
+          const priceRevisionId = use.priceRevisionId ?? creditProduct.currentPrice.id;
+          const totalCents = use.anzahl * unitPriceCents;
+          projected.lines.push({
+            productId: creditProduct.id,
+            productName: creditProduct.name,
+            category: creditProduct.category,
+            priceRevisionId,
+            unitPriceCents,
+            quantity: use.anzahl,
+            totalCents,
+            pending: true,
+          });
+          projected.totalCents += totalCents;
+          projected.categorySubtotals[creditProduct.category] =
+            (projected.categorySubtotals[creditProduct.category] || 0) + totalCents;
+        }
+      }
+
+      // 3. Layer sales. Each queued event deliberately gets a separate pending
+      // line so it cannot be coalesced into an authoritative row and counted
+      // twice on a later refresh.
+      const pendingSales = state.pendingVerkaeufe
+        .filter(v => v.spielerId === spielerId && v.datum === datum);
       for (const sale of pendingSales) {
         const prod = state.produkte.find(p => p.id === sale.productId);
         if (!prod || !prod.currentPrice) continue;
         const linePriceCents = prod.currentPrice.unitPriceCents;
         const addTotal = sale.quantity * linePriceCents;
 
-        const existingLine = projected.lines.find(l => l.productId === sale.productId && l.priceRevisionId === sale.priceRevisionId);
-        if (existingLine) {
-          existingLine.quantity += sale.quantity;
-          existingLine.totalCents += addTotal;
-        } else {
-          projected.lines.push({
-            productId: sale.productId,
-            productName: prod.name,
-            category: prod.category,
-            priceRevisionId: sale.priceRevisionId,
-            unitPriceCents: linePriceCents,
-            quantity: sale.quantity,
-            totalCents: addTotal,
-          });
-        }
+        projected.lines.push({
+          productId: sale.productId,
+          productName: prod.name,
+          category: prod.category,
+          priceRevisionId: sale.priceRevisionId,
+          unitPriceCents: linePriceCents,
+          quantity: sale.quantity,
+          totalCents: addTotal,
+          pending: true,
+        });
         projected.totalCents += addTotal;
         projected.categorySubtotals[prod.category] = (projected.categorySubtotals[prod.category] || 0) + addTotal;
       }
 
       projected.lines = projected.lines.filter(l => l.quantity > 0);
 
-      // 3. Layer games
+      // Billable activity after a settled baseline reopens the bill.  A queued
+      // payment itself is not activity and must not change this state.
+      if (projected.state === 'PAID' && (pendingCreditUses.length > 0 || pendingSales.length > 0)) {
+        projected.state = 'OPEN';
+        projected.paymentExternalId = null;
+        projected.paidAt = null;
+      }
+
+      // 4. Layer games
       const pendingGames = state.pendingGames.filter(g => g.datum.startsWith(datum) && g.teilnahmen.some(t => t.spielerId === spielerId));
       for (const g of pendingGames) {
         projected.games += 1;
@@ -1558,7 +1626,7 @@ export const useGameStore = create<GameState>((set, get) => {
         projected.confirmedClays += g.confirmedLaunches;
       }
 
-      if (!baseSource && !k && pendingSales.length === 0 && pendingGames.length === 0) {
+      if (!baseSource && !k && pendingCreditUses.length === 0 && pendingSales.length === 0 && pendingGames.length === 0) {
         return null;
       }
 
@@ -1596,7 +1664,13 @@ export const useGameStore = create<GameState>((set, get) => {
         // separate, so each is added exactly once by getProduktAnzahl.
         const serverVerkaeufe = data.sales;
         saveVerkaufsReport(datum, serverVerkaeufe);
-        set({ verkaufDatum: datum, serverVerkaeufe, verkaeufeLaden: false });
+        set({
+          verkaufDatum: datum,
+          serverVerkaeufe,
+          verkaeufe: get().verkaeufe.filter(event => event.datum === datum),
+          paidBillCache: get().verkaufDatum === datum ? get().paidBillCache : {},
+          verkaeufeLaden: false,
+        });
       } catch { set({ verkaeufeLaden: false }); }
     },
 
@@ -1630,6 +1704,14 @@ export const useGameStore = create<GameState>((set, get) => {
         externalId: generateSpielId(),
         spielerId,
         datum: todayStr(),
+        coveredActivityExternalIds: [
+          ...state.pendingKredite
+            .filter(e => e.spielerId === spielerId && e.datum === todayStr() && e.typ === 'USE')
+            .map(e => e.externalId),
+          ...state.pendingVerkaeufe
+            .filter(e => e.spielerId === spielerId && e.datum === todayStr())
+            .map(e => e.externalId),
+        ],
       };
       const pendingPayments = [...state.pendingPayments, event];
       savePendingPayments(pendingPayments);
@@ -2007,7 +2089,8 @@ export const useGameStore = create<GameState>((set, get) => {
           const resP = await fetch(`${state.apiUrl}/api/sync/payments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-api-key': state.apiKey },
-            body: JSON.stringify({ events: pushablePayments }),
+            // Snapshot metadata is terminal-only and not part of the portal API.
+            body: JSON.stringify({ events: pushablePayments.map(({ externalId, spielerId, datum }) => ({ externalId, spielerId, datum })) }),
             signal: AbortSignal.timeout(15000),
           });
           if (!resP.ok) throw new Error(`HTTP ${resP.status}`);
@@ -2241,7 +2324,14 @@ export const useGameStore = create<GameState>((set, get) => {
 
       const pendingVerkaeufe = [...state.pendingVerkaeufe, ...events];
       saveVerkaeufe(PENDING_VERKAEUFE_KEY, pendingVerkaeufe);
-      set({ verkaufDatum: datum, pendingVerkaeufe });
+      const rolledOver = state.verkaufDatum !== datum;
+      set({
+        verkaufDatum: datum,
+        pendingVerkaeufe,
+        verkaeufe: rolledOver ? [] : state.verkaeufe,
+        serverVerkaeufe: rolledOver ? [] : state.serverVerkaeufe,
+        paidBillCache: rolledOver ? {} : state.paidBillCache,
+      });
 
       return { success: true };
     },

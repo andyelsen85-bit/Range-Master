@@ -3,8 +3,8 @@ name: Daily bill settlement
 description: Durable rules for player bills, payment closure, and confirmed clay totals.
 ---
 
-Derive daily bills from immutable sale price snapshots and credit events. Represent Paid as a separate immutable, idempotent player/day closure event rather than mutating sales or credit history. Offline Paid events remain pending and the player remains active until the portal accepts or idempotently skips the same event.
+Derive daily bills from immutable sale and consumed-credit price snapshots. Paid is an immutable, idempotent cutoff: each accepted payment closes server-received billable activity up to that point, while later activity reopens a new balance. Offline Paid events remain pending until the portal accepts or idempotently skips them.
 
-**Why:** Local confirmation is not authoritative while offline; removing a player before portal acceptance can lose an unsettled bill. Mutable catalog labels or prices can also rewrite historical bills.
+**Why:** Local confirmation is not authoritative while offline; removing a player before portal acceptance can lose an unsettled bill. Mutable catalog prices can rewrite historical bills, and terminal clocks are not trustworthy for settlement ordering.
 
-**How to apply:** Keep one retryable Paid outbox event per player/day, recover interrupted in-flight events after reboot, preserve paid history, and count clays only from acknowledged gameplay launches—not scores, tests, rejected commands, or unacknowledged fires.
+**How to apply:** Snapshot a credit USE price/revision at consumption, but order payment coverage by server receipt time under the same player/day lock as activity inserts. Preserve full-day reporting separately from the open balance. Keep one retryable Paid outbox event per open balance, recover interrupted in-flight events after reboot, and count clays only from acknowledged gameplay launches—not scores, tests, rejected commands, or unacknowledged fires.

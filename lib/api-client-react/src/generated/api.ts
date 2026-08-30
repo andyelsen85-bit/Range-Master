@@ -30,6 +30,7 @@ import type {
   FlexibleProductInput,
   GetAdminBillDaySummaryParams,
   GetAdminDaySalesParams,
+  GetMyPurchases200,
   GetRangliste200,
   GetRanglisteParams,
   GetSpielerErgebnisse200,
@@ -37,6 +38,7 @@ import type {
   GetStatistikVerlauf200,
   GetStatistikVerlaufParams,
   GetSyncBillDaySummaryParams,
+  GetSyncDayCreditsParams,
   GetSyncDaySalesParams,
   GetSyncSpieler200,
   GetSyncStatus200,
@@ -47,6 +49,7 @@ import type {
   MarkAdminBillPaidBody,
   PostSyncBillPayments200,
   PostSyncBillPaymentsBody,
+  PostSyncCreditEventsBody,
   PostSyncSpiele200,
   PostSyncSpieleBody,
   PostSyncSpieler200,
@@ -533,6 +536,83 @@ export function useGetSpielerErgebnisse<TData = Awaited<ReturnType<typeof getSpi
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetSpielerErgebnisseQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMyPurchasesUrl = () => {
+
+
+
+
+  return `/api/spieler/me/purchases`
+}
+
+/**
+ * @summary Get the authenticated player's event-level purchases and used game credits
+ */
+export const getMyPurchases = async ( options?: Parameters<typeof customFetch>[1]): Promise<GetMyPurchases200> => {
+
+  return customFetch<GetMyPurchases200>(getGetMyPurchasesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMyPurchasesQueryKey = () => {
+    return [
+    `/api/spieler/me/purchases`
+    ] as const;
+    }
+
+
+export const getGetMyPurchasesQueryOptions = <TData = Awaited<ReturnType<typeof getMyPurchases>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyPurchases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMyPurchasesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyPurchases>>> = ({ signal }) => getMyPurchases({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMyPurchases>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMyPurchasesQueryResult = NonNullable<Awaited<ReturnType<typeof getMyPurchases>>>
+export type GetMyPurchasesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the authenticated player's event-level purchases and used game credits
+ */
+
+export function useGetMyPurchases<TData = Awaited<ReturnType<typeof getMyPurchases>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyPurchases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMyPurchasesQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -1166,6 +1246,161 @@ export const usePostSyncSpiele = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getPostSyncSpieleMutationOptions(options));
+    }
+
+export const getGetSyncDayCreditsUrl = (params?: GetSyncDayCreditsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/kredite?${stringifiedParams}` : `/api/sync/kredite`
+}
+
+/**
+ * @summary Get per-player credit balances for a day
+ */
+export const getSyncDayCredits = async (params?: GetSyncDayCreditsParams, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getGetSyncDayCreditsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSyncDayCreditsQueryKey = (params?: GetSyncDayCreditsParams,) => {
+    return [
+    `/api/sync/kredite`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSyncDayCreditsQueryOptions = <TData = Awaited<ReturnType<typeof getSyncDayCredits>>, TError = ErrorType<unknown>>(params?: GetSyncDayCreditsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSyncDayCredits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSyncDayCreditsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSyncDayCredits>>> = ({ signal }) => getSyncDayCredits(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSyncDayCredits>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSyncDayCreditsQueryResult = NonNullable<Awaited<ReturnType<typeof getSyncDayCredits>>>
+export type GetSyncDayCreditsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get per-player credit balances for a day
+ */
+
+export function useGetSyncDayCredits<TData = Awaited<ReturnType<typeof getSyncDayCredits>>, TError = ErrorType<unknown>>(
+ params?: GetSyncDayCreditsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSyncDayCredits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSyncDayCreditsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPostSyncCreditEventsUrl = () => {
+
+
+
+
+  return `/api/sync/kredite`
+}
+
+/**
+ * @summary Upload immutable game-credit grant and use events
+ */
+export const postSyncCreditEvents = async (postSyncCreditEventsBody: PostSyncCreditEventsBody, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getPostSyncCreditEventsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(postSyncCreditEventsBody)
+  }
+);}
+
+
+
+
+
+export const getPostSyncCreditEventsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postSyncCreditEvents>>, TError,{data: BodyType<PostSyncCreditEventsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postSyncCreditEvents>>, TError,{data: BodyType<PostSyncCreditEventsBody>}, TContext> => {
+
+const mutationKey = ['postSyncCreditEvents'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postSyncCreditEvents>>, {data: BodyType<PostSyncCreditEventsBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postSyncCreditEvents(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostSyncCreditEventsMutationResult = NonNullable<Awaited<ReturnType<typeof postSyncCreditEvents>>>
+    export type PostSyncCreditEventsMutationBody = BodyType<PostSyncCreditEventsBody>
+    export type PostSyncCreditEventsMutationError = ErrorType<void>
+
+    /**
+ * @summary Upload immutable game-credit grant and use events
+ */
+export const usePostSyncCreditEvents = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postSyncCreditEvents>>, TError,{data: BodyType<PostSyncCreditEventsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof postSyncCreditEvents>>,
+        TError,
+        {data: BodyType<PostSyncCreditEventsBody>},
+        TContext
+      > => {
+      return useMutation(getPostSyncCreditEventsMutationOptions(options));
     }
 
 export const getListAdminProductsUrl = () => {

@@ -14,6 +14,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { href: "/resultater", label: "Meng Resultater", icon: List },
     { href: "/rangliste", label: "Ranglischt", icon: Trophy },
     { href: "/statistiken", label: "Statistiken", icon: BarChart3 },
+    { href: "/akeef", label: "Meng Akeef", icon: ShoppingCart },
     ...(user?.isAdmin ? [
       { href: "/admin", label: "Spillerverwaltung", icon: Shield },
       { href: "/admin/kreditter", label: "Dageskreditter", icon: Coins },

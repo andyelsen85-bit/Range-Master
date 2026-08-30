@@ -178,6 +178,40 @@ export interface BillPaymentInput {
   terminalId?: string;
 }
 
+export type CreditEventInputTyp = typeof CreditEventInputTyp[keyof typeof CreditEventInputTyp];
+
+
+export const CreditEventInputTyp = {
+  GRANT: 'GRANT',
+  USE: 'USE',
+} as const;
+
+export interface CreditEventInput {
+  /** @minLength 8 */
+  externalId: string;
+  /** @minimum 1 */
+  spielerId: number;
+  datum: string;
+  typ: CreditEventInputTyp;
+  /**
+     * @minimum -100
+     * @maximum 100
+     */
+  anzahl: number;
+  /** Required for USE events; immutable terminal occurrence time. */
+  occurredAt?: string;
+  /**
+     * Required for USE events; must belong to GAME_CREDIT.
+     * @minimum 1
+     */
+  priceRevisionId?: number;
+  /**
+     * Required for USE events; must match priceRevisionId.
+     * @minimum 0
+     */
+  unitPriceCents?: number;
+}
+
 export type BillPaymentResultStatus = typeof BillPaymentResultStatus[keyof typeof BillPaymentResultStatus];
 
 
@@ -191,6 +225,29 @@ export interface BillPaymentResult {
   externalId: string;
   status: BillPaymentResultStatus;
   error?: string;
+}
+
+export type PlayerPurchaseType = typeof PlayerPurchaseType[keyof typeof PlayerPurchaseType];
+
+
+export const PlayerPurchaseType = {
+  SALE: 'SALE',
+  GAME_CREDIT_USE: 'GAME_CREDIT_USE',
+} as const;
+
+export interface PlayerPurchase {
+  type: PlayerPurchaseType;
+  id: number;
+  externalId: string;
+  datum: string;
+  createdAt: string;
+  productId: number;
+  productName: string;
+  category: ProductCategory;
+  priceRevisionId: number;
+  unitPriceCents: number;
+  quantity: number;
+  totalCents: number;
 }
 
 export type BillDaySummaryPlayersItem = { [key: string]: unknown };
@@ -425,6 +482,10 @@ export type GetSpielerErgebnisse200 = {
   ergebnisse: ErgebnisWithSpiel[];
 };
 
+export type GetMyPurchases200 = {
+  purchases: PlayerPurchase[];
+};
+
 export type GetRanglisteParams = {
 modus?: Modus;
 jahr?: number;
@@ -490,6 +551,14 @@ export type PostSyncSpiele200ResultsItem = {
 
 export type PostSyncSpiele200 = {
   results: PostSyncSpiele200ResultsItem[];
+};
+
+export type GetSyncDayCreditsParams = {
+datum?: string;
+};
+
+export type PostSyncCreditEventsBody = {
+  events: CreditEventInput[];
 };
 
 export type GetAdminDaySalesParams = {

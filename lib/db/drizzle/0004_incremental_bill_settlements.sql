@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS "bill_payments_one_paid_per_player_day";

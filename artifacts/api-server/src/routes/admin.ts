@@ -8,7 +8,7 @@ import { authenticate, requireAdmin } from "./auth";
 import { z } from "zod";
 import { catalogue, daySalesReport, ensureSystemProducts } from "../lib/products";
 import { createRestoreCode, hashRestoreCode } from "../lib/terminal-config";
-import { dayBillSummary } from "../lib/bills";
+import { billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSettlement } from "../lib/bills";
 
 const router = Router();
 
@@ -586,18 +586,18 @@ router.get("/bills/day-summary", async (req, res) => {
   return res.json(await dayBillSummary(datum.data));
 });
 
-/** Admin closure uses the same immutable event and uniqueness invariant as terminals. */
+/** Admin settlement uses the same incremental immutable payment events as terminals. */
 router.post("/bills/:spielerId/paid", async (req, res) => {
   const spielerId = z.coerce.number().int().positive().safeParse(req.params.spielerId);
   const body = z.object({ datum: day, externalId: z.string().trim().min(1).max(200).optional() }).safeParse(req.body);
   if (!spielerId.success || !body.success) return res.status(400).json({ error: "spielerId and datum are required" });
   const externalId = body.data.externalId ?? `admin:${randomBytes(16).toString("hex")}`;
   const outcome = await db.transaction(async tx => {
+    await lockBillSettlement(tx, spielerId.data, body.data.datum);
     const [prior] = await tx.select().from(billPaymentsTable).where(eq(billPaymentsTable.externalId, externalId)).limit(1);
     if (prior) return prior.spielerId === spielerId.data && prior.datum === body.data.datum ? "skipped" : "conflict";
-    const [paid] = await tx.select({ id: billPaymentsTable.id }).from(billPaymentsTable)
-      .where(and(eq(billPaymentsTable.spielerId, spielerId.data), eq(billPaymentsTable.datum, body.data.datum))).limit(1);
-    if (paid) return "conflict";
+    const settlement = await billSettlementStatus(tx, spielerId.data, body.data.datum);
+    if (isSettlementRedundant(settlement)) return "skipped";
     const inserted = await tx.insert(billPaymentsTable).values({
       externalId, spielerId: spielerId.data, datum: body.data.datum, source: "ADMIN", markedByAdminId: (req as any).user.id,
     }).onConflictDoNothing().returning({ id: billPaymentsTable.id });

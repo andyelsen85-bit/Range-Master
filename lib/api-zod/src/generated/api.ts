@@ -118,6 +118,27 @@ export const GetSpielerErgebnisseResponse = zod.object({
 
 
 /**
+ * @summary Get the authenticated player's event-level purchases and used game credits
+ */
+export const GetMyPurchasesResponse = zod.object({
+  "purchases": zod.array(zod.object({
+  "type": zod.enum(['SALE', 'GAME_CREDIT_USE']),
+  "id": zod.number().int(),
+  "externalId": zod.string(),
+  "datum": zod.coerce.date(),
+  "createdAt": zod.coerce.date(),
+  "productId": zod.number().int(),
+  "productName": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "priceRevisionId": zod.number().int(),
+  "unitPriceCents": zod.number().int(),
+  "quantity": zod.number().int(),
+  "totalCents": zod.number().int()
+}))
+})
+
+
+/**
  * @summary Get leaderboard
  */
 export const GetRanglisteQueryParams = zod.object({
@@ -297,6 +318,46 @@ export const PostSyncSpieleResponse = zod.object({
   "status": zod.enum(['created', 'skipped'])
 }))
 })
+
+
+/**
+ * @summary Get per-player credit balances for a day
+ */
+export const GetSyncDayCreditsQueryParams = zod.object({
+  "datum": zod.date().optional()
+})
+
+export const GetSyncDayCreditsResponse = zod.unknown()
+
+
+/**
+ * @summary Upload immutable game-credit grant and use events
+ */
+export const postSyncCreditEventsBodyEventsItemExternalIdMin = 8;
+
+
+export const postSyncCreditEventsBodyEventsItemAnzahlMin = -100;
+export const postSyncCreditEventsBodyEventsItemAnzahlMax = 100;
+
+
+export const postSyncCreditEventsBodyEventsItemUnitPriceCentsMin = 0;
+
+
+
+export const PostSyncCreditEventsBody = zod.object({
+  "events": zod.array(zod.object({
+  "externalId": zod.string().min(postSyncCreditEventsBodyEventsItemExternalIdMin),
+  "spielerId": zod.number().int().min(1),
+  "datum": zod.coerce.date(),
+  "typ": zod.enum(['GRANT', 'USE']),
+  "anzahl": zod.number().int().min(postSyncCreditEventsBodyEventsItemAnzahlMin).max(postSyncCreditEventsBodyEventsItemAnzahlMax),
+  "occurredAt": zod.coerce.date().optional().describe('Required for USE events; immutable terminal occurrence time.'),
+  "priceRevisionId": zod.number().int().min(1).optional().describe('Required for USE events; must belong to GAME_CREDIT.'),
+  "unitPriceCents": zod.number().int().min(postSyncCreditEventsBodyEventsItemUnitPriceCentsMin).optional().describe('Required for USE events; must match priceRevisionId.')
+}))
+})
+
+export const PostSyncCreditEventsResponse = zod.unknown()
 
 
 export const ListAdminProductsResponse = zod.object({

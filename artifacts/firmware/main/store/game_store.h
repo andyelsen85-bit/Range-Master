@@ -169,6 +169,11 @@ typedef struct {
     char datum[11];      // YYYY-MM-DD
     char typ[8];         // "GRANT" or "USE"
     int  anzahl;
+    // USE is a billable occurrence.  Its immutable price snapshot is retained
+    // even if a later catalog pull changes GAME_CREDIT.
+    char occurredAt[32]; // UTC ISO timestamp; empty on legacy records
+    int  preisRevisionId;
+    int  unitPriceCent;
     bool inFlight;       // included in the current portal POST; may be accepted
 } KreditEvent;
 
@@ -393,6 +398,9 @@ typedef struct {
     int          pendingVerkaufEventCount;
     PaymentEvent pendingPaymentEvents[MAX_PENDING_PAYMENTS];
     int          pendingPaymentEventCount;
+    // The FAT snapshot is always the portal baseline. billDay is its local
+    // projection and may contain unsynced sale/USE lines.
+    BillDaySummary billDayBaseline;
     BillDaySummary billDay;
 
     // Queued games
@@ -498,6 +506,8 @@ int  store_pending_update_count(void);
 
 // ── Product sales / ammunition ────────────────────────────────
 const Produkt *store_produkt(const char *produkt_code);
+/** Cached GAME_CREDIT receipt data required before charging a new game. */
+bool store_game_credit_price_valid(void);
 bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity);
 /** Atomically validates and appends every line of a catering basket. */
 bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
@@ -525,6 +535,8 @@ bool store_finish_payment_sync(const PaymentEvent *snapshot, int count,
                                const char *const *acceptedIds, int acceptedCount,
                                const char *error);
 void store_cache_bill_day(const BillDaySummary *summary);
+/** Rebuild the display-only bill projection from the cached portal baseline. */
+void store_rebuild_bill_projection(void);
 
 // ── Terminal operating mode / Catering access ─────────────────
 bool store_set_catering_pin(const char *pin);

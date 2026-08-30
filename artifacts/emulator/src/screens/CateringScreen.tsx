@@ -45,6 +45,7 @@ export function CateringScreen() {
     
     // Load fresh data if missing
     void store.ladeProdukte();
+    void store.ladeVerkaeufe();
     
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -62,6 +63,29 @@ export function CateringScreen() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const foodDrinks = store.produkte.filter(p => p.active && (p.category === 'FOOD' || p.category === 'DRINK'));
+  const selectedPurchaseHistory = selectedPlayerId === null ? [] : [
+    ...store.serverVerkaeufe
+      .filter(row => row.spielerId === selectedPlayerId)
+      .map(row => ({
+        productId: row.productId,
+        name: row.productName ?? store.produkte.find(product => product.id === row.productId)?.name ?? `Produkt #${row.productId}`,
+        quantity: row.quantity,
+        totalCents: row.totalCents,
+        pending: false,
+      })),
+    ...store.pendingVerkaeufe
+      .filter(event => event.spielerId === selectedPlayerId && event.datum === store.verkaufDatum)
+      .map(event => {
+        const product = store.produkte.find(candidate => candidate.id === event.productId);
+        return {
+          productId: event.productId,
+          name: product?.name ?? `Produkt #${event.productId}`,
+          quantity: event.quantity,
+          totalCents: event.quantity * (product?.currentPrice?.unitPriceCents ?? 0),
+          pending: true,
+        };
+      }),
+  ].filter(item => item.quantity !== 0);
 
   // Reset if player becomes stale
   useEffect(() => {
@@ -334,6 +358,17 @@ export function CateringScreen() {
                       Bestellung: <span className="text-primary">{players.find(p => p.id === selectedPlayerId)?.name}</span>
                     </h2>
                     <p className="text-sm text-muted-foreground mt-1">Gedrénks an Iessen dobäisetzen</p>
+                    <div className="mt-3 text-xs text-muted-foreground" data-testid="today-purchase-history">
+                      <span className="font-bold uppercase tracking-wider">Haut kaf:</span>{' '}
+                      {selectedPurchaseHistory.length === 0 ? (
+                        <span>nach näischt</span>
+                      ) : selectedPurchaseHistory.map((item, index) => (
+                        <span key={`${item.productId}-${index}`} className="mr-2">
+                          {item.quantity}× {item.name} ({(item.totalCents / 100).toFixed(2)} €)
+                          {item.pending && <em className="not-italic text-amber-400 font-bold"> · pending</em>}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   <button 
                     onClick={() => {

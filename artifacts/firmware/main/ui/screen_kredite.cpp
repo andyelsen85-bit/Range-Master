@@ -263,7 +263,12 @@ static void bill_cb(lv_event_t *e)
         else snprintf(right_text, sizeof(right_text), "%d.%02d EUR",
                       line_cent / 100, abs(line_cent % 100));
         lv_label_set_text(right, right_text);
-        lv_obj_set_style_text_font(right, &lv_font_montserrat_14, 0);
+        // The monetary amount is the operator's settlement target. Keep it
+        // visibly distinct on the light card rather than relying on the small
+        // default label weight.
+        lv_obj_set_style_text_font(right, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_color(right,
+            price_unknown ? lv_color_hex(CLR_WARN) : lv_color_hex(CLR_PRIMARY), 0);
     };
     if (bill_data) {
         for (int i = 0; i < bill_data->lineCount; ++i) {

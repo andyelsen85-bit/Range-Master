@@ -29,6 +29,20 @@
       "when": 1787921000001,
       "tag": "0003_bills_and_confirmed_launches",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787921000002,
+      "tag": "0004_incremental_bill_settlements",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787921000003,
+      "tag": "0005_credit_event_price_snapshots",
+      "breakpoints": true
     }
   ]
 }
