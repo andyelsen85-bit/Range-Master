@@ -39,6 +39,21 @@ static lv_indev_t *s_input_device;
 static uint32_t  s_sync_publication_seen;
 static bool      s_sync_guard_visible;
 
+static bool screen_has_return_button(Screen screen)
+{
+    switch (screen) {
+        case SCREEN_START:
+        case SCREEN_GESCHICHTE:
+        case SCREEN_KREDITE:
+        case SCREEN_SPILLER:
+        case SCREEN_EINSTELLUNGEN:
+        case SCREEN_WIFI:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static void refresh_screen(Screen s)
 {
     switch (s) {
@@ -196,17 +211,18 @@ void ui_manager_init(void)
     lv_obj_clear_flag(s_sync_guard, LV_OBJ_FLAG_SCROLLABLE);
 
     // The indicator is deliberately a separate, non-clickable top-layer
-    // object. It stays visible while HTTP is active without becoming a modal.
-    s_sync_indicator = lv_label_create(lv_layer_top());
-    lv_label_set_text(s_sync_indicator, LV_SYMBOL_REFRESH " SYNCISIERT...");
-    lv_obj_set_style_text_font(s_sync_indicator, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(s_sync_indicator, lv_color_hex(CLR_TEXT), 0);
-    lv_obj_set_style_bg_color(s_sync_indicator, lv_color_hex(CLR_PRIMARY_DIM), 0);
-    lv_obj_set_style_bg_opa(s_sync_indicator, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(s_sync_indicator, 8, 0);
-    lv_obj_set_style_pad_hor(s_sync_indicator, 18, 0);
-    lv_obj_set_style_pad_ver(s_sync_indicator, 10, 0);
-    lv_obj_align(s_sync_indicator, LV_ALIGN_TOP_RIGHT, -20, 20);
+    // object. It is only a running circle: a persistent "synchronized"
+    // message is noisy and can cover the header's return button.
+    s_sync_indicator = lv_spinner_create(lv_layer_top());
+    lv_spinner_set_anim_params(s_sync_indicator, 1000, 60);
+    lv_obj_set_size(s_sync_indicator, 28, 28);
+    lv_obj_set_style_arc_width(s_sync_indicator, 3, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_sync_indicator, 3, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_sync_indicator, lv_color_hex(CLR_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_sync_indicator, lv_color_hex(CLR_PRIMARY), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s_sync_indicator, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(s_sync_indicator, 0, 0);
+    lv_obj_align(s_sync_indicator, LV_ALIGN_TOP_RIGHT, -20, 22);
     lv_obj_clear_flag(s_sync_indicator, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(s_sync_indicator, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_sync_guard, LV_OBJ_FLAG_HIDDEN);
@@ -251,6 +267,11 @@ void ui_manager_tick(void)
     SyncUiState sync_state = {};
     store_get_sync_ui_state(&sync_state);
     if (s_sync_indicator) {
+        // Header return buttons use the same right-side margin and secondary
+        // button padding on these screens. Keep the spinner in the free slot
+        // immediately before that button; elsewhere it remains top-right.
+        lv_obj_align(s_sync_indicator, LV_ALIGN_TOP_RIGHT,
+                     screen_has_return_button(s_current) ? -220 : -20, 22);
         if (sync_state.status == SYNC_RUNNING)
             lv_obj_clear_flag(s_sync_indicator, LV_OBJ_FLAG_HIDDEN);
         else
