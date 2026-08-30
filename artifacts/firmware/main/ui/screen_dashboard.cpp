@@ -124,7 +124,6 @@ static lv_obj_t *sec_btn(lv_obj_t *parent, const char *sym,
 static void sync_cb(lv_event_t *e)
 {
     store_sync();
-    screen_dashboard_refresh();
 }
 
 // ── Graceful deep-sleep shutdown ───────────────────────────────
@@ -163,16 +162,18 @@ static void shutdown_confirm_cb(lv_event_t *e)
     // The global sync result does not identify its source. Refuse while a
     // previous sync is active so the only completion we observe belongs to
     // this shutdown request.
-    if (g_store.syncStatus == SYNC_RUNNING) {
+    if (store_sync_is_queued_or_running()) {
         set_shutdown_message("A SYNC IS ALREADY RUNNING.\n"
                              "WAIT FOR IT, THEN TRY AGAIN.", CLR_WARN);
         return;
     }
 
     if (!store_sync()) {
+        SyncUiState sync_state = {};
+        store_get_sync_ui_state(&sync_state);
         char message[160];
         snprintf(message, sizeof(message), "SYNC COULD NOT START.\n%.100s",
-                 g_store.syncError[0] ? g_store.syncError : "TRY AGAIN.");
+                 sync_state.error[0] ? sync_state.error : "TRY AGAIN.");
         set_shutdown_message(message, CLR_DANGER);
         return;
     }
@@ -180,7 +181,6 @@ static void shutdown_confirm_cb(lv_event_t *e)
     s_shutdown_sync_pending = true;
     set_shutdown_message("SYNCING BEFORE SHUTDOWN...\n"
                          "DO NOT SWITCH OFF THE TERMINAL.", CLR_WARN);
-    screen_dashboard_refresh();
 }
 
 static void shutdown_open_cb(lv_event_t *e)
@@ -442,9 +442,12 @@ void screen_dashboard_refresh(void)
 {
     if (!s_lbl_sync_status) return;
 
+    SyncUiState sync_state = {};
+    store_get_sync_ui_state(&sync_state);
+
     // Sync status label
     char buf[128];
-    switch (g_store.syncStatus) {
+    switch (sync_state.status) {
         case SYNC_IDLE:
             set_label_text_if_changed(s_lbl_sync_status, "BEREET");
             break;
@@ -458,7 +461,7 @@ void screen_dashboard_refresh(void)
             break;
         case SYNC_ERROR:
             snprintf(buf, sizeof(buf),
-                     LV_SYMBOL_WARNING " Feeler: %.40s", g_store.syncError);
+                     LV_SYMBOL_WARNING " Feeler: %.40s", sync_state.error);
             set_label_text_if_changed(s_lbl_sync_status, buf);
             break;
     }
@@ -590,18 +593,20 @@ void screen_dashboard_refresh(void)
 
 void screen_dashboard_tick(void)
 {
+    SyncUiState sync_state = {};
+    store_get_sync_ui_state(&sync_state);
     if (s_shutdown_sync_pending) {
-        if (g_store.syncStatus == SYNC_SUCCESS) {
+        if (sync_state.status == SYNC_SUCCESS) {
             // The sync worker has reported success; no shutdown path can
             // reach deep sleep before this point.
             ESP_LOGI("dashboard", "Sync complete; entering deep sleep");
             esp_deep_sleep_start();
         }
-        if (g_store.syncStatus == SYNC_ERROR) {
+        if (sync_state.status == SYNC_ERROR) {
             s_shutdown_sync_pending = false;
             char message[160];
             snprintf(message, sizeof(message), "SYNC FAILED. TERMINAL STAYS ON.\n%.100s",
-                     g_store.syncError[0] ? g_store.syncError : "TRY AGAIN.");
+                      sync_state.error[0] ? sync_state.error : "TRY AGAIN.");
             set_shutdown_message(message, CLR_DANGER);
             screen_dashboard_refresh();
         }

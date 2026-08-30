@@ -167,7 +167,10 @@ static void paid_cb(lv_event_t *e)
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
     }
     close_bill_modal();
-    screen_kredite_refresh();
+    // A queued/running sync owns the shared billing datasets until its
+    // publication generation completes. ui_manager refreshes this screen once.
+    if (!store_sync_is_queued_or_running())
+        screen_kredite_refresh();
 }
 
 static void bill_cb(lv_event_t *e)

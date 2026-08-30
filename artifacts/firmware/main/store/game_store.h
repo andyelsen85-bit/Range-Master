@@ -92,6 +92,18 @@ typedef enum {
     SYNC_ERROR,
 } SyncStatus;
 
+typedef enum {
+    SYNC_REQUEST_MANUAL = 1,
+    SYNC_REQUEST_BOOT,
+    SYNC_REQUEST_AUTO,
+} SyncRequestSource;
+
+typedef struct {
+    SyncStatus status;
+    uint32_t publicationGeneration;
+    char error[128];
+} SyncUiState;
+
 typedef struct {
     int     id;
     char    name[MAX_NAME_LEN];
@@ -464,6 +476,9 @@ bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_l
 bool store_sync(void);
 bool store_sync_is_queued_or_running(void);
 bool store_set_auto_sync(bool enabled, uint32_t seconds);
+void store_get_sync_ui_state(SyncUiState *state);
+void store_sync_set_ui_ready(void);
+void store_sync_ack_ui_paused(void);
 
 /**
  * Request exactly one initial full sync after this boot's stored-WiFi

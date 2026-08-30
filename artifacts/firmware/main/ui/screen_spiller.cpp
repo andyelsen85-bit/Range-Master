@@ -158,7 +158,6 @@ static void reload_cb(lv_event_t *e)
         lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH "  SYNC LUEFT...");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
     }
-    update_pending_badge();
 }
 
 static void add_local_cb(lv_event_t *e)
@@ -726,9 +725,11 @@ void screen_spiller_refresh(void)
 void screen_spiller_tick(void)
 {
     if (!s_lbl_status) return;
-    // Mirror g_store.syncStatus into the header label; only repaint on change
+    // Mirror the synchronized publication status into the header label.
     static SyncStatus s_last = (SyncStatus)-1;
-    SyncStatus cur = g_store.syncStatus;
+    SyncUiState sync_state = {};
+    store_get_sync_ui_state(&sync_state);
+    SyncStatus cur = sync_state.status;
     if (cur == s_last) return;
     s_last = cur;
 
@@ -740,7 +741,6 @@ void screen_spiller_tick(void)
         case SYNC_SUCCESS:
             lv_label_set_text(s_lbl_status, LV_SYMBOL_OK "  SYNC OK");
             lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
-            build_list();   // refresh player list with updated portal data
             break;
         case SYNC_ERROR:
             lv_label_set_text(s_lbl_status, LV_SYMBOL_WARNING "  SYNC FEELER");

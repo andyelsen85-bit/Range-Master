@@ -8,6 +8,9 @@
 /** Create all LVGL screens and show the dashboard. */
 void ui_manager_init(void);
 
+/** Register the touch input so sync can cancel an active press safely. */
+void ui_manager_set_input_device(lv_indev_t *indev);
+
 /** Switch to the given screen (called when g_store.screen changes). */
 void ui_manager_show(Screen s);
 

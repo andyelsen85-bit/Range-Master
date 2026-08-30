@@ -33,6 +33,53 @@ lv_style_t g_style_sidebar;
 
 static lv_obj_t *s_screens[SCREEN_COUNT];
 static Screen    s_current = SCREEN_COUNT; // invalid → force first load
+static lv_obj_t *s_sync_guard;
+static lv_indev_t *s_input_device;
+static uint32_t  s_sync_publication_seen;
+static bool      s_sync_guard_visible;
+
+static void refresh_screen(Screen s)
+{
+    switch (s) {
+        case SCREEN_DASHBOARD:    screen_dashboard_refresh();    break;
+        case SCREEN_START:        screen_start_refresh();        break;
+        case SCREEN_SPIEL:        screen_spiel_refresh();        break;
+        case SCREEN_RESULTATE:    screen_resultate_refresh();    break;
+        case SCREEN_GESCHICHTE:   screen_geschichte_refresh();   break;
+        case SCREEN_KREDITE:      screen_kredite_refresh();      break;
+        case SCREEN_SPILLER:      screen_spiller_refresh();      break;
+        case SCREEN_EINSTELLUNGEN:screen_einstellungen_refresh();break;
+        case SCREEN_WIFI:         screen_wifi_refresh();         break;
+        case SCREEN_CATERING:     screen_catering_refresh();     break;
+        default: break;
+    }
+}
+
+static void set_sync_guard_visible(bool visible)
+{
+    if (!s_sync_guard || visible == s_sync_guard_visible) return;
+    s_sync_guard_visible = visible;
+    if (visible) {
+        // A pointer-down target is retained by LVGL until release. Reset it
+        // before acknowledging the sync pause so a pre-sync press cannot
+        // dispatch a callback while datasets are being replaced.
+        if (s_input_device) {
+            lv_indev_reset(s_input_device, NULL);
+            lv_indev_enable(s_input_device, false);
+        }
+        lv_obj_remove_flag(s_sync_guard, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_sync_guard);
+    } else {
+        lv_obj_add_flag(s_sync_guard, LV_OBJ_FLAG_HIDDEN);
+        if (s_input_device)
+            lv_indev_enable(s_input_device, true);
+    }
+}
+
+void ui_manager_set_input_device(lv_indev_t *indev)
+{
+    s_input_device = indev;
+}
 
 // ── Style init ────────────────────────────────────────────────
 static void styles_init(void)
@@ -136,6 +183,34 @@ void ui_manager_init(void)
     s_screens[SCREEN_WIFI]         = screen_wifi_create();         vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_CATERING]     = screen_catering_create();
 
+    // Transparent top-layer guard blocks touch callbacks while the worker is
+    // replacing shared datasets. Only the small status pill is painted, so
+    // the current screen remains visually stable throughout the sync.
+    s_sync_guard = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(s_sync_guard, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
+    lv_obj_align(s_sync_guard, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_opa(s_sync_guard, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_sync_guard, 0, 0);
+    lv_obj_set_style_pad_all(s_sync_guard, 0, 0);
+    lv_obj_clear_flag(s_sync_guard, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_sync_guard, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *sync_label = lv_label_create(s_sync_guard);
+    lv_label_set_text(sync_label, LV_SYMBOL_REFRESH " SYNCISIERT...");
+    lv_obj_set_style_text_font(sync_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(sync_label, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_set_style_bg_color(sync_label, lv_color_hex(CLR_PRIMARY_DIM), 0);
+    lv_obj_set_style_bg_opa(sync_label, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(sync_label, 8, 0);
+    lv_obj_set_style_pad_hor(sync_label, 18, 0);
+    lv_obj_set_style_pad_ver(sync_label, 10, 0);
+    lv_obj_align(sync_label, LV_ALIGN_TOP_RIGHT, -20, 20);
+    lv_obj_add_flag(s_sync_guard, LV_OBJ_FLAG_HIDDEN);
+
+    SyncUiState sync_state = {};
+    store_get_sync_ui_state(&sync_state);
+    s_sync_publication_seen = sync_state.publicationGeneration;
+
     // Register a timer to poll store.screen changes
     lv_timer_create([](lv_timer_t *t) {
         ui_manager_tick();
@@ -143,6 +218,7 @@ void ui_manager_init(void)
 
     ui_manager_show(g_store.operatingMode == TERMINAL_MODE_CATERING ?
                     SCREEN_CATERING : SCREEN_DASHBOARD);
+    store_sync_set_ui_ready();
     ESP_LOGI(TAG, "UI ready");
 }
 
@@ -157,21 +233,16 @@ void ui_manager_show(Screen s)
     if (s >= SCREEN_COUNT || !s_screens[s]) return;
     if (s == s_current) return;
 
-    // Refresh dynamic data before showing
-    switch (s) {
-        case SCREEN_DASHBOARD:    screen_dashboard_refresh();    break;
-        case SCREEN_START:        screen_start_refresh();        break;
-        case SCREEN_SPIEL:        screen_spiel_refresh();        break;
-        case SCREEN_RESULTATE:    screen_resultate_refresh();    break;
-        case SCREEN_GESCHICHTE:   screen_geschichte_refresh();   break;
-        case SCREEN_KREDITE:      screen_kredite_refresh();      break;
-        case SCREEN_SPILLER:      screen_spiller_refresh();      break;
-        case SCREEN_EINSTELLUNGEN:screen_einstellungen_refresh();break;
-        case SCREEN_WIFI:         screen_wifi_refresh();         break;
-        case SCREEN_CATERING:     screen_catering_refresh();     break;
-        default: break;
+    SyncUiState sync_state = {};
+    store_get_sync_ui_state(&sync_state);
+    if (sync_state.status == SYNC_RUNNING) {
+        // Preserve the requested destination, but never traverse a dataset
+        // while the worker is replacing it. The completion tick loads it once.
+        g_store.screen = s;
+        return;
     }
 
+    refresh_screen(s);
     lv_scr_load_anim(s_screens[s], LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
     s_current = s;
     g_store.screen = s;
@@ -180,6 +251,29 @@ void ui_manager_show(Screen s)
 
 void ui_manager_tick(void)
 {
+    SyncUiState sync_state = {};
+    store_get_sync_ui_state(&sync_state);
+    if (sync_state.status == SYNC_RUNNING) {
+        set_sync_guard_visible(true);
+        // The worker waits for this acknowledgement before touching any
+        // shared dataset, closing the timer-boundary race completely.
+        store_sync_ack_ui_paused();
+        return;
+    }
+
+    set_sync_guard_visible(false);
+    if (sync_state.publicationGeneration != s_sync_publication_seen) {
+        s_sync_publication_seen = sync_state.publicationGeneration;
+        if (g_store.screen != s_current) {
+            ui_manager_show(g_store.screen);
+        } else {
+            refresh_screen(s_current);
+        }
+        ESP_LOGI(TAG, "Published coherent sync update generation=%u screen=%d",
+                 (unsigned)s_sync_publication_seen, (int)s_current);
+        return;
+    }
+
     // React to store.screen changes triggered by C logic
     if (g_store.screen != s_current) {
         ui_manager_show(g_store.screen);

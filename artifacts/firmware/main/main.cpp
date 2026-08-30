@@ -273,6 +273,7 @@ static void lvgl_task(void *arg)
     click_sound_setup_lvgl_hook(touch_indev);
 
     // ── 5. UI screens ─────────────────────────────────────────
+    ui_manager_set_input_device(touch_indev);
     ui_manager_init();   // builds all screens, shows SCREEN_DASHBOARD
 
     ESP_LOGI(TAG, "UI ready — entering LVGL loop");

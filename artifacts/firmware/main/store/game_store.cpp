@@ -1869,41 +1869,46 @@ void store_navigate(Screen s)
 // RAM regardless of stack placement) and the action hangs.  Same pattern
 // as screen_wifi_create_workers(): workers block on queues; call sites
 // just queue-send, which costs no allocations.
-static QueueHandle_t s_load_spieler_queue = NULL;
 static QueueHandle_t s_sync_queue         = NULL;
 static portMUX_TYPE s_sync_request_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_boot_sync_requested = false;
 static bool s_boot_sync_consumed = false;
 static bool s_sync_pending = false;
+static bool s_sync_ui_ready = false;
+static bool s_sync_ui_paused = false;
+static uint32_t s_sync_publication_generation = 0;
 static TickType_t s_next_auto_sync;
 
+typedef enum {
+    SYNC_REQUEST_ACCEPTED,
+    SYNC_REQUEST_COALESCED,
+    SYNC_REQUEST_FAILED,
+} SyncRequestResult;
+
 static void queue_boot_sync_if_pending(void);
+static SyncRequestResult store_sync_request(SyncRequestSource source);
+
+static const char *sync_source_label(SyncRequestSource source)
+{
+    switch (source) {
+    case SYNC_REQUEST_BOOT: return "boot";
+    case SYNC_REQUEST_AUTO: return "auto";
+    default: return "manual";
+    }
+}
+
+static void publish_sync_failure(const char *error)
+{
+    portENTER_CRITICAL(&s_sync_request_lock);
+    g_store.syncStatus = SYNC_ERROR;
+    snprintf(g_store.syncError, sizeof(g_store.syncError), "%s",
+             error && error[0] ? error : "Sync failed");
+    ++s_sync_publication_generation;
+    portEXIT_CRITICAL(&s_sync_request_lock);
+}
 
 void store_create_workers(void)
 {
-    // Portal-player load worker
-    s_load_spieler_queue = xQueueCreate(1, sizeof(uint32_t));
-    xTaskCreateWithCaps([](void *arg) {
-        uint32_t dummy;
-        for (;;) {
-            xQueueReceive(s_load_spieler_queue, &dummy, portMAX_DELAY);
-            // Heap-allocate in SPIRAM: 200×~104 B = ~20 KB would blow the
-            // stack, and internal RAM may be exhausted by now.
-            int count = 0;
-            PortalSpieler *buf = (PortalSpieler *)heap_caps_malloc(
-                MAX_PORTAL_SPIELER * sizeof(PortalSpieler),
-                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (buf) {
-                if (http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) == ESP_OK) {
-                    store_apply_portal_roster(buf, count);
-                    ESP_LOGI(TAG, "Loaded %d portal players", count);
-                }
-                heap_caps_free(buf);
-            }
-        }
-    }, "load_spieler_w", 8192, NULL, 5, NULL,
-       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-
     // Sync worker — stack MUST be in internal RAM.
     // NVS (called from game_store_save inside the sync path) writes to SPI
     // flash, which requires disabling the cache.  If the task stack is in
@@ -1913,9 +1918,7 @@ void store_create_workers(void)
     QueueHandle_t sync_queue = xQueueCreate(1, sizeof(uint32_t));
     if (!sync_queue) {
         ESP_LOGE(TAG, "Sync worker queue allocation failed");
-        g_store.syncStatus = SYNC_ERROR;
-        snprintf(g_store.syncError, sizeof(g_store.syncError),
-                 "Sync worker unavailable");
+        publish_sync_failure("Sync worker unavailable");
         return;
     }
 
@@ -1927,31 +1930,65 @@ void store_create_workers(void)
         uint32_t dummy;
         for (;;) {
             if (xQueueReceive(queue, &dummy, pdMS_TO_TICKS(1000)) != pdTRUE) {
+                bool ui_ready;
+                portENTER_CRITICAL(&s_sync_request_lock);
+                ui_ready = s_sync_ui_ready;
+                portEXIT_CRITICAL(&s_sync_request_lock);
                 bool due = g_store.autoSyncEnabled &&
                            (int32_t)(xTaskGetTickCount() - s_next_auto_sync) >= 0;
-                if (due && cop_wifi_is_connected() &&
+                if (ui_ready && due && cop_wifi_is_connected() &&
                     !store_sync_is_queued_or_running()) {
-                    store_sync();
+                    store_sync_request(SYNC_REQUEST_AUTO);
                 }
                 continue;
             }
-            g_store.syncStatus = SYNC_RUNNING;
-            esp_err_t err = http_sync_all();
-            g_store.syncStatus = (err == ESP_OK) ? SYNC_SUCCESS : SYNC_ERROR;
-            if (err != ESP_OK) {
-                http_sync_copy_last_error(g_store.syncError,
-                                          sizeof(g_store.syncError));
-                if (!g_store.syncError[0])
-                    snprintf(g_store.syncError, sizeof(g_store.syncError),
-                             "HTTP sync failed: %s", esp_err_to_name(err));
+            SyncRequestSource source = (SyncRequestSource)dummy;
+            ESP_LOGI(TAG, "Sync worker started source=%s interval=%us",
+                     sync_source_label(source),
+                     (unsigned)g_store.autoSyncSeconds);
+            char sync_error[sizeof(g_store.syncError)] = {};
+            bool ui_paused = false;
+            for (int attempt = 0; attempt < 200; ++attempt) {
+                portENTER_CRITICAL(&s_sync_request_lock);
+                ui_paused = s_sync_ui_paused;
+                portEXIT_CRITICAL(&s_sync_request_lock);
+                if (ui_paused) break;
+                vTaskDelay(pdMS_TO_TICKS(5));
+            }
+
+            esp_err_t err;
+            if (!ui_paused) {
+                err = ESP_ERR_TIMEOUT;
+                snprintf(sync_error, sizeof(sync_error),
+                         "UI pause acknowledgement timed out");
+                ESP_LOGE(TAG, "Sync aborted before mutation: %s",
+                         sync_error);
             } else {
-                g_store.syncError[0] = '\0';
+                ESP_LOGI(TAG, "UI paused; sync mutation phase starting");
+                err = http_sync_all();
+            }
+            if (err != ESP_OK && !sync_error[0]) {
+                http_sync_copy_last_error(sync_error, sizeof(sync_error));
+                if (!sync_error[0])
+                    snprintf(sync_error, sizeof(sync_error),
+                             "HTTP sync failed: %s", esp_err_to_name(err));
             }
             portENTER_CRITICAL(&s_sync_request_lock);
+            g_store.syncStatus = (err == ESP_OK) ? SYNC_SUCCESS : SYNC_ERROR;
+            snprintf(g_store.syncError, sizeof(g_store.syncError), "%s",
+                     sync_error);
             s_sync_pending = false;
+            s_sync_ui_paused = false;
             s_next_auto_sync = xTaskGetTickCount() +
                 pdMS_TO_TICKS(g_store.autoSyncSeconds * 1000u);
+            ++s_sync_publication_generation;
+            uint32_t generation = s_sync_publication_generation;
             portEXIT_CRITICAL(&s_sync_request_lock);
+            ESP_LOGI(TAG,
+                     "Sync worker finished source=%s result=%s publication=%u",
+                     sync_source_label(source),
+                     err == ESP_OK ? "success" : "error",
+                     (unsigned)generation);
             queue_boot_sync_if_pending();
         }
     }, "sync_w", 16384, sync_queue, 5, NULL,
@@ -1959,9 +1996,7 @@ void store_create_workers(void)
     if (task_created != pdPASS) {
         vQueueDelete(sync_queue);
         ESP_LOGE(TAG, "Sync worker task creation failed");
-        g_store.syncStatus = SYNC_ERROR;
-        snprintf(g_store.syncError, sizeof(g_store.syncError),
-                 "Sync worker unavailable");
+        publish_sync_failure("Sync worker unavailable");
         return;
     }
 
@@ -1973,17 +2008,14 @@ void store_create_workers(void)
 
     ESP_LOGI(TAG, "Store workers created. Internal RAM remaining: %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-
-    queue_boot_sync_if_pending();
 }
 
 // ── Portal players ───────────────────────────────────────────
 void store_load_portal_spieler(void)
 {
-    // Just trigger the persistent worker — costs no RAM at call time.
-    if (!s_load_spieler_queue) return;
-    uint32_t trigger = 1;
-    xQueueSend(s_load_spieler_queue, &trigger, 0);
+    // A roster-only worker used to bypass the coherent sync publication
+    // boundary. Route this legacy API through the same coalesced full sync.
+    (void)store_sync_request(SYNC_REQUEST_MANUAL);
 }
 
 void store_add_lokal_spieler(const char *name, int *out_id)
@@ -2199,7 +2231,7 @@ void store_queue_passwort_reset(int spieler_id)
 int store_pending_update_count(void) { return g_store.spielerUpdateCount; }
 
 // ── Sync ─────────────────────────────────────────────────────
-bool store_sync(void)
+static SyncRequestResult store_sync_request(SyncRequestSource source)
 {
     // Just trigger the persistent worker — costs no RAM at call time.
     QueueHandle_t sync_queue = NULL;
@@ -2207,34 +2239,45 @@ bool store_sync(void)
     sync_queue = s_sync_queue;
     portEXIT_CRITICAL(&s_sync_request_lock);
     if (!sync_queue) {
-        g_store.syncStatus = SYNC_ERROR;
-        snprintf(g_store.syncError, sizeof(g_store.syncError),
-                 "Sync worker unavailable");
-        return false;
+        publish_sync_failure("Sync worker unavailable");
+        return SYNC_REQUEST_FAILED;
     }
 
     portENTER_CRITICAL(&s_sync_request_lock);
     if (s_sync_pending) {
         portEXIT_CRITICAL(&s_sync_request_lock);
-        snprintf(g_store.syncError, sizeof(g_store.syncError),
-                 "Sync request already queued or running");
-        return false;
+        ESP_LOGI(TAG, "Sync request coalesced source=%s interval=%us",
+                 sync_source_label(source), (unsigned)g_store.autoSyncSeconds);
+        return SYNC_REQUEST_COALESCED;
     }
     s_sync_pending = true;
+    s_sync_ui_paused = false;
+    g_store.syncStatus = SYNC_RUNNING;
+    g_store.syncError[0] = '\0';
     portEXIT_CRITICAL(&s_sync_request_lock);
 
-    g_store.syncStatus = SYNC_RUNNING;
-    uint32_t trigger = 1;
+    uint32_t trigger = (uint32_t)source;
     if (xQueueSend(sync_queue, &trigger, 0) != pdTRUE) {
         portENTER_CRITICAL(&s_sync_request_lock);
         s_sync_pending = false;
-        portEXIT_CRITICAL(&s_sync_request_lock);
+        s_sync_ui_paused = false;
         g_store.syncStatus = SYNC_ERROR;
         snprintf(g_store.syncError, sizeof(g_store.syncError),
-                 "Sync request already queued");
-        return false;
+                 "Sync request queue failed");
+        ++s_sync_publication_generation;
+        portEXIT_CRITICAL(&s_sync_request_lock);
+        ESP_LOGE(TAG, "Sync request queue failed source=%s",
+                 sync_source_label(source));
+        return SYNC_REQUEST_FAILED;
     }
-    return true;
+    ESP_LOGI(TAG, "Sync request accepted source=%s interval=%us",
+             sync_source_label(source), (unsigned)g_store.autoSyncSeconds);
+    return SYNC_REQUEST_ACCEPTED;
+}
+
+bool store_sync(void)
+{
+    return store_sync_request(SYNC_REQUEST_MANUAL) == SYNC_REQUEST_ACCEPTED;
 }
 
 bool store_sync_is_queued_or_running(void)
@@ -2243,6 +2286,33 @@ bool store_sync_is_queued_or_running(void)
     bool pending = s_sync_pending;
     portEXIT_CRITICAL(&s_sync_request_lock);
     return pending;
+}
+
+void store_get_sync_ui_state(SyncUiState *state)
+{
+    if (!state) return;
+    portENTER_CRITICAL(&s_sync_request_lock);
+    state->status = g_store.syncStatus;
+    state->publicationGeneration = s_sync_publication_generation;
+    memcpy(state->error, g_store.syncError, sizeof(state->error));
+    portEXIT_CRITICAL(&s_sync_request_lock);
+}
+
+void store_sync_set_ui_ready(void)
+{
+    portENTER_CRITICAL(&s_sync_request_lock);
+    s_sync_ui_ready = true;
+    portEXIT_CRITICAL(&s_sync_request_lock);
+    ESP_LOGI(TAG, "UI publication boundary ready; boot sync may start");
+    queue_boot_sync_if_pending();
+}
+
+void store_sync_ack_ui_paused(void)
+{
+    portENTER_CRITICAL(&s_sync_request_lock);
+    if (s_sync_pending && g_store.syncStatus == SYNC_RUNNING)
+        s_sync_ui_paused = true;
+    portEXIT_CRITICAL(&s_sync_request_lock);
 }
 
 bool store_set_auto_sync(bool enabled, uint32_t seconds)
@@ -2260,32 +2330,55 @@ bool store_set_auto_sync(bool enabled, uint32_t seconds)
 
 void store_sync_after_boot_wifi_connected(void)
 {
+    bool coalesced = false;
     portENTER_CRITICAL(&s_sync_request_lock);
     // This is deliberately one-shot per boot. A connection flap before the
     // initial request is accepted can retry queueing; once accepted, normal
     // scheduler/manual paths handle all later syncs.
-    if (!s_boot_sync_consumed)
-        s_boot_sync_requested = true;
+    if (!s_boot_sync_consumed) {
+        if (s_sync_pending) {
+            s_boot_sync_requested = false;
+            s_boot_sync_consumed = true;
+            coalesced = true;
+        } else {
+            s_boot_sync_requested = true;
+        }
+    }
     portEXIT_CRITICAL(&s_sync_request_lock);
 
+    if (coalesced)
+        ESP_LOGI(TAG, "Boot sync coalesced into active sync generation");
     queue_boot_sync_if_pending();
 }
 
 static void queue_boot_sync_if_pending(void)
 {
     bool queue_sync_now = false;
+    bool coalesced = false;
     portENTER_CRITICAL(&s_sync_request_lock);
-    if (s_boot_sync_requested && !s_sync_pending && s_sync_queue) {
-        // Consume the request before leaving the lock. If queueing fails it
-        // is restored below; success/failure of the HTTP operation never
-        // leaves a permanent boot latch behind.
-        s_boot_sync_requested = false;
-        s_boot_sync_consumed = true;
-        queue_sync_now = true;
+    if (s_sync_ui_ready && s_boot_sync_requested && s_sync_queue) {
+        // A boot request arriving during another source joins that active
+        // generation instead of forcing a second full sync immediately after.
+        if (s_sync_pending) {
+            s_boot_sync_requested = false;
+            s_boot_sync_consumed = true;
+            coalesced = true;
+        } else {
+            // Consume before leaving the lock. If queueing fails it is
+            // restored below so a later connection callback can retry.
+            s_boot_sync_requested = false;
+            s_boot_sync_consumed = true;
+            queue_sync_now = true;
+        }
     }
     portEXIT_CRITICAL(&s_sync_request_lock);
 
-    if (queue_sync_now && !store_sync()) {
+    if (coalesced)
+        ESP_LOGI(TAG, "Boot sync coalesced into active sync generation");
+    SyncRequestResult result = queue_sync_now
+        ? store_sync_request(SYNC_REQUEST_BOOT)
+        : SYNC_REQUEST_COALESCED;
+    if (queue_sync_now && result == SYNC_REQUEST_FAILED) {
         portENTER_CRITICAL(&s_sync_request_lock);
         s_boot_sync_requested = true;
         s_boot_sync_consumed = false;
