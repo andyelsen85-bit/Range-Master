@@ -107,17 +107,34 @@ bool offline_cache_save(OfflineCacheSection s) {
     lock_cache(); snapshot(s,p); bool ok=valid(s,p)&&write_file(names[s],s,p,n); if(ok){g_store.offlineCacheHealthy=true;g_store.offlineCacheLoaded=true;} unlock_cache(); heap_caps_free(p); return ok;
 }
 bool offline_cache_save_metadata(void) {
-    if(!s_mounted&&!offline_cache_mount())return false; MetaPayload *m=(MetaPayload *)heap_caps_malloc(sizeof(*m),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT); if(!m)return false;
+    if (!s_mounted && !offline_cache_mount()) {
+        return false;
+    }
+    MetaPayload *m = (MetaPayload *)heap_caps_malloc(
+        sizeof(*m), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!m) {
+        return false;
+    }
     lock_cache(); memset(m,0,sizeof(*m));m->lastSync=g_store.lastSuccessfulSyncAt;m->health=g_store.offlineCacheHealthy;m->loaded=g_store.offlineCacheLoaded;memcpy(m->dailyDate,g_store.cacheManifestDailyDate,sizeof(m->dailyDate));memcpy(m->tokens,g_store.cacheManifestTokens,sizeof(m->tokens));bool ok=write_file("meta",0xffff,m,sizeof(*m));unlock_cache();heap_caps_free(m);return ok;
 }
 bool offline_cache_set_manifest_token(OfflineCacheSection s,const char *token) {
     if(s>=OFFLINE_CACHE_SECTION_COUNT||!token||strlen(token)>=CACHE_MANIFEST_TOKEN_LEN)return false;
     char old[CACHE_MANIFEST_TOKEN_LEN], old_date[11]; lock_cache(); memcpy(old,g_store.cacheManifestTokens[s],sizeof(old));memcpy(old_date,g_store.cacheManifestDailyDate,sizeof(old_date));snprintf(g_store.cacheManifestTokens[s],CACHE_MANIFEST_TOKEN_LEN,"%s",token); if(s>=OFFLINE_CACHE_CREDITS){time_t t=time(NULL);struct tm x;localtime_r(&t,&x);strftime(g_store.cacheManifestDailyDate,sizeof(g_store.cacheManifestDailyDate),"%Y-%m-%d",&x);} unlock_cache();
-    if(offline_cache_save_metadata())return true; lock_cache();memcpy(g_store.cacheManifestTokens[s],old,sizeof(old));memcpy(g_store.cacheManifestDailyDate,old_date,sizeof(old_date));unlock_cache();return false;
+    if (offline_cache_save_metadata()) {
+        return true;
+    }
+    lock_cache();
+    memcpy(g_store.cacheManifestTokens[s], old, sizeof(old));
+    memcpy(g_store.cacheManifestDailyDate, old_date, sizeof(old_date));
+    unlock_cache();
+    return false;
 }
 static bool today(const char *d) { time_t t=time(NULL);struct tm x;char now[11];localtime_r(&t,&x);strftime(now,sizeof(now),"%Y-%m-%d",&x);return d&&strcmp(d,now)==0; }
 void offline_cache_load(void) {
-    if(!offline_cache_mount())return; bool any=false;
+    if (!offline_cache_mount()) {
+        return;
+    }
+    bool any = false;
     MetaPayload *m=(MetaPayload *)heap_caps_malloc(sizeof(*m),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(m&&read_file("meta",0xffff,m,sizeof(*m))){g_store.lastSuccessfulSyncAt=m->lastSync;memcpy(g_store.cacheManifestDailyDate,m->dailyDate,sizeof(m->dailyDate));memcpy(g_store.cacheManifestTokens,m->tokens,sizeof(m->tokens));} if(m)heap_caps_free(m);
     bool roster_restored=false;
