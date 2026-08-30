@@ -65,10 +65,7 @@ static bool str_icontains(const char *hay, const char *needle)
 
 static bool player_is_registered_for_day(int spieler_id)
 {
-    for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
-        if (g_store.kreditPlayerIds[i] == spieler_id) return true;
-    }
-    return false;
+    return store_spieler_fuer_tag_aktiv(spieler_id);
 }
 
 // ── Callbacks ─────────────────────────────────────────────────
@@ -135,6 +132,12 @@ static void add_day_cb(lv_event_t *e)
         s_selected_pidx >= g_store.portalSpielerCount) return;
 
     PortalSpieler *ps = &g_store.portalSpieler[s_selected_pidx];
+    if (!ps->portalAktiv) {
+        lv_label_set_text(s_lbl_edit_status,
+                          LV_SYMBOL_WARNING " EISCHT PORTAL AKTIVÉIEREN AN SPÄICHEREN");
+        lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_DANGER), 0);
+        return;
+    }
     if (player_is_registered_for_day(ps->id)) {
         lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  SCHON SPILLER VUM DAAG");
         lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_MUTED), 0);

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "lvgl.h"
 #include "ui_manager.h"
 #include "game_store.h"
@@ -24,6 +25,12 @@ static uint32_t content_signature(void) {
         while (*text) add((uint8_t)*text++);
         add(0xffu);
     };
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    add_text(today);
+    add_text(g_store.kreditDatum);
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
+        add((uint32_t)g_store.kreditPlayerIds[i]);
     add((uint32_t)g_store.portalSpielerCount);
     for (int i = 0; i < g_store.portalSpielerCount; ++i) {
         add((uint32_t)g_store.portalSpieler[i].id);
@@ -51,10 +58,7 @@ static bool ensure_current_content(void) {
 }
 
 static bool player_today(const PortalSpieler *p) {
-    if (!p || !p->portalAktiv) return false;
-    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
-        if (g_store.kreditPlayerIds[i] == p->id) return true;
-    return false;
+    return p && store_spieler_fuer_tag_aktiv(p->id);
 }
 static void activity(void) { s_last_touch = lv_tick_get(); }
 static void reset_basket(void) {

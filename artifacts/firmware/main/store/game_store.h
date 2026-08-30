@@ -430,6 +430,7 @@ void store_add_kredite(int spieler_id, int anzahl);
  * adjustments are rejected when they would make available credit negative.
  */
 bool store_adjust_kredite(int spieler_id, int delta);
+bool store_spieler_fuer_tag_aktiv(int spieler_id);
 void store_register_spieler_fuer_tag(int spieler_id);
 
 // ── Sync ─────────────────────────────────────────────────────

@@ -474,18 +474,16 @@ bool store_queue_verkauf(int spieler_id, const char *produkt_code, int quantity)
     return persist == ESP_OK;
 }
 
-static bool catering_player_is_active(int spieler_id)
+static bool spieler_fuer_tag_aktiv_unlocked(int spieler_id, const char *today)
 {
-    if (spieler_id <= 0) return false;
-    // The daily registration is part of the sale authorization, not merely a
-    // UI filter. Do this check at the enqueue transaction boundary.
-    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
-    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    if (spieler_id <= 0 || !today) return false;
     if (strcmp(g_store.kreditDatum, today) != 0) return false;
-    for (int i = 0; i < g_store.portalSpielerCount; ++i)
-        if (g_store.portalSpieler[i].id == spieler_id && g_store.portalSpieler[i].portalAktiv)
-            for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
-                if (g_store.kreditPlayerIds[k] == spieler_id) return true;
+    for (int i = 0; i < g_store.portalSpielerCount; ++i) {
+        if (g_store.portalSpieler[i].id != spieler_id ||
+            !g_store.portalSpieler[i].portalAktiv) continue;
+        for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
+            if (g_store.kreditPlayerIds[k] == spieler_id) return true;
+    }
     return false;
 }
 
@@ -497,16 +495,16 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
         s_catering_error = "ONGULTEGE WEENCHEN";
         return false;
     }
+    xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
     kredit_events_lock();
-    bool authorized = catering_player_is_active(spieler_id);
-    kredit_events_unlock();
-    if (!authorized) {
-        s_catering_error = "SPILLER NET FIR HAUT AUTORISEIERT";
-        return false;
-    }
     time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tmi);
-    xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
+    if (!spieler_fuer_tag_aktiv_unlocked(spieler_id, today)) {
+        s_catering_error = "SPILLER NET FIR HAUT AUTORISEIERT";
+        kredit_events_unlock();
+        xSemaphoreGive(s_verkauf_events_mutex);
+        return false;
+    }
     MunitionStand prior_munition[MAX_PORTAL_SPIELER];
     memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
     char prior_date[sizeof(g_store.verkaufDatum)];
@@ -524,6 +522,7 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
                 !p->active ? "PRODUKT NET AKTIV" :
                 p->preisRevisionId <= 0 ? "PRODUKT HUET KEE PRAIS" :
                 "ONGULTEGE PRODUKT-DATEN";
+            kredit_events_unlock();
             xSemaphoreGive(s_verkauf_events_mutex);
             return false;
         }
@@ -531,6 +530,7 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
     // Reserve all slots before writing any event: a full outbox is all-or-nothing.
     if (g_store.pendingVerkaufEventCount + line_count > MAX_PENDING_VERKAEUFE) {
         s_catering_error = "VERKAAF-QUEUE ASS VOLL - EISCHT SYNC";
+        kredit_events_unlock();
         xSemaphoreGive(s_verkauf_events_mutex);
         return false;
     }
@@ -568,6 +568,7 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
         g_store.verkaufCal12Total = prior_cal12_total;
         g_store.verkaufCal20Total = prior_cal20_total;
     }
+    kredit_events_unlock();
     xSemaphoreGive(s_verkauf_events_mutex);
     return persist == ESP_OK;
 }
@@ -875,6 +876,16 @@ int store_kredite_verfuegbar(int spieler_id)
     return 0;
 }
 
+bool store_spieler_fuer_tag_aktiv(int spieler_id)
+{
+    kredit_events_lock();
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    bool active = spieler_fuer_tag_aktiv_unlocked(spieler_id, today);
+    kredit_events_unlock();
+    return active;
+}
+
 static int find_kredit_slot(const GameStore *s, int spieler_id)
 {
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
@@ -1057,15 +1068,38 @@ void store_remap_spieler_id(int old_id, int new_id)
 
 void store_register_spieler_fuer_tag(int spieler_id)
 {
+    kredit_events_lock();
+    int prior_ids[MAX_PORTAL_SPIELER];
+    KreditStand prior_credits[MAX_PORTAL_SPIELER];
+    char prior_date[sizeof(g_store.kreditDatum)];
+    memcpy(prior_ids, g_store.kreditPlayerIds, sizeof(prior_ids));
+    memcpy(prior_credits, g_store.kredite, sizeof(prior_credits));
+    memcpy(prior_date, g_store.kreditDatum, sizeof(prior_date));
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    if (strcmp(g_store.kreditDatum, today) != 0) {
+        memset(g_store.kreditPlayerIds, 0, sizeof(g_store.kreditPlayerIds));
+        memset(g_store.kredite, 0, sizeof(g_store.kredite));
+        snprintf(g_store.kreditDatum, sizeof(g_store.kreditDatum), "%s", today);
+    }
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
-        if (g_store.kreditPlayerIds[i] == spieler_id) return; // already listed
+        if (g_store.kreditPlayerIds[i] == spieler_id) {
+            kredit_events_unlock();
+            return;
+        }
         if (g_store.kreditPlayerIds[i] == 0) {
             g_store.kreditPlayerIds[i] = spieler_id;
             g_store.kredite[i] = (KreditStand){0, 0};
-            game_store_save();
+            if (!save_kredit_state_unlocked()) {
+                memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
+                memcpy(g_store.kredite, prior_credits, sizeof(prior_credits));
+                memcpy(g_store.kreditDatum, prior_date, sizeof(prior_date));
+            }
+            kredit_events_unlock();
             return;
         }
     }
+    kredit_events_unlock();
 }
 
 void store_add_kredite(int spieler_id, int anzahl)
