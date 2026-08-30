@@ -271,6 +271,9 @@ void ui_manager_tick(void)
             ui_manager_show(g_store.screen);
         } else {
             refresh_screen(s_current);
+            if (s_current == SCREEN_KREDITE)
+                screen_kredite_sync_completed(sync_state.status == SYNC_SUCCESS,
+                                               sync_state.error);
         }
         ESP_LOGI(TAG, "Published coherent sync update generation=%u screen=%d",
                  (unsigned)s_sync_publication_seen, (int)s_current);

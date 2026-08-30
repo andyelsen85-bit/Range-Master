@@ -760,3 +760,18 @@ void screen_kredite_refresh(void)
 
     build_player_list();
 }
+
+void screen_kredite_sync_completed(bool success, const char *error)
+{
+    if (!s_lbl_status) return;
+    if (success) {
+        lv_label_set_text(s_lbl_status, "SYNC ERFOLLEGRÄICH");
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
+    } else {
+        char message[96];
+        snprintf(message, sizeof(message), "SYNC-FEELER: %.76s",
+                 error && error[0] ? error : "ONBEKANNT");
+        lv_label_set_text(s_lbl_status, message);
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+    }
+}

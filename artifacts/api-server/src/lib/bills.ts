@@ -89,9 +89,10 @@ export async function dayBillSummary(datum: string) {
         SUM(quantity)::int quantity, SUM(quantity * unit_price_cents)::int total_cents
       FROM raw_lines GROUP BY spieler_id, product_id, product_name, category, price_revision_id, unit_price_cents
     ), full_day_lines AS (
-      SELECT product_id, product_name, category, price_revision_id, unit_price_cents,
+      SELECT spieler_id, product_id, product_name, category, price_revision_id, unit_price_cents,
         SUM(quantity)::int quantity, SUM(quantity * unit_price_cents)::int total_cents
-      FROM billable_events GROUP BY product_id, product_name, category, price_revision_id, unit_price_cents
+      FROM billable_events
+      GROUP BY spieler_id, product_id, product_name, category, price_revision_id, unit_price_cents
     ), credit AS (
       SELECT spieler_id,
         COALESCE(SUM(CASE WHEN typ = 'GRANT' THEN anzahl ELSE 0 END), 0)::int granted,
@@ -118,7 +119,16 @@ export async function dayBillSummary(datum: string) {
         'productId', f.product_id, 'productName', f.product_name, 'category', f.category,
         'priceRevisionId', f.price_revision_id, 'unitPriceCents', f.unit_price_cents,
         'quantity', f.quantity, 'totalCents', f.total_cents
-      ) ORDER BY f.product_name, f.price_revision_id) FROM full_day_lines f), '[]'::jsonb) full_day_lines,
+      ) ORDER BY f.product_name, f.price_revision_id) FROM full_day_lines f
+        WHERE f.spieler_id = a.spieler_id), '[]'::jsonb) day_lines,
+      COALESCE((SELECT jsonb_object_agg(category, cents) FROM (
+        SELECT category, SUM(total_cents)::int cents
+        FROM full_day_lines
+        WHERE spieler_id = a.spieler_id
+        GROUP BY category
+      ) categories), '{}'::jsonb) day_category_subtotals,
+      COALESCE((SELECT SUM(total_cents) FROM full_day_lines
+        WHERE spieler_id = a.spieler_id), 0)::int day_total_cents,
       COALESCE(c.granted, 0)::int credit_granted, COALESCE(c.used, 0)::int credit_used,
       (COALESCE(c.granted, 0) - COALESCE(c.used, 0))::int credit_remaining,
       COALESCE(gc.games, 0)::int games, COALESCE(gc.completed_games, 0)::int completed_games,
@@ -139,6 +149,8 @@ export async function dayBillSummary(datum: string) {
   const players = rows.map(row => ({
     spielerId: Number(row.spieler_id), spielerName: row.spieler_name, mitgliedNr: row.mitglied_nr,
     lines: row.lines, categorySubtotals: row.category_subtotals, totalCents: Number(row.total_cents),
+    dayLines: row.day_lines, dayCategorySubtotals: row.day_category_subtotals,
+    dayTotalCents: Number(row.day_total_cents),
     credit: { granted: Number(row.credit_granted), used: Number(row.credit_used), remaining: Number(row.credit_remaining) },
     games: Number(row.games), completedGames: Number(row.completed_games), confirmedClays: Number(row.confirmed_clays),
     state: row.bill_state, payment: row.payment_external_id ? {
@@ -149,7 +161,7 @@ export async function dayBillSummary(datum: string) {
   }));
   const productTotals: Record<string, { productId: number; productName: string; category: string; priceRevisionId: number; unitPriceCents: number; quantity: number; totalCents: number }> = {};
   const categorySubtotals: Record<string, number> = {};
-  const fullDayLines = rows[0]?.full_day_lines ?? [];
+  const fullDayLines = players.flatMap((player: any) => player.dayLines ?? []);
   for (const line of fullDayLines) {
     const key = `${line.productId}:${line.priceRevisionId}:${line.unitPriceCents}`;
     const total = productTotals[key] ?? { productId: Number(line.productId), productName: line.productName, category: line.category, priceRevisionId: Number(line.priceRevisionId), unitPriceCents: Number(line.unitPriceCents), quantity: 0, totalCents: 0 };

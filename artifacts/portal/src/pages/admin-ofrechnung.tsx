@@ -44,9 +44,19 @@ interface DaySummaryPlayerBill {
     unitPriceCents: number;
     totalCents: number;
   }[];
+  dayLines: {
+    productId: number;
+    productName: string;
+    category: string;
+    quantity: number;
+    unitPriceCents: number;
+    totalCents: number;
+  }[];
 
   categorySubtotals: Record<string, number>;
+  dayCategorySubtotals: Record<string, number>;
   totalCents: number;
+  dayTotalCents: number;
 }
 
 interface DaySummaryProductTotal {
@@ -164,6 +174,9 @@ export default function AdminOfrechnung() {
 
   const summary = data ?? { generalTotalCents: 0, games: 0, completedGames: 0, confirmedClays: 0, productTotals: {} };
   const products = Object.values(summary.productTotals || {}) as DaySummaryProductTotal[];
+  const selectedDayLines = selectedBill?.dayLines ?? selectedBill?.lines ?? [];
+  const selectedDayCategories = selectedBill?.dayCategorySubtotals ?? selectedBill?.categorySubtotals ?? {};
+  const selectedDayTotal = selectedBill?.dayTotalCents ?? selectedBill?.totalCents ?? 0;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
@@ -263,6 +276,11 @@ export default function AdminOfrechnung() {
                     
                     <div className="flex flex-col items-end gap-1">
                       <p className="font-mono font-black text-lg">{formatMoney(bill.totalCents)}</p>
+                      {bill.dayTotalCents !== bill.totalCents && (
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          Dag: {formatMoney(bill.dayTotalCents)}
+                        </span>
+                      )}
                       {bill.state === "PAID" ? (
                         <span className="text-[10px] uppercase tracking-widest font-bold text-emerald-500">Bezuelt</span>
                       ) : bill.state === "PENDING_NEUTRAL" ? (
@@ -365,14 +383,14 @@ export default function AdminOfrechnung() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs uppercase tracking-widest font-bold opacity-60 mb-1">Total</p>
+                  <p className="text-xs uppercase tracking-widest font-bold opacity-60 mb-1">Aktuell oppen</p>
                   <p className="text-4xl font-mono font-black">{formatMoney(selectedBill.totalCents)}</p>
                 </div>
               </div>
 
               <div className="p-6 bg-card max-h-[60vh] overflow-y-auto">
                 {/* Credits Summary */}
-                <div className="mb-6 grid grid-cols-3 gap-4 bg-secondary/20 rounded-xl p-4 border border-border/40">
+                <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4 bg-secondary/20 rounded-xl p-4 border border-border/40">
                   <div>
                     <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Kreditter Kaaft</p>
                     <p className="font-mono font-bold mt-1 text-lg">{selectedBill.credit.granted}</p>
@@ -385,13 +403,17 @@ export default function AdminOfrechnung() {
                     <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Rescht</p>
                     <p className="font-mono font-black mt-1 text-lg text-primary">{selectedBill.credit.remaining}</p>
                   </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Dagestotal</p>
+                    <p className="font-mono font-black mt-1 text-lg">{formatMoney(selectedDayTotal)}</p>
+                  </div>
                 </div>
 
                 {/* Subtotals by category */}
                 <div className="mb-6">
-                  <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Zesummefaassung</h4>
+                  <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Zesummefaassung vum Dag</h4>
                   <div className="flex flex-wrap gap-2">
-                    {Object.entries(selectedBill.categorySubtotals).map(([cat, cents]) => (
+                    {Object.entries(selectedDayCategories).map(([cat, cents]) => (
                       <div key={cat} className="flex items-center gap-2 bg-background border border-border/50 rounded-lg px-3 py-1.5 shadow-sm">
                         <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">{cat}</Badge>
                         <span className="font-mono font-bold text-sm">{formatMoney(cents)}</span>
@@ -402,7 +424,7 @@ export default function AdminOfrechnung() {
 
                 {/* Line Items */}
                 <div>
-                  <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Linnen</h4>
+                  <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Kaf vum Dag</h4>
                   <div className="border border-border/50 rounded-xl overflow-hidden shadow-sm">
                     <Table>
                       <TableHeader className="bg-secondary/20">
@@ -414,7 +436,7 @@ export default function AdminOfrechnung() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {selectedBill.lines.map((line, idx) => (
+                        {selectedDayLines.map((line, idx) => (
                           <TableRow key={idx} className="border-border/30 hover:bg-secondary/10">
                             <TableCell className="py-2.5">
                               <p className="font-bold text-sm">{line.productName}</p>
@@ -425,6 +447,13 @@ export default function AdminOfrechnung() {
                             <TableCell className="text-right font-mono font-bold text-primary py-2.5 text-sm">{formatMoney(line.totalCents)}</TableCell>
                           </TableRow>
                         ))}
+                        {selectedDayLines.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
+                              Keng verrechent Aktivitéit fir dësen Dag
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </TableBody>
                     </Table>
                   </div>

@@ -435,6 +435,34 @@ static bool has_pending_billable_activity(int spieler_id, const char *today)
     return false;
 }
 
+static bool has_pending_day_activity(int spieler_id, const char *today)
+{
+    for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i)
+        if (g_store.pendingVerkaufEvents[i].spielerId == spieler_id &&
+            !strcmp(g_store.pendingVerkaufEvents[i].datum, today))
+            return true;
+    for (int i = 0; i < g_store.pendingKreditEventCount; ++i)
+        if (g_store.pendingKreditEvents[i].spielerId == spieler_id &&
+            !strcmp(g_store.pendingKreditEvents[i].datum, today))
+            return true;
+    for (int i = 0; i < g_store.pendingPaymentEventCount; ++i)
+        if (g_store.pendingPaymentEvents[i].spielerId == spieler_id &&
+            !strcmp(g_store.pendingPaymentEvents[i].datum, today))
+            return true;
+    return false;
+}
+
+static bool bill_is_authoritatively_paid(int spieler_id, const char *today)
+{
+    if (!today || !g_store.billDay.authoritative ||
+        strcmp(g_store.billDay.datum, today))
+        return false;
+    for (int i = 0; i < g_store.billDay.playerCount; ++i)
+        if (g_store.billDay.players[i].spielerId == spieler_id)
+            return g_store.billDay.players[i].state == BILL_PAID;
+    return false;
+}
+
 bool store_queue_payment(int spieler_id)
 {
     if (spieler_id <= 0) return false;
@@ -714,6 +742,19 @@ void store_rebuild_bill_projection(void)
     if (g_store.billDay.uniquePlayers < g_store.billDay.playerCount)
         g_store.billDay.uniquePlayers = g_store.billDay.playerCount;
     g_store.billDay.authoritative = g_store.billDayBaseline.authoritative;
+
+    // A portal-confirmed payment retires the player from the operational day
+    // roster, but never from immutable bill history. Pending activity wins:
+    // it represents a new local balance that has not reached the portal yet.
+    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i) {
+        int spieler_id = g_store.kreditPlayerIds[i];
+        if (spieler_id > 0 &&
+            bill_is_authoritatively_paid(spieler_id, today) &&
+            !has_pending_day_activity(spieler_id, today)) {
+            g_store.kreditPlayerIds[i] = 0;
+            g_store.kredite[i] = (KreditStand){};
+        }
+    }
 }
 
 static int munition_caliber_for_product(int produkt_id)
@@ -1539,13 +1580,15 @@ bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_l
     time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
     int slot = find_kredit_slot(&g_store, spieler_id);
+    bool paid = bill_is_authoritatively_paid(spieler_id, today);
     const char *unsettled = NULL;
     if (slot < 0 || strcmp(g_store.kreditDatum, today))
         unsettled = "SPILLER NET AKTIV";
-    else if (g_store.kredite[slot].gewaehrt || g_store.kredite[slot].verbraucht)
+    else if (!paid &&
+             (g_store.kredite[slot].gewaehrt || g_store.kredite[slot].verbraucht))
         unsettled = "KREDIT";
     else {
-        for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
+        for (int i = 0; !paid && i < MAX_PORTAL_SPIELER; ++i)
             if (g_store.munition[i].spielerId == spieler_id &&
                 (g_store.munition[i].cal12 || g_store.munition[i].cal20)) {
                 unsettled = "MUNITION"; break;
@@ -2392,6 +2435,17 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
 {
     kredit_events_lock();
     int kreditSlot = find_kredit_slot(&g_store, spieler_id);
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    if (bill_is_authoritatively_paid(spieler_id, today) &&
+        !has_pending_day_activity(spieler_id, today)) {
+        if (kreditSlot >= 0) {
+            g_store.kreditPlayerIds[kreditSlot] = 0;
+            g_store.kredite[kreditSlot] = (KreditStand){};
+        }
+        kredit_events_unlock();
+        return;
+    }
     if (kreditSlot < 0) {
         for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
             if (g_store.kreditPlayerIds[i] == 0) {
