@@ -5,7 +5,7 @@ import { and, eq, inArray, sql, desc, isNotNull, gt, isNull } from "drizzle-orm"
 import { requireApiKey } from "./auth";
 import { z } from "zod";
 import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmail } from "../lib/mailer";
-import { catalogue, daySalesReport } from "../lib/products";
+import { catalogue, unsettledDaySalesReport } from "../lib/products";
 import { billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSettlement } from "../lib/bills";
 import { sameImmutableChildren } from "../lib/immutable-events";
 import { revisionToken, SYNC_MANIFEST_SCHEMA_VERSION } from "../lib/sync-manifest";
@@ -607,7 +607,7 @@ router.get("/products", requireApiKey, async (_req, res): Promise<void> => {
 router.get("/sales", requireApiKey, async (req, res): Promise<void> => {
   const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(req.query.datum);
   if (!datum.success) { res.status(400).json({ error: "datum must be YYYY-MM-DD" }); return; }
-  res.json(await daySalesReport(datum.data));
+  res.json(await unsettledDaySalesReport(datum.data));
 });
 
 // GET /api/sync/manifest?datum=YYYY-MM-DD — content-addressed revisions let an
@@ -630,7 +630,7 @@ router.get("/manifest", requireApiKey, async (req, res): Promise<void> => {
     catalogue(true).then((items) => ({ products: items })),
     recentGamesPayload(gameHistoryLimit),
     dayCreditsPayload(datum),
-    daySalesReport(datum),
+    unsettledDaySalesReport(datum),
     dayBillSummary(datum),
   ]);
   const timestamp = new Date().toISOString();

@@ -1769,7 +1769,9 @@ esp_err_t http_pull_verkaeufe(void)
                                        (int)qty->valuedouble);
         }
     }
-    // Reconciliation order is: clear cache → rebuild portal rows → replay
+    // The portal response is the unpaid balance after the latest accepted
+    // settlement, not the immutable whole-day sales history. Reconciliation
+    // order is: clear cache → rebuild portal rows → replay
     // only today's unsent/in-flight local events. Events from another date
     // remain in the outbox for delivery but must not inflate this day's view.
     for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i) {
