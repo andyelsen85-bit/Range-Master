@@ -57,10 +57,7 @@ static void build_player_opts(char *buf, size_t len)
     int eligible[MAX_PORTAL_SPIELER];
     int eligible_count = 0;
     for (int i = 0; i < g_store.portalSpielerCount && eligible_count < MAX_PORTAL_SPIELER; i++) {
-        bool in_lineup = false;
-        for (int post = 0; post < MAX_SPIELER; ++post)
-            if (g_store.lineupIds[post] == g_store.portalSpieler[i].id) in_lineup = true;
-        if (!in_lineup && store_kredite_verfuegbar(g_store.portalSpieler[i].id) <= 0) continue;
+        if (store_kredite_verfuegbar(g_store.portalSpieler[i].id) <= 0) continue;
         eligible[eligible_count++] = i;
     }
 
@@ -186,6 +183,7 @@ static void machine_toggle_cb(lv_event_t *e)
 // ── screen_start_create ───────────────────────────────────────
 lv_obj_t *screen_start_create(void)
 {
+    store_reconcile_lineup_with_credits();
     s_scr = lv_obj_create(NULL);
     lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
     screen_base_init(s_scr);   // dark bg, opaque, non-scrollable
@@ -406,6 +404,7 @@ lv_obj_t *screen_start_create(void)
 
 void screen_start_refresh(void)
 {
+    store_reconcile_lineup_with_credits();
     // Rebuild dropdown options when portal players change
     if (!s_player_dropdowns[0]) return;
     const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 64;

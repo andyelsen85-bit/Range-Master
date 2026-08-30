@@ -304,6 +304,7 @@ interface GameState extends Settings {
   dismissResultate: () => void;
   setSpieler: (spieler: Spieler[]) => void;
   setSpielerAufPosten: (post: number, data: { id: number; name: string } | null) => void;
+  reconcileLineupCredits: () => void;
   clearLineup: () => void;
   mixLineup: (random?: () => number) => void;
   moveLineup: (post: number, direction: -1 | 1) => void;
@@ -1036,6 +1037,13 @@ export const useGameStore = create<GameState>((set, get) => {
       })) };
     }),
 
+    reconcileLineupCredits: () => set((state) => {
+      const lineup = state.lineup.filter(entry => state.getKreditRest(entry.spielerId) > 0);
+      if (lineup.length === state.lineup.length) return state;
+      saveLineup(lineup);
+      return { lineup };
+    }),
+
     clearLineup: () => set(() => { saveLineup([]); return { lineup: [], spieler: [], lineupWarning: null }; }),
 
     mixLineup: (random = Math.random) => set((state) => {
@@ -1290,6 +1298,8 @@ export const useGameStore = create<GameState>((set, get) => {
         };
         const newHistory = [finishedGame, ...state.gameHistory].slice(0, 50);
         saveGameHistory(newHistory);
+        const nextLineup = state.lineup.filter(entry => state.getKreditRest(entry.spielerId) > 0);
+        if (nextLineup.length !== state.lineup.length) saveLineup(nextLineup);
 
         return {
           ergebnisse: allErgebnisse,
@@ -1303,6 +1313,7 @@ export const useGameStore = create<GameState>((set, get) => {
           gameHistory: newHistory,
           lastFinishedGame: finishedGame,
           activeGameCreditUses: [],
+          lineup: nextLineup,
         };
       }
 
@@ -1540,13 +1551,18 @@ export const useGameStore = create<GameState>((set, get) => {
       const effective = Math.min(anzahl, Math.max(0, stand.gewaehrt - stand.verbraucht));
       if (effective === 0) return state;
       const nextKredite = { ...kredite, [spielerId]: { ...stand, gewaehrt: stand.gewaehrt - effective } };
+      const nextLineup = state.lineup.filter(entry =>
+        entry.spielerId !== spielerId ||
+        nextKredite[spielerId].gewaehrt - nextKredite[spielerId].verbraucht > 0
+      );
       const pendingKredite: KreditEvent[] = [
         ...state.pendingKredite,
         { externalId: generateSpielId(), spielerId, datum: kreditDatum, typ: 'GRANT' as const, anzahl: -effective },
       ];
       saveKredite(kreditDatum, nextKredite);
       savePendingKredite(pendingKredite);
-      return { kreditDatum, kredite: nextKredite, pendingKredite };
+      if (nextLineup.length !== state.lineup.length) saveLineup(nextLineup);
+      return { kreditDatum, kredite: nextKredite, pendingKredite, lineup: nextLineup };
     }),
 
     deleteKreditEntry: (spielerId) => set((state) => {
@@ -1598,8 +1614,17 @@ export const useGameStore = create<GameState>((set, get) => {
             ? { ...stand, gewaehrt: stand.gewaehrt + e.anzahl }
             : { ...stand, verbraucht: stand.verbraucht + e.anzahl };
         }
+        const current = get();
+        const currentLineup = current.lineup;
+        const nextLineup = current.screen === 'spiel'
+          ? currentLineup
+          : currentLineup.filter(entry => {
+              const stand = merged[entry.spielerId];
+              return stand ? Math.max(0, stand.gewaehrt - stand.verbraucht) > 0 : false;
+            });
+        if (nextLineup.length !== currentLineup.length) saveLineup(nextLineup);
         saveKredite(today, merged);
-        set({ kreditDatum: today, kredite: merged, krediteLaden: false });
+        set({ kreditDatum: today, kredite: merged, lineup: nextLineup, krediteLaden: false });
       } catch {
         set({ krediteLaden: false });
       }

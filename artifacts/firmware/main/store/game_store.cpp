@@ -1387,6 +1387,28 @@ static int find_kredit_slot(const GameStore *s, int spieler_id)
     return -1;
 }
 
+static bool reconcile_lineup_with_credits_unlocked(void)
+{
+    if (!credit_day_is_current() || g_store.screen == SCREEN_SPIEL) return false;
+    bool changed = false;
+    for (int post = 0; post < MAX_SPIELER; ++post) {
+        int spieler_id = g_store.lineupIds[post];
+        if (spieler_id > 0 && store_kredite_verfuegbar(spieler_id) <= 0) {
+            g_store.lineupIds[post] = 0;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+void store_reconcile_lineup_with_credits(void)
+{
+    kredit_events_lock();
+    bool changed = reconcile_lineup_with_credits_unlocked();
+    kredit_events_unlock();
+    if (changed) game_store_save();
+}
+
 static int find_pending_kredit_event(const GameStore *s, const char *external_id)
 {
     if (!external_id || external_id[0] == '\0') return -1;
@@ -1424,7 +1446,7 @@ bool store_set_lineup_post(int post, int spieler_id)
         bool found = false;
         for (int i = 0; i < g_store.portalSpielerCount; ++i)
             if (g_store.portalSpieler[i].id == spieler_id) { found = true; break; }
-        if (!found) return false;
+        if (!found || store_kredite_verfuegbar(spieler_id) <= 0) return false;
     }
     if (spieler_id) for (int i = 0; i < MAX_SPIELER; ++i)
         if (i != slot && g_store.lineupIds[i] == spieler_id) g_store.lineupIds[i] = 0;
@@ -1709,6 +1731,7 @@ bool store_adjust_kredite(int spieler_id, int delta)
                 return false;
             }
             kredit_events_unlock();
+            store_reconcile_lineup_with_credits();
             store_rebuild_bill_projection();
             return true;
         }
@@ -2142,6 +2165,7 @@ static void _store_finish_game(void)
     clear_active_game_credit_tracking(s);
     s->activeAcknowledgedClays = 0;
     s->screen         = SCREEN_RESULTATE;
+    store_reconcile_lineup_with_credits();
     game_store_save();
     ESP_LOGI(TAG, "Game finished, navigating to resultate");
 }
@@ -2523,6 +2547,7 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
         reset_munition_for_player(spieler_id);
         if (kreditSlot >= 0)
             g_store.kredite[kreditSlot] = (KreditStand){};
+        reconcile_lineup_with_credits_unlocked();
         kredit_events_unlock();
         return;
     }
@@ -2551,6 +2576,7 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
         g_store.kredite[kreditSlot].gewaehrt = gewaehrt;
         g_store.kredite[kreditSlot].verbraucht = verbraucht;
     }
+    reconcile_lineup_with_credits_unlocked();
     kredit_events_unlock();
 }
 

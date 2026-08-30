@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGameStore, PortalSpieler } from '@/store/gameStore';
 import { TouchButton } from '@/components/TouchButton';
 import { PlayerSearch } from '@/components/PlayerSearch';
@@ -18,6 +18,10 @@ const POSTS = [1, 2, 3, 4, 5, 6] as const;
 
 export function StartScreen() {
   const store = useGameStore();
+
+  useEffect(() => {
+    store.reconcileLineupCredits();
+  }, [store.reconcileLineupCredits, store.kreditDatum, store.kredite]);
 
   // Which post slot is open for assignment (null = none)
   const [activePost, setActivePost] = useState<number | null>(null);
@@ -55,8 +59,7 @@ export function StartScreen() {
   const mitKreditIds = store.portalSpieler
     .filter(p => store.getKreditRest(p.id) > 0)
     .map(p => p.id);
-  // Assigned players stay visible in the picker (rendered as taken)
-  const allowedIds = [...new Set([...mitKreditIds, ...store.lineup.map(s => s.spielerId)])];
+  const allowedIds = mitKreditIds;
 
   // Guard: a player could lose their last credit after being assigned
   const ohneKredit = store.lineup
