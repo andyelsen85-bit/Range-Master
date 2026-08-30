@@ -494,9 +494,9 @@ bool store_begin_payment_sync(PaymentEvent *snapshot, int capacity, int *out_cou
     return true;
 }
 
-bool store_finish_payment_sync(const PaymentEvent *snapshot, int count,
-                               const char *const *acceptedIds, int acceptedCount,
-                               const char *error)
+static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count,
+                                         const char *const *acceptedIds, int acceptedCount,
+                                         const char *error, bool persist)
 {
     if (!snapshot || count <= 0) return true;
     kredit_events_lock();
@@ -539,7 +539,7 @@ bool store_finish_payment_sync(const PaymentEvent *snapshot, int count,
             break;
         }
     }
-    if (!save_payment_state_unlocked()) {
+    if (persist && !save_payment_state_unlocked()) {
         memcpy(g_store.pendingPaymentEvents, prior_events, sizeof(prior_events));
         g_store.pendingPaymentEventCount = prior_count;
         memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
@@ -549,6 +549,22 @@ bool store_finish_payment_sync(const PaymentEvent *snapshot, int count,
     }
     kredit_events_unlock();
     return true;
+}
+
+bool store_finish_payment_sync(const PaymentEvent *snapshot, int count,
+                               const char *const *acceptedIds, int acceptedCount,
+                               const char *error)
+{
+    return finish_payment_sync_internal(snapshot, count, acceptedIds, acceptedCount,
+                                        error, true);
+}
+
+bool store_finish_payment_sync_commit(const PaymentEvent *snapshot, int count,
+                                      const char *const *acceptedIds, int acceptedCount,
+                                      const char *error)
+{
+    return finish_payment_sync_internal(snapshot, count, acceptedIds, acceptedCount,
+                                        error, false);
 }
 
 void store_cache_bill_day(const BillDaySummary *summary)
@@ -1010,7 +1026,7 @@ int store_begin_verkauf_sync(VerkaufEvent *snapshot, int capacity)
     return count;
 }
 
-void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool delivered)
+void store_finish_verkauf_sync_commit(const VerkaufEvent *snapshot, int count, bool delivered)
 {
     if (!snapshot || count <= 0) return;
     xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
@@ -1025,6 +1041,11 @@ void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool del
         break;
     }
     xSemaphoreGive(s_verkauf_events_mutex);
+}
+
+void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool delivered)
+{
+    store_finish_verkauf_sync_commit(snapshot, count, delivered);
     store_rebuild_bill_projection();
 }
 
@@ -1389,7 +1410,6 @@ void store_apply_portal_roster(const PortalSpieler *spieler, int count)
     memcpy(g_store.portalSpieler, merged, (size_t)count * sizeof(PortalSpieler));
     g_store.portalSpielerCount = count;
     reconcile_lineup_with_roster();
-    game_store_save();
 }
 
 void store_remap_spieler_id(int old_id, int new_id)
@@ -1432,13 +1452,8 @@ void store_remap_spieler_id(int old_id, int new_id)
         for (int r = 0; r < g_store.lastFinished.base.ergebnisse_count; ++r) if (g_store.lastFinished.base.ergebnisse[r].spielerId == old_id) g_store.lastFinished.base.ergebnisse[r].spielerId = new_id;
     }
     for (int u = 0; u < g_store.spielerUpdateCount; ++u) if (g_store.spielerUpdates[u].spielerId == old_id) g_store.spielerUpdates[u].spielerId = new_id;
-    // Keep the persisted daily player authorization in step with ID remaps.
-    game_store_save();
-    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
-    (void)offline_cache_save(OFFLINE_CACHE_HISTORY);
-    (void)offline_cache_save(OFFLINE_CACHE_CREDITS);
-    (void)offline_cache_save(OFFLINE_CACHE_SALES);
-    (void)offline_cache_save(OFFLINE_CACHE_BILLS);
+    // Persistence and FAT snapshots are intentionally performed by the sync
+    // caller after its short UI commit window has closed.
 }
 
 void store_register_spieler_fuer_tag(int spieler_id)
@@ -2054,6 +2069,7 @@ static bool s_boot_sync_consumed = false;
 static bool s_sync_pending = false;
 static bool s_sync_ui_ready = false;
 static bool s_sync_ui_paused = false;
+static bool s_sync_commit_requested = false;
 static uint32_t s_sync_publication_generation = 0;
 static TickType_t s_next_auto_sync;
 
@@ -2125,26 +2141,9 @@ void store_create_workers(void)
                      sync_source_label(source),
                      (unsigned)g_store.autoSyncSeconds);
             char sync_error[sizeof(g_store.syncError)] = {};
-            bool ui_paused = false;
-            for (int attempt = 0; attempt < 200; ++attempt) {
-                portENTER_CRITICAL(&s_sync_request_lock);
-                ui_paused = s_sync_ui_paused;
-                portEXIT_CRITICAL(&s_sync_request_lock);
-                if (ui_paused) break;
-                vTaskDelay(pdMS_TO_TICKS(5));
-            }
-
-            esp_err_t err;
-            if (!ui_paused) {
-                err = ESP_ERR_TIMEOUT;
-                snprintf(sync_error, sizeof(sync_error),
-                         "UI pause acknowledgement timed out");
-                ESP_LOGE(TAG, "Sync aborted before mutation: %s",
-                         sync_error);
-            } else {
-                ESP_LOGI(TAG, "UI paused; sync mutation phase starting");
-                err = http_sync_all();
-            }
+            // SYNC_RUNNING is deliberately not a UI pause. Individual pull
+            // publications request and acknowledge their own tiny windows.
+            esp_err_t err = http_sync_all();
             if (err != ESP_OK && !sync_error[0]) {
                 http_sync_copy_last_error(sync_error, sizeof(sync_error));
                 if (!sync_error[0])
@@ -2157,6 +2156,7 @@ void store_create_workers(void)
                      sync_error);
             s_sync_pending = false;
             s_sync_ui_paused = false;
+            s_sync_commit_requested = false;
             s_next_auto_sync = xTaskGetTickCount() +
                 pdMS_TO_TICKS(g_store.autoSyncSeconds * 1000u);
             ++s_sync_publication_generation;
@@ -2306,8 +2306,8 @@ int store_begin_kredit_event_sync(KreditEvent *snapshot, int capacity)
     return count;
 }
 
-void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
-                                    bool delivered)
+void store_finish_kredit_event_sync_commit(const KreditEvent *snapshot, int count,
+                                           bool delivered)
 {
     if (!snapshot || count <= 0) return;
     kredit_events_lock();
@@ -2323,8 +2323,14 @@ void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
             g_store.pendingKreditEvents[eventIndex].inFlight = false;
         }
     }
-    // The helper reports NVS failures and leaves the committed prior state
-    // intact for a safe idempotent retry after a reboot.
+    kredit_events_unlock();
+}
+
+void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
+                                    bool delivered)
+{
+    store_finish_kredit_event_sync_commit(snapshot, count, delivered);
+    kredit_events_lock();
     (void)save_kredit_state_unlocked();
     kredit_events_unlock();
     store_rebuild_bill_projection();
@@ -2457,6 +2463,7 @@ static SyncRequestResult store_sync_request(SyncRequestSource source)
     }
     s_sync_pending = true;
     s_sync_ui_paused = false;
+    s_sync_commit_requested = false;
     g_store.syncStatus = SYNC_RUNNING;
     g_store.syncError[0] = '\0';
     portEXIT_CRITICAL(&s_sync_request_lock);
@@ -2466,6 +2473,7 @@ static SyncRequestResult store_sync_request(SyncRequestSource source)
         portENTER_CRITICAL(&s_sync_request_lock);
         s_sync_pending = false;
         s_sync_ui_paused = false;
+        s_sync_commit_requested = false;
         g_store.syncStatus = SYNC_ERROR;
         snprintf(g_store.syncError, sizeof(g_store.syncError),
                  "Sync request queue failed");
@@ -2499,6 +2507,7 @@ void store_get_sync_ui_state(SyncUiState *state)
     portENTER_CRITICAL(&s_sync_request_lock);
     state->status = g_store.syncStatus;
     state->publicationGeneration = s_sync_publication_generation;
+    state->commitRequested = s_sync_commit_requested;
     memcpy(state->error, g_store.syncError, sizeof(state->error));
     portEXIT_CRITICAL(&s_sync_request_lock);
 }
@@ -2512,10 +2521,54 @@ void store_sync_set_ui_ready(void)
     queue_boot_sync_if_pending();
 }
 
-void store_sync_ack_ui_paused(void)
+bool store_sync_commit_begin(void)
+{
+    const TickType_t started = xTaskGetTickCount();
+    portENTER_CRITICAL(&s_sync_request_lock);
+    bool valid = s_sync_pending && g_store.syncStatus == SYNC_RUNNING &&
+                 s_sync_ui_ready && !s_sync_commit_requested;
+    if (valid) {
+        s_sync_ui_paused = false;
+        s_sync_commit_requested = true;
+    }
+    portEXIT_CRITICAL(&s_sync_request_lock);
+    if (!valid) {
+        ESP_LOGE(TAG, "Sync commit request rejected (sync/UI not ready)");
+        return false;
+    }
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        portENTER_CRITICAL(&s_sync_request_lock);
+        bool acknowledged = s_sync_ui_paused;
+        portEXIT_CRITICAL(&s_sync_request_lock);
+        if (acknowledged) {
+            ESP_LOGD(TAG, "Sync commit UI acknowledgement in %ums",
+                     (unsigned)((xTaskGetTickCount() - started) * portTICK_PERIOD_MS));
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    portENTER_CRITICAL(&s_sync_request_lock);
+    s_sync_commit_requested = false;
+    s_sync_ui_paused = false;
+    portEXIT_CRITICAL(&s_sync_request_lock);
+    ESP_LOGE(TAG, "Sync commit UI acknowledgement timed out after %ums",
+             (unsigned)((xTaskGetTickCount() - started) * portTICK_PERIOD_MS));
+    return false;
+}
+
+void store_sync_commit_end(void)
 {
     portENTER_CRITICAL(&s_sync_request_lock);
-    if (s_sync_pending && g_store.syncStatus == SYNC_RUNNING)
+    s_sync_commit_requested = false;
+    s_sync_ui_paused = false;
+    portEXIT_CRITICAL(&s_sync_request_lock);
+}
+
+void store_sync_ack_ui_commit(void)
+{
+    portENTER_CRITICAL(&s_sync_request_lock);
+    if (s_sync_pending && g_store.syncStatus == SYNC_RUNNING &&
+        s_sync_commit_requested)
         s_sync_ui_paused = true;
     portEXIT_CRITICAL(&s_sync_request_lock);
 }

@@ -28,3 +28,4 @@
 - [FAT cache mount safety](fat-cache-mount-safety.md) — initialize the reserved FAT partition once; latch mount failures and avoid cache writes from generic store saves
 - [Sync manifest token sizing](sync-manifest-token-sizing.md) — revision tokens include the hash algorithm prefix; firmware buffers must treat them as opaque strings
 - [MIPI DSI PSRAM underruns](mipi-dsi-psram-underruns.md) — full-screen cyan flashes during FAT writes are DSI framebuffer underruns, not LVGL redraw tearing
+- [Non-blocking sync publication](nonblocking-sync-publication.md) — HTTP and persistence must never pause the UI; only acknowledged, bounded RAM swaps may briefly gate touch

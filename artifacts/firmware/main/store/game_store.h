@@ -101,6 +101,9 @@ typedef enum {
 typedef struct {
     SyncStatus status;
     uint32_t publicationGeneration;
+    // True only for the short interval in which the sync worker is about to
+    // replace a shared cache dataset. SYNC_RUNNING itself is non-blocking.
+    bool commitRequested;
     char error[128];
 } SyncUiState;
 
@@ -486,7 +489,11 @@ bool store_sync_is_queued_or_running(void);
 bool store_set_auto_sync(bool enabled, uint32_t seconds);
 void store_get_sync_ui_state(SyncUiState *state);
 void store_sync_set_ui_ready(void);
-void store_sync_ack_ui_paused(void);
+/** Worker-only: acquire/release a bounded UI publication window. */
+bool store_sync_commit_begin(void);
+void store_sync_commit_end(void);
+/** UI-only acknowledgement after input has been quiesced for a commit. */
+void store_sync_ack_ui_commit(void);
 
 /**
  * Request exactly one initial full sync after this boot's stored-WiFi
@@ -500,6 +507,9 @@ bool store_queue_kredit_event(int spieler_id, const char *typ, int anzahl);
 int  store_begin_kredit_event_sync(KreditEvent *snapshot, int capacity);
 void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
                                     bool delivered);
+/** Sync worker variant: RAM outbox mutation only; caller owns commit window. */
+void store_finish_kredit_event_sync_commit(const KreditEvent *snapshot, int count,
+                                           bool delivered);
 void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht);
 void store_queue_passwort_reset(int spieler_id);
 int  store_pending_update_count(void);
@@ -515,6 +525,9 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
 const char *store_last_catering_error(void);
 int  store_begin_verkauf_sync(VerkaufEvent *snapshot, int capacity);
 void store_finish_verkauf_sync(const VerkaufEvent *snapshot, int count, bool delivered);
+/** Sync worker variant: RAM outbox mutation only; caller owns commit window. */
+void store_finish_verkauf_sync_commit(const VerkaufEvent *snapshot, int count,
+                                      bool delivered);
 void store_apply_portal_verkauf(int spieler_id, int produkt_id, int quantity);
 void store_replace_produkte(const Produkt *produkte, int count);
 void store_remap_verkauf_spieler(int old_id, int new_id);
@@ -534,6 +547,10 @@ bool store_begin_payment_sync(PaymentEvent *snapshot, int capacity, int *count);
 bool store_finish_payment_sync(const PaymentEvent *snapshot, int count,
                                const char *const *acceptedIds, int acceptedCount,
                                const char *error);
+/** Sync worker variant: RAM payment/roster mutation only. */
+bool store_finish_payment_sync_commit(const PaymentEvent *snapshot, int count,
+                                      const char *const *acceptedIds, int acceptedCount,
+                                      const char *error);
 void store_cache_bill_day(const BillDaySummary *summary);
 /** Rebuild the display-only bill projection from the cached portal baseline. */
 void store_rebuild_bill_projection(void);

@@ -34,6 +34,7 @@ lv_style_t g_style_sidebar;
 static lv_obj_t *s_screens[SCREEN_COUNT];
 static Screen    s_current = SCREEN_COUNT; // invalid → force first load
 static lv_obj_t *s_sync_guard;
+static lv_obj_t *s_sync_indicator;
 static lv_indev_t *s_input_device;
 static uint32_t  s_sync_publication_seen;
 static bool      s_sync_guard_visible;
@@ -183,9 +184,9 @@ void ui_manager_init(void)
     s_screens[SCREEN_WIFI]         = screen_wifi_create();         vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_CATERING]     = screen_catering_create();
 
-    // Transparent top-layer guard blocks touch callbacks while the worker is
-    // replacing shared datasets. Only the small status pill is painted, so
-    // the current screen remains visually stable throughout the sync.
+    // Transparent top-layer guard is used only for an acknowledged dataset
+    // commit. The status pill remains visible during the full network sync,
+    // but never intercepts normal interaction.
     s_sync_guard = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_sync_guard, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
     lv_obj_align(s_sync_guard, LV_ALIGN_CENTER, 0, 0);
@@ -193,18 +194,21 @@ void ui_manager_init(void)
     lv_obj_set_style_border_width(s_sync_guard, 0, 0);
     lv_obj_set_style_pad_all(s_sync_guard, 0, 0);
     lv_obj_clear_flag(s_sync_guard, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_sync_guard, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *sync_label = lv_label_create(s_sync_guard);
-    lv_label_set_text(sync_label, LV_SYMBOL_REFRESH " SYNCISIERT...");
-    lv_obj_set_style_text_font(sync_label, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(sync_label, lv_color_hex(CLR_TEXT), 0);
-    lv_obj_set_style_bg_color(sync_label, lv_color_hex(CLR_PRIMARY_DIM), 0);
-    lv_obj_set_style_bg_opa(sync_label, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(sync_label, 8, 0);
-    lv_obj_set_style_pad_hor(sync_label, 18, 0);
-    lv_obj_set_style_pad_ver(sync_label, 10, 0);
-    lv_obj_align(sync_label, LV_ALIGN_TOP_RIGHT, -20, 20);
+    // The indicator is deliberately a separate, non-clickable top-layer
+    // object. It stays visible while HTTP is active without becoming a modal.
+    s_sync_indicator = lv_label_create(lv_layer_top());
+    lv_label_set_text(s_sync_indicator, LV_SYMBOL_REFRESH " SYNCISIERT...");
+    lv_obj_set_style_text_font(s_sync_indicator, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(s_sync_indicator, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_set_style_bg_color(s_sync_indicator, lv_color_hex(CLR_PRIMARY_DIM), 0);
+    lv_obj_set_style_bg_opa(s_sync_indicator, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_sync_indicator, 8, 0);
+    lv_obj_set_style_pad_hor(s_sync_indicator, 18, 0);
+    lv_obj_set_style_pad_ver(s_sync_indicator, 10, 0);
+    lv_obj_align(s_sync_indicator, LV_ALIGN_TOP_RIGHT, -20, 20);
+    lv_obj_clear_flag(s_sync_indicator, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_sync_indicator, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_sync_guard, LV_OBJ_FLAG_HIDDEN);
 
     SyncUiState sync_state = {};
@@ -235,13 +239,6 @@ void ui_manager_show(Screen s)
 
     SyncUiState sync_state = {};
     store_get_sync_ui_state(&sync_state);
-    if (sync_state.status == SYNC_RUNNING) {
-        // Preserve the requested destination, but never traverse a dataset
-        // while the worker is replacing it. The completion tick loads it once.
-        g_store.screen = s;
-        return;
-    }
-
     refresh_screen(s);
     lv_scr_load_anim(s_screens[s], LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
     s_current = s;
@@ -253,11 +250,17 @@ void ui_manager_tick(void)
 {
     SyncUiState sync_state = {};
     store_get_sync_ui_state(&sync_state);
-    if (sync_state.status == SYNC_RUNNING) {
+    if (s_sync_indicator) {
+        if (sync_state.status == SYNC_RUNNING)
+            lv_obj_clear_flag(s_sync_indicator, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(s_sync_indicator, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (sync_state.status == SYNC_RUNNING && sync_state.commitRequested) {
         set_sync_guard_visible(true);
-        // The worker waits for this acknowledgement before touching any
-        // shared dataset, closing the timer-boundary race completely.
-        store_sync_ack_ui_paused();
+        // The worker waits only for this commit acknowledgement. Network
+        // fetches/retries leave input, navigation, game and Catering live.
+        store_sync_ack_ui_commit();
         return;
     }
 

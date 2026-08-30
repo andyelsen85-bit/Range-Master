@@ -24,10 +24,73 @@ static const char *TAG = "http_sync";
 #define HTTP_BUF_SIZE  (32 * 1024)
 static portMUX_TYPE s_error_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_last_error[384];
+static void set_http_error(const char *operation, const char *path,
+                           const char *reason);
 static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap);
 static esp_err_t http_get_json(const char *path, char *resp_buf,
                                size_t resp_cap);
+
+// HTTP parsing and all persistence deliberately happen outside this window.
+// It only serializes the small in-RAM publication with the LVGL timer.
+static bool sync_commit_begin(const char *dataset, TickType_t *started)
+{
+    if (!store_sync_commit_begin()) {
+        set_http_error("SYNC", dataset, "UI commit acknowledgement timed out");
+        return false;
+    }
+    *started = xTaskGetTickCount();
+    return true;
+}
+
+static void sync_commit_end(const char *dataset, TickType_t started)
+{
+    TickType_t elapsed = xTaskGetTickCount() - started;
+    store_sync_commit_end();
+    ESP_LOGI(TAG, "Sync commit dataset=%s duration=%ums", dataset,
+             (unsigned)(elapsed * portTICK_PERIOD_MS));
+}
+
+// Outbox acknowledgements affect both the queue and the bill projection.
+// Keep those RAM mutations together under the UI window; persistence follows
+// after release so NVS/FAT can never extend a pause.
+static esp_err_t finish_kredit_sync_publication(const KreditEvent *snapshot,
+                                                int count, bool delivered)
+{
+    TickType_t started;
+    if (!sync_commit_begin("credit-outbox", &started)) return ESP_ERR_TIMEOUT;
+    store_finish_kredit_event_sync_commit(snapshot, count, delivered);
+    store_rebuild_bill_projection();
+    sync_commit_end("credit-outbox", started);
+    game_store_save();
+    return ESP_OK;
+}
+
+static esp_err_t finish_verkauf_sync_publication(const VerkaufEvent *snapshot,
+                                                 int count, bool delivered)
+{
+    TickType_t started;
+    if (!sync_commit_begin("sales-outbox", &started)) return ESP_ERR_TIMEOUT;
+    store_finish_verkauf_sync_commit(snapshot, count, delivered);
+    store_rebuild_bill_projection();
+    sync_commit_end("sales-outbox", started);
+    game_store_save();
+    return ESP_OK;
+}
+
+static bool finish_payment_sync_publication(const PaymentEvent *snapshot, int count,
+                                            const char *const *accepted_ids,
+                                            int accepted_count, const char *error)
+{
+    TickType_t started;
+    if (!sync_commit_begin("payment-outbox", &started)) return false;
+    bool changed = store_finish_payment_sync_commit(snapshot, count, accepted_ids,
+                                                    accepted_count, error);
+    store_rebuild_bill_projection();
+    sync_commit_end("payment-outbox", started);
+    if (changed) game_store_save();
+    return changed;
+}
 
 typedef struct {
     bool available;
@@ -175,7 +238,23 @@ static cJSON *config_snapshot_to_json(void)
     return cfg;
 }
 
-esp_err_t http_backup_config(void)
+static bool publish_backup_state(bool sync_publication, const char *status,
+                                 const char *updated_at)
+{
+    TickType_t started = 0;
+    if (sync_publication && !sync_commit_begin("config-backup", &started))
+        return false;
+    if (updated_at)
+        snprintf(g_store.lastConfigBackupAt, sizeof(g_store.lastConfigBackupAt),
+                 "%s", updated_at);
+    snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus), "%s", status);
+    if (sync_publication) sync_commit_end("config-backup", started);
+    // Persistence is purposefully after the publication window.
+    game_store_save();
+    return true;
+}
+
+static esp_err_t http_backup_config_impl(bool sync_publication)
 {
     char id[40];
     terminal_id(id, sizeof(id));
@@ -184,8 +263,7 @@ esp_err_t http_backup_config(void)
     if (!root || !cfg) {
         if (root) cJSON_Delete(root);
         if (cfg) cJSON_Delete(cfg);
-        snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
-                 "BACKUP FEELER: NET GENUG SPEICHER");
+        (void)publish_backup_state(sync_publication, "BACKUP FEELER: NET GENUG SPEICHER", NULL);
         return ESP_ERR_NO_MEM;
     }
     cJSON_AddStringToObject(root, "terminalId", id);
@@ -201,23 +279,22 @@ esp_err_t http_backup_config(void)
                                    response, sizeof(response));
     cJSON_free(body);
     if (err != ESP_OK) {
-        snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
-                 "BACKUP FEELER: PORTAL NET ERREECHBAR");
-        game_store_save();
-        return err;
+        return publish_backup_state(sync_publication,
+                                    "BACKUP FEELER: PORTAL NET ERREECHBAR", NULL)
+            ? err : ESP_ERR_TIMEOUT;
     }
     cJSON *response_root = cJSON_Parse(response);
     cJSON *backup = response_root ? cJSON_GetObjectItem(response_root, "backup") : NULL;
     cJSON *created = backup ? cJSON_GetObjectItem(backup, "updatedAt") : NULL;
-    if (cJSON_IsString(created)) {
-        snprintf(g_store.lastConfigBackupAt, sizeof(g_store.lastConfigBackupAt),
-                 "%s", created->valuestring);
-    }
-    snprintf(g_store.configBackupStatus, sizeof(g_store.configBackupStatus),
-             "BACKUP ERFOLLEGRÄICH");
+    const char *updated_at = cJSON_IsString(created) ? created->valuestring : NULL;
+    bool published = publish_backup_state(sync_publication, "BACKUP ERFOLLEGRÄICH", updated_at);
     if (response_root) cJSON_Delete(response_root);
-    game_store_save();
-    return ESP_OK;
+    return published ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t http_backup_config(void)
+{
+    return http_backup_config_impl(false);
 }
 
 static bool json_string_into(cJSON *obj, const char *key, char *out, size_t cap)
@@ -672,7 +749,13 @@ esp_err_t http_push_pending_games(void)
     if (synced > 0) {
         // Remove synced games (simple: remove all on full success)
         if (synced == g_store.pendingGamesCount) {
+            TickType_t commit_started;
+            if (!sync_commit_begin("pending-games", &commit_started)) {
+                free(resp);
+                return ESP_ERR_TIMEOUT;
+            }
             g_store.pendingGamesCount = 0;
+            sync_commit_end("pending-games", commit_started);
             game_store_save();
         }
         ESP_LOGI(TAG, "Pushed %d/%d games", synced, g_store.pendingGamesCount + synced);
@@ -748,12 +831,14 @@ esp_err_t http_fetch_spielhistorie(void)
     cJSON *arr = cJSON_GetObjectItem(root, "spiele");
     if (!arr || !cJSON_IsArray(arr)) arr = root;
 
+    FinishedGame *staged = (FinishedGame *)heap_caps_calloc(
+        MAX_HISTORY, sizeof(FinishedGame), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!staged) { cJSON_Delete(root); return ESP_ERR_NO_MEM; }
     int count = 0;
     cJSON *item;
     cJSON_ArrayForEach(item, arr) {
         if (count >= MAX_HISTORY) break;
-        FinishedGame *fg = &g_store.history[count];
-        memset(fg, 0, sizeof(*fg));
+        FinishedGame *fg = &staged[count];
 
         cJSON *jext   = cJSON_GetObjectItem(item, "externalId");
         cJSON *jdatum = cJSON_GetObjectItem(item, "datum");
@@ -816,13 +901,20 @@ esp_err_t http_fetch_spielhistorie(void)
         count++;
     }
 
+    cJSON_Delete(root);
+    TickType_t commit_started;
+    if (!sync_commit_begin("history", &commit_started)) {
+        heap_caps_free(staged);
+        return ESP_ERR_TIMEOUT;
+    }
+    memcpy(g_store.history, staged, MAX_HISTORY * sizeof(FinishedGame));
     g_store.historyCount = count;
+    sync_commit_end("history", commit_started);
+    heap_caps_free(staged);
     if (!offline_cache_save(OFFLINE_CACHE_HISTORY)) {
         ESP_LOGE(TAG, "History pull rejected: FAT cache was not durable");
-        cJSON_Delete(root);
         return ESP_FAIL;
     }
-    cJSON_Delete(root);
     ESP_LOGI(TAG, "Fetched %d games from portal into history", count);
     return ESP_OK;
 }
@@ -868,12 +960,25 @@ esp_err_t http_push_spieler_updates(void)
                 if (new_id > 0) {
                     int old_id = e->spielerId;          // negative local ID
                     // One coherent remap covers lineup, credit balances and
-                    // every durable outbox before it is saved.
+                    // every durable outbox. Persistence follows the short
+                    // publication window, never inside it.
+                    TickType_t commit_started;
+                    if (!sync_commit_begin("player-remap", &commit_started)) {
+                        free(resp);
+                        free(body);
+                        return ESP_ERR_TIMEOUT;
+                    }
                     store_remap_spieler_id(old_id, new_id);
+                    e->used = false;    // mark done — compacted below
+                    sync_commit_end("player-remap", commit_started);
                     ESP_LOGI(TAG, "Spieler '%s' created in portal → id=%d (was local %d)",
                              e->name, new_id, old_id);
-                    e->used = false;    // mark done — compacted below
                     game_store_save();
+                    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
+                    (void)offline_cache_save(OFFLINE_CACHE_HISTORY);
+                    (void)offline_cache_save(OFFLINE_CACHE_CREDITS);
+                    (void)offline_cache_save(OFFLINE_CACHE_SALES);
+                    (void)offline_cache_save(OFFLINE_CACHE_BILLS);
                 } else {
                     ESP_LOGW(TAG, "spieler-neu: bad response for '%s' — retaining", e->name);
                     overall = ESP_FAIL;
@@ -929,10 +1034,17 @@ esp_err_t http_push_spieler_updates(void)
             if (resp) {
                 esp_err_t uerr = http_post_json("/api/sync/spieler-updates", body, resp, 512);
                 if (uerr == ESP_OK) {
+                    TickType_t commit_started;
+                    if (!sync_commit_begin("player-update-ack", &commit_started)) {
+                        free(resp);
+                        free(body);
+                        return ESP_ERR_TIMEOUT;
+                    }
                     for (int i = 0; i < g_store.spielerUpdateCount; i++) {
                         SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
                         if (e->used && e->typ != SPIELER_CREATE) e->used = false;
                     }
+                    sync_commit_end("player-update-ack", commit_started);
                     ESP_LOGI(TAG, "Pushed %d spieler update(s)", update_count);
                 } else {
                     ESP_LOGW(TAG, "Spieler updates push failed (%s) — queue retained", esp_err_to_name(uerr));
@@ -954,6 +1066,13 @@ esp_err_t http_push_spieler_updates(void)
 
     // ── Compact the queue — remove entries cleared above ──────────────────────
     {
+        bool needs_compaction = false;
+        for (int i = 0; i < g_store.spielerUpdateCount; ++i)
+            if (!g_store.spielerUpdates[i].used) { needs_compaction = true; break; }
+        if (!needs_compaction) return overall;
+        TickType_t commit_started;
+        if (!sync_commit_begin("player-updates", &commit_started))
+            return ESP_ERR_TIMEOUT;
         int nc = 0;
         for (int i = 0; i < g_store.spielerUpdateCount; i++) {
             if (g_store.spielerUpdates[i].used) {
@@ -964,6 +1083,8 @@ esp_err_t http_push_spieler_updates(void)
         for (int i = nc; i < g_store.spielerUpdateCount; i++)
             memset(&g_store.spielerUpdates[i], 0, sizeof(SpielerUpdateEntry));
         g_store.spielerUpdateCount = nc;
+        sync_commit_end("player-updates", commit_started);
+        game_store_save();
     }
 
     return overall;
@@ -1006,9 +1127,9 @@ esp_err_t http_push_kredit_events(void)
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!body) {
-        store_finish_kredit_event_sync(snapshot, snapshotCount, false);
+        esp_err_t finish_err = finish_kredit_sync_publication(snapshot, snapshotCount, false);
         free(snapshot);
-        return ESP_ERR_NO_MEM;
+        return finish_err == ESP_OK ? ESP_ERR_NO_MEM : finish_err;
     }
 
     char *resp = (char *)malloc(512);
@@ -1019,8 +1140,9 @@ esp_err_t http_push_kredit_events(void)
     }
     free(body);
 
-    store_finish_kredit_event_sync(snapshot, snapshotCount, err == ESP_OK);
+    esp_err_t finish_err = finish_kredit_sync_publication(snapshot, snapshotCount, err == ESP_OK);
     free(snapshot);
+    if (finish_err != ESP_OK) return finish_err;
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Pushed %d kredit event(s)", snapshotCount);
     } else {
@@ -1049,8 +1171,8 @@ esp_err_t http_push_payment_events(void)
     if (!root || !events) {
         if (root) cJSON_Delete(root);
         if (events) cJSON_Delete(events);
-        bool restored = store_finish_payment_sync(snapshot, count, NULL, 0,
-                                                  "Net genuch Speicher");
+        bool restored = finish_payment_sync_publication(snapshot, count, NULL, 0,
+                                                        "Net genuch Speicher");
         free(snapshot);
         if (!restored) {
             set_http_error("POST", "/api/sync/payments",
@@ -1073,7 +1195,7 @@ esp_err_t http_push_payment_events(void)
         http_post_json("/api/sync/payments", body, response, 4096);
     if (body) cJSON_free(body);
     if (err != ESP_OK) {
-        if (!store_finish_payment_sync(snapshot, count, NULL, 0, "Portal/Netz Feeler"))
+        if (!finish_payment_sync_publication(snapshot, count, NULL, 0, "Portal/Netz Feeler"))
             err = ESP_FAIL;
         if (response) free(response);
         free(snapshot);
@@ -1082,8 +1204,8 @@ esp_err_t http_push_payment_events(void)
     cJSON *parsed = cJSON_Parse(response);
     free(response);
     if (!parsed) {
-        bool restored = store_finish_payment_sync(snapshot, count, NULL, 0,
-                                                  "Onliesbar Portal-Äntwert");
+        bool restored = finish_payment_sync_publication(snapshot, count, NULL, 0,
+                                                        "Onliesbar Portal-Äntwert");
         free(snapshot);
         if (!restored) {
             set_http_error("POST", "/api/sync/payments",
@@ -1106,8 +1228,8 @@ esp_err_t http_push_payment_events(void)
                  !strcmp(status->valuestring, "skipped")))
                 if (accepted_count < MAX_PENDING_PAYMENTS) accepted[accepted_count++] = id->valuestring;
     }
-    bool finish_saved = store_finish_payment_sync(snapshot, count, accepted, accepted_count,
-                                                  "Portal conflict / net acceptéiert");
+    bool finish_saved = finish_payment_sync_publication(snapshot, count, accepted, accepted_count,
+                                                         "Portal conflict / net acceptéiert");
     cJSON_Delete(parsed);
     free(snapshot);
     // A 2xx with a conflict/rejection is not delivery success: preserve a
@@ -1265,8 +1387,14 @@ esp_err_t http_fetch_bill_day_summary(void)
             set_http_error("GET", path, "invalid bill summary response");
             err = ESP_ERR_INVALID_RESPONSE;
         } else {
-            store_cache_bill_day(parsed);
-            if (!offline_cache_save(OFFLINE_CACHE_BILLS)) err = ESP_FAIL;
+            TickType_t commit_started;
+            if (!sync_commit_begin("bills", &commit_started)) {
+                err = ESP_ERR_TIMEOUT;
+            } else {
+                store_cache_bill_day(parsed);
+                sync_commit_end("bills", commit_started);
+                if (!offline_cache_save(OFFLINE_CACHE_BILLS)) err = ESP_FAIL;
+            }
         }
         if (parsed) heap_caps_free(parsed);
         if (summary) cJSON_Delete(summary);
@@ -1299,6 +1427,11 @@ esp_err_t http_pull_kredite(void)
 
     cJSON *arr = cJSON_GetObjectItem(root, "kredite");
     if (arr && cJSON_IsArray(arr)) {
+        TickType_t commit_started;
+        if (!sync_commit_begin("credits", &commit_started)) {
+            cJSON_Delete(root);
+            return ESP_ERR_TIMEOUT;
+        }
         cJSON *item;
         cJSON_ArrayForEach(item, arr) {
             cJSON *jsid = cJSON_GetObjectItem(item, "spielerId");
@@ -1310,6 +1443,7 @@ esp_err_t http_pull_kredite(void)
             int ver = jver && cJSON_IsNumber(jver) ? (int)jver->valuedouble : 0;
             store_apply_portal_kredit(sid, gew, ver);
         }
+        sync_commit_end("credits", commit_started);
         ESP_LOGI(TAG, "Pulled credits for %s", datum);
     }
     cJSON_Delete(root);
@@ -1357,7 +1491,13 @@ esp_err_t http_fetch_produkte(void)
     }
     // An empty array is an authoritative catalog replacement, not "no update".
     // Persist it before success so its manifest token cannot hide stale items.
+    TickType_t commit_started;
+    if (!sync_commit_begin("products", &commit_started)) {
+        cJSON_Delete(root);
+        return ESP_ERR_TIMEOUT;
+    }
     store_replace_produkte(products, count);
+    sync_commit_end("products", commit_started);
     game_store_save();
     if (!offline_cache_save(OFFLINE_CACHE_PRODUCTS)) {
         cJSON_Delete(root);
@@ -1400,8 +1540,9 @@ esp_err_t http_push_verkauf_events(void)
     // /sales accepts a batch atomically. Never partially acknowledge a
     // snapshot: a non-2xx leaves every externalId in the durable outbox for
     // an idempotent retry, while a 2xx removes the complete snapshot.
-    store_finish_verkauf_sync(snapshot, count, err == ESP_OK);
+    esp_err_t finish_err = finish_verkauf_sync_publication(snapshot, count, err == ESP_OK);
     heap_caps_free(snapshot);
+    if (finish_err != ESP_OK) return finish_err;
     return err;
 }
 
@@ -1416,11 +1557,16 @@ esp_err_t http_pull_verkaeufe(void)
     if (err != ESP_OK) { free(resp); return err; }
     cJSON *root = cJSON_Parse(resp); free(resp);
     if (!root) return ESP_ERR_INVALID_RESPONSE;
+    cJSON *arr = cJSON_GetObjectItem(root, "sales");
+    if (!arr || !cJSON_IsArray(arr)) { cJSON_Delete(root); return ESP_ERR_INVALID_RESPONSE; }
+    TickType_t commit_started;
+    if (!sync_commit_begin("sales", &commit_started)) {
+        cJSON_Delete(root);
+        return ESP_ERR_TIMEOUT;
+    }
     memset(g_store.munition, 0, sizeof(g_store.munition));
     snprintf(g_store.verkaufDatum, sizeof(g_store.verkaufDatum), "%s", date);
     g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
-    cJSON *arr = cJSON_GetObjectItem(root, "sales");
-    if (!arr || !cJSON_IsArray(arr)) { cJSON_Delete(root); return ESP_ERR_INVALID_RESPONSE; }
     cJSON *item; cJSON_ArrayForEach(item, arr) {
         cJSON *spieler = cJSON_GetObjectItem(item, "spielerId");
         cJSON *product = cJSON_GetObjectItem(item, "productId");
@@ -1442,6 +1588,7 @@ esp_err_t http_pull_verkaeufe(void)
         if (strcmp(ev->datum, date) == 0)
             store_apply_portal_verkauf(ev->spielerId, ev->produktId, ev->quantity);
     }
+    sync_commit_end("sales", commit_started);
     cJSON_Delete(root); game_store_save();
     if (!offline_cache_save(OFFLINE_CACHE_SALES)) return ESP_FAIL;
     return ESP_OK;
@@ -1544,7 +1691,14 @@ esp_err_t http_sync_all(void)
     err = pull_roster ? http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) : ESP_OK;
     if (err == ESP_OK) {
         if (pull_roster) {
+            TickType_t commit_started;
+            if (!sync_commit_begin("roster", &commit_started)) {
+                free(buf);
+                return ESP_ERR_TIMEOUT;
+            }
             store_apply_portal_roster(buf, count);
+            sync_commit_end("roster", commit_started);
+            game_store_save();
             if (offline_cache_save(OFFLINE_CACHE_ROSTER))
                 commit_manifest_token(&manifest, OFFLINE_CACHE_ROSTER);
             else {
@@ -1558,13 +1712,17 @@ esp_err_t http_sync_all(void)
 
     // A configuration backup is deliberately last: operational outboxes are
     // processed first, and backup failure must never undo successful sync work.
-    esp_err_t backup_err = http_backup_config();
+    esp_err_t backup_err = http_backup_config_impl(true);
     if (backup_err != ESP_OK)
         ESP_LOGW(TAG, "Configuration backup failed — operational sync remains valid");
 
     if (overall == ESP_OK) {
+        TickType_t commit_started;
+        if (!sync_commit_begin("sync-metadata", &commit_started))
+            return ESP_ERR_TIMEOUT;
         g_store.lastSuccessfulSyncAt = time(NULL);
         g_store.offlineCacheHealthy = true;
+        sync_commit_end("sync-metadata", commit_started);
         (void)offline_cache_save_metadata();
     }
     ESP_LOGI(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
