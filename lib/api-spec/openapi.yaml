@@ -446,6 +446,44 @@ paths:
         "400": { description: Invalid credit event }
         "409": { description: Invalid credit balance or price snapshot }
 
+  # ── ADMIN PLAYER RETENTION & RESET ───────────────────────────────────────
+  /admin/spieler/{id}:
+    delete:
+      operationId: deactivateAdminPlayer
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: Player deactivated while historical data remains intact
+          content: { application/json: { schema: { $ref: "#/components/schemas/PlayerActivationResult" } } }
+        "400": { description: Administrator accounts are protected, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "404": { description: Player not found, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /admin/spieler/{id}/reactivate:
+    post:
+      operationId: reactivateAdminPlayer
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: Player reactivated
+          content: { application/json: { schema: { $ref: "#/components/schemas/PlayerActivationResult" } } }
+        "404": { description: Player not found, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /admin/purge:
+    post:
+      operationId: purgeAdminData
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AdminPurgeInput" } } }
+      responses:
+        "200":
+          description: Operational data removed while catalogue and administrator accounts remain
+          content: { application/json: { schema: { $ref: "#/components/schemas/AdminPurgeResult" } } }
+        "400": { description: Invalid scope or confirmation, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+
   # ── PRODUCTS & SALES ─────────────────────────────────────────────────────
   /admin/products:
     get:
@@ -846,6 +884,45 @@ components:
         datum: { type: string, format: date }
         sales: { type: array, items: { $ref: "#/components/schemas/DaySalesItem" } }
         totalCents: { type: integer }
+    PlayerActivationResult:
+      type: object
+      required: [aktiv]
+      properties:
+        id: { type: integer }
+        aktiv: { type: boolean }
+        deactivated: { type: boolean }
+    AdminPurgeInput:
+      oneOf:
+        - type: object
+          required: [mode, datum, confirmation]
+          properties:
+            mode: { type: string, enum: [day] }
+            datum: { type: string, format: date }
+            confirmation: { type: string, enum: [PURGE_DAY] }
+        - type: object
+          required: [mode, confirmation]
+          properties:
+            mode: { type: string, enum: [all] }
+            confirmation: { type: string, enum: [PURGE_ALL] }
+    AdminPurgeCounts:
+      type: object
+      required: [players, games, participations, results, credits, sales, billPayments, playerUpdates]
+      properties:
+        players: { type: integer }
+        games: { type: integer }
+        participations: { type: integer }
+        results: { type: integer }
+        credits: { type: integer }
+        sales: { type: integer }
+        billPayments: { type: integer }
+        playerUpdates: { type: integer }
+    AdminPurgeResult:
+      type: object
+      required: [mode, counts]
+      properties:
+        mode: { type: string, enum: [day, all] }
+        datum: { type: string, format: date }
+        counts: { $ref: "#/components/schemas/AdminPurgeCounts" }
     HealthStatus:
       type: object
       properties:
@@ -908,6 +985,8 @@ components:
         mitgliedNr:
           type: string
           nullable: true
+        aktiv:
+          type: boolean
         portalAktiv:
           type: boolean
         isAdmin:
@@ -915,7 +994,7 @@ components:
         createdAt:
           type: string
           format: date-time
-      required: [id, name, portalAktiv, isAdmin, createdAt]
+      required: [id, name, aktiv, portalAktiv, isAdmin, createdAt]
 
     ErgebnisWithSpiel:
       type: object

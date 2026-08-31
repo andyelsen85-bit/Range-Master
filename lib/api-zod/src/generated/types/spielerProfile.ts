@@ -11,6 +11,7 @@ export interface SpielerProfile {
   name: string;
   email?: string | null;
   mitgliedNr?: string | null;
+  aktiv: boolean;
   portalAktiv: boolean;
   isAdmin: boolean;
   createdAt: Date;

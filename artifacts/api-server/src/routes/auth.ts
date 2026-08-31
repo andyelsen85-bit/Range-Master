@@ -28,7 +28,7 @@ router.post("/login", async (req, res) => {
     .limit(1);
 
   const s = spieler[0];
-  if (!s || !s.passwortHash || !s.portalAktiv) {
+  if (!s || !s.aktiv || !s.passwortHash || !s.portalAktiv) {
     return res.status(401).json({ error: "Ungültige Anmeldedaten" });
   }
   const valid = await bcrypt.compare(passwort, s.passwortHash);
@@ -48,6 +48,7 @@ router.post("/login", async (req, res) => {
       name: s.name,
       email: s.email,
       mitgliedNr: s.mitgliedNr,
+      aktiv: s.aktiv,
       portalAktiv: s.portalAktiv,
       isAdmin: s.isAdmin,
       createdAt: s.createdAt,
@@ -64,12 +65,13 @@ router.get("/me", authenticate, async (req, res) => {
       name: spielerTable.name,
       email: spielerTable.email,
       mitgliedNr: spielerTable.mitgliedNr,
+      aktiv: spielerTable.aktiv,
       portalAktiv: spielerTable.portalAktiv,
       isAdmin: spielerTable.isAdmin,
       createdAt: spielerTable.createdAt,
     })
     .from(spielerTable)
-    .where(eq(spielerTable.id, user.id))
+    .where(and(eq(spielerTable.id, user.id), eq(spielerTable.aktiv, true)))
     .limit(1);
   if (!rows[0]) return res.status(404).json({ error: "Nicht gefunden" });
   return res.json(rows[0]);
@@ -87,7 +89,7 @@ router.put("/passwort", authenticate, async (req, res) => {
   const { altPasswort, neuesPasswort } = parsed.data;
   const userId = (req as any).user.id;
 
-  const rows = await db.select().from(spielerTable).where(eq(spielerTable.id, userId)).limit(1);
+  const rows = await db.select().from(spielerTable).where(and(eq(spielerTable.id, userId), eq(spielerTable.aktiv, true))).limit(1);
   const s = rows[0];
   if (!s || !s.passwortHash) return res.status(401).json({ error: "Unauthorized" });
 
@@ -102,14 +104,31 @@ router.put("/passwort", authenticate, async (req, res) => {
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
 
-export function authenticate(req: any, res: any, next: any) {
+export async function authenticate(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   try {
     const token = authHeader.slice(7);
-    req.user = jwt.verify(token, JWT_SECRET);
+    const claims = jwt.verify(token, JWT_SECRET) as { id?: unknown };
+    if (!Number.isInteger(claims.id)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const [user] = await db.select({
+      id: spielerTable.id,
+      name: spielerTable.name,
+      email: spielerTable.email,
+      isAdmin: spielerTable.isAdmin,
+    }).from(spielerTable).where(and(
+      eq(spielerTable.id, claims.id as number),
+      eq(spielerTable.aktiv, true),
+      eq(spielerTable.portalAktiv, true),
+    )).limit(1);
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    req.user = user;
     next();
   } catch {
     return res.status(401).json({ error: "Unauthorized" });

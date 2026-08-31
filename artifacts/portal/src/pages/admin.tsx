@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
-import { Plus, Pencil, Trash2, KeyRound, Shield, CheckCircle2, XCircle, Eye, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, KeyRound, Shield, CheckCircle2, XCircle, Eye, Search, RotateCcw, Database } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,6 +16,7 @@ interface AdminPlayer {
   name: string;
   email: string | null;
   mitgliedNr: string | null;
+  aktiv: boolean;
   portalAktiv: boolean;
   isAdmin: boolean;
   createdAt: string;
@@ -60,6 +61,9 @@ export default function Admin() {
   const [editPlayer, setEditPlayer] = useState<AdminPlayer | null>(null);
   const [deletePlayer, setDeletePlayer] = useState<AdminPlayer | null>(null);
   const [pwdPlayer, setPwdPlayer] = useState<AdminPlayer | null>(null);
+  const [purgeMode, setPurgeMode] = useState<"day" | "all" | null>(null);
+  const [purgeDate, setPurgeDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [purgeConfirm, setPurgeConfirm] = useState("");
   const [addForm, setAddForm] = useState<PlayerForm>(emptyForm);
   const [editForm, setEditForm] = useState<Omit<PlayerForm, "passwort">>({ name: "", email: "", mitgliedNr: "", portalAktiv: false, isAdmin: false });
   const [newPwd, setNewPwd] = useState("");
@@ -103,8 +107,35 @@ export default function Admin() {
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => apiFetch(`/api/admin/spieler/${id}`, { method: "DELETE" }),
-    onSuccess: () => { invalidate(); setDeletePlayer(null); toast({ title: "Spieler gelöscht" }); },
+    onSuccess: () => { invalidate(); setDeletePlayer(null); toast({ title: "Spieler deaktiviert", description: "Historische Spiele, Käufe und Abrechnungen bleiben erhalten." }); },
     onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
+  });
+
+  const reactivateMut = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/admin/spieler/${id}/reactivate`, { method: "POST" }),
+    onSuccess: () => { invalidate(); toast({ title: "Spieler reaktiviert" }); },
+    onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
+  });
+
+  const purgeMut = useMutation({
+    mutationFn: ({ mode, datum }: { mode: "day" | "all"; datum?: string }) =>
+      apiFetch("/api/admin/purge", {
+        method: "POST",
+        body: JSON.stringify(mode === "day"
+          ? { mode, datum, confirmation: "PURGE_DAY" }
+          : { mode, confirmation: "PURGE_ALL" }),
+      }),
+    onSuccess: (result: any) => {
+      qc.invalidateQueries();
+      setPurgeMode(null);
+      setPurgeConfirm("");
+      const count = result.counts;
+      toast({
+        title: result.mode === "day" ? "Tag bereinigt" : "Globale Daten bereinigt",
+        description: `${count.games} Spiele, ${count.credits} Kreditbuchungen, ${count.sales} Verkäufe und ${count.billPayments} Zahlungen entfernt${count.players ? `; ${count.players} Spieler gelöscht` : ""}.`,
+      });
+    },
+    onError: (e: Error) => toast({ title: "Bereinigung fehlgeschlagen", description: e.message, variant: "destructive" }),
   });
 
   const pwdMut = useMutation({
@@ -128,14 +159,22 @@ export default function Admin() {
       <header className="flex items-start justify-between border-b border-border/50 pb-6 gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Spielerverwaltung</h1>
-          <p className="text-muted-foreground mt-2 text-sm font-medium">Spieler erstellen, bearbeiten, löschen und Passwörter festlegen.</p>
+          <p className="text-muted-foreground mt-2 text-sm font-medium">Spieler erstellen, bearbeiten, deaktivieren und Passwörter festlegen.</p>
         </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg transition-colors shrink-0"
-        >
-          <Plus size={16} /> Neuer Spieler
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => { setPurgeMode("day"); setPurgeConfirm(""); }}
+            className="flex items-center gap-2 px-4 py-2.5 border border-destructive/50 text-destructive hover:bg-destructive/10 text-sm font-bold rounded-lg transition-colors"
+          >
+            <Database size={16} /> Daten bereinigen
+          </button>
+          <button
+            onClick={() => setAddOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg transition-colors"
+          >
+            <Plus size={16} /> Neuer Spieler
+          </button>
+        </div>
       </header>
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
@@ -164,6 +203,7 @@ export default function Admin() {
                   <TableHead className="text-xs uppercase tracking-widest font-bold">Email</TableHead>
                   <TableHead className="text-xs uppercase tracking-widest font-bold">Mitgliedsnummer</TableHead>
                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Portal</TableHead>
+                  <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Status</TableHead>
                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Admin</TableHead>
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spiele</TableHead>
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Ø / 36</TableHead>
@@ -174,13 +214,13 @@ export default function Admin() {
               <TableBody>
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground font-medium">
+                    <TableCell colSpan={10} className="text-center py-10 text-muted-foreground font-medium">
                       {search ? `Keine Ergebnisse für "${search}"` : "Keine Spieler gefunden"}
                     </TableCell>
                   </TableRow>
                 )}
                 {filtered.map((p) => (
-                  <TableRow key={p.id} className="border-border/30 hover:bg-secondary/20 transition-colors">
+                  <TableRow key={p.id} className={`border-border/30 hover:bg-secondary/20 transition-colors ${p.aktiv ? "" : "opacity-60"}`}>
                     <TableCell className="font-bold text-foreground">{p.name}</TableCell>
                     <TableCell className="text-muted-foreground text-sm font-mono">{p.email || <span className="opacity-30">–</span>}</TableCell>
                     <TableCell className="text-muted-foreground text-sm font-mono">{p.mitgliedNr || <span className="opacity-30">–</span>}</TableCell>
@@ -188,6 +228,11 @@ export default function Admin() {
                       {p.portalAktiv
                         ? <CheckCircle2 size={16} className="text-green-500 mx-auto" />
                         : <XCircle size={16} className="text-muted-foreground/40 mx-auto" />}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant={p.aktiv ? "secondary" : "outline"} className={p.aktiv ? "text-green-500 border-green-500/30 bg-green-500/10" : "text-muted-foreground"}>
+                        {p.aktiv ? "Aktiv" : "Inaktiv"}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-center">
                       {p.isAdmin ? <Shield size={16} className="text-primary mx-auto" /> : <span className="text-muted-foreground/30">–</span>}
@@ -200,7 +245,12 @@ export default function Admin() {
                          <IconBtn title="Profil anzeigen" onClick={() => navigate(`/admin/spieler/${p.id}`)}><Eye size={14} /></IconBtn>
                          <IconBtn title="Bearbeiten" onClick={() => openEdit(p)}><Pencil size={14} /></IconBtn>
                          <IconBtn title="Passwort" onClick={() => { setPwdPlayer(p); setNewPwd(""); }}><KeyRound size={14} /></IconBtn>
-                         <IconBtn title="Löschen" danger onClick={() => setDeletePlayer(p)}><Trash2 size={14} /></IconBtn>
+                         {p.aktiv && !p.isAdmin && (
+                           <IconBtn title="Deaktivieren" danger onClick={() => setDeletePlayer(p)}><Trash2 size={14} /></IconBtn>
+                         )}
+                         {!p.aktiv && (
+                           <IconBtn title="Reaktivieren" onClick={() => reactivateMut.mutate(p.id)}><RotateCcw size={14} /></IconBtn>
+                         )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -253,13 +303,13 @@ export default function Admin() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Delete Dialog ─────────────────────────────────────────────────── */}
+      {/* ── Deactivate Dialog ─────────────────────────────────────────────── */}
       <Dialog open={!!deletePlayer} onOpenChange={(o) => !o && setDeletePlayer(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Spieler löschen</DialogTitle>
+            <DialogTitle>Spieler deaktivieren</DialogTitle>
             <DialogDescription>
-              Möchten Sie <strong>{deletePlayer?.name}</strong> wirklich löschen? Alle Statistiken und Ergebnisse werden unwiderruflich gelöscht.
+              Möchten Sie <strong>{deletePlayer?.name}</strong> deaktivieren? Der Spieler kann nicht mehr ausgewählt oder angemeldet werden. Alle Spiele, Käufe, Abrechnungen und Statistiken bleiben erhalten und der Spieler kann später reaktiviert werden.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -269,7 +319,77 @@ export default function Admin() {
               disabled={deleteMut.isPending}
               className="px-4 py-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-50"
             >
-              {deleteMut.isPending ? "Wird gelöscht…" : "Endgültig löschen"}
+              {deleteMut.isPending ? "Wird deaktiviert…" : "Spieler deaktivieren"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Purge Dialog ──────────────────────────────────────────────────── */}
+      <Dialog open={purgeMode !== null} onOpenChange={(o) => { if (!o) { setPurgeMode(null); setPurgeConfirm(""); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Daten bereinigen</DialogTitle>
+            <DialogDescription>
+              Nur operative Spieler-, Spiel-, Kauf- und Abrechnungsdaten werden entfernt. Produkte, Preise, API-Schlüssel und Einstellungen bleiben unverändert.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => { setPurgeMode("day"); setPurgeConfirm(""); }}
+              className={`rounded-lg border p-3 text-left transition-colors ${purgeMode === "day" ? "border-primary bg-primary/10" : "border-border hover:bg-secondary/30"}`}
+            >
+              <span className="block text-sm font-bold">Bestimmten Tag löschen</span>
+              <span className="block text-xs text-muted-foreground mt-1">Entfernt Aktivität des gewählten Tages, aber keine Spieler.</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPurgeMode("all"); setPurgeConfirm(""); }}
+              className={`rounded-lg border p-3 text-left transition-colors ${purgeMode === "all" ? "border-destructive bg-destructive/10" : "border-border hover:bg-secondary/30"}`}
+            >
+              <span className="block text-sm font-bold text-destructive">Alles global löschen</span>
+              <span className="block text-xs text-muted-foreground mt-1">Entfernt alle Aktivitäten und alle Nicht-Admin-Spieler.</span>
+            </button>
+          </div>
+
+          {purgeMode === "day" && (
+            <FormField label="Tag" id="purge-date">
+              <input
+                id="purge-date"
+                type="date"
+                value={purgeDate}
+                onChange={(e) => setPurgeDate(e.target.value)}
+                className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </FormField>
+          )}
+
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
+            <strong className="text-destructive">Unwiderruflich:</strong>{" "}
+            {purgeMode === "day"
+              ? `Alle Spiele, Käufe, Kreditbuchungen und Zahlungen vom ${purgeDate || "gewählten Tag"} werden endgültig entfernt.`
+              : "Alle Spiele, Käufe, Kreditbuchungen, Zahlungen und Nicht-Admin-Spieler werden endgültig entfernt. Administratorkonten bleiben bestehen."}
+          </div>
+
+          <FormField label={`Zur Bestätigung „${purgeMode === "day" ? "TAG LÖSCHEN" : "ALLES LÖSCHEN"}“ eingeben`} id="purge-confirm">
+            <input
+              id="purge-confirm"
+              value={purgeConfirm}
+              onChange={(e) => setPurgeConfirm(e.target.value)}
+              className="w-full bg-background border border-destructive/50 rounded-lg px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-destructive/40"
+            />
+          </FormField>
+
+          <DialogFooter>
+            <button onClick={() => { setPurgeMode(null); setPurgeConfirm(""); }} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Abbrechen</button>
+            <button
+              onClick={() => purgeMode && purgeMut.mutate({ mode: purgeMode, datum: purgeMode === "day" ? purgeDate : undefined })}
+              disabled={purgeMut.isPending || !purgeDate || purgeConfirm !== (purgeMode === "day" ? "TAG LÖSCHEN" : "ALLES LÖSCHEN")}
+              className="px-4 py-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-40"
+            >
+              {purgeMut.isPending ? "Wird bereinigt…" : purgeMode === "day" ? "Tag endgültig löschen" : "Alles endgültig löschen"}
             </button>
           </DialogFooter>
         </DialogContent>

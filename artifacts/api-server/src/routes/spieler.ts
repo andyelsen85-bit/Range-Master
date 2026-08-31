@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, spielerTable, ergebnisseTable, spieleTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { authenticate } from "./auth";
 
 const router = Router();
@@ -17,10 +17,12 @@ router.get("/", authenticate, async (_req, res) => {
       name: spielerTable.name,
       email: spielerTable.email,
       mitgliedNr: spielerTable.mitgliedNr,
+      aktiv: spielerTable.aktiv,
       portalAktiv: spielerTable.portalAktiv,
       createdAt: spielerTable.createdAt,
     })
     .from(spielerTable)
+    .where(eq(spielerTable.aktiv, true))
     .orderBy(spielerTable.name);
   return res.json({ spieler: rows });
 });
@@ -63,11 +65,12 @@ router.get("/:id", authenticate, async (req, res) => {
       name: spielerTable.name,
       email: spielerTable.email,
       mitgliedNr: spielerTable.mitgliedNr,
+      aktiv: spielerTable.aktiv,
       portalAktiv: spielerTable.portalAktiv,
       createdAt: spielerTable.createdAt,
     })
     .from(spielerTable)
-    .where(eq(spielerTable.id, id))
+    .where(and(eq(spielerTable.id, id), sql`${spielerTable.aktiv} = true OR ${(req as any).user.isAdmin} = true`))
     .limit(1);
   if (!rows[0]) return res.status(404).json({ error: "Nicht gefunden" });
   return res.json(rows[0]);

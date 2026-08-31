@@ -20,6 +20,9 @@ static lv_obj_t *s_lbl_status;
 static lv_obj_t *s_bill_modal;
 static lv_obj_t *s_totals_label;
 
+static const uint32_t CAL12_COLOR = 0x38BDF8;
+static const uint32_t CAL20_COLOR = 0xA78BFA;
+
 typedef struct {
     int spielerId;
     lv_obj_t *creditLabel;
@@ -69,7 +72,7 @@ static void refresh_player_values(int spieler_id)
                 available > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_DANGER), 0);
             refs->creditPositive = available > 0;
         }
-        snprintf(text, sizeof(text), "CAL.12: %d     CAL.20: %d",
+        snprintf(text, sizeof(text), "#38BDF8 CAL.12: %d#     #A78BFA CAL.20: %d#",
                  store_munition_cal12(spieler_id), store_munition_cal20(spieler_id));
         current = lv_label_get_text(refs->ammoLabel);
         if (!current || strcmp(current, text) != 0)
@@ -476,17 +479,18 @@ static void build_player_list(void)
         lv_obj_t *row = lv_obj_create(s_player_list);
         // Each player gets enough vertical room for the labelled control
         // groups; compact single-row controls clipped on the touch display.
-        lv_obj_set_size(row, LV_PCT(100), 116);
+        lv_obj_set_size(row, LV_PCT(100), 132);
         lv_obj_add_style(row, &g_style_card, 0);
         lv_obj_set_style_pad_all(row, 10, 0);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(row, 12, 0);
 
         // Name + the three independent daily counters.
         lv_obj_t *info = lv_obj_create(row);
-        lv_obj_set_size(info, 245, LV_SIZE_CONTENT);
+        lv_obj_set_size(info, 300, LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(info, LV_OPA_0, 0);
         lv_obj_set_style_border_width(info, 0, 0);
         lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
@@ -506,29 +510,32 @@ static void build_player_list(void)
                  avail, k->verbraucht, k->gewaehrt);
         lv_obj_t *cred_lbl = lv_label_create(info);
         lv_label_set_text(cred_lbl, cred_buf);
-        lv_obj_set_style_text_font(cred_lbl, UI_FONT_12, 0);
+        lv_obj_set_style_text_font(cred_lbl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(cred_lbl,
             avail > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_DANGER), 0);
-        char ammo_buf[48];
-        snprintf(ammo_buf, sizeof(ammo_buf), "CAL.12: %d     CAL.20: %d",
+        char ammo_buf[96];
+        snprintf(ammo_buf, sizeof(ammo_buf), "#38BDF8 CAL.12: %d#     #A78BFA CAL.20: %d#",
                  store_munition_cal12(sid), store_munition_cal20(sid));
         lv_obj_t *ammo_lbl = lv_label_create(info);
         lv_label_set_text(ammo_lbl, ammo_buf);
-        lv_obj_set_style_text_font(ammo_lbl, UI_FONT_12, 0);
-        lv_obj_set_style_text_color(ammo_lbl, lv_color_hex(CLR_PRIMARY), 0);
+        lv_label_set_recolor(ammo_lbl, true);
+        lv_obj_set_style_text_font(ammo_lbl, UI_FONT_14, 0);
 
         // Keep every operation in an explicitly labelled group.  This makes
         // the two ammunition calibers unambiguous and leaves tap spacing.
         lv_obj_t *btn_grp = lv_obj_create(row);
-        lv_obj_set_size(btn_grp, 480, 88);
+        lv_obj_set_size(btn_grp, 420, 104);
         lv_obj_set_style_bg_opa(btn_grp, LV_OPA_0, 0);
         lv_obj_set_style_border_width(btn_grp, 0, 0);
         lv_obj_set_style_pad_all(btn_grp, 0, 0);
+        lv_obj_set_style_pad_bottom(btn_grp, 8, 0);
         lv_obj_set_flex_flow(btn_grp, LV_FLEX_FLOW_ROW);
         lv_obj_set_style_pad_column(btn_grp, 10, 0);
-        auto control_group = [&](const char *caption, int width) {
+        lv_obj_set_scroll_dir(btn_grp, LV_DIR_HOR);
+        lv_obj_set_scrollbar_mode(btn_grp, LV_SCROLLBAR_MODE_AUTO);
+        auto control_group = [&](const char *caption, int width, uint32_t color) {
             lv_obj_t *group = lv_obj_create(btn_grp);
-            lv_obj_set_size(group, width, 84);
+            lv_obj_set_size(group, width, 94);
             lv_obj_set_style_bg_opa(group, LV_OPA_0, 0);
             lv_obj_set_style_border_width(group, 0, 0);
             lv_obj_set_style_pad_all(group, 0, 0);
@@ -536,29 +543,29 @@ static void build_player_list(void)
             lv_obj_set_style_pad_row(group, 3, 0);
             lv_obj_t *label = lv_label_create(group);
             lv_label_set_text(label, caption);
-            lv_obj_set_style_text_font(label, UI_FONT_12, 0);
-            lv_obj_set_style_text_color(label, lv_color_hex(CLR_MUTED), 0);
+            lv_obj_set_style_text_font(label, UI_FONT_14, 0);
+            lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
             return group;
         };
 
-        lv_obj_t *bill_group = control_group("RECHNUNG", 78);
+        lv_obj_t *bill_group = control_group("RECHNUNG", 92, CLR_MUTED);
         lv_obj_t *bill = lv_btn_create(bill_group);
         lv_obj_add_style(bill, &g_style_btn_secondary, 0);
-        lv_obj_set_size(bill, 76, 52);
+        lv_obj_set_size(bill, 90, 62);
         lv_obj_add_event_cb(bill, bill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)sid);
         lv_obj_t *bill_label = lv_label_create(bill);
         lv_label_set_text(bill_label, store_payment_pending(sid) ? "AUSSTEHEND" : "RECHNUNG");
         lv_obj_set_style_text_font(bill_label, UI_FONT_12, 0);
         lv_obj_center(bill_label);
 
-        lv_obj_t *credit_group = control_group("KREDIT", 92);
+        lv_obj_t *credit_group = control_group("KREDIT", 116, CLR_PRIMARY);
         lv_obj_t *credit_buttons = lv_obj_create(credit_group);
-        lv_obj_set_size(credit_buttons, 92, 54); lv_obj_set_style_bg_opa(credit_buttons, LV_OPA_0, 0);
+        lv_obj_set_size(credit_buttons, 116, 64); lv_obj_set_style_bg_opa(credit_buttons, LV_OPA_0, 0);
         lv_obj_set_style_border_width(credit_buttons, 0, 0); lv_obj_set_style_pad_all(credit_buttons, 0, 0);
         lv_obj_set_flex_flow(credit_buttons, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(credit_buttons, 4, 0);
         // -1
         lv_obj_t *btn_minus = lv_btn_create(credit_buttons);
-        lv_obj_set_size(btn_minus, 44, 52);
+        lv_obj_set_size(btn_minus, 56, 62);
         lv_obj_set_style_bg_color(btn_minus, lv_color_hex(CLR_WARN), 0);
         lv_obj_set_style_bg_opa(btn_minus, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(btn_minus, 8, 0);
@@ -576,7 +583,7 @@ static void build_player_list(void)
         // +1
         lv_obj_t *btn_plus = lv_btn_create(credit_buttons);
         lv_obj_add_style(btn_plus, &g_style_btn_primary, 0);
-        lv_obj_set_size(btn_plus, 44, 52);
+        lv_obj_set_size(btn_plus, 56, 62);
         lv_obj_add_event_cb(btn_plus, grant_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)sid);
         lv_obj_t *bpl = lv_label_create(btn_plus);
@@ -608,16 +615,20 @@ static void build_player_list(void)
         };
         for (size_t action = 0; action < sizeof(ammo_actions) / sizeof(ammo_actions[0]); ++action) {
             if (action == 0 || action == 2) {
-                lv_obj_t *ammo_group = control_group(action == 0 ? "CAL.12" : "CAL.20", 92);
+                const uint32_t caliber_color = action == 0 ? CAL12_COLOR : CAL20_COLOR;
+                lv_obj_t *ammo_group = control_group(action == 0 ? "CAL.12" : "CAL.20", 116, caliber_color);
                 lv_obj_t *buttons = lv_obj_create(ammo_group);
-                lv_obj_set_size(buttons, 92, 54); lv_obj_set_style_bg_opa(buttons, LV_OPA_0, 0);
+                lv_obj_set_size(buttons, 116, 64); lv_obj_set_style_bg_opa(buttons, LV_OPA_0, 0);
                 lv_obj_set_style_border_width(buttons, 0, 0); lv_obj_set_style_pad_all(buttons, 0, 0);
                 lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(buttons, 4, 0);
                 ammo_buttons[action / 2] = buttons;
             }
             lv_obj_t *ammo = lv_btn_create(ammo_buttons[action / 2]);
-            lv_obj_set_size(ammo, 44, 52);
+            const uint32_t caliber_color = action < 2 ? CAL12_COLOR : CAL20_COLOR;
+            lv_obj_set_size(ammo, 56, 62);
             lv_obj_add_style(ammo, &g_style_btn_secondary, 0);
+            lv_obj_set_style_border_width(ammo, 2, 0);
+            lv_obj_set_style_border_color(ammo, lv_color_hex(caliber_color), 0);
             set_disabled_appearance(ammo);
             add_action(ammo, munition_cb, sid, ammo_actions[action].product,
                        ammo_actions[action].quantity);
@@ -627,15 +638,15 @@ static void build_player_list(void)
                 lv_obj_add_state(ammo, LV_STATE_DISABLED);
             lv_obj_t *al = lv_label_create(ammo);
             lv_label_set_text(al, ammo_actions[action].label);
-            lv_obj_set_style_text_font(al, UI_FONT_12, 0);
-            lv_obj_set_style_text_color(al, lv_color_hex(CLR_TEXT), 0);
+            lv_obj_set_style_text_font(al, UI_FONT_16, 0);
+            lv_obj_set_style_text_color(al, lv_color_hex(caliber_color), 0);
             lv_obj_center(al);
         }
 
         // X (remove from today's list)
-        lv_obj_t *remove_group = control_group("LÖSCHEN", 78);
+        lv_obj_t *remove_group = control_group("LÖSCHEN", 92, CLR_DANGER);
         lv_obj_t *btn_del = lv_btn_create(remove_group);
-        lv_obj_set_size(btn_del, 76, 52);
+        lv_obj_set_size(btn_del, 90, 62);
         lv_obj_set_style_bg_color(btn_del, lv_color_hex(CLR_DANGER), 0);
         lv_obj_set_style_bg_opa(btn_del, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(btn_del, 8, 0);

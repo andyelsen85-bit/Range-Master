@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
-import { db, spielerTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, spielerUpdatesTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable, billPaymentsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
+import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, spielerUpdatesTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable, billPaymentsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
 import { buildTransport } from "../lib/mailer";
 import { and, desc, eq, lte, isNull, sql } from "drizzle-orm";
 import { authenticate, requireAdmin } from "./auth";
@@ -106,6 +106,7 @@ router.get("/spieler", async (_req, res) => {
       name: spielerTable.name,
       email: spielerTable.email,
       mitgliedNr: spielerTable.mitgliedNr,
+      aktiv: spielerTable.aktiv,
       portalAktiv: spielerTable.portalAktiv,
       isAdmin: spielerTable.isAdmin,
       createdAt: spielerTable.createdAt,
@@ -214,7 +215,7 @@ router.put("/spieler/:id", async (req, res) => {
   return res.json(updated);
 });
 
-// DELETE /api/admin/spieler/:id — delete player + all their data
+// DELETE /api/admin/spieler/:id — deactivate a player while retaining history
 router.delete("/spieler/:id", async (req, res): Promise<void> => {
   const parsedId = z.coerce.number().int().positive().safeParse(req.params.id);
   if (!parsedId.success) {
@@ -229,35 +230,49 @@ router.delete("/spieler/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const deleted = await db.transaction(async (tx) => {
+  const deactivated = await db.transaction(async (tx) => {
     const [player] = await tx
-      .select({ id: spielerTable.id })
+      .select({ id: spielerTable.id, isAdmin: spielerTable.isAdmin, aktiv: spielerTable.aktiv })
       .from(spielerTable)
       .where(eq(spielerTable.id, id))
+      .for("update")
       .limit(1);
-    if (!player) return false;
+    if (!player) return "not_found" as const;
+    if (player.isAdmin) return "admin" as const;
+    if (!player.aktiv) return "already_inactive" as const;
 
-    // Keep bill audit rows belonging to other players, but remove the
-    // optional admin attribution before deleting this player. All rows owned
-    // by the player are removed in FK dependency order.
-    await tx
-      .update(billPaymentsTable)
-      .set({ markedByAdminId: null })
-      .where(eq(billPaymentsTable.markedByAdminId, id));
-    await tx.delete(ergebnisseTable).where(eq(ergebnisseTable.spielerId, id));
-    await tx.delete(spielTeilnahmenTable).where(eq(spielTeilnahmenTable.spielerId, id));
-    await tx.delete(kreditEventsTable).where(eq(kreditEventsTable.spielerId, id));
-    await tx.delete(spielerUpdatesTable).where(eq(spielerUpdatesTable.spielerId, id));
-    await tx.delete(saleEventsTable).where(eq(saleEventsTable.spielerId, id));
-    await tx.delete(billPaymentsTable).where(eq(billPaymentsTable.spielerId, id));
-    await tx.delete(spielerTable).where(eq(spielerTable.id, id));
-    return true;
+    await tx.update(spielerTable)
+      .set({ aktiv: false })
+      .where(eq(spielerTable.id, id));
+    return "deactivated" as const;
   });
-  if (!deleted) {
+  if (deactivated === "not_found") {
     res.status(404).json({ error: "Spieler nicht gefunden" });
     return;
   }
-  res.json({ deleted: true });
+  if (deactivated === "admin") {
+    res.status(400).json({ error: "Administratorkonten können nicht deaktiviert werden" });
+    return;
+  }
+  res.json({ deactivated: deactivated === "deactivated", aktiv: false });
+});
+
+// POST /api/admin/spieler/:id/reactivate — make a retained player selectable again
+router.post("/spieler/:id/reactivate", async (req, res): Promise<void> => {
+  const parsedId = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!parsedId.success) {
+    res.status(400).json({ error: "Ungültige Spieler-ID" });
+    return;
+  }
+  const [updated] = await db.update(spielerTable)
+    .set({ aktiv: true })
+    .where(eq(spielerTable.id, parsedId.data))
+    .returning({ id: spielerTable.id, aktiv: spielerTable.aktiv });
+  if (!updated) {
+    res.status(404).json({ error: "Spieler nicht gefunden" });
+    return;
+  }
+  res.json(updated);
 });
 
 // PUT /api/admin/spieler/:id/passwort — reset any player's password
@@ -275,6 +290,111 @@ router.put("/spieler/:id/passwort", async (req, res) => {
 
   if (!updated) return res.status(404).json({ error: "Nicht gefunden" });
   return res.json({ success: true });
+});
+
+type PurgeCounts = {
+  players: number;
+  games: number;
+  participations: number;
+  results: number;
+  credits: number;
+  sales: number;
+  billPayments: number;
+  playerUpdates: number;
+};
+
+async function countRows(tx: any, query: any): Promise<number> {
+  const result = await tx.execute(query);
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+// POST /api/admin/purge — explicitly confirmed day or global operational reset
+router.post("/purge", async (req, res): Promise<void> => {
+  const parsed = z.discriminatedUnion("mode", [
+    z.object({
+      mode: z.literal("day"),
+      datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      confirmation: z.literal("PURGE_DAY"),
+    }),
+    z.object({
+      mode: z.literal("all"),
+      confirmation: z.literal("PURGE_ALL"),
+    }),
+  ]).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Ungültige Löschanfrage oder Bestätigung" });
+    return;
+  }
+
+  const counts = await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      LOCK TABLE
+        ${billPaymentsTable}, ${saleEventsTable}, ${kreditEventsTable},
+        ${spielerUpdatesTable}, ${ergebnisseTable}, ${spielTeilnahmenTable},
+        ${spieleTable}, ${spielerTable}
+      IN ACCESS EXCLUSIVE MODE
+    `);
+    const result: PurgeCounts = {
+      players: 0,
+      games: 0,
+      participations: 0,
+      results: 0,
+      credits: 0,
+      sales: 0,
+      billPayments: 0,
+      playerUpdates: 0,
+    };
+
+    if (parsed.data.mode === "day") {
+      const datum = parsed.data.datum;
+      const gameDay = sql`(${spieleTable.datum} AT TIME ZONE 'UTC')::date = ${datum}::date`;
+      result.games = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${spieleTable} WHERE ${gameDay}`);
+      result.participations = await countRows(tx, sql`
+        SELECT COUNT(*)::int AS count
+        FROM ${spielTeilnahmenTable} t
+        INNER JOIN ${spieleTable} s ON s.id = t.spiel_id
+        WHERE (s.datum AT TIME ZONE 'UTC')::date = ${datum}::date
+      `);
+      result.results = await countRows(tx, sql`
+        SELECT COUNT(*)::int AS count
+        FROM ${ergebnisseTable} e
+        INNER JOIN ${spieleTable} s ON s.id = e.spiel_id
+        WHERE (s.datum AT TIME ZONE 'UTC')::date = ${datum}::date
+      `);
+      result.credits = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${kreditEventsTable} WHERE ${kreditEventsTable.datum} = ${datum}::date`);
+      result.sales = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${saleEventsTable} WHERE ${saleEventsTable.datum} = ${datum}::date`);
+      result.billPayments = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${billPaymentsTable} WHERE ${billPaymentsTable.datum} = ${datum}::date`);
+
+      await tx.delete(billPaymentsTable).where(eq(billPaymentsTable.datum, datum));
+      await tx.delete(saleEventsTable).where(eq(saleEventsTable.datum, datum));
+      await tx.delete(kreditEventsTable).where(eq(kreditEventsTable.datum, datum));
+      await tx.delete(spieleTable).where(gameDay);
+      return result;
+    }
+
+    result.players = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${spielerTable} WHERE ${spielerTable.isAdmin} = false`);
+    result.games = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${spieleTable}`);
+    result.participations = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${spielTeilnahmenTable}`);
+    result.results = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${ergebnisseTable}`);
+    result.credits = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${kreditEventsTable}`);
+    result.sales = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${saleEventsTable}`);
+    result.billPayments = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${billPaymentsTable}`);
+    result.playerUpdates = await countRows(tx, sql`SELECT COUNT(*)::int AS count FROM ${spielerUpdatesTable}`);
+
+    await tx.delete(billPaymentsTable);
+    await tx.delete(saleEventsTable);
+    await tx.delete(kreditEventsTable);
+    await tx.delete(spielerUpdatesTable);
+    await tx.delete(spieleTable);
+    await tx.delete(spielerTable).where(eq(spielerTable.isAdmin, false));
+    return result;
+  });
+
+  res.json({
+    mode: parsed.data.mode,
+    datum: parsed.data.mode === "day" ? parsed.data.datum : undefined,
+    counts,
+  });
 });
 
 // GET /api/admin/kredite/joer?year=YYYY — annual credit summary

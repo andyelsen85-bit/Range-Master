@@ -24,6 +24,8 @@ import type {
   AdminAmmoAdjustmentResult,
   AdminCreditAdjustmentInput,
   AdminCreditAdjustmentResult,
+  AdminPurgeInput,
+  AdminPurgeResult,
   BillDaySummary,
   DaySalesReport,
   ErrorResponse,
@@ -47,6 +49,7 @@ import type {
   LoginRequest,
   LoginResponse,
   MarkAdminBillPaidBody,
+  PlayerActivationResult,
   PostSyncBillPayments200,
   PostSyncBillPaymentsBody,
   PostSyncCreditEventsBody,
@@ -1401,6 +1404,201 @@ export const usePostSyncCreditEvents = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getPostSyncCreditEventsMutationOptions(options));
+    }
+
+export const getDeactivateAdminPlayerUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/spieler/${id}`
+}
+
+export const deactivateAdminPlayer = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<PlayerActivationResult> => {
+
+  return customFetch<PlayerActivationResult>(getDeactivateAdminPlayerUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeactivateAdminPlayerMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deactivateAdminPlayer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deactivateAdminPlayer>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deactivateAdminPlayer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deactivateAdminPlayer>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deactivateAdminPlayer(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeactivateAdminPlayerMutationResult = NonNullable<Awaited<ReturnType<typeof deactivateAdminPlayer>>>
+
+    export type DeactivateAdminPlayerMutationError = ErrorType<ErrorResponse>
+
+    export const useDeactivateAdminPlayer = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deactivateAdminPlayer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deactivateAdminPlayer>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeactivateAdminPlayerMutationOptions(options));
+    }
+
+export const getReactivateAdminPlayerUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/spieler/${id}/reactivate`
+}
+
+export const reactivateAdminPlayer = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<PlayerActivationResult> => {
+
+  return customFetch<PlayerActivationResult>(getReactivateAdminPlayerUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getReactivateAdminPlayerMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reactivateAdminPlayer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reactivateAdminPlayer>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['reactivateAdminPlayer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reactivateAdminPlayer>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  reactivateAdminPlayer(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReactivateAdminPlayerMutationResult = NonNullable<Awaited<ReturnType<typeof reactivateAdminPlayer>>>
+
+    export type ReactivateAdminPlayerMutationError = ErrorType<ErrorResponse>
+
+    export const useReactivateAdminPlayer = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reactivateAdminPlayer>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reactivateAdminPlayer>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getReactivateAdminPlayerMutationOptions(options));
+    }
+
+export const getPurgeAdminDataUrl = () => {
+
+
+
+
+  return `/api/admin/purge`
+}
+
+export const purgeAdminData = async (adminPurgeInput: AdminPurgeInput, options?: Parameters<typeof customFetch>[1]): Promise<AdminPurgeResult> => {
+
+  return customFetch<AdminPurgeResult>(getPurgeAdminDataUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(adminPurgeInput)
+  }
+);}
+
+
+
+
+
+export const getPurgeAdminDataMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof purgeAdminData>>, TError,{data: BodyType<AdminPurgeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof purgeAdminData>>, TError,{data: BodyType<AdminPurgeInput>}, TContext> => {
+
+const mutationKey = ['purgeAdminData'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof purgeAdminData>>, {data: BodyType<AdminPurgeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  purgeAdminData(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PurgeAdminDataMutationResult = NonNullable<Awaited<ReturnType<typeof purgeAdminData>>>
+    export type PurgeAdminDataMutationBody = BodyType<AdminPurgeInput>
+    export type PurgeAdminDataMutationError = ErrorType<ErrorResponse>
+
+    export const usePurgeAdminData = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof purgeAdminData>>, TError,{data: BodyType<AdminPurgeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof purgeAdminData>>,
+        TError,
+        {data: BodyType<AdminPurgeInput>},
+        TContext
+      > => {
+      return useMutation(getPurgeAdminDataMutationOptions(options));
     }
 
 export const getListAdminProductsUrl = () => {

@@ -294,6 +294,46 @@ export interface DaySalesReport {
   totalCents: number;
 }
 
+export interface PlayerActivationResult {
+  id?: number;
+  aktiv: boolean;
+  deactivated?: boolean;
+}
+
+export type AdminPurgeInput = {
+  mode: 'day';
+  datum: string;
+  confirmation: 'PURGE_DAY';
+} | {
+  mode: 'all';
+  confirmation: 'PURGE_ALL';
+};
+
+export interface AdminPurgeCounts {
+  players: number;
+  games: number;
+  participations: number;
+  results: number;
+  credits: number;
+  sales: number;
+  billPayments: number;
+  playerUpdates: number;
+}
+
+export type AdminPurgeResultMode = typeof AdminPurgeResultMode[keyof typeof AdminPurgeResultMode];
+
+
+export const AdminPurgeResultMode = {
+  day: 'day',
+  all: 'all',
+} as const;
+
+export interface AdminPurgeResult {
+  mode: AdminPurgeResultMode;
+  datum?: string;
+  counts: AdminPurgeCounts;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -340,6 +380,7 @@ export interface SpielerProfile {
   name: string;
   email?: string | null;
   mitgliedNr?: string | null;
+  aktiv: boolean;
   portalAktiv: boolean;
   isAdmin: boolean;
   createdAt: string;

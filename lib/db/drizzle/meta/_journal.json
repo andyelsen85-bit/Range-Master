@@ -43,6 +43,13 @@
       "when": 1787921000003,
       "tag": "0005_credit_event_price_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788163200000,
+      "tag": "0006_player_active_status",
+      "breakpoints": true
     }
   ]
 }

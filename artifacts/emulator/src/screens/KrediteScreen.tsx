@@ -271,67 +271,71 @@ export function KrediteScreen() {
               <div
                 key={e.spielerId}
                 className={cn(
-                  'grid grid-cols-1 xl:grid-cols-[minmax(180px,1fr)_auto_auto_auto] items-center gap-3 border-2 rounded-xl p-3 transition-all',
+                  'grid grid-cols-1 xl:grid-cols-[minmax(300px,1fr)_minmax(0,2fr)] items-center gap-4 border-2 rounded-xl p-4 transition-all',
                   e.rest > 0 ? 'border-primary/50 bg-primary/5' : 'border-border/40 bg-background/40 opacity-80',
                   e.isPaid && 'border-green-500/30 bg-green-500/5 opacity-70'
                 )}
               >
-                <div className="min-w-0">
+                <div className="min-w-[300px]">
                   <div className={cn('font-bold text-base truncate flex items-center gap-2', e.rest > 0 ? 'text-foreground' : 'text-muted-foreground')}>
                     {e.name}
                     {e.isPaid && <span className="text-[10px] font-bold bg-green-500/20 text-green-500 px-1.5 py-0.5 rounded">BEZUELT</span>}
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5 font-mono">
+                  <div className="text-sm text-muted-foreground mt-1 font-mono whitespace-nowrap">
                     {e.gewaehrt} bezuelt · {e.verbraucht} gespillt
                     {e.rest === 0 && e.gewaehrt > 0 && <span className="text-amber-400 font-bold"> · opgebraucht</span>}
                   </div>
                   {e.pending && <div data-testid={`status-pending-${e.spielerId}`} className="text-[10px] font-bold text-amber-400 mt-1">Verkeef nach net synchroniséiert</div>}
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold uppercase text-primary">Credits: {e.rest}</span>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <TouchButton variant="ghost" className="h-11 w-11 p-0 border border-amber-500/40" onClick={() => store.removeKredit(e.spielerId, 1)} disabled={e.rest === 0} style={e.rest === 0 ? { opacity: 0.3, pointerEvents: 'none' } : undefined} title="1 Kredit zréckbezuelen">
-                      <span className={cn('font-black text-base', e.rest > 0 ? 'text-amber-400' : 'text-muted-foreground')}>−1</span>
-                    </TouchButton>
-                    <div className="w-px h-8 bg-border/60 mx-0.5" />
-                    {ADD_AMOUNTS.map(n => (
-                      <TouchButton key={n} variant="outline" className="h-11 px-3 font-bold text-sm gap-0.5" onClick={() => store.addKredite(e.spielerId, n)}>
-                        <Plus className="w-3 h-3" />{n}
-                      </TouchButton>
-                    ))}
-                    <div className="w-px h-8 bg-border/60 mx-0.5" />
-                    <TouchButton variant="ghost" className="h-11 w-11 p-0 text-destructive hover:bg-destructive/10" onClick={() => store.deleteKreditEntry(e.spielerId)} title="Feeler korrigéieren — Spiller vum Dag läschen">
-                      <Trash2 className="w-4 h-4" />
-                    </TouchButton>
-                  </div>
-                </div>
+                <div className="min-w-0 overflow-x-auto pb-2">
+                  <div className="flex items-end gap-4 min-w-max">
+                    <div className="flex flex-col gap-1.5 min-w-[390px]">
+                      <span className="text-xs font-black uppercase text-primary">Credits: {e.rest}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <TouchButton variant="ghost" className="h-12 w-12 p-0 border-2 border-amber-500/50" onClick={() => store.removeKredit(e.spielerId, 1)} disabled={e.rest === 0} style={e.rest === 0 ? { opacity: 0.3, pointerEvents: 'none' } : undefined} title="1 Kredit zréckbezuelen">
+                          <span className={cn('font-black text-lg', e.rest > 0 ? 'text-amber-400' : 'text-muted-foreground')}>−1</span>
+                        </TouchButton>
+                        {ADD_AMOUNTS.map(n => (
+                          <TouchButton key={n} variant="outline" className="h-12 min-w-12 px-3 font-black text-base gap-1" onClick={() => store.addKredite(e.spielerId, n)}>
+                            <Plus className="w-4 h-4" />{n}
+                          </TouchButton>
+                        ))}
+                        <TouchButton variant="ghost" className="h-12 w-12 p-0 text-destructive hover:bg-destructive/10" onClick={() => store.deleteKreditEntry(e.spielerId)} title="Feeler korrigéieren — Spiller vum Dag läschen">
+                          <Trash2 className="w-5 h-5" />
+                        </TouchButton>
+                      </div>
+                    </div>
 
-                {([
-                  { id: cal12?.id ?? -2, label: 'Cal. 12', quantity: e.cal12, available: !!cal12?.currentPrice && cal12.id > 0 },
-                  { id: cal20?.id ?? -3, label: 'Cal. 20', quantity: e.cal20, available: !!cal20?.currentPrice && cal20.id > 0 },
-                ] as const).map(product => (
-                  <div key={product.id} className="flex flex-col gap-1 min-w-[210px]">
-                    <span className="text-[10px] font-bold uppercase text-foreground">{product.label}: <b data-testid={`text-quantity-${product.id}-${e.spielerId}`}>{product.quantity}</b></span>
-                    <div className="flex gap-1">
-                      <TouchButton variant="ghost" disabled={!product.available} className="h-10 w-10 p-0 border border-amber-500/40" onClick={() => store.addVerkauf(e.spielerId, product.id, -1)} data-testid={`button-minus-${product.id}-${e.spielerId}`}>−1</TouchButton>
-                      {ADD_AMOUNTS.map(n => <TouchButton key={n} disabled={!product.available} variant="outline" className="h-10 px-2 font-bold" onClick={() => store.addVerkauf(e.spielerId, product.id, n)} data-testid={`button-add-${product.id}-${n}-${e.spielerId}`}><Plus className="w-3 h-3" />{n}</TouchButton>)}
+                    {([
+                      { id: cal12?.id ?? -2, label: 'Cal. 12', quantity: e.cal12, available: !!cal12?.currentPrice && cal12.id > 0, color: 'text-sky-400', border: 'border-sky-500/60 hover:bg-sky-500/10' },
+                      { id: cal20?.id ?? -3, label: 'Cal. 20', quantity: e.cal20, available: !!cal20?.currentPrice && cal20.id > 0, color: 'text-violet-400', border: 'border-violet-500/60 hover:bg-violet-500/10' },
+                    ] as const).map(product => (
+                      <div key={product.id} className="flex flex-col gap-1.5 min-w-[290px]">
+                        <span className={cn("text-sm font-black uppercase", product.color)}>
+                          {product.label}: <b className="text-lg" data-testid={`text-quantity-${product.id}-${e.spielerId}`}>{product.quantity}</b>
+                        </span>
+                        <div className="flex gap-2">
+                          <TouchButton variant="ghost" disabled={!product.available} className={cn("h-12 w-12 p-0 border-2 font-black text-base", product.color, product.border)} onClick={() => store.addVerkauf(e.spielerId, product.id, -1)} data-testid={`button-minus-${product.id}-${e.spielerId}`}>−1</TouchButton>
+                          {ADD_AMOUNTS.map(n => <TouchButton key={n} disabled={!product.available} variant="outline" className={cn("h-12 min-w-12 px-3 font-black text-base", product.color, product.border)} onClick={() => store.addVerkauf(e.spielerId, product.id, n)} data-testid={`button-add-${product.id}-${n}-${e.spielerId}`}><Plus className="w-4 h-4" />{n}</TouchButton>)}
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="flex flex-col gap-1.5 shrink-0 ml-2 border-l-2 border-border pl-4">
+                      <span className="text-xs font-black uppercase text-muted-foreground opacity-0">Aktion</span>
+                      <TouchButton
+                        variant={e.isPaid ? 'ghost' : 'outline'}
+                        className={cn("h-12 px-5 font-black text-xs border-2 gap-2", e.isPaid && "text-green-500 border-green-500/30 hover:bg-green-500/10")}
+                        disabled={!e.daySummaryRow}
+                        onClick={() => setBillSpielerId(e.spielerId)}
+                        data-testid={`button-bill-${e.spielerId}`}
+                      >
+                        <Receipt className="w-4 h-4" />
+                        {e.isPaid ? 'RECHNUNG (BEZUELT)' : 'RECHNUNG'}
+                      </TouchButton>
                     </div>
                   </div>
-                ))}
-
-                <div className="flex flex-col gap-1 shrink-0 ml-4 border-l-2 border-border pl-4">
-                  <span className="text-[10px] font-bold uppercase text-muted-foreground opacity-0">Action</span>
-                  <TouchButton
-                    variant={e.isPaid ? 'ghost' : 'outline'}
-                    className={cn("h-10 px-4 font-bold text-xs border-2 gap-2", e.isPaid && "text-green-500 border-green-500/30 hover:bg-green-500/10")}
-                    disabled={!e.daySummaryRow}
-                    onClick={() => setBillSpielerId(e.spielerId)}
-                    data-testid={`button-bill-${e.spielerId}`}
-                  >
-                    <Receipt className="w-4 h-4" />
-                    {e.isPaid ? 'RECHNUNG (BEZUELT)' : 'RECHNUNG'}
-                  </TouchButton>
                 </div>
               </div>
             ))}

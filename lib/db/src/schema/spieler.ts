@@ -7,6 +7,7 @@ export const spielerTable = pgTable("spieler", {
   name: text("name").notNull(),
   email: text("email").unique(),
   mitgliedNr: text("mitglied_nr").unique(),
+  aktiv: boolean("aktiv").notNull().default(true),
   portalAktiv: boolean("portal_aktiv").notNull().default(false),
   isAdmin: boolean("is_admin").notNull().default(false),
   passwortHash: text("passwort_hash"),

@@ -201,7 +201,7 @@ const SpielSchema = z.object({
 
 // GET /api/sync/status
 router.get("/status", requireApiKey, async (_req, res) => {
-  const rows = await db.select({ id: spielerTable.id }).from(spielerTable);
+  const rows = await db.select({ id: spielerTable.id }).from(spielerTable).where(eq(spielerTable.aktiv, true));
   return res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
@@ -219,6 +219,7 @@ async function rosterPayload() {
       portalAktiv: spielerTable.portalAktiv,
     })
     .from(spielerTable)
+    .where(eq(spielerTable.aktiv, true))
     .orderBy(spielerTable.name, spielerTable.id);
   return { spieler: rows };
 }
@@ -245,7 +246,8 @@ router.post("/spieler", requireApiKey, async (req, res) => {
 
     // Server-assigned (positive) IDs: verify existence, nothing to create
     if (s.id > 0) {
-      const existing = await db.select({ id: spielerTable.id }).from(spielerTable).where(eq(spielerTable.id, s.id)).limit(1);
+      const existing = await db.select({ id: spielerTable.id }).from(spielerTable)
+        .where(and(eq(spielerTable.id, s.id), eq(spielerTable.aktiv, true))).limit(1);
       if (existing[0]) {
         mappings.push({ localId: s.id, id: existing[0].id, name, status: "existing" });
         continue;
@@ -254,12 +256,15 @@ router.post("/spieler", requireApiKey, async (req, res) => {
 
     // De-duplicate by name (case-insensitive) before inserting
     const byName = await db
-      .select({ id: spielerTable.id, name: spielerTable.name })
+      .select({ id: spielerTable.id, name: spielerTable.name, aktiv: spielerTable.aktiv })
       .from(spielerTable)
       .where(sql`lower(${spielerTable.name}) = lower(${name})`)
       .limit(1);
 
     if (byName[0]) {
+      if (!byName[0].aktiv) {
+        return res.status(409).json({ error: `Spieler ist deaktiviert: ${byName[0].name}` });
+      }
       mappings.push({ localId: s.id, id: byName[0].id, name: byName[0].name, status: "matched" });
       continue;
     }
@@ -343,6 +348,19 @@ router.get("/spiele", requireApiKey, async (req, res) => {
 // POST /api/sync/spiele
 router.post("/spiele", requireApiKey, async (req, res) => {
   const body = z.object({ spiele: z.array(SpielSchema) }).parse(req.body);
+  const playerIds = [...new Set(body.spiele.flatMap((spiel) => [
+    ...spiel.teilnahmen.map((teilnahme) => teilnahme.spielerId),
+    ...spiel.ergebnisse.map((ergebnis) => ergebnis.spielerId),
+  ]))];
+  const activePlayers = playerIds.length
+    ? await db.select({ id: spielerTable.id }).from(spielerTable)
+      .where(and(inArray(spielerTable.id, playerIds), eq(spielerTable.aktiv, true)))
+    : [];
+  const activePlayerIds = new Set(activePlayers.map((player) => player.id));
+  const inactivePlayerIds = playerIds.filter((id) => !activePlayerIds.has(id));
+  if (inactivePlayerIds.length) {
+    return res.status(409).json({ error: `Unknown or inactive players in game batch: ${inactivePlayerIds.join(", ")}` });
+  }
   const results = [];
 
   for (const s of body.spiele) {
@@ -403,7 +421,8 @@ router.post("/payments", requireApiKey, async (req, res) => {
   const seen = new Set<string>();
   for (const event of parsed.data.events) { if (seen.has(event.externalId)) duplicateIds.add(event.externalId); seen.add(event.externalId); }
   const playerIds = [...new Set(parsed.data.events.map(e => e.spielerId))];
-  const players = await db.select({ id: spielerTable.id }).from(spielerTable).where(inArray(spielerTable.id, playerIds));
+  const players = await db.select({ id: spielerTable.id }).from(spielerTable)
+    .where(and(inArray(spielerTable.id, playerIds), eq(spielerTable.aktiv, true)));
   const known = new Set(players.map(p => p.id));
   if (playerIds.some(id => !known.has(id))) return res.status(400).json({ error: "Unknown player in payment batch" });
   const results = await db.transaction(async tx => {
@@ -498,7 +517,8 @@ router.post("/kredite", requireApiKey, async (req, res) => {
   if (body.events.length) {
     // Reject events for unknown players explicitly (avoid FK 500s)
     const ids = [...new Set(body.events.map((e) => e.spielerId))];
-    const known = await db.select({ id: spielerTable.id }).from(spielerTable).where(inArray(spielerTable.id, ids));
+    const known = await db.select({ id: spielerTable.id }).from(spielerTable)
+      .where(and(inArray(spielerTable.id, ids), eq(spielerTable.aktiv, true)));
     const knownIds = new Set(known.map((k) => k.id));
     const unknown = ids.filter((id) => !knownIds.has(id));
     if (unknown.length) {
@@ -673,7 +693,8 @@ router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
         .filter((event) => event.quantity > 0)
         .map((event) => event.priceRevisionId!))];
       const players = playerIds.length
-        ? await tx.select({ id: spielerTable.id }).from(spielerTable).where(inArray(spielerTable.id, playerIds))
+        ? await tx.select({ id: spielerTable.id }).from(spielerTable)
+          .where(and(inArray(spielerTable.id, playerIds), eq(spielerTable.aktiv, true)))
         : [];
       const products = productIds.length
         ? await tx.select({ id: productsTable.id, name: productsTable.name, category: productsTable.category }).from(productsTable).where(inArray(productsTable.id, productIds))
@@ -822,7 +843,8 @@ async function trySendUpdateEmail(updateId: number, job: EmailJob): Promise<"SEN
 async function buildEmailJobForUpdate(
   u: { id: number; spielerId: number; typ: "UPDATE" | "PASSWORT_RESET" },
 ): Promise<EmailJob | null> {
-  const [s] = await db.select().from(spielerTable).where(eq(spielerTable.id, u.spielerId)).limit(1);
+  const [s] = await db.select().from(spielerTable)
+    .where(and(eq(spielerTable.id, u.spielerId), eq(spielerTable.aktiv, true))).limit(1);
   if (!s?.email) return null;
   const smtp = await getSmtpSettings();
   const portalUrl = smtp?.portalUrl ?? "";
@@ -830,7 +852,7 @@ async function buildEmailJobForUpdate(
   const passwortHash = await bcrypt.hash(passwort, 10);
   await db.update(spielerTable)
     .set(u.typ === "UPDATE" ? { passwortHash, eingeladenAt: new Date() } : { passwortHash })
-    .where(eq(spielerTable.id, u.spielerId));
+    .where(and(eq(spielerTable.id, u.spielerId), eq(spielerTable.aktiv, true)));
   const mail = u.typ === "UPDATE"
     ? invitationEmail(s.name, s.email, passwort, portalUrl)
     : resetEmail(s.name, passwort, portalUrl);
@@ -854,7 +876,8 @@ router.post("/spieler-updates", requireApiKey, async (req, res) => {
       continue;
     }
 
-    const [spieler] = await db.select().from(spielerTable).where(eq(spielerTable.id, u.spielerId)).limit(1);
+    const [spieler] = await db.select().from(spielerTable)
+      .where(and(eq(spielerTable.id, u.spielerId), eq(spielerTable.aktiv, true))).limit(1);
     if (!spieler) {
       results.push({ externalId: u.externalId, status: "error", emailStatus: "NONE", error: `Spiller ${u.spielerId} net fonnt` });
       continue;
@@ -878,7 +901,8 @@ router.post("/spieler-updates", requireApiKey, async (req, res) => {
       if (u.portalAktiv !== undefined) patch.portalAktiv = u.portalAktiv;
       const nowActivating = u.portalAktiv === true && !spieler.portalAktiv;
       const effectiveEmail = u.email !== undefined ? u.email : spieler.email;
-      await db.update(spielerTable).set(patch).where(eq(spielerTable.id, u.spielerId));
+      await db.update(spielerTable).set(patch)
+        .where(and(eq(spielerTable.id, u.spielerId), eq(spielerTable.aktiv, true)));
       // Invitation only on fresh activation with a known email address
       needsEmail = nowActivating && !!effectiveEmail;
     } else {

@@ -35,6 +35,7 @@ export const LoginResponse = zod.object({
   "name": zod.string(),
   "email": zod.string().nullish(),
   "mitgliedNr": zod.string().nullish(),
+  "aktiv": zod.boolean(),
   "portalAktiv": zod.boolean(),
   "isAdmin": zod.boolean(),
   "createdAt": zod.coerce.date()
@@ -50,6 +51,7 @@ export const GetMeResponse = zod.object({
   "name": zod.string(),
   "email": zod.string().nullish(),
   "mitgliedNr": zod.string().nullish(),
+  "aktiv": zod.boolean(),
   "portalAktiv": zod.boolean(),
   "isAdmin": zod.boolean(),
   "createdAt": zod.coerce.date()
@@ -65,6 +67,7 @@ export const ListSpielerResponse = zod.object({
   "name": zod.string(),
   "email": zod.string().nullish(),
   "mitgliedNr": zod.string().nullish(),
+  "aktiv": zod.boolean(),
   "portalAktiv": zod.boolean(),
   "isAdmin": zod.boolean(),
   "createdAt": zod.coerce.date()
@@ -84,6 +87,7 @@ export const GetSpielerResponse = zod.object({
   "name": zod.string(),
   "email": zod.string().nullish(),
   "mitgliedNr": zod.string().nullish(),
+  "aktiv": zod.boolean(),
   "portalAktiv": zod.boolean(),
   "isAdmin": zod.boolean(),
   "createdAt": zod.coerce.date()
@@ -358,6 +362,53 @@ export const PostSyncCreditEventsBody = zod.object({
 })
 
 export const PostSyncCreditEventsResponse = zod.unknown()
+
+
+export const DeactivateAdminPlayerParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const DeactivateAdminPlayerResponse = zod.object({
+  "id": zod.number().int().optional(),
+  "aktiv": zod.boolean(),
+  "deactivated": zod.boolean().optional()
+})
+
+
+export const ReactivateAdminPlayerParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const ReactivateAdminPlayerResponse = zod.object({
+  "id": zod.number().int().optional(),
+  "aktiv": zod.boolean(),
+  "deactivated": zod.boolean().optional()
+})
+
+
+export const PurgeAdminDataBody = zod.union([zod.object({
+  "mode": zod.enum(['day']),
+  "datum": zod.coerce.date(),
+  "confirmation": zod.enum(['PURGE_DAY'])
+}),zod.object({
+  "mode": zod.enum(['all']),
+  "confirmation": zod.enum(['PURGE_ALL'])
+})])
+
+export const PurgeAdminDataResponse = zod.object({
+  "mode": zod.enum(['day', 'all']),
+  "datum": zod.coerce.date().optional(),
+  "counts": zod.object({
+  "players": zod.number().int(),
+  "games": zod.number().int(),
+  "participations": zod.number().int(),
+  "results": zod.number().int(),
+  "credits": zod.number().int(),
+  "sales": zod.number().int(),
+  "billPayments": zod.number().int(),
+  "playerUpdates": zod.number().int()
+})
+})
 
 
 export const ListAdminProductsResponse = zod.object({
