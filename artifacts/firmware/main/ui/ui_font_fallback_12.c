@@ -4,11 +4,7 @@
  * Opts: --size 12 --bpp 4 --format lvgl --font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf --symbols ÄÖÜäöüßÉÀÈÊéàèêû€°²×—→≈─⚠ --no-kerning --no-compress --no-prefilter --lv-font-name ui_font_fallback_12 -o main/ui/ui_font_fallback_12.c
  ******************************************************************************/
 
-#ifdef LV_LVGL_H_INCLUDE_SIMPLE
 #include "lvgl.h"
-#else
-#include "lvgl/lvgl.h"
-#endif
 
 #ifndef UI_FONT_FALLBACK_12
 #define UI_FONT_FALLBACK_12 1
