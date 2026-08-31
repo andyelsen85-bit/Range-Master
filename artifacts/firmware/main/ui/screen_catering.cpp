@@ -259,6 +259,7 @@ static void rebuild(void) {
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW); lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         char name[64]; snprintf(name, sizeof(name), "%s  %d.%02d", p->name, p->preisCent / 100, p->preisCent % 100);
         lv_obj_t *l = lv_label_create(row); lv_label_set_text(l, name);
+        lv_obj_set_style_text_font(l, UI_FONT_14, 0);
         lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
         lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
         lv_obj_set_width(l, 0);
