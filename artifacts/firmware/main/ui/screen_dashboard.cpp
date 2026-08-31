@@ -7,6 +7,7 @@
 // ============================================================
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "ui_time_fmt.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -24,6 +25,7 @@ static lv_obj_t *s_lbl_sync_status;
 static lv_obj_t *s_lbl_pending;
 static lv_obj_t *s_lbl_wifi;
 static lv_obj_t *s_lbl_gateway;
+static lv_obj_t *s_lbl_clock;
 static lv_obj_t *s_history_list;
 static lv_obj_t *s_shutdown_modal;
 static lv_obj_t *s_shutdown_message;
@@ -282,10 +284,18 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_align(s_lbl_wifi, LV_ALIGN_RIGHT_MID, 0, 0);
 
     s_lbl_gateway = lv_label_create(header);
-    lv_label_set_text(s_lbl_gateway, "GATEWAY: NOT CONFIGURED");
+    lv_label_set_text(s_lbl_gateway, "GATEWAY: NET CONFIG");
     lv_obj_set_style_text_font(s_lbl_gateway, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_gateway, LV_ALIGN_RIGHT_MID, -260, 0);
+
+    s_lbl_clock = lv_label_create(header);
+    lv_label_set_text(s_lbl_clock, "ZEIT: NET SYNCHRONISEIERT");
+    lv_obj_set_style_text_font(s_lbl_clock, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_lbl_clock, lv_color_hex(CLR_MUTED), 0);
+    lv_obj_set_width(s_lbl_clock, 250);
+    lv_label_set_long_mode(s_lbl_clock, LV_LABEL_LONG_DOT);
+    lv_obj_align(s_lbl_clock, LV_ALIGN_RIGHT_MID, -510, 0);
 
     // ── Left content area (game history) ──────────────────────
     lv_obj_t *content = lv_obj_create(s_scr);
@@ -506,6 +516,17 @@ void screen_dashboard_refresh(void)
             lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(color), 0);
             s_rendered_gateway_state = gateway_state;
         }
+    }
+    if (s_lbl_clock) {
+        time_t now = time(NULL);
+        struct tm local;
+        localtime_r(&now, &local);
+        char clock_text[48];
+        strftime(clock_text, sizeof(clock_text), "ZEIT: %d.%m.%Y  %H:%M:%S", &local);
+        set_label_text_if_changed(s_lbl_clock, clock_text);
+        lv_obj_set_style_text_color(
+            s_lbl_clock,
+            lv_color_hex(now >= 1704067200 ? CLR_SUCCESS : CLR_DANGER), 0);
     }
 
     // History list (most-recent 5 entries) - proper-height rows. Do not

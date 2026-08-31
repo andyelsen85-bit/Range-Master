@@ -41,6 +41,28 @@ static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap);
 static esp_err_t http_get_json(const char *path, char *resp_buf,
                                size_t resp_cap);
+static bool sync_commit_begin(const char *dataset, TickType_t *started);
+static void sync_commit_end(const char *dataset, TickType_t started);
+
+static bool wait_for_trusted_day(void)
+{
+    // DHCP commonly completes before the first SNTP response. Keep the sync
+    // worker off the network until local dates are trustworthy so no request
+    // can be sent for 1970-01-01 and yesterday's daily roster is retired first.
+    for (int attempt = 0; attempt < 80; ++attempt) {
+        TickType_t commit_started;
+        if (sync_commit_begin("day-rollover", &commit_started)) {
+            bool ready = store_prepare_current_day();
+            sync_commit_end("day-rollover", commit_started);
+            if (ready) return true;
+        }
+        if (!cop_wifi_is_connected()) break;
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+    set_http_error("SYNC", "clock", "time synchronization not ready");
+    ESP_LOGW(TAG, "Sync deferred — trusted local date unavailable");
+    return false;
+}
 
 static bool response_acknowledges_event(const cJSON *results, const char *external_id)
 {
@@ -1794,6 +1816,7 @@ static esp_err_t http_sync_billing_impl(void)
         set_http_error("SYNC", "billing", "WiFi not connected");
         return ESP_ERR_INVALID_STATE;
     }
+    if (!wait_for_trusted_day()) return ESP_ERR_INVALID_STATE;
 
     ESP_LOGI(TAG, "Starting billing sync...");
     esp_err_t overall = ESP_OK;
@@ -1838,6 +1861,7 @@ static esp_err_t http_sync_all_impl(void)
         set_http_error("SYNC", "all", "WiFi not connected");
         return ESP_ERR_INVALID_STATE;
     }
+    if (!wait_for_trusted_day()) return ESP_ERR_INVALID_STATE;
     ESP_LOGI(TAG, "Starting full sync...");
     // The manifest is optional for compatibility with older portals. It is
     // fetched before any data endpoint, but outbox pushes below force their

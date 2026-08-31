@@ -25,9 +25,11 @@ static bool s_mounted;
 static bool s_mount_attempted;
 #define CACHE_MAGIC 0x544D4348u
 #define CACHE_SCHEMA 1u
-// Increment only when the FAT partition moves. A layout migration may format
-// the new partition once; an established partition must never be auto-formatted.
-#define CACHE_FAT_LAYOUT 2u
+// Layout 3 is a one-time recovery migration for released devices that can have
+// a v2 marker alongside an unformatted reserved partition. Healthy v2 volumes
+// mount without formatting; only an unmountable v2 cache is rebuilt. NVS
+// outboxes are outside this partition and remain untouched.
+#define CACHE_FAT_LAYOUT 3u
 typedef struct { uint32_t magic; uint16_t schema, section; uint32_t payload_len, crc32; } CacheEnvelope;
 static_assert(sizeof(CacheEnvelope) == 16, "stable cache envelope");
 typedef struct { int count; PortalSpieler value[MAX_PORTAL_SPIELER]; } RosterPayload;
@@ -159,7 +161,7 @@ bool offline_cache_mount(void) {
         : nvs_err;
     const bool may_initialize = nvs_err == ESP_OK &&
         (marker_err == ESP_ERR_NVS_NOT_FOUND ||
-         (marker_err == ESP_OK && initialized_layout != CACHE_FAT_LAYOUT));
+         (marker_err == ESP_OK && initialized_layout == 2u));
 
     esp_vfs_fat_mount_config_t cfg = {};
     cfg.format_if_mount_failed = may_initialize;

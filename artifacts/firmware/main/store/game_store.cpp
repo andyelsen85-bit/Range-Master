@@ -333,6 +333,9 @@ static bool save_kredit_state_unlocked(void)
     if (err == ESP_OK) err = set_credit_events_blob_unlocked();
     if (err == ESP_OK)
         err = nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds,
+                           sizeof(g_store.lineupIds));
     if (err == ESP_OK) err = nvs_commit(s_nvs);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Could not persist credit state: %s", esp_err_to_name(err));
@@ -1352,6 +1355,73 @@ static bool credit_day_is_current(void)
     char today[11];
     strftime(today, sizeof(today), "%Y-%m-%d", &tm);
     return strcmp(g_store.kreditDatum, today) == 0;
+}
+
+bool store_prepare_current_day(void)
+{
+    time_t now = time(NULL);
+    if (now < VALID_UNIX_TIME) return false;
+
+    struct tm tm;
+    localtime_r(&now, &tm);
+    char today[11];
+    strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+
+    bool credit_changed = false;
+    kredit_events_lock();
+    if (strcmp(g_store.kreditDatum, today) != 0) {
+        int prior_ids[MAX_PORTAL_SPIELER];
+        KreditStand prior_credits[MAX_PORTAL_SPIELER];
+        int prior_lineup[MAX_SPIELER];
+        char prior_date[sizeof(g_store.kreditDatum)];
+        memcpy(prior_ids, g_store.kreditPlayerIds, sizeof(prior_ids));
+        memcpy(prior_credits, g_store.kredite, sizeof(prior_credits));
+        memcpy(prior_lineup, g_store.lineupIds, sizeof(prior_lineup));
+        memcpy(prior_date, g_store.kreditDatum, sizeof(prior_date));
+
+        memset(g_store.kreditPlayerIds, 0, sizeof(g_store.kreditPlayerIds));
+        memset(g_store.kredite, 0, sizeof(g_store.kredite));
+        memset(g_store.lineupIds, 0, sizeof(g_store.lineupIds));
+        snprintf(g_store.kreditDatum, sizeof(g_store.kreditDatum), "%s", today);
+        if (save_kredit_state_unlocked()) {
+            credit_changed = true;
+            ESP_LOGI(TAG, "Started new credit day %s", today);
+        } else {
+            memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
+            memcpy(g_store.kredite, prior_credits, sizeof(prior_credits));
+            memcpy(g_store.lineupIds, prior_lineup, sizeof(prior_lineup));
+            memcpy(g_store.kreditDatum, prior_date, sizeof(prior_date));
+            kredit_events_unlock();
+            return false;
+        }
+    }
+    kredit_events_unlock();
+
+    bool sales_changed = false;
+    xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
+    if (strcmp(g_store.verkaufDatum, today) != 0) {
+        MunitionStand prior_munition[MAX_PORTAL_SPIELER];
+        char prior_date[sizeof(g_store.verkaufDatum)];
+        int prior_cal12 = g_store.verkaufCal12Total;
+        int prior_cal20 = g_store.verkaufCal20Total;
+        memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
+        memcpy(prior_date, g_store.verkaufDatum, sizeof(prior_date));
+        rollover_ammunition_day(today);
+        if (save_sale_state_unlocked() != ESP_OK) {
+            memcpy(g_store.munition, prior_munition, sizeof(prior_munition));
+            memcpy(g_store.verkaufDatum, prior_date, sizeof(prior_date));
+            g_store.verkaufCal12Total = prior_cal12;
+            g_store.verkaufCal20Total = prior_cal20;
+            xSemaphoreGive(s_verkauf_events_mutex);
+            return false;
+        }
+        sales_changed = true;
+        ESP_LOGI(TAG, "Started new sales day %s", today);
+    }
+    xSemaphoreGive(s_verkauf_events_mutex);
+
+    if (credit_changed || sales_changed) store_rebuild_bill_projection();
+    return true;
 }
 
 int store_kredite_verfuegbar(int spieler_id)

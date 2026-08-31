@@ -439,6 +439,7 @@ static void build_player_list(void)
 {
     lv_obj_clean(s_player_list);
     s_row_ref_count = 0;
+    const bool day_ready = store_prepare_current_day();
 
     int count = 0;
     // The canonical sales GET is a day aggregate (not player-attributed), so
@@ -452,7 +453,7 @@ static void build_player_list(void)
     lv_label_set_text(columns, columns_text);
     lv_obj_set_style_text_font(columns, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(columns, lv_color_hex(CLR_MUTED), 0);
-    for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
+    for (int i = 0; day_ready && i < MAX_PORTAL_SPIELER; i++) {
         if (g_store.kreditPlayerIds[i] == 0) continue;
         int sid = g_store.kreditPlayerIds[i];
         KreditStand *k = &g_store.kredite[i];
@@ -654,6 +655,7 @@ static void build_player_list(void)
 
 lv_obj_t *screen_kredite_create(void)
 {
+    (void)store_prepare_current_day();
     s_scr = lv_obj_create(NULL);
     lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
     screen_base_init(s_scr);   // dark bg, opaque, non-scrollable
@@ -744,6 +746,7 @@ lv_obj_t *screen_kredite_create(void)
 
 void screen_kredite_refresh(void)
 {
+    (void)store_prepare_current_day();
     if (!s_player_list) return;
 
     // Rebuild dropdown - heap-allocated: ~13 KB is too large for stack AND for

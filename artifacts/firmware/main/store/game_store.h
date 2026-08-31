@@ -481,6 +481,8 @@ void store_add_kredite(int spieler_id, int anzahl);
  */
 bool store_adjust_kredite(int spieler_id, int delta);
 bool store_spieler_fuer_tag_aktiv(int spieler_id);
+/** Apply a trusted local-date rollover without discarding queued prior-day events. */
+bool store_prepare_current_day(void);
 void store_reconcile_lineup_with_credits(void);
 void store_register_spieler_fuer_tag(int spieler_id);
 /** Atomically rejects unsettled players or removes the active-day roster entry. */

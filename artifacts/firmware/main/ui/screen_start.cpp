@@ -183,7 +183,8 @@ static void machine_toggle_cb(lv_event_t *e)
 // ── screen_start_create ───────────────────────────────────────
 lv_obj_t *screen_start_create(void)
 {
-    store_reconcile_lineup_with_credits();
+    if (store_prepare_current_day())
+        store_reconcile_lineup_with_credits();
     s_scr = lv_obj_create(NULL);
     lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
     screen_base_init(s_scr);   // dark bg, opaque, non-scrollable
@@ -404,7 +405,8 @@ lv_obj_t *screen_start_create(void)
 
 void screen_start_refresh(void)
 {
-    store_reconcile_lineup_with_credits();
+    if (store_prepare_current_day())
+        store_reconcile_lineup_with_credits();
     // Rebuild dropdown options when portal players change
     if (!s_player_dropdowns[0]) return;
     const size_t opts_sz = MAX_PORTAL_SPIELER * (MAX_NAME_LEN + 1) + 64;
