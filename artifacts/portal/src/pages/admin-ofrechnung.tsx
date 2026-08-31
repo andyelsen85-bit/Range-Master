@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Coins, AlertCircle, ShoppingCart, Activity, Target, Receipt, CheckCircle, Clock, CalendarRange, RotateCcw } from "lucide-react";
+import { Coins, AlertCircle, ShoppingCart, Activity, Target, Receipt, CheckCircle, Clock, CalendarRange, RotateCcw, CircleCheck, CircleDashed } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { endOfMonth, format, parseISO, startOfMonth } from "date-fns";
 import { de } from "date-fns/locale";
@@ -74,6 +74,16 @@ interface DaySummaryProductTotal {
   totalCents: number;
 }
 
+interface GameClayBreakdown {
+  modus: "NORMAL" | "HARAKIRI" | "CUSTOM_1" | "CUSTOM_2" | "CUSTOM_3" | "CUSTOM_4";
+  games: number;
+  completedGames: number;
+  playerParticipations: number;
+  theoreticalClays: number;
+  confirmedClays: number;
+  unconfirmedClays: number;
+}
+
 interface DaySummary {
   datum?: string;
   from?: string;
@@ -83,7 +93,10 @@ interface DaySummary {
   paidPlayers: number;
   games: number;
   completedGames: number;
+  theoreticalClays: number;
   confirmedClays: number;
+  unconfirmedClays: number;
+  gameBreakdown: GameClayBreakdown[];
   productTotals: Record<string, DaySummaryProductTotal>;
   players: DaySummaryPlayerBill[];
 }
@@ -112,6 +125,12 @@ function dateStr(date: Date): string {
 function periodLabel(from: string, to: string): string {
   if (from === to) return format(parseISO(from), "dd. MMMM yyyy", { locale: de });
   return `${format(parseISO(from), "dd. MMM yyyy", { locale: de })} – ${format(parseISO(to), "dd. MMM yyyy", { locale: de })}`;
+}
+
+function modusLabel(modus: GameClayBreakdown["modus"]): string {
+  if (modus === "NORMAL") return "Normal";
+  if (modus === "HARAKIRI") return "Harakiri";
+  return `Custom ${modus.slice(-1)}`;
 }
 
 function StatCard({ label, value, sub, icon: Icon }: { label: string; value: number | string; sub?: string; icon: any }) {
@@ -166,7 +185,10 @@ export default function AdminOfrechnung() {
             paidPlayers: 0,
             games: 0,
             completedGames: 0,
+            theoreticalClays: 0,
             confirmedClays: 0,
+            unconfirmedClays: 0,
+            gameBreakdown: [],
             productTotals: {},
             players: []
           };
@@ -273,7 +295,7 @@ export default function AdminOfrechnung() {
     return true;
   });
 
-  const summary = data ?? { generalTotalCents: 0, uniquePlayers: 0, paidPlayers: 0, games: 0, completedGames: 0, confirmedClays: 0, productTotals: {}, players: [] };
+  const summary = data ?? { generalTotalCents: 0, uniquePlayers: 0, paidPlayers: 0, games: 0, completedGames: 0, theoreticalClays: 0, confirmedClays: 0, unconfirmedClays: 0, gameBreakdown: [], productTotals: {}, players: [] };
   const products = Object.values(summary.productTotals || {}) as DaySummaryProductTotal[];
   const selectedDayLines = isSingleDay ? selectedBill?.dayLines ?? selectedBill?.lines ?? [] : selectedBill?.lines ?? [];
   const selectedDayCategories = isSingleDay ? selectedBill?.dayCategorySubtotals ?? selectedBill?.categorySubtotals ?? {} : selectedBill?.categorySubtotals ?? {};
@@ -397,12 +419,72 @@ export default function AdminOfrechnung() {
       </section>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
          <StatCard label="Gesamtumsatz" value={formatMoney(summary.generalTotalCents)} sub={isSingleDay ? "Alle Produkte des Tages" : "Alle Produkte im Zeitraum"} icon={Coins} />
          <StatCard label="Spiele" value={summary.games} sub={`${summary.completedGames} abgeschlossen`} icon={Activity} />
-         <StatCard label="Tauben" value={summary.confirmedClays} sub="Ausgelöst (A-G: 1, H: 2)" icon={Target} />
+         <StatCard label="Theoretisch" value={summary.theoreticalClays} sub="Resultate abgeschlossener Spiele" icon={Target} />
+         <StatCard label="Real bestätigt" value={summary.confirmedClays} sub="Nur Auslösungen mit ACK" icon={CircleCheck} />
+         <StatCard label="Differenz" value={summary.unconfirmedClays} sub="Ohne bestätigten ACK" icon={CircleDashed} />
          <StatCard label={isSingleDay ? "Rechnungen" : "Spieler"} value={summary.uniquePlayers} sub={`${summary.paidPlayers} vollständig bezahlt`} icon={Receipt} />
       </div>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight">Tauben nach Spieltyp</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Theoretisch basiert auf gespeicherten Resultaten. Real zählt ausschließlich vom Empfänger bestätigte ACK-Auslösungen.
+          </p>
+        </div>
+        <div className="bg-card border border-border/50 rounded-xl overflow-hidden shadow-sm">
+          {isLoading ? (
+            <div className="p-6 space-y-3">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-lg bg-secondary/30" />)}
+            </div>
+          ) : summary.gameBreakdown.length === 0 ? (
+            <div className="p-10 text-center text-muted-foreground">
+              <Target size={32} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium">Keine Spiele im ausgewählten Zeitraum.</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-secondary/20">
+                <TableRow className="border-border/50 hover:bg-transparent">
+                  <TableHead className="text-xs uppercase tracking-widest font-bold">Spieltyp</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spiele</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spieler-Einsätze</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Theoretisch</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Real</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Differenz</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {summary.gameBreakdown.map((entry) => (
+                  <TableRow key={entry.modus} className="border-border/30 hover:bg-secondary/10">
+                    <TableCell>
+                      <p className="font-bold text-sm">{modusLabel(entry.modus)}</p>
+                      {entry.completedGames !== entry.games && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5">{entry.completedGames} von {entry.games} abgeschlossen</p>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-mono font-bold">{entry.games}</TableCell>
+                    <TableCell className="text-right font-mono font-bold">{entry.playerParticipations}</TableCell>
+                    <TableCell className="text-right font-mono font-bold">{entry.theoreticalClays}</TableCell>
+                    <TableCell className="text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{entry.confirmedClays}</TableCell>
+                    <TableCell className={cn(
+                      "text-right font-mono font-black",
+                      entry.unconfirmedClays > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+                    )}>{entry.unconfirmedClays}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Hinweis: Bei älteren Spielen kann „0 real bestätigt“ bedeuten, dass die ACK-Zählung damals noch nicht gespeichert wurde.
+          Die Differenz ändert keine Rechnung automatisch.
+        </p>
+      </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         

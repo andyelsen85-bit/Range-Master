@@ -50,6 +50,13 @@
       "when": 1788163200000,
       "tag": "0006_player_active_status",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788172800000,
+      "tag": "0007_custom_4_modus",
+      "breakpoints": true
     }
   ]
 }

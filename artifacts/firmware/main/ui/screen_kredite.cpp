@@ -213,11 +213,10 @@ static void bill_cb(lv_event_t *e)
     if (remaining < 0) remaining = 0;
     snprintf(totals, sizeof(totals),
               "KREDITE: %d GEWÄHRT  |  %d GENUTZT  |  %d ÜBRIG\n"
-              "SPIELE: %d SPIELE / %d ABGESCHLOSSEN  |  %d BESTÄTIGTE TAUBEN",
+              "SPIELE: %d SPIELE / %d ABGESCHLOSSEN",
              granted, used, remaining,
              bill_data ? bill_data->games : 0,
-             bill_data ? bill_data->completedGames : 0,
-             bill_data ? bill_data->confirmedClays : 0);
+              bill_data ? bill_data->completedGames : 0);
     lv_obj_t *summary = lv_label_create(card); lv_label_set_text(summary, totals);
     lv_obj_set_style_text_font(summary, UI_FONT_16, 0);
     lv_obj_set_style_text_color(summary, lv_color_hex(CLR_TEXT), 0);

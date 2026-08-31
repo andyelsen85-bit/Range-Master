@@ -24,6 +24,7 @@ export * from './billDaySummary';
 export * from './billDaySummaryCategorySubtotals';
 export * from './billDaySummaryPlayersItem';
 export * from './billDaySummaryProductTotals';
+export * from './billGameBreakdown';
 export * from './billPaymentInput';
 export * from './billPaymentResult';
 export * from './billPaymentResultStatus';

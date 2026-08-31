@@ -22,7 +22,6 @@ export interface BillPeriodPlayer {
   credit: BillPeriodPlayerCredit;
   games: number;
   completedGames: number;
-  confirmedClays: number;
   paidDays: number;
   state: BillPeriodPlayerState;
 }

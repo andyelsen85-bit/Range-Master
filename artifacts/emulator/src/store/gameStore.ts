@@ -154,7 +154,6 @@ export interface DaySummary {
     credit: { granted: number; used: number; remaining: number };
     games: number;
     completedGames: number;
-    confirmedClays: number;
     state: 'OPEN' | 'PENDING_NEUTRAL' | 'PAID';
     paymentExternalId: string | null;
     paidAt: string | null;
@@ -1697,7 +1696,6 @@ export const useGameStore = create<GameState>((set, get) => {
         credit: baseSource ? { ...baseSource.credit } : { granted: 0, used: 0, remaining: 0 },
         games: baseSource?.games ?? 0,
         completedGames: baseSource?.completedGames ?? 0,
-        confirmedClays: baseSource?.confirmedClays ?? 0,
         state: baseSource?.state ?? 'OPEN',
         paymentExternalId: baseSource?.paymentExternalId ?? null,
         paidAt: baseSource?.paidAt ?? null,
@@ -1785,7 +1783,6 @@ export const useGameStore = create<GameState>((set, get) => {
       for (const g of pendingGames) {
         projected.games += 1;
         if (g.abgeschlossen) projected.completedGames += 1;
-        projected.confirmedClays += g.confirmedLaunches;
       }
 
       if (!baseSource && !k && pendingCreditUses.length === 0 && pendingSales.length === 0 && pendingGames.length === 0) {

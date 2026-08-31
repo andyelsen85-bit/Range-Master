@@ -8,6 +8,7 @@
 import type { BillDaySummaryCategorySubtotals } from './billDaySummaryCategorySubtotals';
 import type { BillDaySummaryPlayersItem } from './billDaySummaryPlayersItem';
 import type { BillDaySummaryProductTotals } from './billDaySummaryProductTotals';
+import type { BillGameBreakdown } from './billGameBreakdown';
 
 export interface BillDaySummary {
   datum: Date;
@@ -19,5 +20,8 @@ export interface BillDaySummary {
   paidPlayers: number;
   games: number;
   completedGames: number;
+  theoreticalClays: number;
   confirmedClays: number;
+  unconfirmedClays: number;
+  gameBreakdown: BillGameBreakdown[];
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isActivityAfterPayment, isBillableCreditEvent, isSettlementRedundant, periodSettlementState } from "./bills";
+import { clayDifference, isActivityAfterPayment, isBillableCreditEvent, isSettlementRedundant, periodSettlementState } from "./bills";
 
 test("only consumed game credits are billable", () => {
   assert.equal(isBillableCreditEvent("USE"), true);
@@ -25,4 +25,10 @@ test("period state remains open when open amounts from different days net to zer
   assert.equal(periodSettlementState(2, 2), "OPEN");
   assert.equal(periodSettlementState(0, 2), "PAID");
   assert.equal(periodSettlementState(0, 0), "PENDING_NEUTRAL");
+});
+
+test("clay difference never invents negative missing launches", () => {
+  assert.equal(clayDifference(108, 104), 4);
+  assert.equal(clayDifference(108, 108), 0);
+  assert.equal(clayDifference(108, 110), 0);
 });

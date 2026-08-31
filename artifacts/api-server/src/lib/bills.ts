@@ -17,6 +17,10 @@ export function periodSettlementState(openDays: number, billableDays: number): "
   return "PENDING_NEUTRAL";
 }
 
+export function clayDifference(theoreticalClays: number, confirmedClays: number): number {
+  return Math.max(0, theoreticalClays - confirmedClays);
+}
+
 /** Settlements are ordered by server receipt time, never a terminal clock. */
 export function isActivityAfterPayment(createdAt: Date, paidAt: Date | null): boolean {
   return paidAt === null || createdAt.getTime() > paidAt.getTime();
@@ -57,6 +61,64 @@ export async function billSettlementStatus(executor: SqlExecutor, spielerId: num
 /** Serialize payment decisions for one player/day, including terminal retries. */
 export async function lockBillSettlement(executor: SqlExecutor, spielerId: number, datum: string): Promise<void> {
   await executor.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`bill:${spielerId}:${datum}`}, 0))`);
+}
+
+async function gameClaySummary(from: string, to: string) {
+  const rows = (await db.execute(sql`
+    WITH scoped_games AS (
+      SELECT id, modus, abgeschlossen, confirmed_launches
+      FROM spiele
+      WHERE (datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+    ), participants AS (
+      SELECT st.spiel_id, COUNT(DISTINCT st.spieler_id)::int player_participations
+      FROM spiel_teilnahmen st
+      JOIN scoped_games g ON g.id = st.spiel_id
+      GROUP BY st.spiel_id
+    ), result_counts AS (
+      SELECT e.spiel_id, COUNT(*)::int theoretical_clays
+      FROM ergebnisse e
+      JOIN scoped_games g ON g.id = e.spiel_id
+      GROUP BY e.spiel_id
+    )
+    SELECT g.modus,
+      COUNT(*)::int games,
+      COUNT(*) FILTER (WHERE g.abgeschlossen)::int completed_games,
+      COALESCE(SUM(p.player_participations) FILTER (WHERE g.abgeschlossen), 0)::int player_participations,
+      COALESCE(SUM(r.theoretical_clays) FILTER (WHERE g.abgeschlossen), 0)::int theoretical_clays,
+      COALESCE(SUM(g.confirmed_launches) FILTER (WHERE g.abgeschlossen), 0)::int confirmed_clays
+    FROM scoped_games g
+    LEFT JOIN participants p ON p.spiel_id = g.id
+    LEFT JOIN result_counts r ON r.spiel_id = g.id
+    GROUP BY g.modus
+    ORDER BY g.modus
+  `)).rows as any[];
+
+  const gameBreakdown = rows.map((row) => {
+    const theoreticalClays = Number(row.theoretical_clays);
+    const confirmedClays = Number(row.confirmed_clays);
+    return {
+      modus: row.modus,
+      games: Number(row.games),
+      completedGames: Number(row.completed_games),
+      playerParticipations: Number(row.player_participations),
+      theoreticalClays,
+      confirmedClays,
+      unconfirmedClays: clayDifference(theoreticalClays, confirmedClays),
+    };
+  });
+
+  const totals = gameBreakdown.reduce((sum, entry) => ({
+    games: sum.games + entry.games,
+    completedGames: sum.completedGames + entry.completedGames,
+    theoreticalClays: sum.theoreticalClays + entry.theoreticalClays,
+    confirmedClays: sum.confirmedClays + entry.confirmedClays,
+  }), { games: 0, completedGames: 0, theoreticalClays: 0, confirmedClays: 0 });
+
+  return {
+    ...totals,
+    unconfirmedClays: clayDifference(totals.theoreticalClays, totals.confirmedClays),
+    gameBreakdown,
+  };
 }
 
 /** The authoritative, incremental day view. */
@@ -106,8 +168,7 @@ export async function dayBillSummary(datum: string) {
       FROM kredit_events WHERE datum = ${datum} GROUP BY spieler_id
     ), game_counts AS (
       SELECT st.spieler_id, COUNT(DISTINCT g.id)::int games,
-        COUNT(DISTINCT g.id) FILTER (WHERE g.abgeschlossen)::int completed_games,
-        COALESCE(SUM(g.confirmed_launches) FILTER (WHERE g.abgeschlossen), 0)::int confirmed_clays
+        COUNT(DISTINCT g.id) FILTER (WHERE g.abgeschlossen)::int completed_games
       FROM spiel_teilnahmen st JOIN spiele g ON g.id = st.spiel_id
       WHERE (g.datum AT TIME ZONE 'UTC')::date = ${datum} GROUP BY st.spieler_id
     )
@@ -138,7 +199,6 @@ export async function dayBillSummary(datum: string) {
       COALESCE(c.granted, 0)::int credit_granted, COALESCE(c.used, 0)::int credit_used,
       (COALESCE(c.granted, 0) - COALESCE(c.used, 0))::int credit_remaining,
       COALESCE(gc.games, 0)::int games, COALESCE(gc.completed_games, 0)::int completed_games,
-      COALESCE(gc.confirmed_clays, 0)::int confirmed_clays,
       lp.external_id payment_external_id, lp.paid_at, lp.source,
       admin.id marked_by_admin_id, admin.name marked_by_admin_name,
       key.id marked_by_api_key_id, key.name marked_by_api_key_name,
@@ -158,7 +218,7 @@ export async function dayBillSummary(datum: string) {
     dayLines: row.day_lines, dayCategorySubtotals: row.day_category_subtotals,
     dayTotalCents: Number(row.day_total_cents),
     credit: { granted: Number(row.credit_granted), used: Number(row.credit_used), remaining: Number(row.credit_remaining) },
-    games: Number(row.games), completedGames: Number(row.completed_games), confirmedClays: Number(row.confirmed_clays),
+    games: Number(row.games), completedGames: Number(row.completed_games),
     state: row.bill_state, payment: row.payment_external_id ? {
       externalId: row.payment_external_id, paidAt: row.paid_at, source: row.source,
       markedByAdmin: row.marked_by_admin_id ? { id: Number(row.marked_by_admin_id), name: row.marked_by_admin_name } : null,
@@ -174,14 +234,10 @@ export async function dayBillSummary(datum: string) {
     total.quantity += Number(line.quantity); total.totalCents += Number(line.totalCents); productTotals[key] = total;
     categorySubtotals[line.category] = (categorySubtotals[line.category] ?? 0) + Number(line.totalCents);
   }
-  const [gameTotals] = (await db.execute(sql`
-    SELECT COUNT(*)::int games, COUNT(*) FILTER (WHERE abgeschlossen)::int completed_games,
-      COALESCE(SUM(confirmed_launches) FILTER (WHERE abgeschlossen), 0)::int confirmed_clays
-    FROM spiele WHERE (datum AT TIME ZONE 'UTC')::date = ${datum}
-  `)).rows as any[];
+  const gameTotals = await gameClaySummary(datum, datum);
   return { datum, players, categorySubtotals, productTotals, generalTotalCents: fullDayLines.reduce((n: number, line: any) => n + Number(line.totalCents), 0),
     uniquePlayers: players.length, paidPlayers: players.filter(p => p.state === "PAID").length,
-    games: Number(gameTotals?.games ?? 0), completedGames: Number(gameTotals?.completed_games ?? 0), confirmedClays: Number(gameTotals?.confirmed_clays ?? 0) };
+    ...gameTotals };
 }
 
 /** Dates with any authoritative activity, used to decorate the portal calendar. */
@@ -275,8 +331,7 @@ export async function periodBillSummary(from: string, to: string) {
       GROUP BY spieler_id
     ), game_counts AS (
       SELECT st.spieler_id, COUNT(DISTINCT g.id)::int games,
-        COUNT(DISTINCT g.id) FILTER (WHERE g.abgeschlossen)::int completed_games,
-        COALESCE(SUM(g.confirmed_launches) FILTER (WHERE g.abgeschlossen), 0)::int confirmed_clays
+        COUNT(DISTINCT g.id) FILTER (WHERE g.abgeschlossen)::int completed_games
       FROM spiel_teilnahmen st JOIN spiele g ON g.id = st.spiel_id
       WHERE (g.datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
       GROUP BY st.spieler_id
@@ -295,7 +350,6 @@ export async function periodBillSummary(from: string, to: string) {
       COALESCE(c.granted, 0)::int credit_granted, COALESCE(c.used, 0)::int credit_used,
       (COALESCE(c.granted, 0) - COALESCE(c.used, 0))::int credit_remaining,
       COALESCE(gc.games, 0)::int games, COALESCE(gc.completed_games, 0)::int completed_games,
-      COALESCE(gc.confirmed_clays, 0)::int confirmed_clays,
       COALESCE((SELECT COUNT(*) FROM latest_payments lp WHERE lp.spieler_id = a.spieler_id), 0)::int paid_days,
       COALESCE((SELECT COUNT(*) FROM day_states ds
         WHERE ds.spieler_id = a.spieler_id AND ds.open_total_cents <> 0), 0)::int open_days,
@@ -327,7 +381,6 @@ export async function periodBillSummary(from: string, to: string) {
       },
       games: Number(row.games),
       completedGames: Number(row.completed_games),
-      confirmedClays: Number(row.confirmed_clays),
       paidDays: Number(row.paid_days),
       state: periodSettlementState(Number(row.open_days), Number(row.billable_days)),
     };
@@ -350,12 +403,7 @@ export async function periodBillSummary(from: string, to: string) {
     productTotals[key] = total;
     categorySubtotals[line.category] = (categorySubtotals[line.category] ?? 0) + Number(line.totalCents);
   }
-  const [gameTotals] = (await db.execute(sql`
-    SELECT COUNT(*)::int games, COUNT(*) FILTER (WHERE abgeschlossen)::int completed_games,
-      COALESCE(SUM(confirmed_launches) FILTER (WHERE abgeschlossen), 0)::int confirmed_clays
-    FROM spiele
-    WHERE (datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
-  `)).rows as any[];
+  const gameTotals = await gameClaySummary(from, to);
   return {
     from,
     to,
@@ -365,8 +413,6 @@ export async function periodBillSummary(from: string, to: string) {
     generalTotalCents: players.reduce((sum: number, player: any) => sum + player.totalCents, 0),
     uniquePlayers: players.length,
     paidPlayers: players.filter((player: any) => player.state === "PAID").length,
-    games: Number(gameTotals?.games ?? 0),
-    completedGames: Number(gameTotals?.completed_games ?? 0),
-    confirmedClays: Number(gameTotals?.confirmed_clays ?? 0),
+    ...gameTotals,
   };
 }

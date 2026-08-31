@@ -29,7 +29,7 @@ describe('projected billing overlays', () => {
           spielerId: 7, spielerName: 'Ada', mitgliedNr: null, lines: [],
           categorySubtotals: {}, totalCents: 0,
           credit: { granted: 0, used: 0, remaining: 0 },
-          games: 0, completedGames: 0, confirmedClays: 0,
+          games: 0, completedGames: 0,
           state: 'PAID', paymentExternalId: 'old-payment', paidAt: 'now',
         }],
         categorySubtotals: {}, productTotals: {}, generalTotalCents: 0,

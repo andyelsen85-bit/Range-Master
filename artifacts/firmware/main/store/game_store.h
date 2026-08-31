@@ -271,7 +271,7 @@ typedef struct {
     int  creditRemaining;
     int  games;
     int  completedGames;
-    int  confirmedClays;
+    int  reservedConfirmedClays; // retained only to preserve persisted cache layout
     BillState state;
     char paymentExternalId[40];
     char paidAt[32];

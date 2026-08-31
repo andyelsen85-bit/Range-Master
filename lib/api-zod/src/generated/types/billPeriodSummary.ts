@@ -5,6 +5,7 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+import type { BillGameBreakdown } from './billGameBreakdown';
 import type { BillPeriodPlayer } from './billPeriodPlayer';
 import type { BillPeriodSummaryCategorySubtotals } from './billPeriodSummaryCategorySubtotals';
 import type { BillPeriodSummaryProductTotals } from './billPeriodSummaryProductTotals';
@@ -20,5 +21,8 @@ export interface BillPeriodSummary {
   paidPlayers: number;
   games: number;
   completedGames: number;
+  theoreticalClays: number;
   confirmedClays: number;
+  unconfirmedClays: number;
+  gameBreakdown: BillGameBreakdown[];
 }

@@ -863,7 +863,7 @@ components:
         totalCents: { type: integer }
     BillDaySummary:
       type: object
-      required: [datum, players, categorySubtotals, productTotals, generalTotalCents, uniquePlayers, paidPlayers, games, completedGames, confirmedClays]
+      required: [datum, players, categorySubtotals, productTotals, generalTotalCents, uniquePlayers, paidPlayers, games, completedGames, theoreticalClays, confirmedClays, unconfirmedClays, gameBreakdown]
       properties:
         datum: { type: string, format: date }
         players: { type: array, items: { type: object } }
@@ -877,7 +877,12 @@ components:
         paidPlayers: { type: integer }
         games: { type: integer }
         completedGames: { type: integer }
+        theoreticalClays: { type: integer }
         confirmedClays: { type: integer }
+        unconfirmedClays: { type: integer }
+        gameBreakdown:
+          type: array
+          items: { $ref: "#/components/schemas/BillGameBreakdown" }
     BillActivityDays:
       type: object
       required: [from, to, days]
@@ -889,7 +894,7 @@ components:
           items: { type: string, format: date }
     BillPeriodSummary:
       type: object
-      required: [from, to, players, categorySubtotals, productTotals, generalTotalCents, uniquePlayers, paidPlayers, games, completedGames, confirmedClays]
+      required: [from, to, players, categorySubtotals, productTotals, generalTotalCents, uniquePlayers, paidPlayers, games, completedGames, theoreticalClays, confirmedClays, unconfirmedClays, gameBreakdown]
       properties:
         from: { type: string, format: date }
         to: { type: string, format: date }
@@ -906,10 +911,26 @@ components:
         paidPlayers: { type: integer }
         games: { type: integer }
         completedGames: { type: integer }
+        theoreticalClays: { type: integer }
         confirmedClays: { type: integer }
+        unconfirmedClays: { type: integer }
+        gameBreakdown:
+          type: array
+          items: { $ref: "#/components/schemas/BillGameBreakdown" }
+    BillGameBreakdown:
+      type: object
+      required: [modus, games, completedGames, playerParticipations, theoreticalClays, confirmedClays, unconfirmedClays]
+      properties:
+        modus: { $ref: "#/components/schemas/Modus" }
+        games: { type: integer }
+        completedGames: { type: integer }
+        playerParticipations: { type: integer }
+        theoreticalClays: { type: integer }
+        confirmedClays: { type: integer }
+        unconfirmedClays: { type: integer }
     BillPeriodPlayer:
       type: object
-      required: [spielerId, spielerName, mitgliedNr, lines, categorySubtotals, totalCents, openTotalCents, credit, games, completedGames, confirmedClays, paidDays, state]
+      required: [spielerId, spielerName, mitgliedNr, lines, categorySubtotals, totalCents, openTotalCents, credit, games, completedGames, paidDays, state]
       properties:
         spielerId: { type: integer }
         spielerName: { type: string }
@@ -929,7 +950,6 @@ components:
             remaining: { type: integer }
         games: { type: integer }
         completedGames: { type: integer }
-        confirmedClays: { type: integer }
         paidDays: { type: integer }
         state: { type: string, enum: [OPEN, PENDING_NEUTRAL, PAID] }
     BillProductTotal:
@@ -1023,6 +1043,7 @@ components:
         - CUSTOM_1
         - CUSTOM_2
         - CUSTOM_3
+        - CUSTOM_4
 
     Maschine:
       type: string

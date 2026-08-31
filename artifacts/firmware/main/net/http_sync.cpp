@@ -1570,7 +1570,6 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
         bill->totalCent = json_int(player, "totalCents");
         bill->games = json_int(player, "games");
         bill->completedGames = json_int(player, "completedGames");
-        bill->confirmedClays = json_int(player, "confirmedClays");
         cJSON *credit = cJSON_GetObjectItemCaseSensitive(player, "credit");
         bill->creditGranted = json_int(credit, "granted");
         bill->creditUsed = json_int(credit, "used");

@@ -17,4 +17,5 @@ export const Modus = {
   CUSTOM_1: 'CUSTOM_1',
   CUSTOM_2: 'CUSTOM_2',
   CUSTOM_3: 'CUSTOM_3',
+  CUSTOM_4: 'CUSTOM_4',
 } as const;

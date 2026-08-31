@@ -266,6 +266,30 @@ export interface BillProductTotal {
 
 export type BillDaySummaryProductTotals = {[key: string]: BillProductTotal};
 
+export type Modus = typeof Modus[keyof typeof Modus];
+
+
+export const Modus = {
+  NORMAL: 'NORMAL',
+  HARAKIRI: 'HARAKIRI',
+  HARAKIRI_DELAYED: 'HARAKIRI_DELAYED',
+  HARAKIRI_FULL: 'HARAKIRI_FULL',
+  CUSTOM_1: 'CUSTOM_1',
+  CUSTOM_2: 'CUSTOM_2',
+  CUSTOM_3: 'CUSTOM_3',
+  CUSTOM_4: 'CUSTOM_4',
+} as const;
+
+export interface BillGameBreakdown {
+  modus: Modus;
+  games: number;
+  completedGames: number;
+  playerParticipations: number;
+  theoreticalClays: number;
+  confirmedClays: number;
+  unconfirmedClays: number;
+}
+
 export interface BillDaySummary {
   datum: string;
   players: BillDaySummaryPlayersItem[];
@@ -276,7 +300,10 @@ export interface BillDaySummary {
   paidPlayers: number;
   games: number;
   completedGames: number;
+  theoreticalClays: number;
   confirmedClays: number;
+  unconfirmedClays: number;
+  gameBreakdown: BillGameBreakdown[];
 }
 
 export interface BillActivityDays {
@@ -318,7 +345,6 @@ export interface BillPeriodPlayer {
   credit: BillPeriodPlayerCredit;
   games: number;
   completedGames: number;
-  confirmedClays: number;
   paidDays: number;
   state: BillPeriodPlayerState;
 }
@@ -334,7 +360,10 @@ export interface BillPeriodSummary {
   paidPlayers: number;
   games: number;
   completedGames: number;
+  theoreticalClays: number;
   confirmedClays: number;
+  unconfirmedClays: number;
+  gameBreakdown: BillGameBreakdown[];
 }
 
 export interface DaySalesItem {
@@ -399,19 +428,6 @@ export interface HealthStatus {
 export interface ErrorResponse {
   error: string;
 }
-
-export type Modus = typeof Modus[keyof typeof Modus];
-
-
-export const Modus = {
-  NORMAL: 'NORMAL',
-  HARAKIRI: 'HARAKIRI',
-  HARAKIRI_DELAYED: 'HARAKIRI_DELAYED',
-  HARAKIRI_FULL: 'HARAKIRI_FULL',
-  CUSTOM_1: 'CUSTOM_1',
-  CUSTOM_2: 'CUSTOM_2',
-  CUSTOM_3: 'CUSTOM_3',
-} as const;
 
 export type Maschine = typeof Maschine[keyof typeof Maschine];
 

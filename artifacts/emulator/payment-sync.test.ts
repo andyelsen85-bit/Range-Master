@@ -45,7 +45,6 @@ describe('Payment Sync Resolution', () => {
           credit: { granted: 0, used: 0, remaining: 0 },
           games: 0,
           completedGames: 0,
-          confirmedClays: 0,
           state: 'PAID',
           paymentExternalId: 'payment-local',
           paidAt: null,
