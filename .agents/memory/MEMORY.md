@@ -32,3 +32,4 @@
 - [Non-blocking sync publication](nonblocking-sync-publication.md) — HTTP and persistence must never pause the UI; only acknowledged, bounded RAM swaps may briefly gate touch
 - [Firmware warning policy](firmware-build-werror.md) — Windows ESP-IDF builds use -Werror=all; keep snprintf inputs provably bounded and avoid same-object restrict overlap
 - [German UI language](german-ui-language.md) — Portal and terminal user-facing text should be natural German; preserve internal routes, enums, and protocol identifiers
+- [LVGL generated font include path](lvgl-font-include-path.md) — firmware font sources must include simple `lvgl.h`, not nested `lvgl/lvgl.h`
