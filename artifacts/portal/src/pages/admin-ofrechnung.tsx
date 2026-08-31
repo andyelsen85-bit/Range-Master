@@ -157,11 +157,11 @@ export default function AdminOfrechnung() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-day-summary", datum] });
-      toast({ title: "Bezuelt", description: "D'Rechnung gouf als bezuelt markéiert." });
+      toast({ title: "Bezahlt", description: "Die Rechnung wurde als bezahlt markiert." });
       setSelectedBill(null);
     },
     onError: (e: any) => {
-      toast({ title: "Feeler", description: e.message || "Onbekannte Feeler", variant: "destructive" });
+      toast({ title: "Fehler", description: e.message || "Unbekannter Fehler", variant: "destructive" });
     }
   });
 
@@ -182,9 +182,9 @@ export default function AdminOfrechnung() {
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
       <header className="border-b border-border/50 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dagesofrechnung</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Tagesabrechnung</h1>
           <p className="text-muted-foreground mt-2 text-sm font-medium">
-            Komplett Iwwersiicht vun den Deeg, Rechnungen pro Spiller a Bezuelungen.
+            Vollständige Übersicht des Tages, der Spielerrechnungen und Zahlungen.
           </p>
         </div>
         <div className="flex items-center gap-3 bg-secondary/20 p-1.5 rounded-xl border border-border/40 w-fit">
@@ -203,10 +203,10 @@ export default function AdminOfrechnung() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Ëmsaz" value={formatMoney(summary.generalTotalCents)} sub="All Produkter" icon={Coins} />
-        <StatCard label="Spiller (Games)" value={summary.games} sub={`${summary.completedGames} ofgeschloss`} icon={Activity} />
-        <StatCard label="Tauben" value={summary.confirmedClays} sub="Ausgeléist (A-G: 1, H: 2)" icon={Target} />
-        <StatCard label="Rechnungen" value={data?.players.length ?? 0} sub={`${data?.players.filter(b => b.state === "PAID").length ?? 0} bezuelt`} icon={Receipt} />
+         <StatCard label="Gesamtumsatz" value={formatMoney(summary.generalTotalCents)} sub="Alle Produkte" icon={Coins} />
+         <StatCard label="Spiele" value={summary.games} sub={`${summary.completedGames} abgeschlossen`} icon={Activity} />
+         <StatCard label="Tauben" value={summary.confirmedClays} sub="Ausgelöst (A-G: 1, H: 2)" icon={Target} />
+         <StatCard label="Rechnungen" value={data?.players.length ?? 0} sub={`${data?.players.filter(b => b.state === "PAID").length ?? 0} bezahlt`} icon={Receipt} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -214,7 +214,7 @@ export default function AdminOfrechnung() {
         {/* Left Column: Player Bills */}
         <div className="xl:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold tracking-tight">Spiller Rechnungen</h2>
+            <h2 className="text-xl font-bold tracking-tight">Spielerrechnungen</h2>
             <div className="flex gap-1 bg-secondary/20 rounded-xl p-1 border border-border/40">
               {(["ALL", "OPEN", "PENDING_NEUTRAL", "PAID"] as const).map(f => (
                 <button
@@ -227,7 +227,7 @@ export default function AdminOfrechnung() {
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {f === "ALL" ? "All" : f === "OPEN" ? "Oppen" : f === "PENDING_NEUTRAL" ? "Neutral" : "Bezuelt"}
+                  {f === "ALL" ? "Alle" : f === "OPEN" ? "Offen" : f === "PENDING_NEUTRAL" ? "Neutral" : "Bezahlt"}
                 </button>
               ))}
             </div>
@@ -241,12 +241,12 @@ export default function AdminOfrechnung() {
             ) : error ? (
               <div className="p-12 text-center text-destructive">
                 <AlertCircle size={32} className="mx-auto mb-3 opacity-50" />
-                <p className="text-sm font-medium">Feeler beim Lueden: {(error as any).message}</p>
+                <p className="text-sm font-medium">Fehler beim Laden: {(error as any).message}</p>
               </div>
             ) : filteredBills.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <Receipt size={32} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-medium">Keng Rechnungen fonnt.</p>
+                <p className="text-sm font-medium">Keine Rechnungen gefunden.</p>
               </div>
             ) : (
               <div className="divide-y divide-border/30">
@@ -270,7 +270,7 @@ export default function AdminOfrechnung() {
                       </div>
                       <div>
                         <p className="font-bold text-foreground text-sm group-hover:text-primary transition-colors">{bill.spielerName}</p>
-                        <p className="text-xs text-muted-foreground font-mono mt-0.5">{bill.mitgliedNr || "Keen Member"}</p>
+                         <p className="text-xs text-muted-foreground font-mono mt-0.5">{bill.mitgliedNr || "Kein Mitglied"}</p>
                       </div>
                     </div>
                     
@@ -278,15 +278,15 @@ export default function AdminOfrechnung() {
                       <p className="font-mono font-black text-lg">{formatMoney(bill.totalCents)}</p>
                       {bill.dayTotalCents !== bill.totalCents && (
                         <span className="text-[10px] font-mono text-muted-foreground">
-                          Dag: {formatMoney(bill.dayTotalCents)}
+                           Tag: {formatMoney(bill.dayTotalCents)}
                         </span>
                       )}
                       {bill.state === "PAID" ? (
-                        <span className="text-[10px] uppercase tracking-widest font-bold text-emerald-500">Bezuelt</span>
+                         <span className="text-[10px] uppercase tracking-widest font-bold text-emerald-500">Bezahlt</span>
                       ) : bill.state === "PENDING_NEUTRAL" ? (
                         <span className="text-[10px] uppercase tracking-widest font-bold text-blue-500">Neutral</span>
                       ) : (
-                        <span className="text-[10px] uppercase tracking-widest font-bold text-amber-500">Oppen</span>
+                         <span className="text-[10px] uppercase tracking-widest font-bold text-amber-500">Offen</span>
                       )}
                     </div>
                   </div>
@@ -298,7 +298,7 @@ export default function AdminOfrechnung() {
 
         {/* Right Column: Products Summary */}
         <div className="space-y-4">
-          <h2 className="text-xl font-bold tracking-tight">Verkaaften Produkter</h2>
+           <h2 className="text-xl font-bold tracking-tight">Verkaufte Produkte</h2>
           
           <div className="bg-card border border-border/50 rounded-xl overflow-hidden shadow-sm">
             {isLoading ? (
@@ -308,14 +308,14 @@ export default function AdminOfrechnung() {
             ) : products.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <ShoppingCart size={32} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-medium">Keng Produkter verkaaft.</p>
+                <p className="text-sm font-medium">Keine Produkte verkauft.</p>
               </div>
             ) : (
               <Table>
                 <TableHeader className="bg-secondary/20">
                   <TableRow className="border-border/50 hover:bg-transparent">
                     <TableHead className="text-xs uppercase tracking-widest font-bold">Produkt</TableHead>
-                    <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Qty</TableHead>
+                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Menge</TableHead>
                     <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Total</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -356,7 +356,7 @@ export default function AdminOfrechnung() {
               )}>
                 <div>
                   <h2 className="text-2xl font-black">{selectedBill.spielerName}</h2>
-                  <p className="font-mono text-sm opacity-70 mt-1">{selectedBill.mitgliedNr || "Gaascht"}</p>
+                   <p className="font-mono text-sm opacity-70 mt-1">{selectedBill.mitgliedNr || "Gast"}</p>
                   
                   <div className="flex items-center gap-2 mt-4">
                     <Badge variant={selectedBill.state === "PAID" ? "default" : "secondary"} className={cn(
@@ -367,23 +367,23 @@ export default function AdminOfrechnung() {
                           ? "bg-blue-500/20 text-blue-600 hover:bg-blue-500/30" 
                           : "bg-amber-500/20 text-amber-600 hover:bg-amber-500/30"
                     )}>
-                      {selectedBill.state === "PAID" ? "BEZUELT" : selectedBill.state === "PENDING_NEUTRAL" ? "NEUTRAL" : "OPPEN"}
+                       {selectedBill.state === "PAID" ? "BEZAHLT" : selectedBill.state === "PENDING_NEUTRAL" ? "NEUTRAL" : "OFFEN"}
                     </Badge>
                     {selectedBill.state === "PAID" && selectedBill.payment && (
                       <span className="text-xs font-mono opacity-60">
                         {new Date(selectedBill.payment.paidAt).toLocaleTimeString()} 
                         {selectedBill.payment.markedByAdmin 
-                          ? ` - vun ${selectedBill.payment.markedByAdmin.adminName}` 
-                          : selectedBill.payment.markedByApiKey 
-                            ? ` - per API (${selectedBill.payment.markedByApiKey.keyName})`
-                            : " - system"
+                           ? ` – von ${selectedBill.payment.markedByAdmin.adminName}`
+                           : selectedBill.payment.markedByApiKey
+                             ? ` – per API (${selectedBill.payment.markedByApiKey.keyName})`
+                             : " – System"
                         }
                       </span>
                     )}
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs uppercase tracking-widest font-bold opacity-60 mb-1">Aktuell oppen</p>
+                   <p className="text-xs uppercase tracking-widest font-bold opacity-60 mb-1">Aktuell offen</p>
                   <p className="text-4xl font-mono font-black">{formatMoney(selectedBill.totalCents)}</p>
                 </div>
               </div>
@@ -392,26 +392,26 @@ export default function AdminOfrechnung() {
                 {/* Credits Summary */}
                 <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4 bg-secondary/20 rounded-xl p-4 border border-border/40">
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Kreditter Kaaft</p>
+                     <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Guthaben gekauft</p>
                     <p className="font-mono font-bold mt-1 text-lg">{selectedBill.credit.granted}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Gespillt</p>
+                     <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Gespielt</p>
                     <p className="font-mono font-bold mt-1 text-lg">{selectedBill.credit.used}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Rescht</p>
+                     <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Rest</p>
                     <p className="font-mono font-black mt-1 text-lg text-primary">{selectedBill.credit.remaining}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Dagestotal</p>
+                     <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Tagessumme</p>
                     <p className="font-mono font-black mt-1 text-lg">{formatMoney(selectedDayTotal)}</p>
                   </div>
                 </div>
 
                 {/* Subtotals by category */}
                 <div className="mb-6">
-                  <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Zesummefaassung vum Dag</h4>
+                   <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Zusammenfassung des Tages</h4>
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(selectedDayCategories).map(([cat, cents]) => (
                       <div key={cat} className="flex items-center gap-2 bg-background border border-border/50 rounded-lg px-3 py-1.5 shadow-sm">
@@ -424,7 +424,7 @@ export default function AdminOfrechnung() {
 
                 {/* Line Items */}
                 <div>
-                  <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Kaf vum Dag</h4>
+                   <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Einkäufe des Tages</h4>
                   <div className="border border-border/50 rounded-xl overflow-hidden shadow-sm">
                     <Table>
                       <TableHeader className="bg-secondary/20">
@@ -450,7 +450,7 @@ export default function AdminOfrechnung() {
                         {selectedDayLines.length === 0 && (
                           <TableRow>
                             <TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
-                              Keng verrechent Aktivitéit fir dësen Dag
+                               Keine abgerechneten Aktivitäten für diesen Tag
                             </TableCell>
                           </TableRow>
                         )}
@@ -465,7 +465,7 @@ export default function AdminOfrechnung() {
                   onClick={() => setSelectedBill(null)} 
                   className="px-6 py-2.5 text-sm font-bold text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
                 >
-                  Zoumaachen
+                  Schließen
                 </button>
                 {selectedBill.state !== "PAID" && (
                   <button 
@@ -474,10 +474,10 @@ export default function AdminOfrechnung() {
                     className="px-8 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-lg shadow-lg shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
                     data-testid="button-mark-paid"
                   >
-                    {payMut.isPending ? "Späicheren..." : (
+                     {payMut.isPending ? "Wird gespeichert..." : (
                       <>
                         <CheckCircle size={18} strokeWidth={2.5} />
-                        Als Bezuelt markéieren
+                         Als bezahlt markieren
                       </>
                     )}
                   </button>

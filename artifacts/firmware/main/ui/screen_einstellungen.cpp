@@ -60,14 +60,14 @@ static void refresh_bill_day_summary(void)
     const BillDaySummary *day = &g_store.billDay;
     char text[1024];
     if (!day->datum[0]) {
-        snprintf(text, sizeof(text), "DAGESSUMMARY: NACH KENG PORTAL-DATEN");
+        snprintf(text, sizeof(text), "TAGESÜBERSICHT: NOCH KEINE PORTALDATEN");
     } else {
         snprintf(text, sizeof(text),
-                 "DAGESSUMMARY %s%s\n"
-                 "SPILLER: %d  |  BEZUELT: %d\n"
-                 "SPILLER: %d  |  OFGESCHLOSS: %d  |  CONFIRMED CLAYS: %d\n"
-                 "GENERAL TOTAL: %d.%02d EUR",
-                 day->datum, day->authoritative ? "" : " (OFFLINE CACHE)",
+                 "TAGESÜBERSICHT %s%s\n"
+                 "SPIELER: %d  |  BEZAHLT: %d\n"
+                 "SPIELE: %d  |  ABGESCHLOSSEN: %d  |  BESTÄTIGTE TAUBEN: %d\n"
+                 "GESAMT: %d.%02d EUR",
+                 day->datum, day->authoritative ? "" : " (OFFLINE-CACHE)",
                  day->uniquePlayers, day->paidPlayers, day->games,
                  day->completedGames, day->confirmedClays,
                  day->generalTotalCent / 100, abs(day->generalTotalCent % 100));
@@ -85,12 +85,12 @@ static void refresh_bill_day_summary(void)
             int n;
             if (line->unitPriceCent == VERKAUF_UNIT_PRICE_UNKNOWN)
                 n = snprintf(text + used, sizeof(text) - used,
-                             "\nPENDING %s: %d x PRAIS ONBEKANNT (RECONCILIATION)",
+                             "\nAUSSTEHEND %s: %d x PREIS UNBEKANNT (ABGLEICH)",
                              line->produktName, line->quantity);
             else
                 n = snprintf(text + used, sizeof(text) - used,
                              "\n%s%s: %d x %d.%02d = %d.%02d EUR",
-                             line->localPending ? "PENDING " : "",
+                              line->localPending ? "AUSSTEHEND " : "",
                              line->produktName, line->quantity,
                              line->unitPriceCent / 100,
                              abs(line->unitPriceCent % 100),
@@ -101,7 +101,7 @@ static void refresh_bill_day_summary(void)
         }
         if (day->productOverflow && used < sizeof(text)) {
             snprintf(text + used, sizeof(text) - used,
-                     "\nDETAIL-LIMIT ERREECHT - PORTALDETAILER PRUEWEN");
+                      "\nDETAIL-LIMIT ERREICHT - PORTALDETAILS PRÜFEN");
         }
     }
     set_label_text_if_changed(s_bill_day_summary, text);
@@ -112,14 +112,14 @@ static void catering_save_pin_cb(lv_event_t *)
     if (store_catering_pin_configured() &&
         store_verify_catering_pin(lv_textarea_get_text(s_catering_old_pin)) != CATERING_PIN_OK) {
         lv_textarea_set_text(s_catering_old_pin, "");
-        lv_label_set_text(s_catering_status, "ALE PIN ASS NET KORREKT.");
+        lv_label_set_text(s_catering_status, "ALTE PIN IST NICHT KORREKT.");
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
     const char *new_pin = lv_textarea_get_text(s_catering_pin);
     size_t new_pin_len = strnlen(new_pin, 17);
     if (new_pin_len < 4 || new_pin_len > 16) {
-        lv_label_set_text(s_catering_status, "PIN MUSS 4 BIS 16 ZIFFEREN HUN.");
+        lv_label_set_text(s_catering_status, "PIN MUSS 4 BIS 16 ZIFFERN HABEN.");
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
     } else if (store_set_catering_pin(new_pin)) {
         lv_textarea_set_text(s_catering_pin, "");
@@ -127,7 +127,7 @@ static void catering_save_pin_cb(lv_event_t *)
         lv_label_set_text(s_catering_status, "CATERING PIN GESPEICHERT.");
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_SUCCESS), 0);
     } else {
-        lv_label_set_text(s_catering_status, "CATERING PIN NET GESPEICHERT.");
+        lv_label_set_text(s_catering_status, "CATERING-PIN NICHT GESPEICHERT.");
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
     }
 }
@@ -136,8 +136,8 @@ static void catering_enter_cb(lv_event_t *)
     if (!store_set_operating_mode(TERMINAL_MODE_CATERING)) {
         lv_label_set_text(s_catering_status,
                           store_catering_pin_configured()
-                              ? "CATERING MODUS NET GESPEICHERT."
-                              : "FIR D'RAUSCHT E PIN KONFIGUREIEREN.");
+                              ? "CATERING-MODUS NICHT GESPEICHERT."
+                              : "ZUERST EINE PIN KONFIGURIEREN.");
         lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
@@ -179,7 +179,7 @@ static void gateway_test_cb(lv_event_t *e)
     save_api_settings();
     if (lora_gateway_check()) {
         s_gateway_check_pending = true;
-        set_api_status("GATEWAY GËTT GEPRÉIFT...", CLR_WARN);
+        set_api_status("GATEWAY WIRD GEPRÜFT...", CLR_WARN);
     } else {
         char status[96];
         lora_copy_status_text(status, sizeof(status));
@@ -193,9 +193,9 @@ static void portal_test_cb(lv_event_t *e)
     save_api_settings();
     if (store_sync()) {
         s_portal_check_pending = true;
-        set_api_status("PORTAL CONNECTION GËTT GEPRÉIFT...", CLR_WARN);
+        set_api_status("PORTALVERBINDUNG WIRD GEPRÜFT...", CLR_WARN);
     } else {
-        set_api_status("PORTAL TEST NET GESTART: SYNC ASS SCHONN AKTIV", CLR_WARN);
+        set_api_status("PORTALTEST NICHT GESTARTET: SYNC LÄUFT BEREITS", CLR_WARN);
     }
 }
 
@@ -206,10 +206,10 @@ static void config_backup_cb(lv_event_t *e)
     if (store_sync()) {
         if (s_config_backup_status)
             lv_label_set_text(s_config_backup_status,
-                              "SYNC + BACKUP GËTT AM HANNERGROND GESTART...");
+                               "SYNC + BACKUP STARTET IM HINTERGRUND...");
     } else if (s_config_backup_status) {
         lv_label_set_text(s_config_backup_status,
-                          "BACKUP NET GESTART: SYNC ASS SCHONN AKTIV");
+                           "BACKUP NICHT GESTARTET: SYNC LÄUFT BEREITS");
     }
 }
 
@@ -220,7 +220,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_all(parent, 16, 0);
 
     lv_obj_t *section = lv_label_create(parent);
-    lv_label_set_text(section, "CONNECTION");
+    lv_label_set_text(section, "VERBINDUNG");
     lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -323,7 +323,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_size(backup_btn, 260, 44);
     lv_obj_add_event_cb(backup_btn, config_backup_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *backup_label = lv_label_create(backup_btn);
-    lv_label_set_text(backup_label, LV_SYMBOL_UPLOAD " BACKUP ELO");
+    lv_label_set_text(backup_label, LV_SYMBOL_UPLOAD " BACKUP JETZT");
     lv_obj_set_style_text_color(backup_label, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(backup_label);
 
@@ -331,8 +331,8 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     char backup_status[192];
     snprintf(backup_status, sizeof(backup_status), "%s%s%s",
              g_store.configBackupStatus[0] ? g_store.configBackupStatus
-                                           : "NACH KEE BACKUP",
-             g_store.lastConfigBackupAt[0] ? "\nLESCHT BACKUP: " : "",
+                                           : "NOCH KEIN BACKUP",
+                 g_store.lastConfigBackupAt[0] ? "\nLETZTES BACKUP: " : "",
              g_store.lastConfigBackupAt);
     lv_label_set_text(s_config_backup_status, backup_status);
     lv_obj_set_style_text_font(s_config_backup_status, &lv_font_montserrat_14, 0);
@@ -361,7 +361,7 @@ static void machine_test_cb(lv_event_t *e)
         s_machine_test_pending = true;
         if (s_lbl_machine_test_status) {
             char msg[64];
-            snprintf(msg, sizeof(msg), "TEST MASCHINN %c GESCHÉCKT...",
+            snprintf(msg, sizeof(msg), "TEST MASCHINE %c GESENDET...",
                      (char)('A' + machine));
             lv_label_set_text(s_lbl_machine_test_status, msg);
             lv_obj_set_style_text_color(s_lbl_machine_test_status,
@@ -379,15 +379,15 @@ static void machine_test_cb(lv_event_t *e)
 static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 {
     static const char *labels[] = {
-        "MASCHINN A","MASCHINN B","MASCHINN C","MASCHINN D",
-        "MASCHINN E","MASCHINN F","MASCHINN G","MASCHINN H (DOUBLETTE)"
+        "MASCHINE A","MASCHINE B","MASCHINE C","MASCHINE D",
+        "MASCHINE E","MASCHINE F","MASCHINE G","MASCHINE H (DUBLETTE)"
     };
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(parent, 8, 0);
     lv_obj_set_style_pad_all(parent, 16, 0);
 
     lv_obj_t *section = lv_label_create(parent);
-    lv_label_set_text(section, "MASCHINN CONFIGURATION");
+    lv_label_set_text(section, "MASCHINENKONFIGURATION");
     lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -415,7 +415,7 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
         lv_obj_add_event_cb(test, machine_test_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)m);
         lv_obj_t *test_label = lv_label_create(test);
-        lv_label_set_text(test_label, LV_SYMBOL_PLAY " TEST FIRE");
+        lv_label_set_text(test_label, LV_SYMBOL_PLAY " TESTAUSLÖSUNG");
         lv_obj_set_style_text_font(test_label, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(test_label, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(test_label);
@@ -429,7 +429,7 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 
     s_lbl_machine_test_status = lv_label_create(parent);
     lv_label_set_text(s_lbl_machine_test_status,
-                      "TEST FIRE löst genau einen Schuss aus — kein Spiel.");
+                       "TESTAUSLÖSUNG STARTET GENAU EINEN SCHUSS — KEIN SPIEL.");
     lv_obj_set_style_text_font(s_lbl_machine_test_status, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_machine_test_status, lv_color_hex(CLR_MUTED), 0);
     return parent;
@@ -479,7 +479,7 @@ static void refresh_custom_seq(int ci)
     int len = g_store.customSequenzLen[ci];
     if (len == 0) {
         lv_obj_t *ph = lv_label_create(cont);
-        lv_label_set_text(ph, "KENG SCHANZEN");
+        lv_label_set_text(ph, "KEINE WÜRFE");
         lv_obj_set_style_text_color(ph, lv_color_hex(CLR_MUTED), 0);
         lv_obj_set_style_text_font(ph, &lv_font_montserrat_14, 0);
         lv_obj_center(ph);
@@ -551,7 +551,7 @@ static void set_pair_status(int ci, const char *text)
 static void add_custom_entry(int ci, CustomSequenzEintrag entry)
 {
     if (g_store.customSequenzLen[ci] >= CUSTOM_SEQ_MAX) {
-        set_pair_status(ci, "MAXIMAL 16 EINTRAEG");
+        set_pair_status(ci, "MAXIMAL 16 EINTRÄGE");
         return;
     }
     g_store.customSequenzen[ci][g_store.customSequenzLen[ci]++] = entry;
@@ -568,7 +568,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_row(parent, 12, 0);
 
     lv_obj_t *section = lv_label_create(parent);
-    lv_label_set_text(section, "CUSTOM GAME CONFIGURATION");
+    lv_label_set_text(section, "EIGENE SPIELKONFIGURATION");
     lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -613,14 +613,14 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             refresh_custom_stats(c);
         }, LV_EVENT_CLICKED, (void*)(intptr_t)ci);
         lv_obj_t *clrl = lv_label_create(clr);
-        lv_label_set_text(clrl, LV_SYMBOL_CLOSE "  LOESCHEN");
+        lv_label_set_text(clrl, LV_SYMBOL_CLOSE "  LÖSCHEN");
         lv_obj_set_style_text_font(clrl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(clrl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(clrl);
 
         // ── Section label: SEQUENZ ────────────────────────────
         lv_obj_t *seq_hdr = lv_label_create(card);
-        lv_label_set_text(seq_hdr, "SEQUENZ  (tippen op eng Schanz fir ze loeschen)");
+        lv_label_set_text(seq_hdr, "SEQUENZ  (WURF ANTIPPEN ZUM LÖSCHEN)");
         lv_obj_set_style_text_font(seq_hdr, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(seq_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -645,7 +645,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
 
         // ── Section label: single A-G entries ─────────────────
         lv_obj_t *add_hdr = lv_label_create(card);
-        lv_label_set_text(add_hdr, "EENZEL SCHANZ DOBAISETZEN");
+        lv_label_set_text(add_hdr, "EINZELWURF HINZUFÜGEN");
         lv_obj_set_style_text_font(add_hdr, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(add_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -686,7 +686,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
 
         // ── Doublette builder ─────────────────────────────────
         lv_obj_t *pair_hdr = lv_label_create(card);
-        lv_label_set_text(pair_hdr, "DOUBLETTE: A-G + PARTNER (DELAY A SEKONNEN)");
+        lv_label_set_text(pair_hdr, "DUBLETTE: A-G + PARTNER (VERZÖGERUNG IN SEKUNDEN)");
         lv_obj_set_style_text_font(pair_hdr, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(pair_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -700,7 +700,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         lv_obj_clear_flag(pair_cfg, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *delay_lbl = lv_label_create(pair_cfg);
-        lv_label_set_text(delay_lbl, "DELAY:");
+        lv_label_set_text(delay_lbl, "VERZÖGERUNG:");
         lv_obj_set_style_text_font(delay_lbl, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(delay_lbl, lv_color_hex(CLR_TEXT), 0);
         s_pair_delay_ta[ci] = lv_textarea_create(pair_cfg);
@@ -739,18 +739,18 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
                 if (s_pending_pair_first[c] < 0) {
                     s_pending_pair_first[c] = m;
                     char msg[48];
-                    snprintf(msg, sizeof(msg), "%s GEWIELT - PARTNER WIELEN",
+                    snprintf(msg, sizeof(msg), "%s GEWÄHLT - PARTNER WÄHLEN",
                              MACH_LBL[m]);
                     set_pair_status(c, msg);
                 } else if (s_pending_pair_first[c] == m) {
-                    set_pair_status(c, "ENG ANER PARTNER-MASCHINN WIELEN");
+                    set_pair_status(c, "ANDERE PARTNERMASCHINE WÄHLEN");
                 } else {
                     int first = s_pending_pair_first[c];
                     add_custom_entry(c, (CustomSequenzEintrag){
                         (Maschine)first, (Maschine)m, true, read_pair_delay_ms(c)
                     });
                     s_pending_pair_first[c] = -1;
-                    set_pair_status(c, "DOUBLETTE GESPAECHERT");
+                    set_pair_status(c, "DUBLETTE GESPEICHERT");
                 }
             }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
             lv_obj_t *pl = lv_label_create(pb);
@@ -773,7 +773,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             add_custom_entry(c, (CustomSequenzEintrag){
                 MASCHINE_H, MASCHINE_H, true, 0
             });
-            set_pair_status(c, "H: 1 FIRE - MASCHINN MAACHT H2");
+            set_pair_status(c, "H: 1 AUSLÖSUNG - MASCHINE ERZEUGT H2");
         }, LV_EVENT_CLICKED, (void*)(intptr_t)ci);
         lv_obj_t *hl = lv_label_create(h_pair);
         lv_label_set_text(hl, "H  H1/H2");
@@ -782,13 +782,13 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         lv_obj_center(hl);
 
         s_pair_status[ci] = lv_label_create(card);
-        lv_label_set_text(s_pair_status[ci], "1. MASCHINN WIELEN - DUERNO PARTNER");
+        lv_label_set_text(s_pair_status[ci], "1. MASCHINE WÄHLEN - DANN PARTNER");
         lv_obj_set_style_text_font(s_pair_status[ci], &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(s_pair_status[ci], lv_color_hex(CLR_MUTED), 0);
 
         // ── Läufe toggle (1 / 2) ─────────────────────────────
         lv_obj_t *lauf_hdr = lv_label_create(card);
-        lv_label_set_text(lauf_hdr, "UNZUEL VUN DE LAEUF");
+        lv_label_set_text(lauf_hdr, "ANZAHL DER LÄUFE");
         lv_obj_set_style_text_font(lauf_hdr, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(lauf_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -832,7 +832,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
             lv_obj_t *ll = lv_label_create(lb);
             char lbuf[16];
-            snprintf(lbuf, sizeof(lbuf), "%d %s", li + 1, li == 0 ? "LAUF" : "LAEUF");
+            snprintf(lbuf, sizeof(lbuf), "%d %s", li + 1, li == 0 ? "LAUF" : "LÄUFE");
             lv_label_set_text(ll, lbuf);
             lv_obj_set_style_text_font(ll, &lv_font_montserrat_14, 0);
             lv_obj_set_style_text_color(ll, lv_color_hex(CLR_TEXT), 0);
@@ -893,7 +893,7 @@ static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *info = lv_label_create(parent);
-    lv_label_set_text(info, "WiFi ASTELLUNGEN kann op der WiFi-SAit geAnnert ginn.");
+    lv_label_set_text(info, "WIFI-EINSTELLUNGEN KÖNNEN AUF DER WIFI-SEITE GEÄNDERT WERDEN.");
     lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(info, lv_color_hex(CLR_MUTED), 0);
 
@@ -904,7 +904,7 @@ static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
         ui_manager_show(SCREEN_WIFI);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl = lv_label_create(btn);
-    lv_label_set_text(bl, LV_SYMBOL_WIFI "  WIFI SAEIT");
+    lv_label_set_text(bl, LV_SYMBOL_WIFI "  WIFI-SEITE");
     lv_obj_set_style_text_color(bl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl);
     return parent;
@@ -950,7 +950,7 @@ static lv_obj_t *build_day_stats_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_all(parent, 16, 0);
     lv_obj_set_style_pad_row(parent, 8, 0);
     lv_obj_t *heading = lv_label_create(parent);
-    lv_label_set_text(heading, "DAY STATS");
+    lv_label_set_text(heading, "TAGESSTATISTIK");
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(CLR_PRIMARY), 0);
     s_bill_day_summary = lv_label_create(parent);
@@ -989,7 +989,7 @@ static void auto_sync_changed(lv_event_t *e)
     (void)e;
     uint32_t seconds;
     if (!read_auto_sync_seconds(&seconds)) {
-        lv_label_set_text(s_auto_sync_feedback, "10..86400 SEKONNEN NOUTWENDIG");
+        lv_label_set_text(s_auto_sync_feedback, "10..86400 SEKUNDEN ERFORDERLICH");
         lv_obj_set_style_text_color(s_auto_sync_feedback, lv_color_hex(CLR_DANGER), 0);
         return;
     }
@@ -1001,13 +1001,13 @@ static void auto_sync_changed(lv_event_t *e)
     if (!billing_text[0] || *billing_end ||
         billing_seconds < BILLING_SYNC_MIN_SECONDS ||
         billing_seconds > BILLING_SYNC_MAX_SECONDS) {
-        lv_label_set_text(s_auto_sync_feedback, "BILLING: 20..30 SEKONNEN NOUTWENDIG");
+        lv_label_set_text(s_auto_sync_feedback, "ABRECHNUNG: 20..30 SEKUNDEN ERFORDERLICH");
         lv_obj_set_style_text_color(s_auto_sync_feedback, lv_color_hex(CLR_DANGER), 0);
         return;
     }
     store_set_auto_sync(enabled, seconds);
     store_set_billing_sync((uint32_t)billing_seconds);
-    lv_label_set_text(s_auto_sync_feedback, "FULL + BILLING SYNC GESPEICHERT");
+    lv_label_set_text(s_auto_sync_feedback, "VOLL- + ABRECHNUNGS-SYNC GESPEICHERT");
     lv_obj_set_style_text_color(s_auto_sync_feedback, lv_color_hex(CLR_SUCCESS), 0);
 }
 
@@ -1019,15 +1019,15 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_row(parent, 8, 0);
 
     lv_obj_t *heading = lv_label_create(parent);
-    lv_label_set_text(heading, "PRODUCT & BILLING / CATERING");
+    lv_label_set_text(heading, "PRODUKTE & ABRECHNUNG / CATERING");
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_t *help = lv_label_create(parent);
     lv_label_set_text(help,
-        "Catering ass de Self-Service Modus fir Gedrénks an Iessen.\n"
-        "Fir de Modus ze schützen, setz hei e PIN. Wann schonn e PIN besteet,\n"
-        "gëff fir d'éischt den ale PIN an. Duerno den neie PIN späicheren.\n"
-        "\"CATERING STARTEN\" wiesselt den Terminal direkt an de Catering Modus.");
+        "CATERING IST DER SELBSTBEDIENUNGSMODUS FÜR GETRÄNKE UND ESSEN.\n"
+        "ZUM SCHUTZ EINE PIN FESTLEGEN. BEI VORHANDENER PIN ZUERST DIE ALTE EINGEBEN,\n"
+        "DANN DIE NEUE PIN SPEICHERN.\n"
+        "\"CATERING STARTEN\" WECHSELT DIREKT IN DEN CATERING-MODUS.");
     lv_label_set_long_mode(help, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(help, LV_PCT(100));
     lv_obj_set_style_text_color(help, lv_color_hex(CLR_MUTED), 0);
@@ -1040,12 +1040,12 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
     lv_obj_set_flex_flow(cat, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(cat, 8, 0);
     lv_obj_t *cat_label = lv_label_create(cat);
-    lv_label_set_text(cat_label, "ALE PIN (nëmme wann e PIN schonn konfiguréiert ass)");
+    lv_label_set_text(cat_label, "ALTE PIN (NUR WENN BEREITS KONFIGURIERT)");
     s_catering_old_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_old_pin, 260, 44);
     lv_textarea_set_one_line(s_catering_old_pin, true); lv_textarea_set_password_mode(s_catering_old_pin, true);
     lv_textarea_set_accepted_chars(s_catering_old_pin, "0123456789"); lv_textarea_set_max_length(s_catering_old_pin, 16);
     cat_label = lv_label_create(cat);
-    lv_label_set_text(cat_label, "NEIE PIN (4-16 Zifferen)");
+    lv_label_set_text(cat_label, "NEUE PIN (4-16 ZIFFERN)");
     s_catering_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_pin, 260, 44);
     lv_textarea_set_one_line(s_catering_pin, true); lv_textarea_set_password_mode(s_catering_pin, true);
     lv_textarea_set_accepted_chars(s_catering_pin, "0123456789"); lv_textarea_set_max_length(s_catering_pin, 16);
@@ -1065,7 +1065,7 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
     lv_obj_add_event_cb(enter, catering_enter_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *enter_l = lv_label_create(enter); lv_label_set_text(enter_l, "CATERING STARTEN"); lv_obj_center(enter_l);
     s_catering_status = lv_label_create(parent);
-    lv_label_set_text(s_catering_status, g_store.cateringPinConfigured ? "CATERING PIN ASS KONFIGUREIERT." : "KENG CATERING PIN KONFIGUREIERT.");
+    lv_label_set_text(s_catering_status, g_store.cateringPinConfigured ? "CATERING-PIN IST KONFIGURIERT." : "KEINE CATERING-PIN KONFIGURIERT.");
     return parent;
 }
 
@@ -1105,7 +1105,7 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(sync_row, 16, 0);
     lv_obj_t *sync_label = lv_label_create(sync_row);
-    lv_label_set_text(sync_label, "AUTO FULL SYNC");
+    lv_label_set_text(sync_label, "AUTOMATISCHER VOLL-SYNC");
     lv_obj_set_style_text_color(sync_label, lv_color_hex(CLR_TEXT), 0);
     s_auto_sync_switch = lv_switch_create(sync_row);
     if (g_store.autoSyncEnabled) lv_obj_add_state(s_auto_sync_switch, LV_STATE_CHECKED);
@@ -1122,7 +1122,7 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_label_set_text(seconds_label, "SEK. (10..86400)");
     lv_obj_set_style_text_color(seconds_label, lv_color_hex(CLR_MUTED), 0);
     lv_obj_t *billing_label = lv_label_create(sync_row);
-    lv_label_set_text(billing_label, "BILLING SYNC");
+    lv_label_set_text(billing_label, "ABRECHNUNGS-SYNC");
     lv_obj_set_style_text_color(billing_label, lv_color_hex(CLR_TEXT), 0);
     s_billing_sync_seconds = lv_textarea_create(sync_row);
     lv_obj_set_size(s_billing_sync_seconds, 100, 44);
@@ -1186,7 +1186,7 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_set_style_pad_hor(hdr, 20, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
-    lv_label_set_text(title, LV_SYMBOL_SETTINGS "  ASTELLUNGEN");
+    lv_label_set_text(title, LV_SYMBOL_SETTINGS "  EINSTELLUNGEN");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -1196,7 +1196,7 @@ lv_obj_t *screen_einstellungen_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
-    lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURUCK");
+    lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURÜCK");
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 
@@ -1209,11 +1209,11 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_set_style_text_font(s_tab_view, &lv_font_montserrat_14, 0);
 
     lv_obj_t *tab_conn     = lv_tabview_add_tab(s_tab_view, "Portal & Gateway");
-    lv_obj_t *tab_machines = lv_tabview_add_tab(s_tab_view, "Machines");
+    lv_obj_t *tab_machines = lv_tabview_add_tab(s_tab_view, "Maschinen");
     lv_obj_t *tab_catering = lv_tabview_add_tab(s_tab_view, "Catering");
-    lv_obj_t *tab_custom   = lv_tabview_add_tab(s_tab_view, "Custom GameModes");
+    lv_obj_t *tab_custom   = lv_tabview_add_tab(s_tab_view, "Eigene Spielmodi");
     lv_obj_t *tab_sys      = lv_tabview_add_tab(s_tab_view, "System");
-    lv_obj_t *tab_stats    = lv_tabview_add_tab(s_tab_view, "Day Stats");
+    lv_obj_t *tab_stats    = lv_tabview_add_tab(s_tab_view, "Tagesstatistik");
 
     lv_obj_set_scroll_dir(tab_conn, LV_DIR_VER);
     lv_obj_set_scroll_dir(tab_machines, LV_DIR_VER);
@@ -1331,8 +1331,8 @@ void screen_einstellungen_refresh(void)
         char backup_status[192];
         snprintf(backup_status, sizeof(backup_status), "%s%s%s",
                  g_store.configBackupStatus[0] ? g_store.configBackupStatus
-                                               : "NACH KEE BACKUP",
-                 g_store.lastConfigBackupAt[0] ? "\nLESCHT BACKUP: " : "",
+                                               : "NOCH KEIN BACKUP",
+                 g_store.lastConfigBackupAt[0] ? "\nLETZTES BACKUP: " : "",
                  g_store.lastConfigBackupAt);
         set_label_text_if_changed(s_config_backup_status, backup_status);
     }
@@ -1374,7 +1374,7 @@ void screen_einstellungen_refresh(void)
     s_machine_test_pending = false;
     if (s_lbl_machine_test_status) {
         lv_label_set_text(s_lbl_machine_test_status,
-                          "TEST FIRE löst genau einen Schuss aus — kein Spiel.");
+                          "TESTAUSLÖSUNG STARTET GENAU EINEN SCHUSS — KEIN SPIEL.");
         lv_obj_set_style_text_color(s_lbl_machine_test_status,
                                     lv_color_hex(CLR_MUTED), 0);
     }
@@ -1386,11 +1386,11 @@ void screen_einstellungen_tick(void)
         SyncUiState sync_state = {};
         store_get_sync_ui_state(&sync_state);
         if (sync_state.status == SYNC_SUCCESS) {
-            set_api_status("PORTAL CONNECTION OK", CLR_SUCCESS);
+            set_api_status("PORTALVERBINDUNG OK", CLR_SUCCESS);
             s_portal_check_pending = false;
         } else if (sync_state.status == SYNC_ERROR) {
             char status[160];
-            snprintf(status, sizeof(status), "PORTAL CONNECTION FEELER: %.110s",
+            snprintf(status, sizeof(status), "PORTALVERBINDUNGSFEHLER: %.110s",
                      sync_state.error);
             set_api_status(status, CLR_DANGER);
             s_portal_check_pending = false;

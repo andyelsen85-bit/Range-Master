@@ -68,15 +68,15 @@ export default function AdminMail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-smtp"] });
       setForm((f) => ({ ...f, passwort: "" }));
-      toast({ title: "SMTP-Astellunge gespäichert" });
+      toast({ title: "SMTP-Einstellungen gespeichert" });
     },
-    onError: (e: Error) => toast({ title: "Feeler", description: e.message, variant: "destructive" }),
+    onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
 
   const testMut = useMutation({
     mutationFn: () => apiFetch("/api/admin/smtp/test", { method: "POST", body: JSON.stringify({ empfaenger: testEmpfaenger }) }),
-    onSuccess: () => toast({ title: "Test-Email verschéckt", description: `un ${testEmpfaenger}` }),
-    onError: (e: Error) => toast({ title: "Verschécke feelgeschloen", description: e.message, variant: "destructive" }),
+    onSuccess: () => toast({ title: "Test-E-Mail gesendet", description: `an ${testEmpfaenger}` }),
+    onError: (e: Error) => toast({ title: "Senden fehlgeschlagen", description: e.message, variant: "destructive" }),
   });
 
   const set = (k: keyof typeof emptyForm, v: any) => setForm((f) => ({ ...f, [k]: v }));
@@ -92,7 +92,7 @@ export default function AdminMail() {
       <header className="border-b border-border/50 pb-6">
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><Mail className="text-primary" /> Mail Server</h1>
         <p className="text-muted-foreground mt-2 text-sm font-medium">
-          SMTP-Astellunge fir Invitatiouns- a Passwuert-Emailen un d'Spiller.
+          SMTP-Einstellungen für Einladungs- und Passwort-E-Mails an die Spieler.
         </p>
       </header>
 
@@ -110,33 +110,33 @@ export default function AdminMail() {
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label>Benotzernumm</Label>
+            <Label>Benutzername</Label>
             <input className={inputCls} value={form.username} onChange={(e) => set("username", e.target.value)} autoComplete="off" />
           </div>
           <div className="space-y-1.5">
-            <Label>Passwuert {data?.passwortGesat && <span className="normal-case font-normal text-muted-foreground/60">(gesat — eidel = behalen)</span>}</Label>
+            <Label>Passwort {data?.passwortGesat && <span className="normal-case font-normal text-muted-foreground/60">(festgelegt – leer = beibehalten)</span>}</Label>
             <input className={inputCls} type="password" autoComplete="new-password" value={form.passwort}
               onChange={(e) => set("passwort", e.target.value)} placeholder={data?.passwortGesat ? "••••••••" : ""} />
           </div>
         </div>
 
         <div className="space-y-1.5">
-          <Label>Vun-Adress (From)</Label>
+          <Label>Absenderadresse</Label>
           <input className={inputCls} type="email" value={form.fromAddress} onChange={(e) => set("fromAddress", e.target.value)} placeholder="noreply@rangemaster.hostzone.lu" />
         </div>
 
         <div className="space-y-1.5">
-          <Label>Portal URL (fir an d'Emailen)</Label>
+          <Label>Portal-URL (für E-Mails)</Label>
           <input className={inputCls} value={form.portalUrl} onChange={(e) => set("portalUrl", e.target.value)} placeholder="https://rangemaster.hostzone.lu" />
         </div>
 
         <div className="space-y-1.5">
-          <Label>Verschlësselung</Label>
+          <Label>Verschlüsselung</Label>
           <div className="flex gap-2">
             {(["NONE", "STARTTLS", "SSL"] as const).map((v) => (
               <button key={v} type="button" onClick={() => set("verschluesselung", v)}
                 className={`px-4 py-2 rounded-lg text-sm font-bold border transition-colors ${form.verschluesselung === v ? "bg-primary/15 border-primary text-primary" : "border-border/60 text-muted-foreground hover:text-foreground"}`}>
-                {v === "NONE" ? "Keng" : v}
+                {v === "NONE" ? "Keine" : v}
               </button>
             ))}
           </div>
@@ -147,18 +147,18 @@ export default function AdminMail() {
           <div className={`w-9 h-5 rounded-full transition-colors relative ${form.ignoreTlsErrors ? "bg-primary" : "bg-secondary"}`}>
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${form.ignoreTlsErrors ? "translate-x-4" : "translate-x-0.5"}`} />
           </div>
-          Ongëlteg SSL-Zertifikater ignoréieren
+          Ungültige SSL-Zertifikate ignorieren
         </button>
         {form.ignoreTlsErrors && (
           <div className="flex items-center gap-2 text-xs text-amber-500 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-            <ShieldAlert size={14} /> Nëmme fir intern Serveren mat self-signed Zertifikater benotzen.
+            <ShieldAlert size={14} /> Nur für interne Server mit selbstsignierten Zertifikaten verwenden.
           </div>
         )}
 
         <div className="pt-2">
           <button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}
             className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-50">
-            <Save size={16} /> {saveMut.isPending ? "Späicheren…" : "Späicheren"}
+            <Save size={16} /> {saveMut.isPending ? "Wird gespeichert…" : "Speichern"}
           </button>
         </div>
       </div>
@@ -169,10 +169,10 @@ export default function AdminMail() {
           <input className={inputCls} type="email" value={testEmpfaenger} onChange={(e) => setTestEmpfaenger(e.target.value)} placeholder="test@beispill.lu" />
           <button onClick={() => testMut.mutate()} disabled={!testEmpfaenger || testMut.isPending}
             className="flex items-center gap-2 px-4 py-2.5 bg-secondary hover:bg-secondary/80 text-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-50 shrink-0">
-            <Send size={16} /> {testMut.isPending ? "Schécken…" : "Schécken"}
+            <Send size={16} /> {testMut.isPending ? "Wird gesendet…" : "Senden"}
           </button>
         </div>
-        <p className="text-xs text-muted-foreground">Späichert d'Astellungen als éischt — den Test benotzt déi gespäichert Konfiguratioun.</p>
+        <p className="text-xs text-muted-foreground">Speichern Sie die Einstellungen zuerst – der Test verwendet die gespeicherte Konfiguration.</p>
       </div>
     </div>
   );

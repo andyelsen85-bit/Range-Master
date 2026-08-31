@@ -111,7 +111,7 @@ static const char HTML_HEAD[] =
     ".status{color:#94a3b8;font-size:.82rem;line-height:1.5;margin-top:1rem}"
     "</style></head><body><div class=card>"
     "<h1>&#127919; TrapMaster</h1>"
-    "<p class=sub>Terminal-Konfiguration</p>";
+    "<p class=sub>Terminalkonfiguration</p>";
 
 static const char HTML_FORM_START[] =
     "<form method=POST action=/save>"
@@ -136,11 +136,11 @@ static const char HTML_FORM_END[] =
     "<button>&#128190;&nbsp; Speichern</button>"
     "</form>"
     "<hr>"
-    "<form method=POST action=/backup><button class=secondary>Konfiguratioun elo sécheren</button></form>"
+    "<form method=POST action=/backup><button class=secondary>Konfiguration jetzt sichern</button></form>"
     "<form method=POST action=/restore>"
-    "<label style='margin-top:1.25rem'>Eemolege Restore-Code</label>"
+    "<label style='margin-top:1.25rem'>Einmaliger Wiederherstellungscode</label>"
     "<input name=restoreCode type=text maxlength=12 pattern='[A-Fa-f0-9]{12}' autocomplete=off placeholder='ABCDEF123456' required>"
-    "<button class=secondary>Backup restauréieren</button></form>"
+    "<button class=secondary>Backup wiederherstellen</button></form>"
     "<p class=status>";
 
 static const char HTML_TAIL[] = "</p></div></body></html>";
@@ -167,9 +167,9 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_sendstr_chunk(req, g_store.gatewayToken);
     httpd_resp_sendstr_chunk(req, HTML_FORM_END);
     httpd_resp_sendstr_chunk(req, g_store.configBackupStatus[0]
-        ? g_store.configBackupStatus : "Nach kee Backup-Status.");
+        ? g_store.configBackupStatus : "Noch kein Backup-Status.");
     if (g_store.lastConfigBackupAt[0]) {
-        httpd_resp_sendstr_chunk(req, "<br>Lescht Backup: ");
+        httpd_resp_sendstr_chunk(req, "<br>Letztes Backup: ");
         httpd_resp_sendstr_chunk(req, g_store.lastConfigBackupAt);
     }
     httpd_resp_sendstr_chunk(req, HTML_TAIL);
@@ -188,7 +188,7 @@ static esp_err_t action_result(httpd_req_t *req, bool ok, const char *message)
         "min-height:100vh;display:flex;align-items:center;justify-content:center}"
         ".box{background:%s;border:1px solid %s;color:%s;border-radius:12px;"
         "padding:2rem 3rem;text-align:center}p{color:#94a3b8}</style></head>"
-        "<body><div class=box><strong>%s</strong><p>Zréck an 3 Sekonnen...</p></div></body></html>",
+        "<body><div class=box><strong>%s</strong><p>Zurück in 3 Sekunden...</p></div></body></html>",
         ok ? "#022c22" : "#2c0a0a", ok ? "#10b981" : "#ef4444",
         ok ? "#10b981" : "#ef4444", message);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -201,7 +201,7 @@ static esp_err_t backup_post_handler(httpd_req_t *req)
 {
     esp_err_t err = http_backup_config();
     return action_result(req, err == ESP_OK,
-                         err == ESP_OK ? "Backup erfollegräich." : "Backup feelgeschloen.");
+                          err == ESP_OK ? "Backup erfolgreich." : "Backup fehlgeschlagen.");
 }
 
 static esp_err_t restore_post_handler(httpd_req_t *req)
@@ -221,8 +221,8 @@ static esp_err_t restore_post_handler(httpd_req_t *req)
     extract_field(body, "restoreCode=", code, sizeof(code));
     esp_err_t err = http_restore_config(code);
     return action_result(req, err == ESP_OK,
-                         err == ESP_OK ? "Restore erfollegräich. Terminal nei starten."
-                                       : "Restore feelgeschloen. Code a Verbindung préiwen.");
+                          err == ESP_OK ? "Wiederherstellung erfolgreich. Terminal neu starten."
+                                        : "Wiederherstellung fehlgeschlagen. Code und Verbindung prüfen.");
 }
 
 // ── POST /save — apply new config ────────────────────────────
@@ -301,8 +301,8 @@ static esp_err_t save_post_handler(httpd_req_t *req)
         "p{color:#64748b;margin-top:.5rem;font-size:.85rem}"
         "</style></head><body>"
         "<div class=box>"
-        "&#10003;&nbsp; Gespichert!<br>"
-        "<p>Leitung zreeck an 2 Sekonnen...</p>"
+        "&#10003;&nbsp; Gespeichert!<br>"
+        "<p>Weiterleitung in 2 Sekunden...</p>"
         "</div></body></html>";
 
     httpd_resp_send(req, ok_page, HTTPD_RESP_USE_STRLEN);

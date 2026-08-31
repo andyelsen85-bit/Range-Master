@@ -26,11 +26,11 @@ export default function Rangliste() {
     <div className="space-y-8 animate-in fade-in duration-500">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-border/50 pb-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Saison Ranglischt</h1>
-          <p className="text-muted-foreground mt-2 text-sm font-medium">Vergläicht Är Leeschtung mat anere Memberen.</p>
+          <h1 className="text-3xl font-bold tracking-tight">Saisonrangliste</h1>
+          <p className="text-muted-foreground mt-2 text-sm font-medium">Vergleichen Sie Ihre Leistung mit anderen Mitgliedern.</p>
           {showPercent && (
             <p className="text-muted-foreground mt-1 text-xs">
-              Sortéiert no normaliséiertem Duerchschnëtt (% vum max. méigleche Score) — erlaabt fairen Vergläich iwwer verschidde Formater.
+              Sortiert nach normalisiertem Durchschnitt (% der maximal möglichen Punktzahl) – für einen fairen Vergleich über verschiedene Formate hinweg.
             </p>
           )}
         </div>
@@ -38,7 +38,7 @@ export default function Rangliste() {
         <div className="flex items-center gap-3">
           <Select value={jahr} onValueChange={setJahr}>
             <SelectTrigger className="w-32 bg-card border-border/80 h-10 font-medium">
-              <SelectValue placeholder="Joer" />
+              <SelectValue placeholder="Jahr" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="2026">2026</SelectItem>
@@ -76,17 +76,17 @@ export default function Rangliste() {
               <TableHeader className="bg-secondary/20">
                 <TableRow className="border-border/50 hover:bg-transparent">
                   <TableHead className="w-20 text-center font-mono text-xs uppercase tracking-widest font-bold">Rang</TableHead>
-                  <TableHead className="text-xs uppercase tracking-widest font-bold">Spiller</TableHead>
-                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spiller</TableHead>
-                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Gesamt Punkten</TableHead>
-                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Bescht</TableHead>
+                  <TableHead className="text-xs uppercase tracking-widest font-bold">Spieler</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spiele</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Gesamtpunkte</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Bestes Ergebnis</TableHead>
                   {showPercent ? (
                     <TableHead className="text-right text-xs uppercase tracking-widest font-bold text-primary">
                       Ø % Score
-                      <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0 font-normal border-primary/40 text-primary/80">normaliséiert</Badge>
+                      <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0 font-normal border-primary/40 text-primary/80">normalisiert</Badge>
                     </TableHead>
                   ) : (
-                    <TableHead className="text-right text-xs uppercase tracking-widest font-bold text-primary">Ø Duerchschnëtt</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-widest font-bold text-primary">Ø Durchschnitt</TableHead>
                   )}
                 </TableRow>
               </TableHeader>
@@ -116,7 +116,7 @@ export default function Rangliste() {
           </div>
         ) : (
           <div className="p-16 text-center">
-            <p className="text-muted-foreground font-medium">Keng Ranglëscht Date fir dës Selektioun.</p>
+            <p className="text-muted-foreground font-medium">Keine Ranglistendaten für diese Auswahl.</p>
           </div>
         )}
       </div>

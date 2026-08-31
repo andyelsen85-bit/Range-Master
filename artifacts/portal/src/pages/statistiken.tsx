@@ -37,7 +37,7 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
 
   const machineData = stats?.maschinen 
     ? Object.entries(stats.maschinen).map(([key, val]) => ({
-        name: `Maschinn ${key}`,
+        name: `Maschine ${key}`,
         short: key,
         versuche: val.versuche,
         treffer: val.treffer,
@@ -48,15 +48,15 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <header className="border-b border-border/50 pb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Detailléiert Statistiken</h1>
-        <p className="text-muted-foreground mt-2 text-sm font-medium">Iwwerpréift Är Schwächten a Stäerkten.</p>
+        <h1 className="text-3xl font-bold tracking-tight">Detaillierte Statistiken</h1>
+        <p className="text-muted-foreground mt-2 text-sm font-medium">Überprüfen Sie Ihre Stärken und Schwächen.</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="bg-card border-border/50 shadow-sm overflow-hidden">
           <CardHeader className="bg-secondary/20 border-b border-border/50 pb-5">
-            <CardTitle className="text-sm uppercase tracking-widest font-bold">Trefferquote pro Maschinn</CardTitle>
-            <CardDescription className="font-medium mt-1">Weist wéi gutt Dir verschidde Fluchbunne trefft.</CardDescription>
+            <CardTitle className="text-sm uppercase tracking-widest font-bold">Trefferquote pro Maschine</CardTitle>
+            <CardDescription className="font-medium mt-1">Zeigt, wie gut Sie verschiedene Flugbahnen treffen.</CardDescription>
           </CardHeader>
           <CardContent className="h-[340px] pt-6">
             {isLoading ? <Skeleton className="w-full h-full bg-secondary/20 rounded-md" /> : 
@@ -79,7 +79,7 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
         <Card className="bg-card border-border/50 shadow-sm overflow-hidden">
           <CardHeader className="bg-secondary/20 border-b border-border/50 pb-5">
             <CardTitle className="text-sm uppercase tracking-widest font-bold">Profil Radar</CardTitle>
-            <CardDescription className="font-medium mt-1">Visuell Duerstellung vun Ärer Tauben-Performance.</CardDescription>
+            <CardDescription className="font-medium mt-1">Visuelle Darstellung Ihrer Leistung bei den Tauben.</CardDescription>
           </CardHeader>
           <CardContent className="h-[340px] pt-6">
             {isLoading ? <Skeleton className="w-full h-full bg-secondary/20 rounded-md" /> : 
@@ -105,7 +105,7 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
         <CardHeader className="bg-secondary/20 border-b border-border/50 pb-5">
           <CardTitle className="text-sm uppercase tracking-widest font-bold">Score pro Spillformat</CardTitle>
           <CardDescription className="font-medium mt-1">
-            Wéi säi normaliséierte Leaderboard-Score sech pro Spillmodus zesummesetzt.
+            Wie sich Ihr normalisierter Ranglistenwert je Spielmodus zusammensetzt.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
@@ -127,9 +127,9 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
               {/* Header row */}
               <div className="flex items-center gap-4 px-6 py-3 border-b border-border/40 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 <span className="flex-1">Format</span>
-                <span className="w-20 text-right">Spiller</span>
+                 <span className="w-20 text-right">Spiele</span>
                 <span className="w-24 text-right">Ø Punkte</span>
-                <span className="w-24 text-right">Normaliséiert</span>
+                 <span className="w-24 text-right">Normalisiert</span>
               </div>
               <div className="divide-y divide-border/40">
                 {breakdownData.breakdown
@@ -160,7 +160,7 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
             </>
           ) : (
             <div className="py-12 flex items-center justify-center text-muted-foreground font-medium text-sm">
-              Keng Spiller Daten disponibel
+               Keine Spieldaten verfügbar
             </div>
           )}
         </CardContent>
@@ -169,7 +169,7 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
       {machineData.length > 0 && (
         <Card className="bg-card border-border/50 shadow-sm overflow-hidden mt-6">
           <CardHeader className="bg-secondary/20 border-b border-border/50 pb-4">
-            <CardTitle className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Rohdaten Detailer</CardTitle>
+            <CardTitle className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Rohdaten im Detail</CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -193,5 +193,5 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
 }
 
 function EmptyState() {
-  return <div className="w-full h-full flex items-center justify-center text-muted-foreground font-medium text-sm">Keng Daten disponibel</div>;
+  return <div className="w-full h-full flex items-center justify-center text-muted-foreground font-medium text-sm">Keine Daten verfügbar</div>;
 }

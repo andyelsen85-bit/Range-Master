@@ -37,12 +37,12 @@ export default function AdminSpieler() {
       <div className="border-b border-border/50 pb-6">
         <Link href="/admin">
           <button className="flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors mb-4">
-            <ArrowLeft size={16} /> Spillerverwaltung
+            <ArrowLeft size={16} /> Spielerverwaltung
           </button>
         </Link>
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-3xl font-bold tracking-tight">
-            {spieler?.name ?? `Spiller #${spielerId}`}
+            {spieler?.name ?? `Spieler #${spielerId}`}
           </h1>
           {spieler?.mitgliedNr && (
             <span className="text-xs font-mono font-black text-muted-foreground bg-secondary/50 border border-border/50 px-2.5 py-1 rounded-lg tracking-widest">
@@ -123,14 +123,14 @@ function DashboardTab({ spielerId }: { spielerId: number }) {
   }
 
   if (!stats) {
-    return <EmptyState text="Keng Statistike fonnt. Dëse Spiller huet nach keng Resultater." />;
+    return <EmptyState text="Keine Statistiken gefunden. Dieser Spieler hat noch keine Ergebnisse." />;
   }
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Saison Spiller" value={stats.gesamtSpiele} icon={<Activity className="text-chart-2" />} />
-        <StatCard title="Duerchschnëtt" value={stats.durchschnitt.toFixed(1)} icon={<Crosshair className="text-chart-3" />} />
+        <StatCard title="Saisonspiele" value={stats.gesamtSpiele} icon={<Activity className="text-chart-2" />} />
+        <StatCard title="Durchschnitt" value={stats.durchschnitt.toFixed(1)} icon={<Crosshair className="text-chart-3" />} />
         <StatCard title="Trefferquote" value={`${Math.round(stats.trefferquote)}%`} icon={<Target className="text-primary" />} />
         <StatCard title="Bescht Resultat" value={stats.bestPunkte} icon={<Trophy className="text-chart-4" />} />
       </div>
@@ -138,7 +138,7 @@ function DashboardTab({ spielerId }: { spielerId: number }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="bg-card border-border/50">
           <CardHeader className="bg-secondary/20 border-b border-border/50 pb-4">
-            <CardTitle className="text-xs uppercase tracking-[0.15em] font-bold text-muted-foreground">Trefferquote pro Maschinn</CardTitle>
+            <CardTitle className="text-xs uppercase tracking-[0.15em] font-bold text-muted-foreground">Trefferquote pro Maschine</CardTitle>
           </CardHeader>
           <CardContent className="h-72 pt-6">
             {machineData.length > 0 ? (
@@ -150,7 +150,7 @@ function DashboardTab({ spielerId }: { spielerId: number }) {
                   <Bar dataKey="quote" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <EmptyState text="Keng Daten" />}
+            ) : <EmptyState text="Keine Daten" />}
           </CardContent>
         </Card>
 
@@ -175,7 +175,7 @@ function DashboardTab({ spielerId }: { spielerId: number }) {
                   <Area type="monotone" dataKey="punkte" stroke="hsl(var(--primary))" strokeWidth={3} fill="url(#adminTrend)" dot={{ fill: "hsl(var(--primary))", r: 4 }} />
                 </AreaChart>
               </ResponsiveContainer>
-            ) : <EmptyState text="Keng Daten" />}
+            ) : <EmptyState text="Keine Daten" />}
           </CardContent>
         </Card>
       </div>
@@ -207,7 +207,7 @@ function ResultaterTab({ spielerId }: { spielerId: number }) {
   }
 
   if (sortedGroups.length === 0) {
-    return <EmptyState text="Keng Resultater fonnt." />;
+    return <EmptyState text="Keine Ergebnisse gefunden." />;
   }
 
   return (
@@ -239,7 +239,7 @@ function ResultaterTab({ spielerId }: { spielerId: number }) {
               </div>
             </div>
             <div className="p-5 grid md:grid-cols-2 gap-6">
-              {[{ label: "Lauf 1", ergebnisse: lauf1 }, { label: "Lauf 2", ergebnisse: lauf2 }].map(({ label, ergebnisse }) => (
+              {[{ label: "Durchgang 1", ergebnisse: lauf1 }, { label: "Durchgang 2", ergebnisse: lauf2 }].map(({ label, ergebnisse }) => (
                 ergebnisse.length > 0 && (
                   <div key={label}>
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-3">{label} — {ergebnisse.reduce((s, e) => s + e.punkte, 0)} Punkte</p>
@@ -296,7 +296,7 @@ function StatistikenTab({ spielerId }: { spielerId: number }) {
   }
 
   if (!stats || machineData.length === 0) {
-    return <EmptyState text="Keng Statistike fonnt." />;
+    return <EmptyState text="Keine Statistiken gefunden." />;
   }
 
   return (
@@ -304,7 +304,7 @@ function StatistikenTab({ spielerId }: { spielerId: number }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="bg-card border-border/50">
           <CardHeader className="bg-secondary/20 border-b border-border/50 pb-4">
-            <CardTitle className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Trefferquote pro Maschinn</CardTitle>
+            <CardTitle className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Trefferquote pro Maschine</CardTitle>
           </CardHeader>
           <CardContent className="h-80 pt-6">
             <ResponsiveContainer width="100%" height="100%">
@@ -320,7 +320,7 @@ function StatistikenTab({ spielerId }: { spielerId: number }) {
 
         <Card className="bg-card border-border/50">
           <CardHeader className="bg-secondary/20 border-b border-border/50 pb-4">
-            <CardTitle className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Radar Analyse</CardTitle>
+            <CardTitle className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Radar-Analyse</CardTitle>
           </CardHeader>
           <CardContent className="h-80 pt-6">
             <ResponsiveContainer width="100%" height="100%">
@@ -338,7 +338,7 @@ function StatistikenTab({ spielerId }: { spielerId: number }) {
 
       <Card className="bg-card border-border/50">
         <CardHeader className="bg-secondary/20 border-b border-border/50 pb-4">
-          <CardTitle className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Detailer pro Maschinn</CardTitle>
+          <CardTitle className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Details pro Maschine</CardTitle>
         </CardHeader>
         <CardContent className="pt-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

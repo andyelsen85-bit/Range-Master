@@ -90,28 +90,28 @@ export default function Admin() {
 
   const createMut = useMutation({
     mutationFn: ({ mitgliedNr: _nr, ...body }: PlayerForm) => apiFetch("/api/admin/spieler", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => { invalidate(); setAddOpen(false); setAddForm(emptyForm); toast({ title: "Spiller erstallt" }); },
-    onError: (e: Error) => toast({ title: "Feeler", description: e.message, variant: "destructive" }),
+    onSuccess: () => { invalidate(); setAddOpen(false); setAddForm(emptyForm); toast({ title: "Spieler erstellt" }); },
+    onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
 
   const updateMut = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Omit<PlayerForm, "passwort"> }) =>
       apiFetch(`/api/admin/spieler/${id}`, { method: "PUT", body: JSON.stringify(body) }),
-    onSuccess: () => { invalidate(); setEditPlayer(null); toast({ title: "Spiller aktualiséiert" }); },
-    onError: (e: Error) => toast({ title: "Feeler", description: e.message, variant: "destructive" }),
+    onSuccess: () => { invalidate(); setEditPlayer(null); toast({ title: "Spieler aktualisiert" }); },
+    onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => apiFetch(`/api/admin/spieler/${id}`, { method: "DELETE" }),
-    onSuccess: () => { invalidate(); setDeletePlayer(null); toast({ title: "Spiller geläscht" }); },
-    onError: (e: Error) => toast({ title: "Feeler", description: e.message, variant: "destructive" }),
+    onSuccess: () => { invalidate(); setDeletePlayer(null); toast({ title: "Spieler gelöscht" }); },
+    onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
 
   const pwdMut = useMutation({
     mutationFn: ({ id, pwd }: { id: number; pwd: string }) =>
       apiFetch(`/api/admin/spieler/${id}/passwort`, { method: "PUT", body: JSON.stringify({ neuesPasswort: pwd }) }),
-    onSuccess: () => { setPwdPlayer(null); setNewPwd(""); toast({ title: "Passwuert geännert" }); },
-    onError: (e: Error) => toast({ title: "Feeler", description: e.message, variant: "destructive" }),
+    onSuccess: () => { setPwdPlayer(null); setNewPwd(""); toast({ title: "Passwort geändert" }); },
+    onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
 
   // ── Open edit dialog ──────────────────────────────────────────────────────
@@ -127,14 +127,14 @@ export default function Admin() {
     <div className="space-y-6 animate-in fade-in duration-500">
       <header className="flex items-start justify-between border-b border-border/50 pb-6 gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Spillerverwaltung</h1>
-          <p className="text-muted-foreground mt-2 text-sm font-medium">Spiller erstellen, änneren, läschen a Passwierder setzen.</p>
+          <h1 className="text-3xl font-bold tracking-tight">Spielerverwaltung</h1>
+          <p className="text-muted-foreground mt-2 text-sm font-medium">Spieler erstellen, bearbeiten, löschen und Passwörter festlegen.</p>
         </div>
         <button
           onClick={() => setAddOpen(true)}
           className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg transition-colors shrink-0"
         >
-          <Plus size={16} /> Neit Spiller
+          <Plus size={16} /> Neuer Spieler
         </button>
       </header>
 
@@ -145,7 +145,7 @@ export default function Admin() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
 
-          placeholder="Spiller sichen… (Numm, Email, Mitglied Nr)"
+          placeholder="Spieler suchen… (Name, E-Mail, Mitgliedsnummer)"
           className="w-full bg-card border border-border/60 rounded-lg pl-9 pr-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
         />
       </div>
@@ -160,14 +160,14 @@ export default function Admin() {
             <Table>
               <TableHeader className="bg-secondary/20">
                 <TableRow className="border-border/50 hover:bg-transparent">
-                  <TableHead className="text-xs uppercase tracking-widest font-bold">Numm</TableHead>
+                  <TableHead className="text-xs uppercase tracking-widest font-bold">Name</TableHead>
                   <TableHead className="text-xs uppercase tracking-widest font-bold">Email</TableHead>
-                  <TableHead className="text-xs uppercase tracking-widest font-bold">Mitglied Nr</TableHead>
+                  <TableHead className="text-xs uppercase tracking-widest font-bold">Mitgliedsnummer</TableHead>
                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Portal</TableHead>
                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Admin</TableHead>
-                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spiller</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Spiele</TableHead>
                   <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Ø / 36</TableHead>
-                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Bescht</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Bestes Ergebnis</TableHead>
                   <TableHead className="w-28"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -175,7 +175,7 @@ export default function Admin() {
                 {filtered.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-10 text-muted-foreground font-medium">
-                      {search ? `Keng Resultater fir "${search}"` : "Keng Spiller fonnt"}
+                      {search ? `Keine Ergebnisse für "${search}"` : "Keine Spieler gefunden"}
                     </TableCell>
                   </TableRow>
                 )}
@@ -197,10 +197,10 @@ export default function Admin() {
                     <TableCell className="text-right font-mono font-bold text-primary">{p.bestPunkte > 0 ? p.bestPunkte : <span className="text-muted-foreground/40">–</span>}</TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        <IconBtn title="Profil gesinn" onClick={() => navigate(`/admin/spieler/${p.id}`)}><Eye size={14} /></IconBtn>
-                        <IconBtn title="Änneren" onClick={() => openEdit(p)}><Pencil size={14} /></IconBtn>
-                        <IconBtn title="Passwuert" onClick={() => { setPwdPlayer(p); setNewPwd(""); }}><KeyRound size={14} /></IconBtn>
-                        <IconBtn title="Läschen" danger onClick={() => setDeletePlayer(p)}><Trash2 size={14} /></IconBtn>
+                         <IconBtn title="Profil anzeigen" onClick={() => navigate(`/admin/spieler/${p.id}`)}><Eye size={14} /></IconBtn>
+                         <IconBtn title="Bearbeiten" onClick={() => openEdit(p)}><Pencil size={14} /></IconBtn>
+                         <IconBtn title="Passwort" onClick={() => { setPwdPlayer(p); setNewPwd(""); }}><KeyRound size={14} /></IconBtn>
+                         <IconBtn title="Löschen" danger onClick={() => setDeletePlayer(p)}><Trash2 size={14} /></IconBtn>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -215,12 +215,12 @@ export default function Admin() {
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Neit Spiller erstellen</DialogTitle>
-            <DialogDescription>Fëllt d'Felder aus. Passwuert ass nëmme néideg fir Portal-Zougang.</DialogDescription>
+            <DialogTitle>Neuen Spieler erstellen</DialogTitle>
+            <DialogDescription>Füllen Sie die Felder aus. Ein Passwort wird nur für den Portalzugang benötigt.</DialogDescription>
           </DialogHeader>
           <PlayerFormFields form={addForm} onChange={setAddForm} showPassword isEdit={false} />
           <DialogFooter>
-            <button onClick={() => setAddOpen(false)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Ofbriechen</button>
+            <button onClick={() => setAddOpen(false)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Abbrechen</button>
             <button
               onClick={() => createMut.mutate(addForm)}
               disabled={!addForm.name || createMut.isPending}
@@ -236,18 +236,18 @@ export default function Admin() {
       <Dialog open={!!editPlayer} onOpenChange={(o) => !o && setEditPlayer(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Spiller änneren</DialogTitle>
+            <DialogTitle>Spieler bearbeiten</DialogTitle>
             <DialogDescription>{editPlayer?.name}</DialogDescription>
           </DialogHeader>
           <PlayerFormFields form={editForm} onChange={setEditForm} showPassword={false} isEdit />
           <DialogFooter>
-            <button onClick={() => setEditPlayer(null)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Ofbriechen</button>
+            <button onClick={() => setEditPlayer(null)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Abbrechen</button>
             <button
               onClick={() => editPlayer && updateMut.mutate({ id: editPlayer.id, body: editForm })}
               disabled={!editForm.name || updateMut.isPending}
               className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-50"
             >
-              {updateMut.isPending ? "Späicheren…" : "Späicheren"}
+              {updateMut.isPending ? "Wird gespeichert…" : "Speichern"}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -257,19 +257,19 @@ export default function Admin() {
       <Dialog open={!!deletePlayer} onOpenChange={(o) => !o && setDeletePlayer(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Spiller läschen</DialogTitle>
+            <DialogTitle>Spieler löschen</DialogTitle>
             <DialogDescription>
-              Wëllt dir <strong>{deletePlayer?.name}</strong> wierklech läschen? All Statistiken a Resultater ginn onwidderrufflech geläscht.
+              Möchten Sie <strong>{deletePlayer?.name}</strong> wirklich löschen? Alle Statistiken und Ergebnisse werden unwiderruflich gelöscht.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <button onClick={() => setDeletePlayer(null)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Ofbriechen</button>
+            <button onClick={() => setDeletePlayer(null)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Abbrechen</button>
             <button
               onClick={() => deletePlayer && deleteMut.mutate(deletePlayer.id)}
               disabled={deleteMut.isPending}
               className="px-4 py-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-50"
             >
-              {deleteMut.isPending ? "Läschen…" : "Definitiv läschen"}
+              {deleteMut.isPending ? "Wird gelöscht…" : "Endgültig löschen"}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -279,18 +279,18 @@ export default function Admin() {
       <Dialog open={!!pwdPlayer} onOpenChange={(o) => !o && setPwdPlayer(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Passwuert setzen</DialogTitle>
-            <DialogDescription>Neit Passwuert fir <strong>{pwdPlayer?.name}</strong>.</DialogDescription>
+            <DialogTitle>Passwort festlegen</DialogTitle>
+            <DialogDescription>Neues Passwort für <strong>{pwdPlayer?.name}</strong>.</DialogDescription>
           </DialogHeader>
           <PwdField value={newPwd} onChange={setNewPwd} />
           <DialogFooter>
-            <button onClick={() => setPwdPlayer(null)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Ofbriechen</button>
+            <button onClick={() => setPwdPlayer(null)} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Abbrechen</button>
             <button
               onClick={() => pwdPlayer && newPwd.length >= 6 && pwdMut.mutate({ id: pwdPlayer.id, pwd: newPwd })}
               disabled={newPwd.length < 6 || pwdMut.isPending}
               className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-50"
             >
-              {pwdMut.isPending ? "Späicheren…" : "Späicheren"}
+              {pwdMut.isPending ? "Wird gespeichert…" : "Speichern"}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -304,12 +304,12 @@ export default function Admin() {
 function PwdField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <div className="space-y-1.5 py-2">
-      <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Neit Passwuert</label>
+      <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Neues Passwort</label>
       <input
         type="password" autoComplete="new-password"
         value={value} onChange={(e) => onChange(e.target.value)}
         className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
-        placeholder="Min. 6 Zeechen"
+        placeholder="Mindestens 6 Zeichen"
       />
     </div>
   );
@@ -328,7 +328,7 @@ function PlayerFormFields({
   const set = (k: string, v: any) => onChange((f: any) => ({ ...f, [k]: v }));
   return (
     <div className="space-y-4 py-2">
-      <FormField label="Numm *" id="name">
+      <FormField label="Name *" id="name">
         <input
           id="name" value={form.name} onChange={(e) => set("name", e.target.value)} required
           className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
@@ -339,11 +339,11 @@ function PlayerFormFields({
         <input
           id="email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)}
           className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
-          placeholder="max@beispill.lu"
+          placeholder="max@beispiel.de"
         />
       </FormField>
       {isEdit ? (
-        <FormField label="Mitglied Nr" id="nr">
+        <FormField label="Mitgliedsnummer" id="nr">
           <div className="w-full bg-secondary/30 border border-border/40 rounded-lg px-4 py-2.5 text-sm font-mono font-medium text-muted-foreground select-all">
             {form.mitgliedNr || "–"}
           </div>
@@ -351,21 +351,21 @@ function PlayerFormFields({
       ) : (
         <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/20 border border-border/30 rounded-lg px-3 py-2">
           <span className="font-mono font-bold text-primary">WLZ###</span>
-          <span>Mitglied Nr gëtt automatesch zougewisen</span>
+          <span>Die Mitgliedsnummer wird automatisch vergeben</span>
         </div>
       )}
       {showPassword && (
-        <FormField label="Passwuert (fir Portal-Zougang)" id="pwd">
+        <FormField label="Passwort (für den Portalzugang)" id="pwd">
           <input
             id="pwd" type="password" autoComplete="new-password" value={form.passwort}
             onChange={(e) => set("passwort", e.target.value)}
             className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-colors"
-            placeholder="Min. 6 Zeechen"
+            placeholder="Mindestens 6 Zeichen"
           />
         </FormField>
       )}
       <div className="flex gap-6 pt-1">
-        <Toggle label="Portal Aktiv" checked={form.portalAktiv} onToggle={(v) => set("portalAktiv", v)} />
+        <Toggle label="Portal aktiv" checked={form.portalAktiv} onToggle={(v) => set("portalAktiv", v)} />
         <Toggle label="Admin" checked={form.isAdmin} onToggle={(v) => set("isAdmin", v)} />
       </div>
     </div>

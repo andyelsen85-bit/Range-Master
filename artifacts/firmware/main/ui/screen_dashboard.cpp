@@ -156,8 +156,8 @@ static void shutdown_confirm_cb(lv_event_t *e)
     if (s_shutdown_sync_pending) return;
 
     if (cop_wifi_state() != COP_WIFI_CONNECTED) {
-        set_shutdown_message("WIFI IS NOT CONNECTED.\n"
-                             "CONNECT FIRST, THEN TRY AGAIN.", CLR_DANGER);
+        set_shutdown_message("WIFI IST NICHT VERBUNDEN.\n"
+                             "ZUERST VERBINDEN, DANN ERNEUT VERSUCHEN.", CLR_DANGER);
         return;
     }
 
@@ -165,8 +165,8 @@ static void shutdown_confirm_cb(lv_event_t *e)
     // previous sync is active so the only completion we observe belongs to
     // this shutdown request.
     if (store_sync_is_queued_or_running()) {
-        set_shutdown_message("A SYNC IS ALREADY RUNNING.\n"
-                             "WAIT FOR IT, THEN TRY AGAIN.", CLR_WARN);
+        set_shutdown_message("EIN SYNC LÄUFT BEREITS.\n"
+                             "WARTEN, DANN ERNEUT VERSUCHEN.", CLR_WARN);
         return;
     }
 
@@ -174,15 +174,15 @@ static void shutdown_confirm_cb(lv_event_t *e)
         SyncUiState sync_state = {};
         store_get_sync_ui_state(&sync_state);
         char message[160];
-        snprintf(message, sizeof(message), "SYNC COULD NOT START.\n%.100s",
-                 sync_state.error[0] ? sync_state.error : "TRY AGAIN.");
+        snprintf(message, sizeof(message), "SYNC KONNTE NICHT STARTEN.\n%.100s",
+                 sync_state.error[0] ? sync_state.error : "ERNEUT VERSUCHEN.");
         set_shutdown_message(message, CLR_DANGER);
         return;
     }
 
     s_shutdown_sync_pending = true;
-    set_shutdown_message("SYNCING BEFORE SHUTDOWN...\n"
-                         "DO NOT SWITCH OFF THE TERMINAL.", CLR_WARN);
+    set_shutdown_message("SYNC VOR DEM AUSSCHALTEN...\n"
+                         "TERMINAL NICHT AUSSCHALTEN.", CLR_WARN);
 }
 
 static void shutdown_open_cb(lv_event_t *e)
@@ -210,14 +210,14 @@ static void shutdown_open_cb(lv_event_t *e)
     lv_obj_clear_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = lv_label_create(dialog);
-    lv_label_set_text(title, "SYNC & SHUT DOWN?");
+    lv_label_set_text(title, "SYNC & AUSSCHALTEN?");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_DANGER), 0);
 
     s_shutdown_message = lv_label_create(dialog);
     lv_label_set_text(s_shutdown_message,
-                      "THE TERMINAL WILL SYNC FIRST.\n"
-                      "IT WILL ENTER DEEP SLEEP ONLY IF SYNC SUCCEEDS.");
+                       "DAS TERMINAL SYNCHRONISIERT ZUERST.\n"
+                       "TIEFSCHLAF NUR BEI ERFOLGREICHEM SYNC.");
     lv_obj_set_style_text_align(s_shutdown_message, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_shutdown_message, lv_color_hex(CLR_TEXT), 0);
 
@@ -237,7 +237,7 @@ static void shutdown_open_cb(lv_event_t *e)
     lv_obj_set_size(confirm, 250, 54);
     lv_obj_add_event_cb(confirm, shutdown_confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *confirm_label = lv_label_create(confirm);
-    lv_label_set_text(confirm_label, LV_SYMBOL_POWER "  SYNC & SHUT DOWN");
+    lv_label_set_text(confirm_label, LV_SYMBOL_POWER "  SYNC & AUSSCHALTEN");
     lv_obj_set_style_text_font(confirm_label, &lv_font_montserrat_14, 0);
     lv_obj_center(confirm_label);
 
@@ -246,7 +246,7 @@ static void shutdown_open_cb(lv_event_t *e)
     lv_obj_set_size(cancel, 160, 54);
     lv_obj_add_event_cb(cancel, shutdown_cancel_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cancel_label = lv_label_create(cancel);
-    lv_label_set_text(cancel_label, "CANCEL");
+    lv_label_set_text(cancel_label, "ABBRECHEN");
     lv_obj_center(cancel_label);
 }
 
@@ -278,19 +278,19 @@ lv_obj_t *screen_dashboard_create(void)
 
     // WiFi status (right side of header)
     s_lbl_wifi = lv_label_create(header);
-    lv_label_set_text(s_lbl_wifi, LV_SYMBOL_WIFI "  NET VERBONNEN");
+    lv_label_set_text(s_lbl_wifi, LV_SYMBOL_WIFI "  NICHT VERBUNDEN");
     lv_obj_set_style_text_font(s_lbl_wifi, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_wifi, LV_ALIGN_RIGHT_MID, 0, 0);
 
     s_lbl_gateway = lv_label_create(header);
-    lv_label_set_text(s_lbl_gateway, "GATEWAY: NET CONFIG");
+    lv_label_set_text(s_lbl_gateway, "GATEWAY: NICHT KONFIGURIERT");
     lv_obj_set_style_text_font(s_lbl_gateway, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_gateway, LV_ALIGN_RIGHT_MID, -260, 0);
 
     s_lbl_clock = lv_label_create(header);
-    lv_label_set_text(s_lbl_clock, "ZEIT: NET SYNCHRONISEIERT");
+    lv_label_set_text(s_lbl_clock, "ZEIT: NICHT SYNCHRONISIERT");
     lv_obj_set_style_text_font(s_lbl_clock, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_clock, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_width(s_lbl_clock, 250);
@@ -317,7 +317,7 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_flex_flow(hist_card, LV_FLEX_FLOW_COLUMN);
 
     lv_obj_t *hist_hdr = lv_label_create(hist_card);
-    lv_label_set_text(hist_hdr, "LESCHTE SPILLER");
+    lv_label_set_text(hist_hdr, "LETZTE SPIELE");
     lv_obj_set_style_text_font(hist_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(hist_hdr, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_style_text_letter_space(hist_hdr, 2, 0);
@@ -345,10 +345,10 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_clear_flag(sidebar, LV_OBJ_FLAG_SCROLLABLE);
 
     // 1. Large primary "SPILL START" button (140 px tall)
-    big_btn(sidebar, LV_SYMBOL_PLAY, "SPILL START", 140, SCREEN_START);
+    big_btn(sidebar, LV_SYMBOL_PLAY, "SPIEL START", 140, SCREEN_START);
 
     // 2. "SPILLER VUM DAG" (credits) - full width, 88 px
-    sec_btn(sidebar, LV_SYMBOL_CHARGE, "SPILLER VUM DAG",
+    sec_btn(sidebar, LV_SYMBOL_CHARGE, "SPIELER DES TAGES",
             SIDEBAR_W - 32, 88, SCREEN_KREDITE);
 
     // 3. Row: "SPILLER" | "ASTELLUNGEN" side-by-side
@@ -363,8 +363,8 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    sec_btn(row, LV_SYMBOL_LIST,     "SPILLER",    140, 88, SCREEN_SPILLER);
-    sec_btn(row, LV_SYMBOL_SETTINGS, "ASTELLUNGEN",140, 88, SCREEN_EINSTELLUNGEN);
+    sec_btn(row, LV_SYMBOL_LIST,     "SPIELER",    140, 88, SCREEN_SPILLER);
+    sec_btn(row, LV_SYMBOL_SETTINGS, "EINSTELLUNGEN",140, 88, SCREEN_EINSTELLUNGEN);
 
     // 4. "SPILLGESCHICHT" - muted ghost style
     lv_obj_t *hist_btn = lv_btn_create(sidebar);
@@ -387,7 +387,7 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_color(hist_ic, lv_color_hex(CLR_MUTED), 0);
 
     lv_obj_t *hist_lbl = lv_label_create(hist_btn);
-    lv_label_set_text(hist_lbl, "SPILLGESCHICHT");
+    lv_label_set_text(hist_lbl, "SPIELVERLAUF");
     lv_obj_set_style_text_font(hist_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(hist_lbl, lv_color_hex(CLR_MUTED), 0);
 
@@ -397,7 +397,7 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_size(shutdown_btn, SIDEBAR_W - 32, 50);
     lv_obj_add_event_cb(shutdown_btn, shutdown_open_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *shutdown_label = lv_label_create(shutdown_btn);
-    lv_label_set_text(shutdown_label, LV_SYMBOL_POWER "  SHUT DOWN");
+    lv_label_set_text(shutdown_label, LV_SYMBOL_POWER "  AUSSCHALTEN");
     lv_obj_set_style_text_font(shutdown_label, &lv_font_montserrat_14, 0);
     lv_obj_center(shutdown_label);
 
@@ -418,13 +418,13 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_clear_flag(queue, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *q_hdr = lv_label_create(queue);
-    lv_label_set_text(q_hdr, "OFFLINE QUEUE");
+    lv_label_set_text(q_hdr, "OFFLINE-WARTESCHLANGE");
     lv_obj_set_style_text_font(q_hdr, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(q_hdr, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_style_text_letter_space(q_hdr, 1, 0);
 
     s_lbl_pending = lv_label_create(queue);
-    lv_label_set_text(s_lbl_pending, "0 SPILLER AM WAARDRAUM");
+    lv_label_set_text(s_lbl_pending, "0 AKTIONEN AUSSTEHEND");
     lv_obj_set_style_text_font(s_lbl_pending, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_lbl_pending, lv_color_hex(CLR_TEXT), 0);
     lv_label_set_long_mode(s_lbl_pending, LV_LABEL_LONG_WRAP);
@@ -443,7 +443,7 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_add_event_cb(sync_btn, sync_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *sync_lbl = lv_label_create(sync_btn);
-    lv_label_set_text(sync_lbl, LV_SYMBOL_REFRESH "  ALLES SYNCEN");
+    lv_label_set_text(sync_lbl, LV_SYMBOL_REFRESH "  ALLES SYNCHRONISIEREN");
     lv_obj_set_style_text_font(sync_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(sync_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sync_lbl);
@@ -467,23 +467,23 @@ void screen_dashboard_refresh(void)
             break;
         case SYNC_RUNNING:
             set_label_text_if_changed(s_lbl_sync_status,
-                                      LV_SYMBOL_REFRESH " SYNCISIERT...");
+                                       LV_SYMBOL_REFRESH " SYNCHRONISIERT...");
             break;
         case SYNC_SUCCESS:
             set_label_text_if_changed(s_lbl_sync_status,
-                                      LV_SYMBOL_OK " SYNCISIERT");
+                                       LV_SYMBOL_OK " SYNCHRONISIERT");
             break;
         case SYNC_ERROR:
             snprintf(buf, sizeof(buf),
-                     LV_SYMBOL_WARNING " Feeler: %.40s", sync_state.error);
+                      LV_SYMBOL_WARNING " Fehler: %.40s", sync_state.error);
             set_label_text_if_changed(s_lbl_sync_status, buf);
             break;
     }
 
     // Pending games
-    snprintf(buf, sizeof(buf), "%d AKTIOUNEN | %s | LAST SYNC: %lld",
+    snprintf(buf, sizeof(buf), "%d AKTIONEN | %s | LETZTER SYNC: %lld",
              store_pending_action_count(),
-             g_store.offlineCacheLoaded ? "OFFLINE CACHE" : "NO CACHE",
+              g_store.offlineCacheLoaded ? "OFFLINE-CACHE" : "KEIN CACHE",
              (long long)g_store.lastSuccessfulSyncAt);
     set_label_text_if_changed(s_lbl_pending, buf);
 
@@ -537,7 +537,7 @@ void screen_dashboard_refresh(void)
     lv_obj_clean(s_history_list);
     if (g_store.historyCount == 0) {
         lv_obj_t *empty = lv_label_create(s_history_list);
-        lv_label_set_text(empty, "KENG SPILLER NACH");
+        lv_label_set_text(empty, "NOCH KEINE SPIELE");
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
     } else {
@@ -610,7 +610,7 @@ void screen_dashboard_refresh(void)
             lv_obj_set_flex_grow(win_lbl, 1);
 
             char p_buf[12];
-            snprintf(p_buf, sizeof(p_buf), "%d SPILLER", fg->spieler_count);
+            snprintf(p_buf, sizeof(p_buf), "%d SPIELER", fg->spieler_count);
             lv_obj_t *p_lbl = lv_label_create(row);
             lv_label_set_text(p_lbl, p_buf);
             lv_obj_set_style_text_font(p_lbl, &lv_font_montserrat_14, 0);
@@ -633,8 +633,8 @@ void screen_dashboard_tick(void)
         if (sync_state.status == SYNC_ERROR) {
             s_shutdown_sync_pending = false;
             char message[160];
-            snprintf(message, sizeof(message), "SYNC FAILED. TERMINAL STAYS ON.\n%.100s",
-                      sync_state.error[0] ? sync_state.error : "TRY AGAIN.");
+            snprintf(message, sizeof(message), "SYNC FEHLGESCHLAGEN. TERMINAL BLEIBT AN.\n%.100s",
+                       sync_state.error[0] ? sync_state.error : "ERNEUT VERSUCHEN.");
             set_shutdown_message(message, CLR_DANGER);
             screen_dashboard_refresh();
         }

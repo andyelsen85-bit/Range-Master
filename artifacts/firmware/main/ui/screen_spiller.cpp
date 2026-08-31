@@ -98,12 +98,12 @@ static void save_cb(lv_event_t *e)
     const char *name  = lv_textarea_get_text(s_ta_name);
     const char *email = lv_textarea_get_text(s_ta_email);
     if (!name || strlen(name) == 0) {
-        lv_label_set_text(s_lbl_edit_status, "NUMM DARF NET EIDEL SEIN");
+        lv_label_set_text(s_lbl_edit_status, "NAME DARF NICHT LEER SEIN");
         lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
     store_queue_spieler_update(ps->id, name, email, s_edit_aktiv);
-    lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  GEQUEUED — BEIM NAACHSTE SYNC APPLIZÉIERT");
+    lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  VORGEMERKT — BEIM NÄCHSTEN SYNC ÜBERNOMMEN");
     lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_SUCCESS), 0);
     update_pending_badge();
     build_list();
@@ -114,7 +114,7 @@ static void pwd_reset_cb(lv_event_t *e)
     if (s_selected_pidx < 0 || s_selected_pidx >= g_store.portalSpielerCount) return;
     PortalSpieler *ps = &g_store.portalSpieler[s_selected_pidx];
     store_queue_passwort_reset(ps->id);
-    lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_LOOP "  PASSWUERT RESET GEQUEUED");
+    lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_LOOP "  PASSWORT-RESET VORGEMERKT");
     lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_WARN), 0);
     update_pending_badge();
 }
@@ -133,7 +133,7 @@ static void add_day_cb(lv_event_t *e)
 
     PortalSpieler *ps = &g_store.portalSpieler[s_selected_pidx];
     if (player_is_registered_for_day(ps->id)) {
-        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  SCHON SPILLER VUM DAAG");
+        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  BEREITS SPIELER DES TAGES");
         lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_MUTED), 0);
         update_day_btn();
         return;
@@ -141,10 +141,10 @@ static void add_day_cb(lv_event_t *e)
 
     store_register_spieler_fuer_tag(ps->id);
     if (player_is_registered_for_day(ps->id)) {
-        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  SPILLER VUM DAAG DOBÄIGESAT");
+        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_OK "  SPIELER DES TAGES HINZUGEFÜGT");
         lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_SUCCESS), 0);
     } else {
-        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_WARNING "  SPILLER-VUM-DAAG-LËSCHT ASS VOLL");
+        lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_WARNING "  LISTE DER TAGES-SPIELER IST VOLL");
         lv_obj_set_style_text_color(s_lbl_edit_status, lv_color_hex(CLR_DANGER), 0);
     }
     update_day_btn();
@@ -155,7 +155,7 @@ static void reload_cb(lv_event_t *e)
 {
     store_sync();
     if (s_lbl_status) {
-        lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH "  SYNC LUEFT...");
+        lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH "  SYNC LÄUFT...");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
     }
 }
@@ -203,8 +203,8 @@ static void update_day_btn(void)
         registered ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_set_style_bg_opa(s_day_btn, LV_OPA_COVER, 0);
     lv_label_set_text(s_lbl_day,
-        registered ? LV_SYMBOL_OK "  SPILLER VUM DAAG" :
-                     "+  SPILLER VUM DAAG");
+        registered ? LV_SYMBOL_OK "  SPIELER DES TAGES" :
+                      "+  SPIELER DES TAGES");
 }
 
 // ── Helper: update pending badge in header ────────────────────
@@ -288,7 +288,7 @@ static void build_list(void)
 
         if (player_is_registered_for_day(ps->id)) {
             lv_obj_t *day_lbl = lv_label_create(info);
-            lv_label_set_text(day_lbl, LV_SYMBOL_OK "  SPILLER VUM DAAG");
+            lv_label_set_text(day_lbl, LV_SYMBOL_OK "  SPIELER DES TAGES");
             lv_obj_set_style_text_font(day_lbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(day_lbl, lv_color_hex(CLR_SUCCESS), 0);
         }
@@ -329,8 +329,8 @@ static void build_list(void)
     if (shown == 0) {
         lv_obj_t *empty = lv_label_create(s_list);
         lv_label_set_text(empty, has_search
-            ? "KENG RESULTATER"
-            : "KENG SPILLER.\nPORTAL SYNC ODER LOKAL DOBAISETZEN.");
+            ? "KEINE ERGEBNISSE"
+            : "KEINE SPIELER.\nPORTAL-SYNC ODER LOKAL HINZUFÜGEN.");
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
         lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
@@ -397,7 +397,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_style_pad_column(hdr, 12, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
-    lv_label_set_text(title, LV_SYMBOL_LIST "  SPILLERVERWALTUNG");
+    lv_label_set_text(title, LV_SYMBOL_LIST "  SPIELERVERWALTUNG");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_set_flex_grow(title, 1);
@@ -436,7 +436,7 @@ lv_obj_t *screen_spiller_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl = lv_label_create(back_btn);
-    lv_label_set_text(bl, LV_SYMBOL_HOME "  ZURUCK");
+    lv_label_set_text(bl, LV_SYMBOL_HOME "  ZURÜCK");
     lv_obj_set_style_text_color(bl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl);
 
@@ -479,14 +479,14 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_clear_flag(add_card, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *add_hdr_lbl = lv_label_create(add_card);
-    lv_label_set_text(add_hdr_lbl, "NEI:");
+    lv_label_set_text(add_hdr_lbl, "NEU:");
     lv_obj_set_style_text_font(add_hdr_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(add_hdr_lbl, lv_color_hex(CLR_MUTED), 0);
 
     s_ta_new_name = lv_textarea_create(add_card);
     lv_obj_set_flex_grow(s_ta_new_name, 1);
     lv_obj_set_height(s_ta_new_name, 42);
-    lv_textarea_set_placeholder_text(s_ta_new_name, "Lokale Spiller...");
+    lv_textarea_set_placeholder_text(s_ta_new_name, "Lokaler Spieler...");
     lv_textarea_set_one_line(s_ta_new_name, true);
     lv_obj_set_style_text_font(s_ta_new_name, &lv_font_montserrat_14, 0);
     lv_obj_set_style_bg_color(s_ta_new_name, lv_color_hex(CLR_BORDER), 0);
@@ -497,7 +497,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_size(add_btn, 100, 42);
     lv_obj_add_event_cb(add_btn, add_local_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *abl = lv_label_create(add_btn);
-    lv_label_set_text(abl, "+ Lokal");
+    lv_label_set_text(abl, "+ LOKAL");
     lv_obj_set_style_text_font(abl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(abl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(abl);
@@ -512,7 +512,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_clear_flag(s_placeholder, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *ph_lbl = lv_label_create(s_placeholder);
-    lv_label_set_text(ph_lbl, LV_SYMBOL_RIGHT "  SPILLER TIPPPEN\nFIR ZE ÄNNEREN");
+    lv_label_set_text(ph_lbl, LV_SYMBOL_RIGHT "  SPIELER ANTIPPEN\nZUM BEARBEITEN");
     lv_obj_set_style_text_font(ph_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(ph_lbl, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_style_text_align(ph_lbl, LV_TEXT_ALIGN_CENTER, 0);
@@ -535,7 +535,7 @@ lv_obj_t *screen_spiller_create(void)
 
     // Name field
     lv_obj_t *name_hdr = lv_label_create(s_edit_form);
-    lv_label_set_text(name_hdr, "NUMM");
+    lv_label_set_text(name_hdr, "NAME");
     lv_obj_set_style_text_font(name_hdr, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(name_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -555,7 +555,7 @@ lv_obj_t *screen_spiller_create(void)
     s_ta_email = lv_textarea_create(s_edit_form);
     lv_obj_set_size(s_ta_email, LV_PCT(100), 48);
     lv_textarea_set_one_line(s_ta_email, true);
-    lv_textarea_set_placeholder_text(s_ta_email, "spiller@beispill.lu");
+    lv_textarea_set_placeholder_text(s_ta_email, "spieler@beispiel.de");
     lv_obj_set_style_text_font(s_ta_email, &lv_font_montserrat_14, 0);
     lv_obj_set_style_bg_color(s_ta_email, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_email, lv_color_hex(CLR_TEXT), 0);
@@ -600,7 +600,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_height(save_btn, 48);
     lv_obj_add_event_cb(save_btn, save_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *save_lbl = lv_label_create(save_btn);
-    lv_label_set_text(save_lbl, LV_SYMBOL_SAVE "  SPÄICHEREN");
+    lv_label_set_text(save_lbl, LV_SYMBOL_SAVE "  SPEICHERN");
     lv_obj_set_style_text_font(save_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(save_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(save_lbl);
@@ -622,7 +622,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_size(cancel_btn, LV_PCT(100), 42);
     lv_obj_add_event_cb(cancel_btn, cancel_edit_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
-    lv_label_set_text(cancel_lbl, "OFBRIECHEN");
+    lv_label_set_text(cancel_lbl, "ABBRECHEN");
     lv_obj_set_style_text_font(cancel_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(cancel_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(cancel_lbl);
@@ -651,7 +651,7 @@ lv_obj_t *screen_spiller_create(void)
     s_ta_search = lv_textarea_create(right_panel);
     lv_obj_set_size(s_ta_search, LV_PCT(100), 50);
     lv_textarea_set_placeholder_text(s_ta_search,
-        LV_SYMBOL_LIST "  Spiller sichen (Numm oder Member-Nr.)...");
+        LV_SYMBOL_LIST "  Spieler suchen (Name oder Mitglieds-Nr.)...");
     lv_textarea_set_one_line(s_ta_search, true);
     lv_obj_set_style_text_font(s_ta_search, &lv_font_montserrat_16, 0);
     lv_obj_set_style_bg_color(s_ta_search, lv_color_hex(CLR_CARD), 0);
@@ -735,7 +735,7 @@ void screen_spiller_tick(void)
 
     switch (cur) {
         case SYNC_RUNNING:
-            lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH "  SYNC LUEFT...");
+            lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH "  SYNC LÄUFT...");
             lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
             break;
         case SYNC_SUCCESS:
@@ -743,7 +743,7 @@ void screen_spiller_tick(void)
             lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
             break;
         case SYNC_ERROR:
-            lv_label_set_text(s_lbl_status, LV_SYMBOL_WARNING "  SYNC FEELER");
+            lv_label_set_text(s_lbl_status, LV_SYMBOL_WARNING "  SYNC-FEHLER");
             lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
             break;
         default:

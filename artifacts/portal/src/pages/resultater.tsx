@@ -34,8 +34,8 @@ export default function Resultater({ spielerId }: ResultaterProps = {}) {
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <header className="border-b border-border/50 pb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Meng Resultater</h1>
-        <p className="text-muted-foreground mt-2 text-sm font-medium">Detailléiert Analyse vun all Rond.</p>
+        <h1 className="text-3xl font-bold tracking-tight">Meine Ergebnisse</h1>
+        <p className="text-muted-foreground mt-2 text-sm font-medium">Detaillierte Analyse jeder Runde.</p>
       </header>
 
       {isLoading ? (
@@ -51,8 +51,8 @@ export default function Resultater({ spielerId }: ResultaterProps = {}) {
       ) : (
         <div className="p-12 text-center bg-card rounded-xl border border-border/50">
           <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground mb-4 opacity-50" />
-          <h3 className="text-lg font-bold mb-1">Nach keng Resultater</h3>
-          <p className="text-muted-foreground font-medium">Dir hutt nach keng Spiller an dëser Saison ofgeschloss.</p>
+          <h3 className="text-lg font-bold mb-1">Noch keine Ergebnisse</h3>
+          <p className="text-muted-foreground font-medium">Sie haben in dieser Saison noch keine Spiele abgeschlossen.</p>
         </div>
       )}
     </div>
@@ -89,19 +89,19 @@ function ResultGroup({ ergebnisse }: { ergebnisse: ErgebnisWithSpiel[] }) {
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground font-mono uppercase tracking-widest font-bold">
-            2 Läufe • {Math.max(lauf1.length, lauf2.length)} Tauben / Lauf • max {maxTotal} Pkt
+             2 Durchgänge • {Math.max(lauf1.length, lauf2.length)} Tauben / Durchgang • max. {maxTotal} Pkt.
           </p>
         </div>
         <div className="flex items-end gap-6">
           {/* Per-lauf subtotals */}
           <div className="flex gap-4 text-sm font-mono text-muted-foreground">
             <div className="text-center">
-              <div className="text-[10px] uppercase tracking-widest mb-1 font-bold">Lauf 1</div>
+              <div className="text-[10px] uppercase tracking-widest mb-1 font-bold">Durchgang 1</div>
               <div className="font-black text-foreground">{lauf1Pts}<span className="text-muted-foreground font-bold">/{maxPerLauf}</span></div>
             </div>
             <div className="text-muted-foreground/30 self-center text-lg">+</div>
             <div className="text-center">
-              <div className="text-[10px] uppercase tracking-widest mb-1 font-bold">Lauf 2</div>
+              <div className="text-[10px] uppercase tracking-widest mb-1 font-bold">Durchgang 2</div>
               <div className="font-black text-foreground">{lauf2Pts}<span className="text-muted-foreground font-bold">/{maxPerLauf}</span></div>
             </div>
           </div>
@@ -119,7 +119,7 @@ function ResultGroup({ ergebnisse }: { ergebnisse: ErgebnisWithSpiel[] }) {
       {lauf1.length > 0 && (
         <div className="border-b border-border/30">
           <div className="px-5 pt-4 pb-1 flex items-center gap-3">
-            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Lauf 1</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Durchgang 1</span>
             <span className="text-xs font-mono font-bold text-primary">{lauf1Pts} Pkt</span>
           </div>
           <div className="px-5 pb-4 overflow-x-auto">
@@ -134,7 +134,7 @@ function ResultGroup({ ergebnisse }: { ergebnisse: ErgebnisWithSpiel[] }) {
       {lauf2.length > 0 && (
         <div>
           <div className="px-5 pt-4 pb-1 flex items-center gap-3">
-            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Lauf 2</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Durchgang 2</span>
             <span className="text-xs font-mono font-bold text-primary">{lauf2Pts} Pkt</span>
           </div>
           <div className="px-5 pb-4 overflow-x-auto">

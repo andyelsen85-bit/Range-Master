@@ -11,17 +11,17 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/resultater", label: "Meng Resultater", icon: List },
-    { href: "/rangliste", label: "Ranglischt", icon: Trophy },
+    { href: "/resultater", label: "Meine Ergebnisse", icon: List },
+    { href: "/rangliste", label: "Rangliste", icon: Trophy },
     { href: "/statistiken", label: "Statistiken", icon: BarChart3 },
-    { href: "/akeef", label: "Meng Akeef", icon: ShoppingCart },
+    { href: "/akeef", label: "Meine Einkäufe", icon: ShoppingCart },
     ...(user?.isAdmin ? [
-      { href: "/admin", label: "Spillerverwaltung", icon: Shield },
-      { href: "/admin/kreditter", label: "Dageskreditter", icon: Coins },
-      { href: "/admin/verkeef", label: "Katalog & Verkeef", icon: ShoppingCart },
-      { href: "/admin/ofrechnung", label: "Dagesofrechnung", icon: FileText },
-      { href: "/admin/api-schluesselen", label: "API Schlësselen", icon: KeyRound },
-      { href: "/admin/mail", label: "Mail Server", icon: Mail },
+      { href: "/admin", label: "Spielerverwaltung", icon: Shield },
+      { href: "/admin/kreditter", label: "Tagesguthaben", icon: Coins },
+      { href: "/admin/verkeef", label: "Katalog & Verkäufe", icon: ShoppingCart },
+      { href: "/admin/ofrechnung", label: "Tagesabrechnung", icon: FileText },
+      { href: "/admin/api-schluesselen", label: "API-Schlüssel", icon: KeyRound },
+      { href: "/admin/mail", label: "Mailserver", icon: Mail },
       { href: "/admin/terminal-config", label: "Terminal-Backups", icon: Settings2 },
     ] : []),
   ];
@@ -35,7 +35,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
           <div>
             <h1 className="font-bold text-lg leading-none tracking-tight text-foreground uppercase">Range-Master</h1>
-            <p className="text-[10px] text-primary mt-0.5 uppercase tracking-widest font-mono font-bold">Wolz Sektioun</p>
+            <p className="text-[10px] text-primary mt-0.5 uppercase tracking-widest font-mono font-bold">Sektion Wolz</p>
           </div>
         </div>
 
@@ -72,7 +72,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground border border-transparent",
             )}>
               <User size={18} className="opacity-60" strokeWidth={2} />
-              Mäi Profil
+              Mein Profil
             </div>
           </Link>
           <button
@@ -81,7 +81,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             data-testid="button-logout"
           >
             <LogOut size={18} className="opacity-60" strokeWidth={2} />
-            Ausloggen
+            Abmelden
           </button>
         </div>
       </aside>

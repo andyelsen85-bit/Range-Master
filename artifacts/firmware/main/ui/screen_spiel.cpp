@@ -99,8 +99,8 @@ static void quit_confirm_cb(lv_event_t *e)
     }
     if (s_quit_message) {
         lv_label_set_text(s_quit_message,
-                          "CREDITS COULD NOT BE RESTORED.\n"
-                          "SYNC OR CLEAR QUEUE, THEN TRY AGAIN.");
+                           "KREDITE KONNTEN NICHT WIEDERHERGESTELLT WERDEN.\n"
+                           "SYNC AUSFÜHREN ODER WARTESCHLANGE LEEREN.");
         lv_obj_set_style_text_color(s_quit_message, lv_color_hex(CLR_DANGER), 0);
     }
 }
@@ -130,14 +130,14 @@ static void quit_open_cb(lv_event_t *e)
     lv_obj_clear_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = lv_label_create(dialog);
-    lv_label_set_text(title, "QUIT GAME?");
+    lv_label_set_text(title, "SPIEL BEENDEN?");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_DANGER), 0);
 
     s_quit_message = lv_label_create(dialog);
     lv_label_set_text(s_quit_message,
-                      "THE GAME WILL NOT BE SAVED.\n"
-                      "ALL PLAYER CREDITS WILL BE RESTORED.");
+                       "DAS SPIEL WIRD NICHT GESPEICHERT.\n"
+                       "ALLE SPIELERKREDITE WERDEN WIEDERHERGESTELLT.");
     lv_obj_set_style_text_align(s_quit_message, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(s_quit_message, lv_color_hex(CLR_TEXT), 0);
 
@@ -155,7 +155,7 @@ static void quit_open_cb(lv_event_t *e)
     lv_obj_set_size(confirm, 210, 54);
     lv_obj_add_event_cb(confirm, quit_confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *confirm_label = lv_label_create(confirm);
-    lv_label_set_text(confirm_label, "YES, QUIT");
+    lv_label_set_text(confirm_label, "JA, BEENDEN");
     lv_obj_center(confirm_label);
 
     lv_obj_t *cancel = lv_btn_create(actions);
@@ -163,7 +163,7 @@ static void quit_open_cb(lv_event_t *e)
     lv_obj_set_size(cancel, 210, 54);
     lv_obj_add_event_cb(cancel, quit_cancel_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cancel_label = lv_label_create(cancel);
-    lv_label_set_text(cancel_label, "KEEP GAME");
+    lv_label_set_text(cancel_label, "SPIEL FORTSETZEN");
     lv_obj_center(cancel_label);
 }
 
@@ -209,7 +209,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_size(quit_btn, 142, 42);
     lv_obj_add_event_cb(quit_btn, quit_open_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *quit_label = lv_label_create(quit_btn);
-    lv_label_set_text(quit_label, "QUIT GAME");
+    lv_label_set_text(quit_label, "SPIEL BEENDEN");
     lv_obj_center(quit_label);
 
     // ── Left panel: game controls (280px) ──────────────────
@@ -290,7 +290,7 @@ lv_obj_t *screen_spiel_create(void)
 
     // ── Throw target, directly above the FIRE trigger ──────
     lv_obj_t *mach_hdr = lv_label_create(left);
-    lv_label_set_text(mach_hdr, "WERFEN");
+    lv_label_set_text(mach_hdr, "WERFER");
     lv_obj_set_style_text_font(mach_hdr, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(mach_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -308,7 +308,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_style_border_width(s_btn_fire, 0, 0);
     lv_obj_add_event_cb(s_btn_fire, fire_cb, LV_EVENT_CLICKED, NULL);
     s_lbl_fire_button = lv_label_create(s_btn_fire);
-    lv_label_set_text(s_lbl_fire_button, LV_SYMBOL_PLAY " FIRE MASCHINN A");
+    lv_label_set_text(s_lbl_fire_button, LV_SYMBOL_PLAY " MASCHINE A STARTEN");
     lv_obj_set_style_text_font(s_lbl_fire_button, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(s_lbl_fire_button, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(s_lbl_fire_button);
@@ -327,7 +327,7 @@ lv_obj_t *screen_spiel_create(void)
 
     // ── 1. Post grid header
     lv_obj_t *pg_hdr = lv_label_create(right);
-    lv_label_set_text(pg_hdr, "POSTEN");
+    lv_label_set_text(pg_hdr, "STÄNDE");
     lv_obj_set_style_text_font(pg_hdr, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(pg_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -368,7 +368,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_set_flex_grow(name_col, 1);
 
     lv_obj_t *shooter_hdr_lbl = lv_label_create(name_col);
-    lv_label_set_text(shooter_hdr_lbl, "AKTUELLEN SCHUTZ");
+    lv_label_set_text(shooter_hdr_lbl, "AKTUELLER SCHÜTZE");
     lv_obj_set_style_text_font(shooter_hdr_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(shooter_hdr_lbl, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -419,8 +419,8 @@ lv_obj_t *screen_spiel_create(void)
     lv_table_set_col_width(s_score_table, 0, 220);
     lv_table_set_col_width(s_score_table, 1, 90);
     lv_table_set_col_width(s_score_table, 2, 90);
-    lv_table_set_cell_value(s_score_table, 0, 0, "SPILLER");
-    lv_table_set_cell_value(s_score_table, 0, 1, "POSTEN");
+    lv_table_set_cell_value(s_score_table, 0, 0, "SPIELER");
+    lv_table_set_cell_value(s_score_table, 0, 1, "STAND");
     lv_table_set_cell_value(s_score_table, 0, 2, "PUNKTE");
     lv_obj_set_style_text_font(s_score_table, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_score_table, lv_color_hex(CLR_TEXT), 0);
@@ -514,24 +514,24 @@ void screen_spiel_refresh(void)
             char fire_label[40];
             SequenzEintrag *se = &s->sequenz[s->taubeIndex];
             if (se->isPair && se->maschine == MASCHINE_H) {
-                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE H (MASCHINN H2)");
+                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " H STARTEN (MASCHINE H2)");
             } else if (se->isPair) {
-                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE %s + %s",
+                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " %s + %s STARTEN",
                          maschine_label(se->maschine), maschine_label(se->partner));
             } else {
-                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " FIRE MASCHINN %s",
+                snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " MASCHINE %s STARTEN",
                          maschine_label(se->maschine));
             }
             set_label_text_if_changed(s_lbl_fire_button, fire_label);
             lv_obj_clear_state(s_btn_fire, LV_STATE_DISABLED);
         } else {
             if (isPairSecond)
-                set_label_text_if_changed(s_lbl_fire_button, "2. RESULTAT - KENG FIRE");
+                set_label_text_if_changed(s_lbl_fire_button, "2. ERGEBNIS - NICHT STARTEN");
             else if (s->currentFireSent)
-                set_label_text_if_changed(s_lbl_fire_button, "SCHON GESTART");
+                set_label_text_if_changed(s_lbl_fire_button, "BEREITS GESTARTET");
             else
                 set_label_text_if_changed(s_lbl_fire_button,
-                    s->taubeIndex < s->sequenzLen ? "GATEWAY BESCHAFT" : "KENG MASCHINN");
+                    s->taubeIndex < s->sequenzLen ? "GATEWAY BESCHÄFTIGT" : "KEINE MASCHINE");
             lv_obj_add_state(s_btn_fire, LV_STATE_DISABLED);
         }
     }
@@ -587,7 +587,7 @@ void screen_spiel_refresh(void)
         // Post header
         lv_obj_t *post_hdr = lv_label_create(col);
         char phdr[16];
-        snprintf(phdr, sizeof(phdr), "POSTEN %d", post);
+            snprintf(phdr, sizeof(phdr), "STAND %d", post);
         lv_label_set_text(post_hdr, phdr);
         lv_obj_set_style_text_font(post_hdr, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(post_hdr,

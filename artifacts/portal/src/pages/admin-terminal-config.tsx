@@ -74,19 +74,19 @@ export default function AdminTerminalConfig() {
       setTargetApiKeyId("");
       setCode({ value: data.code, expiresAt: data.expiresAt });
     },
-    onError: (error: Error) => toast({ title: "Feeler", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
   });
   
   const revoke = useMutation({
     mutationFn: (id: number) => apiFetch(`/api/admin/terminal-config/backups/${id}/revoke`, { method: "POST" }),
-    onSuccess: () => { invalidate(); setRevokeId(null); toast({ title: "Backup revokéiert" }); },
-    onError: (error: Error) => toast({ title: "Feeler", description: error.message, variant: "destructive" }),
+    onSuccess: () => { invalidate(); setRevokeId(null); toast({ title: "Backup widerrufen" }); },
+    onError: (error: Error) => toast({ title: "Fehler", description: error.message, variant: "destructive" }),
   });
 
   const copyCode = async () => {
     if (!code) return;
     await navigator.clipboard?.writeText(code.value);
-    toast({ title: "Code kopéiert" });
+    toast({ title: "Code kopiert" });
   };
 
   return (
@@ -98,9 +98,9 @@ export default function AdminTerminalConfig() {
               <ShieldCheck size={26} strokeWidth={2} />
             </div>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight text-foreground">Terminal-Konfiguratioun</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-foreground">Terminal-Konfiguration</h1>
               <p className="mt-2 text-sm font-medium text-muted-foreground max-w-2xl leading-relaxed">
-                Versioune gesinn an eng eemoleg Geneemegung fir en Ersatzterminal erstellen. Backups ginn automatesch all Nuecht gemaach oder no wichtegen Ännerungen.
+                Versionen anzeigen und eine einmalige Genehmigung für ein Ersatzterminal erstellen. Backups werden automatisch jede Nacht oder nach wichtigen Änderungen erstellt.
               </p>
             </div>
           </div>
@@ -112,7 +112,7 @@ export default function AdminTerminalConfig() {
         <div className="flex gap-3 items-start">
           <ShieldAlert size={20} className="shrink-0 text-primary mt-0.5" />
           <div className="text-muted-foreground leading-relaxed">
-            <strong className="text-foreground font-semibold">Privatsphär & Sécherheet:</strong> WiFi-Passwierder a Gateway-Schlësselen ginn verschlësselt gespäichert a sinn hei ni am Kloertext ze gesinn. Den Terminal-API-Schlëssel ass net am Backup; den Ersatzterminal behält säin eegene Schlëssel. Spiller, Kreditter, Resultater a waartend Sync-Elementer si net am Backup integréiert.
+             <strong className="text-foreground font-semibold">Datenschutz & Sicherheit:</strong> WLAN-Passwörter und Gateway-Schlüssel werden verschlüsselt gespeichert und hier nie im Klartext angezeigt. Der Terminal-API-Schlüssel ist nicht im Backup enthalten; das Ersatzterminal behält seinen eigenen Schlüssel. Spieler, Guthaben, Ergebnisse und ausstehende Synchronisierungselemente sind nicht im Backup enthalten.
           </div>
         </div>
       </div>
@@ -120,19 +120,19 @@ export default function AdminTerminalConfig() {
       <div className="rounded-xl border border-border/50 bg-card shadow-sm flex flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-border/40 bg-secondary/30 px-5 py-4">
           <div>
-            <h2 className="text-lg font-bold text-card-foreground tracking-tight">Gespäichert Backups</h2>
-            <p className="mt-0.5 text-xs font-medium text-muted-foreground">Nëmme sécher Metadate ginn ugewisen</p>
+             <h2 className="text-lg font-bold text-card-foreground tracking-tight">Gespeicherte Backups</h2>
+             <p className="mt-0.5 text-xs font-medium text-muted-foreground">Es werden nur sichere Metadaten angezeigt</p>
           </div>
           <button 
             type="button" 
             onClick={() => backupsQuery.refetch()} 
             disabled={backupsQuery.isFetching}
             className="flex items-center gap-2 rounded-lg bg-background px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary border border-border/50 transition-all disabled:opacity-50 shadow-sm"
-            title="Aktualiséieren"
+             title="Aktualisieren"
             data-testid="button-refresh-backups"
           >
             <RefreshCw size={14} className={cn(backupsQuery.isFetching && "animate-spin text-primary")} />
-            <span>Aktualiséieren</span>
+             <span>Aktualisieren</span>
           </button>
         </div>
 
@@ -155,9 +155,9 @@ export default function AdminTerminalConfig() {
               <div className="bg-secondary/20 p-4 rounded-full mb-4 text-muted-foreground ring-1 ring-border/50">
                 <HardDrive size={32} strokeWidth={1.5} />
               </div>
-              <h3 className="text-base font-semibold text-foreground mb-1 tracking-tight">Keng Backups fonnt</h3>
+               <h3 className="text-base font-semibold text-foreground mb-1 tracking-tight">Keine Backups gefunden</h3>
               <p className="text-sm text-muted-foreground max-w-sm">
-                Et si momentan keng Terminal-Backups disponibel. Späicher- an Konfiguratiouns-Backups erschéngen hei automatesch.
+                 Derzeit sind keine Terminal-Backups verfügbar. Speicher- und Konfigurations-Backups werden hier automatisch angezeigt.
               </p>
             </div>
           ) : (
@@ -168,10 +168,10 @@ export default function AdminTerminalConfig() {
                     <th className="px-5 py-4 whitespace-nowrap">Terminal</th>
                     <th className="px-5 py-4 whitespace-nowrap">Schema</th>
                     <th className="px-5 py-4 whitespace-nowrap">Firmware</th>
-                    <th className="px-5 py-4 whitespace-nowrap">Lescht Backup</th>
-                    <th className="px-5 py-4 whitespace-nowrap">Restauréiert</th>
+                     <th className="px-5 py-4 whitespace-nowrap">Letztes Backup</th>
+                     <th className="px-5 py-4 whitespace-nowrap">Wiederhergestellt</th>
                     <th className="px-5 py-4 whitespace-nowrap">Status</th>
-                    <th className="px-5 py-4 text-right whitespace-nowrap">Aktiounen</th>
+                     <th className="px-5 py-4 text-right whitespace-nowrap">Aktionen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/30">
@@ -200,7 +200,7 @@ export default function AdminTerminalConfig() {
                       <td className="px-5 py-4 whitespace-nowrap">
                         {backup.revokedAt ? (
                           <Badge variant="destructive" className="bg-destructive/15 text-destructive hover:bg-destructive/25 border-0 font-medium">
-                            Revokéiert
+                             Widerrufen
                           </Badge>
                         ) : (
                           <Badge className="bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border-0 font-medium gap-1.5 px-2">
@@ -216,7 +216,7 @@ export default function AdminTerminalConfig() {
                               onClick={() => setAuthorizeId(backup.id)}
                               disabled={authorize.isPending} 
                               className="flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 ring-1 ring-primary/20 shadow-sm" 
-                              title="Restore-Code erstellen"
+                               title="Wiederherstellungscode erstellen"
                               data-testid={`button-authorize-restore-${backup.id}`}
                             >
                               <KeyRound size={14} /> Code
@@ -225,7 +225,7 @@ export default function AdminTerminalConfig() {
                               type="button" 
                               onClick={() => setRevokeId(backup.id)} 
                               className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive transition-colors ring-1 ring-transparent hover:ring-destructive/30" 
-                              title="Backup revokéieren"
+                               title="Backup widerrufen"
                               data-testid={`button-revoke-backup-${backup.id}`}
                             >
                               <Ban size={16} />
@@ -233,7 +233,7 @@ export default function AdminTerminalConfig() {
                           </div>
                         ) : (
                            <div className="flex justify-end text-xs text-muted-foreground/50 font-medium italic">
-                             Keng Aktiounen
+                             Keine Aktionen
                            </div>
                         )}
                       </td>
@@ -251,15 +251,15 @@ export default function AdminTerminalConfig() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl tracking-tight">
               <KeyRound className="text-primary" size={20} />
-              Ersatzterminal autoriséieren
+               Ersatzterminal autorisieren
             </DialogTitle>
             <DialogDescription className="text-muted-foreground text-sm leading-relaxed pt-1.5">
-              De Code funktionéiert nëmme fir dësen Terminal mat dësem aktive Terminal-API-Schlëssel.
+               Der Code funktioniert nur für dieses Terminal mit diesem aktiven Terminal-API-Schlüssel.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <label className="block space-y-2 text-sm font-semibold">
-              <span>Terminal-ID vum Ersatzterminal</span>
+               <span>Terminal-ID des Ersatzterminals</span>
               <input
                 value={targetTerminalId}
                 onChange={(event) => setTargetTerminalId(event.target.value)}
@@ -269,14 +269,14 @@ export default function AdminTerminalConfig() {
               />
             </label>
             <label className="block space-y-2 text-sm font-semibold">
-              <span>Terminal-API-Schlëssel</span>
+               <span>Terminal-API-Schlüssel</span>
               <select
                 value={targetApiKeyId}
                 onChange={(event) => setTargetApiKeyId(event.target.value)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40"
                 data-testid="select-target-api-key"
               >
-                <option value="">Schlëssel auswielen</option>
+                 <option value="">Schlüssel auswählen</option>
                 {(backupsQuery.data?.terminalKeys ?? []).map((key) => (
                   <option key={key.id} value={key.id}>{key.name}</option>
                 ))}
@@ -289,7 +289,7 @@ export default function AdminTerminalConfig() {
               onClick={() => setAuthorizeId(null)}
               className="rounded-lg px-4 py-2 text-sm font-semibold text-muted-foreground hover:bg-secondary/80"
             >
-              Ofbriechen
+               Abbrechen
             </button>
             <button
               type="button"
@@ -316,7 +316,7 @@ export default function AdminTerminalConfig() {
               Restore-Code
             </DialogTitle>
             <DialogDescription className="text-muted-foreground text-sm leading-relaxed pt-1.5">
-              Dëse Code gëtt nëmmen eemol gewisen an ass valabel fir 15 Minutten. Gitt dëse Code um Ersatzterminal an fir eng voll Restauratioun z'aktivéieren.
+               Dieser Code wird nur einmal angezeigt und ist 15 Minuten gültig. Geben Sie ihn am Ersatzterminal ein, um eine vollständige Wiederherstellung zu aktivieren.
             </DialogDescription>
           </DialogHeader>
           
@@ -330,7 +330,7 @@ export default function AdminTerminalConfig() {
             </div>
             <div className="relative mt-4 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
               <Clock size={14} className="text-primary/70" />
-              Valabel bis {formatDate(code?.expiresAt ?? null)}
+               Gültig bis {formatDate(code?.expiresAt ?? null)}
             </div>
           </div>
           
@@ -341,7 +341,7 @@ export default function AdminTerminalConfig() {
               className="rounded-lg px-4 py-2 text-sm font-semibold text-muted-foreground hover:bg-secondary/80 transition-colors"
               data-testid="button-close-code"
             >
-              Zoumaachen
+               Schließen
             </button>
             <button 
               type="button" 
@@ -349,7 +349,7 @@ export default function AdminTerminalConfig() {
               className="flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-colors shadow-md shadow-primary/20"
               data-testid="button-copy-code"
             >
-              <Copy size={16} strokeWidth={2.5} /> Code kopéieren
+               <Copy size={16} strokeWidth={2.5} /> Code kopieren
             </button>
           </DialogFooter>
         </DialogContent>
@@ -360,12 +360,12 @@ export default function AdminTerminalConfig() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive text-xl tracking-tight">
               <AlertTriangle size={20} />
-              Backup revokéieren?
+               Backup widerrufen?
             </DialogTitle>
             <DialogDescription className="text-muted-foreground pt-1.5 text-sm leading-relaxed">
-              Dëst wäert dëse Backup permanent als ongëlteg markéieren. Aktiv Restore-Geneemegunge fir dëse Backup ginn direkt invalidéiert.
+               Dieses Backup wird dauerhaft als ungültig markiert. Aktive Wiederherstellungsgenehmigungen für dieses Backup werden sofort ungültig.
               <br/><br/>
-              <strong className="text-foreground">Dës Aktioun kann net réckgängeg gemaach ginn.</strong>
+               <strong className="text-foreground">Diese Aktion kann nicht rückgängig gemacht werden.</strong>
             </DialogDescription>
           </DialogHeader>
           
@@ -376,7 +376,7 @@ export default function AdminTerminalConfig() {
               className="rounded-lg px-4 py-2 text-sm font-semibold text-muted-foreground hover:bg-secondary/80 transition-colors"
               data-testid="button-cancel-revoke"
             >
-              Ofbriechen
+               Abbrechen
             </button>
             <button 
               type="button" 
@@ -386,10 +386,10 @@ export default function AdminTerminalConfig() {
               data-testid="button-confirm-revoke"
             >
               {revoke.isPending ? (
-                <>Revokéieren…</>
+                 <>Wird widerrufen…</>
               ) : (
                 <>
-                  <Ban size={16} strokeWidth={2.5} /> Jo, revokéieren
+                   <Ban size={16} strokeWidth={2.5} /> Ja, widerrufen
                 </>
               )}
             </button>

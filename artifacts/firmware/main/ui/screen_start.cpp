@@ -49,7 +49,7 @@ static int option_for_player_id(int id)
 // portal player without relying on a direct sel-1 index offset.
 static void build_player_opts(char *buf, size_t len)
 {
-    strncpy(buf, "--- Kee SPILLER ---", len - 1);
+    strncpy(buf, "--- KEIN SPIELER ---", len - 1);
     buf[len-1] = '\0';
     s_options_count = 1;  // option 0 = "Kee SPILLER"
 
@@ -104,14 +104,14 @@ static void start_cb(lv_event_t *e)
     bool any = false;
     for (int i = 0; i < MAX_SPIELER; ++i) if (g_store.lineupIds[i]) any = true;
     if (!any) {
-        lv_label_set_text(s_lbl_error, "Mindestens 1 SPILLER auswiele!");
+        lv_label_set_text(s_lbl_error, "MINDESTENS 1 SPIELER WÄHLEN!");
         lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);
         return;
     }
 
     if (!store_start_spiel()) {
         lv_label_set_text(s_lbl_error, g_store.lineupWarning[0]
-            ? g_store.lineupWarning : "Fehler: SPILLER hunn keng Kreditter!");
+            ? g_store.lineupWarning : "FEHLER: SPIELER HABEN KEINE KREDITE!");
         lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);
         return;
     }
@@ -201,7 +201,7 @@ lv_obj_t *screen_start_create(void)
     lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *hdr_lbl = lv_label_create(hdr);
-    lv_label_set_text(hdr_lbl, LV_SYMBOL_PLAY "  SPILL STARTEN");
+    lv_label_set_text(hdr_lbl, LV_SYMBOL_PLAY "  SPIEL STARTEN");
     lv_obj_set_style_text_font(hdr_lbl, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(hdr_lbl, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_align(hdr_lbl, LV_ALIGN_LEFT_MID, 20, 0);
@@ -213,7 +213,7 @@ lv_obj_t *screen_start_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *back_lbl = lv_label_create(back_btn);
-    lv_label_set_text(back_lbl, LV_SYMBOL_HOME "  ZURUCK");
+    lv_label_set_text(back_lbl, LV_SYMBOL_HOME "  ZURÜCK");
     lv_obj_set_style_text_color(back_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(back_lbl);
 
@@ -237,7 +237,7 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_pad_row(left, 10, 0);
 
     lv_obj_t *players_hdr = lv_label_create(left);
-    lv_label_set_text(players_hdr, "SPILLER zouweisen");
+    lv_label_set_text(players_hdr, "SPIELER ZUWEISEN");
     lv_obj_set_style_text_font(players_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(players_hdr, lv_color_hex(CLR_TEXT), 0);
 
@@ -248,7 +248,7 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_pad_all(tools, 0, 0);
     lv_obj_set_flex_flow(tools, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(tools, 8, 0);
-    const char *tool_names[] = {"CLEAR ALL", "MIX"};
+    const char *tool_names[] = {"ALLE LÖSCHEN", "MISCHEN"};
     for (int t = 0; t < 2; ++t) {
         lv_obj_t *btn = lv_btn_create(tools);
         lv_obj_set_size(btn, 150, 38);
@@ -330,7 +330,7 @@ lv_obj_t *screen_start_create(void)
 
     // Modus buttons
     lv_obj_t *modus_hdr = lv_label_create(right);
-    lv_label_set_text(modus_hdr, "SPILLMODUS");
+    lv_label_set_text(modus_hdr, "SPIELMODUS");
     lv_obj_set_style_text_font(modus_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(modus_hdr, lv_color_hex(CLR_TEXT), 0);
 
@@ -363,7 +363,7 @@ lv_obj_t *screen_start_create(void)
 
     // Machine toggles
     lv_obj_t *mach_hdr = lv_label_create(right);
-    lv_label_set_text(mach_hdr, "Aktiv MASCHINNEN");
+    lv_label_set_text(mach_hdr, "AKTIVE MASCHINEN");
     lv_obj_set_style_text_font(mach_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(mach_hdr, lv_color_hex(CLR_TEXT), 0);
 
@@ -395,7 +395,7 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_size(start_btn, LV_PCT(100), 70);
     lv_obj_add_event_cb(start_btn, start_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *start_lbl = lv_label_create(start_btn);
-    lv_label_set_text(start_lbl, LV_SYMBOL_PLAY "  SPILL STARTEN");
+    lv_label_set_text(start_lbl, LV_SYMBOL_PLAY "  SPIEL STARTEN");
     lv_obj_set_style_text_font(start_lbl, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(start_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(start_lbl);

@@ -14,11 +14,11 @@ export default function Profil() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.neuesPasswort !== form.confirm) {
-      toast({ title: "Feeler", description: "Déi nei Passwierder stëmmen net iwwer.", variant: "destructive" });
+      toast({ title: "Fehler", description: "Die neuen Passwörter stimmen nicht überein.", variant: "destructive" });
       return;
     }
     if (form.neuesPasswort.length < 6) {
-      toast({ title: "Feeler", description: "Neit Passwuert muss mindestens 6 Zeechen hunn.", variant: "destructive" });
+      toast({ title: "Fehler", description: "Das neue Passwort muss mindestens 6 Zeichen enthalten.", variant: "destructive" });
       return;
     }
     setLoading(true);
@@ -29,11 +29,11 @@ export default function Profil() {
         body: JSON.stringify({ altPasswort: form.altPasswort, neuesPasswort: form.neuesPasswort }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Feeler");
-      toast({ title: "Erfolleg", description: "Äert Passwuert gouf geännert." });
+      if (!res.ok) throw new Error(data.error || "Fehler");
+      toast({ title: "Erfolg", description: "Ihr Passwort wurde geändert." });
       setForm({ altPasswort: "", neuesPasswort: "", confirm: "" });
     } catch (err: any) {
-      toast({ title: "Feeler", description: err.message, variant: "destructive" });
+      toast({ title: "Fehler", description: err.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -42,29 +42,29 @@ export default function Profil() {
   return (
     <div className="space-y-8 animate-in fade-in duration-500 max-w-lg">
       <header className="border-b border-border/50 pb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Mäi Profil</h1>
-        <p className="text-muted-foreground mt-2 text-sm font-medium">Kontoinformatiounen a Passwuert änneren.</p>
+        <h1 className="text-3xl font-bold tracking-tight">Mein Profil</h1>
+        <p className="text-muted-foreground mt-2 text-sm font-medium">Kontoinformationen und Passwort ändern.</p>
       </header>
 
       {/* Profile info */}
       <div className="bg-card border border-border/50 rounded-xl overflow-hidden">
         <div className="px-6 py-4 bg-secondary/20 border-b border-border/50">
-          <h2 className="text-xs font-black uppercase tracking-widest text-muted-foreground">Profil Informatiounen</h2>
+          <h2 className="text-xs font-black uppercase tracking-widest text-muted-foreground">Profilinformationen</h2>
         </div>
         <div className="p-6 space-y-4">
-          <InfoRow icon={<User size={16} />} label="Numm" value={user?.name ?? "–"} />
+           <InfoRow icon={<User size={16} />} label="Name" value={user?.name ?? "–"} />
           <InfoRow icon={<Mail size={16} />} label="Email" value={user?.email ?? "–"} />
-          <InfoRow icon={<Hash size={16} />} label="Mitglied Nr" value={user?.mitgliedNr ?? "–"} />
+           <InfoRow icon={<Hash size={16} />} label="Mitgliedsnummer" value={user?.mitgliedNr ?? "–"} />
         </div>
       </div>
 
       {/* Password change */}
       <div className="bg-card border border-border/50 rounded-xl overflow-hidden">
         <div className="px-6 py-4 bg-secondary/20 border-b border-border/50">
-          <h2 className="text-xs font-black uppercase tracking-widest text-muted-foreground">Passwuert änneren</h2>
+          <h2 className="text-xs font-black uppercase tracking-widest text-muted-foreground">Passwort ändern</h2>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <Field label="Ale Passwuert" id="alt">
+          <Field label="Altes Passwort" id="alt">
             <input
               id="alt" type="password" required autoComplete="current-password"
               value={form.altPasswort}
@@ -73,7 +73,7 @@ export default function Profil() {
               placeholder="••••••••"
             />
           </Field>
-          <Field label="Neit Passwuert" id="new">
+          <Field label="Neues Passwort" id="new">
             <input
               id="new" type="password" required autoComplete="new-password"
               value={form.neuesPasswort}
@@ -82,7 +82,7 @@ export default function Profil() {
               placeholder="••••••••"
             />
           </Field>
-          <Field label="Neit Passwuert (confirméieren)" id="confirm">
+          <Field label="Neues Passwort (bestätigen)" id="confirm">
             <input
               id="confirm" type="password" required autoComplete="new-password"
               value={form.confirm}
@@ -96,7 +96,7 @@ export default function Profil() {
             className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-bold py-2.5 rounded-lg transition-colors disabled:opacity-50"
           >
             <Lock size={16} />
-            {loading ? "Änneren…" : "Passwuert änneren"}
+            {loading ? "Wird geändert…" : "Passwort ändern"}
           </button>
         </form>
       </div>

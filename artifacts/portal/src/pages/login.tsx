@@ -18,8 +18,8 @@ export default function Login() {
       sessionStorage.removeItem('rangemaster-session-expired');
       setTimeout(() => {
         toast({
-          title: "Sëtzung ofgelaf",
-          description: "Är 30-Minutten Sëtzung ass ofgelaf. Loggt iech nees an.",
+          title: "Sitzung abgelaufen",
+          description: "Ihre 30-minütige Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
           variant: "destructive",
         });
       }, 300);
@@ -38,13 +38,13 @@ export default function Login() {
       {
         onSuccess: (res) => {
           setAuth(res.spieler, res.token);
-          toast({ title: "Umellen erfollegräich", description: "Wëllkomm zréck am Range-Master!" });
+          toast({ title: "Anmeldung erfolgreich", description: "Willkommen zurück bei Range-Master!" });
           setLocation("/");
         },
         onError: () => {
           toast({ 
-            title: "Feeler beim Umellen", 
-            description: "Iwwerpréift w.e.g. Är Email an Äert Passwuert.",
+            title: "Anmeldung fehlgeschlagen",
+            description: "Bitte überprüfen Sie Ihre E-Mail-Adresse und Ihr Passwort.",
             variant: "destructive" 
           });
         }
@@ -69,7 +69,7 @@ export default function Login() {
         
         <form onSubmit={handleSubmit} className="p-10 space-y-6">
           <div className="space-y-3">
-            <Label htmlFor="email" className="text-xs uppercase tracking-wider font-bold text-muted-foreground">Email Adress</Label>
+            <Label htmlFor="email" className="text-xs uppercase tracking-wider font-bold text-muted-foreground">E-Mail-Adresse</Label>
             <Input 
               id="email" 
               type="email" 
@@ -83,7 +83,7 @@ export default function Login() {
           </div>
           
           <div className="space-y-3">
-            <Label htmlFor="password" className="text-xs uppercase tracking-wider font-bold text-muted-foreground">Passwuert</Label>
+            <Label htmlFor="password" className="text-xs uppercase tracking-wider font-bold text-muted-foreground">Passwort</Label>
             <Input 
               id="password" 
               type="password" 
@@ -102,7 +102,7 @@ export default function Login() {
             data-testid="button-submit"
           >
             {loginMutation.isPending ? <Loader2 className="animate-spin mr-2" /> : null}
-            Umellen
+            Anmelden
           </Button>
         </form>
       </div>

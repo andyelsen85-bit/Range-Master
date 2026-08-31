@@ -25,9 +25,9 @@ static void refresh_wifi_status(void) {
         if (g_store.wifiIp[0])
             snprintf(text, sizeof(text), LV_SYMBOL_WIFI "  %s", g_store.wifiIp);
         else
-            snprintf(text, sizeof(text), "WIFI: VERBONNEN");
+            snprintf(text, sizeof(text), "WIFI: VERBUNDEN");
     } else {
-        snprintf(text, sizeof(text), "WIFI: NET VERBONNEN");
+        snprintf(text, sizeof(text), "WIFI: NICHT VERBUNDEN");
     }
     if (!strcmp(text, s_rendered_wifi_status)) return;
     lv_label_set_text(s_wifi_status, text);
@@ -72,7 +72,7 @@ static bool ensure_current_content(void) {
     reset_basket();
     rebuild();
     lv_label_set_text(s_status,
-        "SYNC HUET D'LESCHT GEANNERT. WIEL NEES.");
+        "SYNC HAT DIE LISTE GEÄNDERT. BITTE NEU WÄHLEN.");
     return false;
 }
 
@@ -88,7 +88,7 @@ static void refresh_total(void) {
     for (int i = 0; i < g_store.produkteCount; ++i) {
         cents += s_qty[i] * g_store.produkte[i].preisCent; count += s_qty[i];
     }
-    char text[80]; snprintf(text, sizeof(text), "TOTAL: %d.%02d EUR  (%d ARTIKEL)",
+    char text[80]; snprintf(text, sizeof(text), "GESAMT: %d.%02d EUR  (%d ARTIKEL)",
                              cents / 100, cents % 100, count);
     lv_label_set_text(s_total, text);
 }
@@ -133,30 +133,30 @@ static void confirm_cb(lv_event_t *) {
     for (int i = 0; i < g_store.produkteCount; ++i) if (s_qty[i]) {
         ids[n] = g_store.produkte[i].id; qty[n++] = s_qty[i];
     }
-    if (!n) { lv_label_set_text(s_status, "E MINDSTENS EN ARTIKEL WIELEN."); return; }
+    if (!n) { lv_label_set_text(s_status, "MINDESTENS EINEN ARTIKEL WÄHLEN."); return; }
     if (!s_confirm_armed) {
         s_confirm_armed = true;
-        char summary[192] = "ZESUMMEFAASSUNG: ";
+        char summary[192] = "ZUSAMMENFASSUNG: ";
         size_t used = strlen(summary);
         for (int i = 0; i < g_store.produkteCount && used + 8 < sizeof(summary); ++i) {
             if (!s_qty[i]) continue;
             int written = snprintf(summary + used, sizeof(summary) - used, "%s%d x %.20s",
-                                   used == strlen("ZESUMMEFAASSUNG: ") ? "" : ", ",
+                                    used == strlen("ZUSAMMENFASSUNG: ") ? "" : ", ",
                                    s_qty[i], g_store.produkte[i].name);
             if (written < 0 || (size_t)written >= sizeof(summary) - used) break;
             used += (size_t)written;
         }
-        snprintf(summary + used, sizeof(summary) - used, "\nNACH EMOL BESTAETEGEN.");
+        snprintf(summary + used, sizeof(summary) - used, "\nERNEUT BESTÄTIGEN.");
         lv_label_set_text(s_status, summary);
         return;
     }
     s_submitting = true; // prevents a second touch before store persistence returns
     bool ok = store_queue_catering_basket(s_player_id, ids, qty, n);
     if (ok) {
-        lv_label_set_text(s_status, "VERKAAF GESPEICHERT.");
+        lv_label_set_text(s_status, "VERKAUF GESPEICHERT.");
     } else {
         char message[160];
-        snprintf(message, sizeof(message), "VERKAAF NET GESPEICHERT: %s",
+        snprintf(message, sizeof(message), "VERKAUF NICHT GESPEICHERT: %s",
                  store_last_catering_error());
         lv_label_set_text(s_status, message);
         // Keep the basket available for a retry after a transient persistence
@@ -173,7 +173,7 @@ static void exit_pin_cb(lv_event_t *) {
     if (result == CATERING_PIN_OK) {
         if (!store_set_operating_mode(TERMINAL_MODE_NORMAL)) {
             lv_textarea_set_text(s_pin, "");
-            lv_label_set_text(s_status, "NORMAL MODUS NET GESPEICHERT.");
+            lv_label_set_text(s_status, "NORMALMODUS NICHT GESPEICHERT.");
             return;
         }
         lv_obj_del(s_pin_modal); s_pin_modal = s_pin = s_pin_kb = NULL;
@@ -184,11 +184,11 @@ static void exit_pin_cb(lv_event_t *) {
     if (result == CATERING_PIN_LOCKED) {
         uint32_t remaining = store_catering_pin_lockout_remaining();
         char message[64];
-        if (remaining) snprintf(message, sizeof(message), "ZE VILL FALSCH PINEN. WAART %lu SEKONNEN.",
+        if (remaining) snprintf(message, sizeof(message), "ZU VIELE FALSCHE PIN. WARTEN %lu SEKUNDEN.",
                                 (unsigned long)remaining);
-        else snprintf(message, sizeof(message), "ZE VILL FALSCH PINEN. KORREKT PIN ASS NOETEG.");
+        else snprintf(message, sizeof(message), "ZU VIELE FALSCHE PIN. KORREKTE PIN ERFORDERLICH.");
         lv_label_set_text(s_status, message);
-    } else lv_label_set_text(s_status, "FALSCH PIN.");
+    } else lv_label_set_text(s_status, "FALSCHE PIN.");
 }
 static void close_pin_cb(lv_event_t *) {
     if (s_pin_modal) lv_obj_del(s_pin_modal);
@@ -200,7 +200,7 @@ static void exit_open_cb(lv_event_t *) {
     lv_obj_center(s_pin_modal); lv_obj_add_style(s_pin_modal, &g_style_card, 0);
     lv_obj_set_flex_flow(s_pin_modal, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_pin_modal, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *l = lv_label_create(s_pin_modal); lv_label_set_text(l, "CATERING VERLOOSSEN - PIN");
+    lv_obj_t *l = lv_label_create(s_pin_modal); lv_label_set_text(l, "CATERING VERLASSEN - PIN");
     s_pin = lv_textarea_create(s_pin_modal); lv_obj_set_width(s_pin, 360);
     lv_textarea_set_one_line(s_pin, true); lv_textarea_set_password_mode(s_pin, true);
     lv_textarea_set_accepted_chars(s_pin, "0123456789"); lv_textarea_set_max_length(s_pin, 16);
@@ -209,10 +209,10 @@ static void exit_open_cb(lv_event_t *) {
     lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW); lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *b = lv_btn_create(actions); lv_obj_add_style(b, &g_style_btn_primary, 0);
     lv_obj_add_event_cb(b, exit_pin_cb, LV_EVENT_CLICKED, NULL);
-    l = lv_label_create(b); lv_label_set_text(l, "PIN PRUEWEN"); lv_obj_center(l);
+    l = lv_label_create(b); lv_label_set_text(l, "PIN PRÜFEN"); lv_obj_center(l);
     b = lv_btn_create(actions); lv_obj_add_style(b, &g_style_btn_secondary, 0);
     lv_obj_add_event_cb(b, close_pin_cb, LV_EVENT_CLICKED, NULL);
-    l = lv_label_create(b); lv_label_set_text(l, "OFBRIECHEN"); lv_obj_center(l);
+    l = lv_label_create(b); lv_label_set_text(l, "ABBRECHEN"); lv_obj_center(l);
     s_pin_kb = lv_keyboard_create(s_pin_modal);
     lv_obj_set_size(s_pin_kb, 480, 190); lv_keyboard_set_mode(s_pin_kb, LV_KEYBOARD_MODE_NUMBER);
     lv_keyboard_set_textarea(s_pin_kb, s_pin);
@@ -235,7 +235,7 @@ static void rebuild(void) {
     memset(s_player_buttons, 0, sizeof(s_player_buttons));
     memset(s_product_qty_labels, 0, sizeof(s_product_qty_labels));
     lv_obj_t *heading = lv_label_create(s_players);
-    lv_label_set_text(heading, "SPILLER VUM DAG");
+    lv_label_set_text(heading, "SPIELER DES TAGES");
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(CLR_MUTED), 0);
     for (int i = 0; i < g_store.portalSpielerCount; ++i) if (player_today(&g_store.portalSpieler[i])) {
@@ -246,7 +246,7 @@ static void rebuild(void) {
                        (void *)(intptr_t)g_store.portalSpieler[i].id);
     }
     heading = lv_label_create(s_products);
-    lv_label_set_text(heading, "IESSEN & GEDRENKS");
+    lv_label_set_text(heading, "ESSEN & GETRÄNKE");
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(CLR_MUTED), 0);
     for (int i = 0; i < g_store.produkteCount; ++i) {
@@ -282,7 +282,7 @@ lv_obj_t *screen_catering_create(void) {
     s_wifi_status = lv_label_create(s_scr); lv_obj_set_style_text_font(s_wifi_status, &lv_font_montserrat_14, 0);
     lv_obj_align(s_wifi_status, LV_ALIGN_TOP_RIGHT, -285, 34);
     s_rendered_wifi_status[0] = '\0'; refresh_wifi_status();
-    lv_obj_t *exit = button(s_scr, "CATERING VERLOOSSEN", &g_style_btn_danger);
+    lv_obj_t *exit = button(s_scr, "CATERING VERLASSEN", &g_style_btn_danger);
     lv_obj_set_size(exit, 260, 52); lv_obj_align(exit, LV_ALIGN_TOP_RIGHT, -18, 16);
     lv_obj_add_event_cb(exit, exit_open_cb, LV_EVENT_CLICKED, NULL);
 
@@ -299,8 +299,8 @@ lv_obj_t *screen_catering_create(void) {
     lv_label_set_long_mode(s_status, LV_LABEL_LONG_WRAP);
     lv_obj_set_height(s_status, 110);
     lv_obj_set_style_text_color(s_status, lv_color_hex(CLR_TEXT), 0);
-    lv_obj_t *confirm = button(s_checkout, "BESTAETEG VERKAAF", &g_style_btn_primary); lv_obj_set_size(confirm, LV_PCT(100), 70); lv_obj_align(confirm, LV_ALIGN_TOP_LEFT, 0, 210); lv_obj_add_event_cb(confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *cancel = button(s_checkout, "OFBRIECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, LV_PCT(100), 55); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 0, 296); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); refresh_selection(); }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *confirm = button(s_checkout, "VERKAUF BESTÄTIGEN", &g_style_btn_primary); lv_obj_set_size(confirm, LV_PCT(100), 70); lv_obj_align(confirm, LV_ALIGN_TOP_LEFT, 0, 210); lv_obj_add_event_cb(confirm, confirm_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel = button(s_checkout, "ABBRECHEN", &g_style_btn_secondary); lv_obj_set_size(cancel, LV_PCT(100), 55); lv_obj_align(cancel, LV_ALIGN_TOP_LEFT, 0, 296); lv_obj_add_event_cb(cancel, [](lv_event_t *) { reset_basket(); refresh_selection(); }, LV_EVENT_CLICKED, NULL);
     reset_basket(); rebuild(); return s_scr;
 }
 void screen_catering_refresh(void) { reset_basket(); rebuild(); }
@@ -316,7 +316,7 @@ void screen_catering_tick(void) {
         uint32_t remaining = store_catering_pin_lockout_remaining();
         if (remaining) {
             char message[64];
-            snprintf(message, sizeof(message), "ZE VILL FALSCH PINEN. WAART %lu SEKONNEN.",
+            snprintf(message, sizeof(message), "ZU VIELE FALSCHE PIN. WARTEN %lu SEKUNDEN.",
                      (unsigned long)remaining);
             lv_label_set_text(s_status, message);
         }

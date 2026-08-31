@@ -58,7 +58,7 @@ static void refresh_player_values(int spieler_id)
         int available = stand->gewaehrt - stand->verbraucht;
         if (available < 0) available = 0;
         char text[80];
-        snprintf(text, sizeof(text), "%d KREDITTER VERFUGBAR  (%d/%d VERBRAUCHT)",
+        snprintf(text, sizeof(text), "%d KREDITE VERFÜGBAR  (%d/%d VERBRAUCHT)",
                  available, stand->verbraucht, stand->gewaehrt);
         const char *current = lv_label_get_text(refs->creditLabel);
         if (!current || strcmp(current, text) != 0)
@@ -88,7 +88,7 @@ static void refresh_player_values(int spieler_id)
     if (s_totals_label) {
         char text[96];
         snprintf(text, sizeof(text),
-                 "CREDITS                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
+                  "KREDITE                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
                  g_store.verkaufCal12Total, g_store.verkaufCal20Total);
         const char *current = lv_label_get_text(s_totals_label);
         if (!current || strcmp(current, text) != 0)
@@ -155,16 +155,16 @@ static void paid_cb(lv_event_t *e)
 {
     int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
     if (store_payment_pending(spieler_id)) {
-        lv_label_set_text(s_lbl_status, "BEZUELUNG WAART OP PORTAL-ACCEPT");
+        lv_label_set_text(s_lbl_status, "ZAHLUNG WARTET AUF PORTAL-BESTÄTIGUNG");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
     } else if (!store_queue_payment(spieler_id)) {
-        lv_label_set_text(s_lbl_status, "BEZUELUNG KONNT NET GESPAECHERT GINN");
+        lv_label_set_text(s_lbl_status, "ZAHLUNG KONNTE NICHT GESPEICHERT WERDEN");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
     } else if (store_sync_billing()) {
-        lv_label_set_text(s_lbl_status, "BEZUELUNG GESPAECHERT - PORTAL SYNC...");
+        lv_label_set_text(s_lbl_status, "ZAHLUNG GESPEICHERT - PORTAL-SYNC...");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
     } else {
-        lv_label_set_text(s_lbl_status, "BEZUELUNG OFFLINE PENDING");
+        lv_label_set_text(s_lbl_status, "ZAHLUNG OFFLINE AUSSTEHEND");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
     }
     close_bill_modal();
@@ -178,7 +178,7 @@ static void bill_cb(lv_event_t *e)
 {
     int sid = (int)(intptr_t)lv_event_get_user_data(e);
     if (s_bill_modal) return;
-    const char *name = "ONBEKANNT";
+    const char *name = "UNBEKANNT";
     KreditStand stand = {};
     PlayerBill *bill_data = cached_bill(sid);
     for (int i = 0; i < g_store.portalSpielerCount; ++i)
@@ -208,8 +208,8 @@ static void bill_cb(lv_event_t *e)
     int remaining = bill_data ? bill_data->creditRemaining : granted - used;
     if (remaining < 0) remaining = 0;
     snprintf(totals, sizeof(totals),
-             "KREDITTER: %d GEWAEHRT  |  %d GENOTZT  |  %d RESCHT\n"
-             "SPILLER: %d SPILLER / %d OFGESCHLOSS  |  %d CONFIRMED CLAYS",
+              "KREDITE: %d GEWÄHRT  |  %d GENUTZT  |  %d ÜBRIG\n"
+              "SPIELE: %d SPIELE / %d ABGESCHLOSSEN  |  %d BESTÄTIGTE TAUBEN",
              granted, used, remaining,
              bill_data ? bill_data->games : 0,
              bill_data ? bill_data->completedGames : 0,
@@ -252,11 +252,11 @@ static void bill_cb(lv_event_t *e)
         lv_obj_t *left = lv_label_create(line_row); char left_text[96];
         bool price_unknown = unit_cent == VERKAUF_UNIT_PRICE_UNKNOWN;
         if (price_unknown)
-            snprintf(left_text, sizeof(left_text), "PENDING  %s [%s]\n%d x PRAIS ONBEKANNT",
+            snprintf(left_text, sizeof(left_text), "AUSSTEHEND  %s [%s]\n%d x PREIS UNBEKANNT",
                      product, category, quantity);
         else
             snprintf(left_text, sizeof(left_text), "%s%s [%s]\n%d x %d.%02d EUR",
-                     pending ? "PENDING  " : "", product, category, quantity,
+                      pending ? "AUSSTEHEND  " : "", product, category, quantity,
                      unit_cent / 100, abs(unit_cent % 100));
         lv_label_set_text(left, left_text);
         lv_obj_set_style_text_font(left, &lv_font_montserrat_14, 0);
@@ -266,7 +266,7 @@ static void bill_cb(lv_event_t *e)
         lv_obj_set_width(left, 0);
         lv_obj_set_flex_grow(left, 1);
         lv_obj_t *right = lv_label_create(line_row); char right_text[32];
-        if (price_unknown) snprintf(right_text, sizeof(right_text), "RECONCILE");
+        if (price_unknown) snprintf(right_text, sizeof(right_text), "ABGLEICH");
         else snprintf(right_text, sizeof(right_text), "%d.%02d EUR",
                       line_cent / 100, abs(line_cent % 100));
         lv_label_set_text(right, right_text);
@@ -292,16 +292,16 @@ static void bill_cb(lv_event_t *e)
             if (event->spielerId != sid || !is_today(event->datum)) continue;
             bool price_unknown = event->unitPriceCent == VERKAUF_UNIT_PRICE_UNKNOWN;
             int cents = price_unknown ? 0 : event->quantity * event->unitPriceCent;
-            add_item_row(event->produktName[0] ? event->produktName : "ONBEKANNT",
-                         event->category[0] ? event->category : "ONBEKANNT",
+            add_item_row(event->produktName[0] ? event->produktName : "UNBEKANNT",
+                         event->category[0] ? event->category : "UNBEKANNT",
                          event->quantity, event->unitPriceCent, cents, true);
             fallback_line_count++;
             fallback_total += cents;
-            add_fallback_category(event->category[0] ? event->category : "ONBEKANNT", cents);
+            add_fallback_category(event->category[0] ? event->category : "UNBEKANNT", cents);
         }
         if (fallback_line_count == 0) {
             lv_obj_t *empty = lv_label_create(items);
-            lv_label_set_text(empty, "KENG LOKAL VERKAAF-EVENT FIR DESSE SPILLER");
+            lv_label_set_text(empty, "KEINE LOKALEN VERKAUFSVORGÄNGE FÜR DIESEN SPIELER");
             lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
         }
     }
@@ -310,34 +310,34 @@ static void bill_cb(lv_event_t *e)
     int category_count = bill_data ? bill_data->categoryCount : fallback_category_count;
     for (int i = 0; i < category_count; ++i) {
         lv_obj_t *category = lv_label_create(card); char text[384];
-        snprintf(text, sizeof(text), "%s TOTAL: %d.%02d EUR",
+        snprintf(text, sizeof(text), "%s GESAMT: %d.%02d EUR",
                  category_totals[i].name, category_totals[i].totalCent / 100,
                  abs(category_totals[i].totalCent % 100));
         lv_label_set_text(category, text);
         lv_obj_set_style_text_color(category, lv_color_hex(CLR_MUTED), 0);
     }
     lv_obj_t *general = lv_label_create(card); char general_text[128];
-    snprintf(general_text, sizeof(general_text), "GENERAL TOTAL: %d.%02d EUR  |  STATUS: %s",
+    snprintf(general_text, sizeof(general_text), "GESAMT: %d.%02d EUR  |  STATUS: %s",
               bill_data ? bill_data->totalCent / 100 : fallback_total / 100,
               bill_data ? abs(bill_data->totalCent % 100) : abs(fallback_total % 100),
-             store_payment_pending(sid) ? "PAID PENDING" :
-             bill_data && bill_data->state == BILL_PAID ? "PAID" :
-             bill_data && bill_data->state == BILL_PENDING_NEUTRAL ? "PENDING NEUTRAL" : "OPEN");
+              store_payment_pending(sid) ? "ZAHLUNG AUSSTEHEND" :
+              bill_data && bill_data->state == BILL_PAID ? "BEZAHLT" :
+              bill_data && bill_data->state == BILL_PENDING_NEUTRAL ? "NEUTRAL AUSSTEHEND" : "OFFEN");
     lv_label_set_text(general, general_text);
     lv_obj_set_style_text_font(general, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(general, lv_color_hex(CLR_PRIMARY), 0);
     if (bill_data && bill_data->lineOverflow) {
         lv_obj_t *overflow = lv_label_create(card);
-        lv_label_set_text(overflow, "RECHNUNG ZEILENLIMIT ERREECHT - PORTALDETAILER PRUEWEN");
+        lv_label_set_text(overflow, "ZEILENLIMIT ERREICHT - PORTALDETAILS PRÜFEN");
         lv_obj_set_style_text_color(overflow, lv_color_hex(CLR_DANGER), 0);
     }
     lv_obj_t *hint = lv_label_create(card);
     char audit[160];
     snprintf(audit, sizeof(audit), "%s%s%s",
-             bill_data && bill_data->paymentSource[0] ? "BEZUELUNG: " : "",
+             bill_data && bill_data->paymentSource[0] ? "ZAHLUNG: " : "",
              bill_data ? bill_data->paymentSource : "",
-             bill_data && bill_data->paidAt[0] ? "  (PORTAL AUDIT GESPEICHERT)" :
-             "  PAID BLEIFT PENDING BIS PORTAL ACCEPT.");
+             bill_data && bill_data->paidAt[0] ? "  (PORTAL-PRÜFUNG GESPEICHERT)" :
+              "  ZAHLUNG BLEIBT BIS ZUR PORTAL-BESTÄTIGUNG AUSSTEHEND.");
     lv_label_set_text(hint, audit);
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(hint, lv_color_hex(CLR_MUTED), 0);
@@ -347,15 +347,15 @@ static void bill_cb(lv_event_t *e)
     lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(actions, 16, 0);
     lv_obj_t *cancel = lv_btn_create(actions); lv_obj_add_style(cancel, &g_style_btn_secondary, 0);
     lv_obj_set_size(cancel, 180, 52); lv_obj_add_event_cb(cancel, [](lv_event_t *) { close_bill_modal(); }, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "ZURUCK"); lv_obj_center(cl);
+    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "ZURÜCK"); lv_obj_center(cl);
     lv_obj_t *paid = lv_btn_create(actions);
     lv_obj_add_style(paid, store_payment_pending(sid) ? &g_style_btn_secondary : &g_style_btn_primary, 0);
     lv_obj_set_size(paid, 260, 52);
     lv_obj_add_event_cb(paid, paid_cb, LV_EVENT_CLICKED, (void *)(intptr_t)sid);
     lv_obj_t *pl = lv_label_create(paid);
     bool already_paid = bill_data && bill_data->state == BILL_PAID;
-    lv_label_set_text(pl, store_payment_pending(sid) ? "PAID PENDING" :
-                          already_paid ? "PAID" : LV_SYMBOL_OK "  PAID CONFIRM");
+    lv_label_set_text(pl, store_payment_pending(sid) ? "ZAHLUNG AUSSTEHEND" :
+                           already_paid ? "BEZAHLT" : LV_SYMBOL_OK "  ZAHLUNG BESTÄTIGEN");
     if (already_paid) lv_obj_add_state(paid, LV_STATE_DISABLED);
     lv_obj_center(pl);
 }
@@ -365,11 +365,11 @@ static void munition_cb(lv_event_t *e)
     const KreditAction *action = (const KreditAction *)lv_event_get_user_data(e);
     if (!action || !store_queue_verkauf(action->spielerId, action->produktCode,
                                          action->quantity)) {
-        lv_label_set_text(s_lbl_status, "VERKAUF KONNT NET GESPAECHERT GINN");
+        lv_label_set_text(s_lbl_status, "VERKAUF KONNTE NICHT GESPEICHERT WERDEN");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
-    lv_label_set_text(s_lbl_status, "VERKAAF GESPEICHERT");
+    lv_label_set_text(s_lbl_status, "VERKAUF GESPEICHERT");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     refresh_player_values(action->spielerId);
 }
@@ -379,10 +379,10 @@ static void grant_cb(lv_event_t *e)
 {
     int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
     if (!store_adjust_kredite(spieler_id, 1)) {
-        lv_label_set_text(s_lbl_status, "KREDITT KONNT NET GESPAECHERT GINN");
+        lv_label_set_text(s_lbl_status, "KREDIT KONNTE NICHT GESPEICHERT WERDEN");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
     } else {
-        lv_label_set_text(s_lbl_status, "+1 KREDITT GESPAECHERT");
+        lv_label_set_text(s_lbl_status, "+1 KREDIT GESPEICHERT");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     }
     refresh_player_values(spieler_id);
@@ -393,10 +393,10 @@ static void revoke_cb(lv_event_t *e)
 {
     int spieler_id = (int)(intptr_t)lv_event_get_user_data(e);
     if (!store_adjust_kredite(spieler_id, -1)) {
-        lv_label_set_text(s_lbl_status, "KREDITT KONNT NET GESPAECHERT GINN");
+        lv_label_set_text(s_lbl_status, "KREDIT KONNTE NICHT GESPEICHERT WERDEN");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
     } else {
-        lv_label_set_text(s_lbl_status, "-1 KREDITT GESPAECHERT");
+        lv_label_set_text(s_lbl_status, "-1 KREDIT GESPEICHERT");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     }
     refresh_player_values(spieler_id);
@@ -409,12 +409,12 @@ static void remove_player_cb(lv_event_t *e)
     char reason[64];
     if (!store_remove_spieler_fuer_tag(spieler_id, reason, sizeof(reason))) {
         char message[112];
-        snprintf(message, sizeof(message), "NET GELOSCHT: %s", reason);
+        snprintf(message, sizeof(message), "NICHT GELÖSCHT: %s", reason);
         lv_label_set_text(s_lbl_status, message);
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
-    lv_label_set_text(s_lbl_status, "SPILLER GELOSCHT");
+    lv_label_set_text(s_lbl_status, "SPIELER GELÖSCHT");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
     screen_kredite_refresh();
 }
@@ -429,7 +429,7 @@ static void add_player_cb(lv_event_t *e)
     if (idx >= (uint16_t)g_store.portalSpielerCount) return;
     PortalSpieler *ps = &g_store.portalSpieler[idx];
     store_register_spieler_fuer_tag(ps->id);
-    lv_label_set_text(s_lbl_status, "SPILLER DOBAIGESAT");
+    lv_label_set_text(s_lbl_status, "SPIELER HINZUGEFÜGT");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     screen_kredite_refresh();
 }
@@ -448,7 +448,7 @@ static void build_player_list(void)
     s_totals_label = columns;
     char columns_text[96];
     snprintf(columns_text, sizeof(columns_text),
-             "CREDITS                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
+              "KREDITE                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
              g_store.verkaufCal12Total, g_store.verkaufCal20Total);
     lv_label_set_text(columns, columns_text);
     lv_obj_set_style_text_font(columns, &lv_font_montserrat_12, 0);
@@ -459,7 +459,7 @@ static void build_player_list(void)
         KreditStand *k = &g_store.kredite[i];
 
         // Find player name
-        const char *name = "ONBEKANNT";
+        const char *name = "UNBEKANNT";
         for (int j = 0; j < g_store.portalSpielerCount; j++) {
             if (g_store.portalSpieler[j].id == sid) {
                 name = g_store.portalSpieler[j].name;
@@ -496,7 +496,7 @@ static void build_player_list(void)
         int avail = k->gewaehrt - k->verbraucht;
         if (avail < 0) avail = 0;
         snprintf(cred_buf, sizeof(cred_buf),
-                 "%d KREDITTER VERFUGBAR  (%d/%d VERBRAUCHT)",
+                  "%d KREDITE VERFÜGBAR  (%d/%d VERBRAUCHT)",
                  avail, k->verbraucht, k->gewaehrt);
         lv_obj_t *cred_lbl = lv_label_create(info);
         lv_label_set_text(cred_lbl, cred_buf);
@@ -535,13 +535,13 @@ static void build_player_list(void)
             return group;
         };
 
-        lv_obj_t *bill_group = control_group("BILL", 78);
+        lv_obj_t *bill_group = control_group("RECHNUNG", 78);
         lv_obj_t *bill = lv_btn_create(bill_group);
         lv_obj_add_style(bill, &g_style_btn_secondary, 0);
         lv_obj_set_size(bill, 76, 52);
         lv_obj_add_event_cb(bill, bill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)sid);
         lv_obj_t *bill_label = lv_label_create(bill);
-        lv_label_set_text(bill_label, store_payment_pending(sid) ? "PENDING" : "BILL");
+        lv_label_set_text(bill_label, store_payment_pending(sid) ? "AUSSTEHEND" : "RECHNUNG");
         lv_obj_set_style_text_font(bill_label, &lv_font_montserrat_12, 0);
         lv_obj_center(bill_label);
 
@@ -627,7 +627,7 @@ static void build_player_list(void)
         }
 
         // X (remove from today's list)
-        lv_obj_t *remove_group = control_group("REMOVE", 78);
+        lv_obj_t *remove_group = control_group("LÖSCHEN", 78);
         lv_obj_t *btn_del = lv_btn_create(remove_group);
         lv_obj_set_size(btn_del, 76, 52);
         lv_obj_set_style_bg_color(btn_del, lv_color_hex(CLR_DANGER), 0);
@@ -647,7 +647,7 @@ static void build_player_list(void)
 
     if (count == 0) {
         lv_obj_t *empty = lv_label_create(s_player_list);
-        lv_label_set_text(empty, "Keng SPILLER fir HAUT REGISTRIERT");
+        lv_label_set_text(empty, "KEINE SPIELER FÜR HEUTE REGISTRIERT");
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
     }
@@ -676,7 +676,7 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_style_pad_hor(hdr, 20, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
-    lv_label_set_text(title, LV_SYMBOL_CHARGE "  SPILLER VUM DAG");
+    lv_label_set_text(title, LV_SYMBOL_CHARGE "  SPIELER DES TAGES");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -686,7 +686,7 @@ lv_obj_t *screen_kredite_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
-    lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURUCK");
+    lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURÜCK");
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 
@@ -701,7 +701,7 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_style_pad_column(add_row, 12, 0);
 
     lv_obj_t *add_lbl = lv_label_create(add_row);
-    lv_label_set_text(add_lbl, "SPILLER DOBAISETZEN:");
+    lv_label_set_text(add_lbl, "SPIELER HINZUFÜGEN:");
     lv_obj_set_style_text_font(add_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(add_lbl, lv_color_hex(CLR_TEXT), 0);
 
@@ -717,7 +717,7 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_size(add_btn, 120, 44);
     lv_obj_add_event_cb(add_btn, add_player_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *abl = lv_label_create(add_btn);
-    lv_label_set_text(abl, "+ DOBAISETZEN");
+    lv_label_set_text(abl, "+ HINZUFÜGEN");
     lv_obj_set_style_text_font(abl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(abl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(abl);
@@ -771,12 +771,12 @@ void screen_kredite_sync_completed(bool success, const char *error)
 {
     if (!s_lbl_status) return;
     if (success) {
-        lv_label_set_text(s_lbl_status, "SYNC ERFOLLEGRÄICH");
+        lv_label_set_text(s_lbl_status, "SYNC ERFOLGREICH");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_SUCCESS), 0);
     } else {
         char message[96];
-        snprintf(message, sizeof(message), "SYNC-FEELER: %.76s",
-                 error && error[0] ? error : "ONBEKANNT");
+        snprintf(message, sizeof(message), "SYNC-FEHLER: %.76s",
+                 error && error[0] ? error : "UNBEKANNT");
         lv_label_set_text(s_lbl_status, message);
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
     }

@@ -42,14 +42,14 @@ void screen_bluetooth_create_workers(void)
             // Check if connected
             lv_async_call([](void *arg2) {
                 if (cop_ble_is_connected()) {
-                    lv_label_set_text(s_lbl_state, LV_SYMBOL_OK "  KEYBOARD VERBONNEN!");
+                    lv_label_set_text(s_lbl_state, LV_SYMBOL_OK "  TASTATUR VERBUNDEN!");
                     lv_obj_set_style_text_color(s_lbl_state,
                         lv_color_hex(CLR_SUCCESS), 0);
                     lv_label_set_text(s_lbl_device, "BLE HID Keyboard");
-                    lv_list_add_text(s_list_log, LV_SYMBOL_OK " KEYBOARD VERBONNEN");
+                    lv_list_add_text(s_list_log, LV_SYMBOL_OK " TASTATUR VERBUNDEN");
                 } else {
                     s_advertising = false;
-                    lv_label_set_text(s_lbl_state, "KENG VERBINDUNG - NEI PROBIEREN");
+                    lv_label_set_text(s_lbl_state, "KEINE VERBINDUNG - ERNEUT VERSUCHEN");
                     lv_obj_set_style_text_color(s_lbl_state,
                         lv_color_hex(CLR_MUTED), 0);
                     lv_obj_clear_flag(s_btn_pair, LV_OBJ_FLAG_HIDDEN);
@@ -66,7 +66,7 @@ static void pair_cb(lv_event_t *e)
 {
     if (!s_pair_queue || s_advertising) return;
     s_advertising = true;
-    lv_label_set_text(s_lbl_state, LV_SYMBOL_BLUETOOTH "  ANNONCIERT... (KOPPEL AM HANDY)");
+    lv_label_set_text(s_lbl_state, LV_SYMBOL_BLUETOOTH "  SICHTBAR... (AM HANDY KOPPELN)");
     lv_obj_set_style_text_color(s_lbl_state, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_add_flag(s_btn_pair, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);
@@ -80,12 +80,12 @@ static void unpair_cb(lv_event_t *e)
 {
     cop_ble_stop();
     s_advertising = false;
-    lv_label_set_text(s_lbl_state, "NET VERBONNEN");
+    lv_label_set_text(s_lbl_state, "NICHT VERBUNDEN");
     lv_obj_set_style_text_color(s_lbl_state, lv_color_hex(CLR_MUTED), 0);
     lv_label_set_text(s_lbl_device, "-");
     lv_obj_clear_flag(s_btn_pair, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);
-    lv_list_add_text(s_list_log, LV_SYMBOL_CLOSE " Keyboard getrennt");
+    lv_list_add_text(s_list_log, LV_SYMBOL_CLOSE " TASTATUR GETRENNT");
 }
 
 lv_obj_t *screen_bluetooth_create(void)
@@ -110,7 +110,7 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_set_style_pad_hor(hdr, 20, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
-    lv_label_set_text(title, LV_SYMBOL_BLUETOOTH "  BLUETOOTH KEYBOARD");
+    lv_label_set_text(title, LV_SYMBOL_BLUETOOTH "  BLUETOOTH-TASTATUR");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -120,7 +120,7 @@ lv_obj_t *screen_bluetooth_create(void)
         ui_manager_show(SCREEN_EINSTELLUNGEN);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
-    lv_label_set_text(bl2, LV_SYMBOL_LEFT "  ZURUCK");
+    lv_label_set_text(bl2, LV_SYMBOL_LEFT "  ZURÜCK");
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 
@@ -141,7 +141,7 @@ lv_obj_t *screen_bluetooth_create(void)
 
     lv_obj_t *warn_lbl = lv_label_create(sim_warn);
     lv_label_set_text(warn_lbl, LV_SYMBOL_WARNING
-        "  BLUETOOTH ASS NEMMEN UM PHYSESCHE TERMINAL VERFUGBAR");
+        "  BLUETOOTH NUR AM PHYSISCHEN TERMINAL VERFÜGBAR");
     lv_obj_set_style_text_font(warn_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(warn_lbl, lv_color_hex(CLR_WARN), 0);
 
@@ -163,7 +163,7 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_set_flex_flow(status_card, LV_FLEX_FLOW_COLUMN);
 
     s_lbl_state = lv_label_create(status_card);
-    lv_label_set_text(s_lbl_state, "NET VERBONNEN");
+    lv_label_set_text(s_lbl_state, "NICHT VERBUNDEN");
     lv_obj_set_style_text_font(s_lbl_state, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(s_lbl_state, lv_color_hex(CLR_MUTED), 0);
 
@@ -186,7 +186,7 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_set_size(s_btn_pair, 200, 52);
     lv_obj_add_event_cb(s_btn_pair, pair_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *pl = lv_label_create(s_btn_pair);
-    lv_label_set_text(pl, LV_SYMBOL_BLUETOOTH "  KOPPELE STARTEN");
+    lv_label_set_text(pl, LV_SYMBOL_BLUETOOTH "  KOPPLUNG STARTEN");
     lv_obj_set_style_text_font(pl, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(pl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(pl);
@@ -197,14 +197,14 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_add_event_cb(s_btn_unpair, unpair_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *upl = lv_label_create(s_btn_unpair);
-    lv_label_set_text(upl, LV_SYMBOL_CLOSE "  Trennen");
+    lv_label_set_text(upl, LV_SYMBOL_CLOSE "  TRENNEN");
     lv_obj_set_style_text_font(upl, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(upl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(upl);
 
     // Event log
     lv_obj_t *log_hdr = lv_label_create(content);
-    lv_label_set_text(log_hdr, "EVENEMENTER");
+    lv_label_set_text(log_hdr, "EREIGNISSE");
     lv_obj_set_style_text_font(log_hdr, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(log_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -215,7 +215,7 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_set_style_border_width(s_list_log, 1, 0);
     lv_obj_set_style_radius(s_list_log, 8, 0);
     lv_obj_set_style_text_font(s_list_log, &lv_font_montserrat_14, 0);
-    lv_list_add_text(s_list_log, "Keng EVENEMENTER");
+    lv_list_add_text(s_list_log, "KEINE EREIGNISSE");
 
     return s_scr;
 }
@@ -224,13 +224,13 @@ void screen_bluetooth_refresh(void)
 {
     if (!s_lbl_state) return;
     if (cop_ble_is_connected()) {
-        lv_label_set_text(s_lbl_state, LV_SYMBOL_OK "  KEYBOARD VERBONNEN");
+        lv_label_set_text(s_lbl_state, LV_SYMBOL_OK "  TASTATUR VERBUNDEN");
         lv_obj_set_style_text_color(s_lbl_state, lv_color_hex(CLR_SUCCESS), 0);
         lv_obj_add_flag(s_btn_pair, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);
     } else {
         if (!s_advertising) {
-            lv_label_set_text(s_lbl_state, "NET VERBONNEN");
+            lv_label_set_text(s_lbl_state, "NICHT VERBUNDEN");
             lv_obj_set_style_text_color(s_lbl_state, lv_color_hex(CLR_MUTED), 0);
             lv_obj_clear_flag(s_btn_pair, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);

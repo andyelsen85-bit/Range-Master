@@ -76,7 +76,7 @@ static void scan_cb(lv_event_t *e)
     uint32_t trigger = 1;
     if (xQueueSend(s_scan_queue, &trigger, 0) != pdTRUE) {
         s_scan_busy = false;
-        lv_label_set_text(s_lbl_status, "SCAN WORKER BESCHAFT");
+        lv_label_set_text(s_lbl_status, "SCAN-PROZESS BESCHÄFTIGT");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
     }
 }
@@ -87,7 +87,7 @@ static void connect_cb(lv_event_t *e)
     const char *ssid = lv_textarea_get_text(s_ta_ssid);
     const char *pass = lv_textarea_get_text(s_ta_pass);
     if (!ssid || strlen(ssid) == 0) {
-        lv_label_set_text(s_lbl_status, "SSID ASS EIDEL");
+        lv_label_set_text(s_lbl_status, "SSID IST LEER");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
@@ -96,11 +96,11 @@ static void connect_cb(lv_event_t *e)
     strncpy(g_store.wifiPass, pass, MAX_PASS_LEN - 1);
     g_store.wifiPass[MAX_PASS_LEN - 1] = '\0';
     game_store_save();
-    lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " VERBANNE...");
+    lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " VERBINDE...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
     esp_err_t err = cop_wifi_request_connect(g_store.wifiSsid, g_store.wifiPass);
     if (err != ESP_OK) {
-        lv_label_set_text(s_lbl_status, "WIFI SUPERVISOR NET BEREET");
+        lv_label_set_text(s_lbl_status, "WIFI-SUPERVISOR NICHT BEREIT");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
     } else {
         s_connect_busy = true;
@@ -129,7 +129,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_pad_hor(hdr, 20, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
-    lv_label_set_text(title, LV_SYMBOL_WIFI "  WIFI ASTELLUNGEN");
+    lv_label_set_text(title, LV_SYMBOL_WIFI "  WIFI-EINSTELLUNGEN");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -139,7 +139,7 @@ lv_obj_t *screen_wifi_create(void)
         ui_manager_show(SCREEN_EINSTELLUNGEN);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
-    lv_label_set_text(bl2, LV_SYMBOL_LEFT "  ZURUCK");
+    lv_label_set_text(bl2, LV_SYMBOL_LEFT "  ZURÜCK");
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 
@@ -163,7 +163,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_pad_row(left, 10, 0);
 
     lv_obj_t *net_hdr = lv_label_create(left);
-    lv_label_set_text(net_hdr, "VERFUGBAR NETZWIERKER");
+    lv_label_set_text(net_hdr, "VERFÜGBARE NETZWERKE");
     lv_obj_set_style_text_font(net_hdr, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(net_hdr, lv_color_hex(CLR_TEXT), 0);
 
@@ -184,7 +184,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_border_width(s_list_networks, 1, 0);
     lv_obj_set_style_radius(s_list_networks, 8, 0);
     lv_obj_set_style_text_font(s_list_networks, &lv_font_montserrat_14, 0);
-    lv_list_add_text(s_list_networks, "SCAN DRECKEN FIR NETZWIERKER ZE SICHEN");
+    lv_list_add_text(s_list_networks, "SCAN DRÜCKEN, UM NETZWERKE ZU SUCHEN");
 
     // Right: SSID/pass/connect
     lv_obj_t *right = lv_obj_create(content);
@@ -209,7 +209,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_text_color(s_ta_ssid, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *pass_lbl = lv_label_create(right);
-    lv_label_set_text(pass_lbl, "PASSWUERT");
+    lv_label_set_text(pass_lbl, "PASSWORT");
     lv_obj_set_style_text_font(pass_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(pass_lbl, lv_color_hex(CLR_TEXT), 0);
 
@@ -227,7 +227,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_size(s_btn_connect, LV_PCT(100), 56);
     lv_obj_add_event_cb(s_btn_connect, connect_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cl = lv_label_create(s_btn_connect);
-    lv_label_set_text(cl, LV_SYMBOL_WIFI "  VERBANNE");
+    lv_label_set_text(cl, LV_SYMBOL_WIFI "  VERBINDEN");
     lv_obj_set_style_text_font(cl, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(cl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(cl);
@@ -243,7 +243,7 @@ lv_obj_t *screen_wifi_create(void)
         lv_label_set_text(s_lbl_ip, buf);
         lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_SUCCESS), 0);
     } else {
-        lv_label_set_text(s_lbl_ip, "NET VERBONNEN");
+        lv_label_set_text(s_lbl_ip, "NICHT VERBUNDEN");
         lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_MUTED), 0);
     }
     lv_obj_set_style_text_font(s_lbl_ip, &lv_font_montserrat_14, 0);
@@ -315,7 +315,7 @@ void screen_wifi_refresh(void)
             snprintf(status, sizeof(status), LV_SYMBOL_REFRESH " SCANNT...");
             color = CLR_WARN;
         } else if (s_connect_busy) {
-            snprintf(status, sizeof(status), LV_SYMBOL_REFRESH " VERBANNE...");
+            snprintf(status, sizeof(status), LV_SYMBOL_REFRESH " VERBINDE...");
             color = CLR_WARN;
         } else {
             snprintf(status, sizeof(status), "WIFI: %s", label);
@@ -329,7 +329,7 @@ void screen_wifi_refresh(void)
         lv_label_set_text(s_lbl_ip, buf);
         lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_PRIMARY), 0);
     } else {
-        lv_label_set_text(s_lbl_ip, "NET VERBONNEN");
+        lv_label_set_text(s_lbl_ip, "NICHT VERBUNDEN");
         lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_MUTED), 0);
     }
 }
@@ -349,13 +349,13 @@ void screen_wifi_tick(void)
                     if (state == COP_WIFI_CONNECTING ||
                         state == COP_WIFI_RECONNECTING) {
                         lv_list_add_text(s_list_networks,
-                            LV_SYMBOL_WARNING " WIFI VERBINNT - SCAN SPEIDER");
+                            LV_SYMBOL_WARNING " WIFI VERBINDET - SCAN SPÄTER");
                     } else if (result.err == ESP_ERR_TIMEOUT) {
                         lv_list_add_text(s_list_networks,
-                            LV_SYMBOL_WARNING " SCAN TIMEOUT");
+                            LV_SYMBOL_WARNING " SCAN-ZEITÜBERSCHREITUNG");
                     } else {
                         lv_list_add_text(s_list_networks,
-                            LV_SYMBOL_WARNING " SCAN NET DISPONIBEL");
+                            LV_SYMBOL_WARNING " SCAN NICHT VERFÜGBAR");
                     }
                 } else {
                     for (int i = 0; i < result.count; i++) {
@@ -371,7 +371,7 @@ void screen_wifi_tick(void)
                         }, LV_EVENT_CLICKED, NULL);
                     }
                     if (result.count == 0)
-                        lv_list_add_text(s_list_networks, "KENG NETZWIERKER FONNT");
+                        lv_list_add_text(s_list_networks, "KEINE NETZWERKE GEFUNDEN");
                 }
             }
             s_scan_busy = false;

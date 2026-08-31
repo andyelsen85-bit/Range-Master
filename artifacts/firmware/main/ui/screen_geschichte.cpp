@@ -29,7 +29,7 @@ static void show_detail(int idx)
     const FinishedGame *fg = &g_store.history[idx];
 
     char hdr[64];
-    snprintf(hdr, sizeof(hdr), "%s  |  %d SPILLER",
+    snprintf(hdr, sizeof(hdr), "%s  |  %d SPIELER",
              modus_label(fg->base.modus), fg->spieler_count);
     lv_label_set_text(s_detail_hdr, hdr);
     {   // UTC → local time (CET/CEST), formatted as "DD.MM.YYYY HH:MM"
@@ -40,8 +40,8 @@ static void show_detail(int idx)
 
     // Fill player table (row 0 = header)
     lv_table_set_row_cnt(s_detail_table, fg->spieler_count + 1);
-    lv_table_set_cell_value(s_detail_table, 0, 0, "SPILLER");
-    lv_table_set_cell_value(s_detail_table, 0, 1, "POSTEN");
+    lv_table_set_cell_value(s_detail_table, 0, 0, "SPIELER");
+    lv_table_set_cell_value(s_detail_table, 0, 1, "STAND");
     lv_table_set_cell_value(s_detail_table, 0, 2, "PKT");
 
     // Build per-player totals from teilnahmen
@@ -190,7 +190,7 @@ lv_obj_t *screen_geschichte_create(void)
     lv_obj_set_style_pad_hor(hdr, 20, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
-    lv_label_set_text(title, LV_SYMBOL_LIST "  SPILLGESCHICHT");
+    lv_label_set_text(title, LV_SYMBOL_LIST "  SPIELVERLAUF");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -200,13 +200,13 @@ lv_obj_t *screen_geschichte_create(void)
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl = lv_label_create(back);
-    lv_label_set_text(bl, LV_SYMBOL_HOME "  ZURUCK");
+    lv_label_set_text(bl, LV_SYMBOL_HOME "  ZURÜCK");
     lv_obj_set_style_text_color(bl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl);
 
     // Empty placeholder
     s_lbl_empty = lv_label_create(s_scr);
-    lv_label_set_text(s_lbl_empty, "KENG SPILLER NACH");
+    lv_label_set_text(s_lbl_empty, "NOCH KEINE SPIELE");
     lv_obj_set_style_text_font(s_lbl_empty, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(s_lbl_empty, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_empty, LV_ALIGN_CENTER, 0, 0);
@@ -234,7 +234,7 @@ lv_obj_t *screen_geschichte_create(void)
 
     // Detail header
     lv_obj_t *d_title = lv_label_create(s_detail_card);
-    lv_label_set_text(d_title, "RESULTAT");
+    lv_label_set_text(d_title, "ERGEBNIS");
     lv_obj_set_style_text_font(d_title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(d_title, lv_color_hex(CLR_MUTED), 0);
 

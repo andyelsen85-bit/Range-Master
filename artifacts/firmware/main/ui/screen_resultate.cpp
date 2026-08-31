@@ -37,7 +37,7 @@ lv_obj_t *screen_resultate_create(void)
     lv_obj_set_style_pad_hor(hdr, 20, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
-    lv_label_set_text(title, LV_SYMBOL_CHARGE "  RESULTATER");
+    lv_label_set_text(title, LV_SYMBOL_CHARGE "  ERGEBNISSE");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -52,7 +52,7 @@ lv_obj_t *screen_resultate_create(void)
         store_dismiss_resultate();
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *dl = lv_label_create(done_btn);
-    lv_label_set_text(dl, LV_SYMBOL_HOME "  OFSCHLOSSEN");
+    lv_label_set_text(dl, LV_SYMBOL_HOME "  FERTIG");
     lv_obj_set_style_text_color(dl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(dl);
 
@@ -77,7 +77,7 @@ lv_obj_t *screen_resultate_create(void)
     lv_obj_set_style_text_color(trophy, lv_color_hex(CLR_WARN), 0);
 
     s_lbl_winner = lv_label_create(win_card);
-    lv_label_set_text(s_lbl_winner, "WINNER: -");
+    lv_label_set_text(s_lbl_winner, "SIEGER: -");
     lv_obj_set_style_text_font(s_lbl_winner, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(s_lbl_winner, lv_color_hex(CLR_WARN), 0);
     lv_label_set_long_mode(s_lbl_winner, LV_LABEL_LONG_DOT);
@@ -106,10 +106,10 @@ lv_obj_t *screen_resultate_create(void)
     lv_obj_set_style_border_color(s_table, lv_color_hex(CLR_BORDER), 0);
 
     lv_table_set_cell_value(s_table, 0, 0, "#");
-    lv_table_set_cell_value(s_table, 0, 1, "SPILLER");
+    lv_table_set_cell_value(s_table, 0, 1, "SPIELER");
     lv_table_set_cell_value(s_table, 0, 2, "LAUF 1");
     lv_table_set_cell_value(s_table, 0, 3, "LAUF 2");
-    lv_table_set_cell_value(s_table, 0, 4, "TOTAL");
+    lv_table_set_cell_value(s_table, 0, 4, "GESAMT");
 
     return s_scr;
 }
@@ -124,7 +124,7 @@ void screen_resultate_refresh(void)
 
     // Meta line
     char buf[80];
-    snprintf(buf, sizeof(buf), "%s   |   %s   |   %d Tauben/Lauf",
+    snprintf(buf, sizeof(buf), "%s   |   %s   |   %d TAUBEN/LAUF",
              fg->finishedAt,
              modus_label(fg->base.modus),
              fg->base.taubenProLauf);
@@ -151,7 +151,7 @@ void screen_resultate_refresh(void)
 
     // Winner banner
     if (n > 0) {
-        snprintf(buf, sizeof(buf), "WINNER: %s  (%d PUNKTE)",
+        snprintf(buf, sizeof(buf), "SIEGER: %s  (%d PUNKTE)",
                  rows[0].name, rows[0].total);
         lv_label_set_text(s_lbl_winner, buf);
         int maxScore = fg->base.taubenProLauf * 2 * 2;

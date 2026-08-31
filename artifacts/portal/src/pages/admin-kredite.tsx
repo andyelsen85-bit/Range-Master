@@ -40,7 +40,7 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-const MONTH_NAMES = ["Jan", "Feb", "Mär", "Apr", "Mee", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+const MONTH_NAMES = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 const MASCHINEN = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
 
 function StatCard({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
@@ -110,11 +110,11 @@ function TabDag({ token }: { token: string | null }) {
     onSuccess: (data, variables) => {
       qc.invalidateQueries({ queryKey: ["admin-kredite-dag", datum] });
       qc.invalidateQueries({ queryKey: getGetAdminDaySalesQueryKey({ datum }) });
-      toast({ title: "Späicheren erfollegräich", description: "D'Kreditter goufen ugepasst." });
+      toast({ title: "Erfolgreich gespeichert", description: "Die Guthaben wurden angepasst." });
       setOps(prev => { const next = { ...prev }; delete next[variables.opKey]; return next; });
     },
     onError: (err: any, variables) => {
-      toast({ title: "Feeler", description: err.message, variant: "destructive" });
+      toast({ title: "Fehler", description: err.message, variant: "destructive" });
       const status = err.status;
       if (status && status >= 400 && status < 500 && status !== 408 && status !== 429) {
         setOps(prev => { const next = { ...prev }; delete next[variables.opKey]; return next; });
@@ -150,11 +150,11 @@ function TabDag({ token }: { token: string | null }) {
     },
     onSuccess: (data, variables) => {
       qc.invalidateQueries({ queryKey: getGetAdminDaySalesQueryKey({ datum }) });
-      toast({ title: "Späicheren erfollegräich", description: "D'Munitioun gouf ugepasst." });
+      toast({ title: "Erfolgreich gespeichert", description: "Die Munition wurde angepasst." });
       setOps(prev => { const next = { ...prev }; delete next[variables.opKey]; return next; });
     },
     onError: (err: any, variables) => {
-      toast({ title: "Feeler", description: err.message, variant: "destructive" });
+      toast({ title: "Fehler", description: err.message, variant: "destructive" });
       const status = err.status;
       if (status && status >= 400 && status < 500 && status !== 408 && status !== 429) {
         setOps(prev => { const next = { ...prev }; delete next[variables.opKey]; return next; });
@@ -245,7 +245,7 @@ function TabDag({ token }: { token: string | null }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <p className="text-sm text-muted-foreground font-medium">
-          Virbezuelte Spiller pro Dag, inklusiv Munitioun.{isToday && " Fir haut kënnen dës hei ugepasst ginn."}
+          Im Voraus bezahlte Spiele pro Tag, einschließlich Munition.{isToday && " Diese können für heute hier angepasst werden."}
         </p>
         <input
           type="date"
@@ -256,9 +256,9 @@ function TabDag({ token }: { token: string | null }) {
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        <StatCard label="Kaaft" value={totalGewaehrt} />
-        <StatCard label="Gespillt" value={totalVerbraucht} />
-        <StatCard label={isToday ? "Nach oppen" : "Net benotzt"} value={totalRest} />
+        <StatCard label="Gekauft" value={totalGewaehrt} />
+        <StatCard label="Gespielt" value={totalVerbraucht} />
+        <StatCard label={isToday ? "Noch offen" : "Nicht genutzt"} value={totalRest} />
       </div>
 
       <div className="bg-card border border-border/50 rounded-xl overflow-hidden shadow-sm">
@@ -267,16 +267,16 @@ function TabDag({ token }: { token: string | null }) {
         ) : combinedRows.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground">
             <Coins size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm font-medium">Keng Kreditten oder Munitioun fir den {datum}.</p>
+            <p className="text-sm font-medium">Keine Guthaben oder Munition für den {datum}.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader className="bg-secondary/20">
                 <TableRow className="border-border/50 hover:bg-transparent">
-                  <TableHead className="text-xs uppercase tracking-widest font-bold">Spiller</TableHead>
-                  <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Kreditter (Rescht)</TableHead>
-                  <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Gespillt</TableHead>
+                  <TableHead className="text-xs uppercase tracking-widest font-bold">Spieler</TableHead>
+                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Guthaben (Rest)</TableHead>
+                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Gespielt</TableHead>
                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Cal. 12</TableHead>
                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Cal. 20</TableHead>
                 </TableRow>
@@ -409,7 +409,7 @@ function TabJoer({ token }: { token: string | null }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <p className="text-sm text-muted-foreground font-medium">
-          Joeregesamt vun alle Kreditten déi kaaft goufen — aggregéiert iwwer all Schéissdeeg.
+          Jahresübersicht aller gekauften Guthaben – zusammengefasst über alle Schießtage.
         </p>
         <div className="flex gap-2">
           {years.map(y => (
@@ -434,30 +434,30 @@ function TabJoer({ token }: { token: string | null }) {
       ) : (
         <>
           <div className="grid grid-cols-4 gap-4">
-            <StatCard label="Total Kaaft" value={data?.totalGewaehrt ?? 0} sub="Kreditten" />
-            <StatCard label="Total Gespillt" value={data?.totalVerbraucht ?? 0} sub="Kreditten" />
-            <StatCard label="Schéissdeeg" value={data?.anzahlDagen ?? 0} sub="Deeg" />
-            <StatCard label="Verschidde Schützen" value={data?.anzahlSpiller ?? 0} sub="Spiller" />
+            <StatCard label="Insgesamt gekauft" value={data?.totalGewaehrt ?? 0} sub="Guthaben" />
+            <StatCard label="Insgesamt gespielt" value={data?.totalVerbraucht ?? 0} sub="Guthaben" />
+            <StatCard label="Schießtage" value={data?.anzahlDagen ?? 0} sub="Tage" />
+            <StatCard label="Verschiedene Schützen" value={data?.anzahlSpiller ?? 0} sub="Spieler" />
           </div>
 
           <div className="bg-card border border-border/50 rounded-xl overflow-hidden shadow-sm">
             <div className="px-6 py-4 border-b border-border/50 bg-secondary/10">
-              <h3 className="font-bold text-sm uppercase tracking-widest text-muted-foreground">Pro Mounts {year}</h3>
+               <h3 className="font-bold text-sm uppercase tracking-widest text-muted-foreground">Pro Monat {year}</h3>
             </div>
             {!data || data.byMonth.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <Coins size={28} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-medium">Keng Donnéeën fir {year}.</p>
+                <p className="text-sm font-medium">Keine Daten für {year}.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader className="bg-secondary/20">
                     <TableRow className="border-border/50 hover:bg-transparent">
-                      <TableHead className="text-xs uppercase tracking-widest font-bold">Mount</TableHead>
-                      <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Kaaft</TableHead>
-                      <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Gespillt</TableHead>
-                      <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Schéissdeeg</TableHead>
+                       <TableHead className="text-xs uppercase tracking-widest font-bold">Monat</TableHead>
+                       <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Gekauft</TableHead>
+                       <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Gespielt</TableHead>
+                       <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Schießtage</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -516,7 +516,7 @@ function TabTauben({ token }: { token: string | null }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <p className="text-sm text-muted-foreground font-medium">
-          Ausgeléiste Tauben baséiert op den Spillresultater — A–G = 1 Taube, H = 2 Tauben (H1+H2).
+          Ausgelöste Tauben basierend auf den Spielergebnissen – A–G = 1 Taube, H = 2 Tauben (H1+H2).
         </p>
         <div className="flex gap-2">
           {years.map(y => (
@@ -541,29 +541,29 @@ function TabTauben({ token }: { token: string | null }) {
       ) : (
         <>
           <div className="grid grid-cols-3 gap-4">
-            <StatCard label="Total Tauben" value={data?.total ?? 0} sub="eenzel Tauben ausgeléist" />
-            <StatCard label="Maschinnen A–G" value={aGTotal} sub="eenzel Tauben" />
-            <StatCard label="Doubletten H" value={`${hTotal} (${hDoubletten}×)`} sub="eenzel Tauben (Doublette-Zyklen)" />
+            <StatCard label="Tauben gesamt" value={data?.total ?? 0} sub="einzelne Tauben ausgelöst" />
+            <StatCard label="Maschinen A–G" value={aGTotal} sub="einzelne Tauben" />
+            <StatCard label="Dublette H" value={`${hTotal} (${hDoubletten}×)`} sub="einzelne Tauben (Dublettenzyklen)" />
           </div>
 
           <div className="bg-card border border-border/50 rounded-xl overflow-hidden shadow-sm">
             <div className="px-6 py-4 border-b border-border/50 bg-secondary/10">
-              <h3 className="font-bold text-sm uppercase tracking-widest text-muted-foreground">Pro Maschinn {year}</h3>
+               <h3 className="font-bold text-sm uppercase tracking-widest text-muted-foreground">Pro Maschine {year}</h3>
             </div>
             {!data || data.total === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <Target size={28} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-medium">Keng Resultater fir {year} fonnt.</p>
+                <p className="text-sm font-medium">Keine Ergebnisse für {year} gefunden.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader className="bg-secondary/20">
                     <TableRow className="border-border/50 hover:bg-transparent">
-                      <TableHead className="text-xs uppercase tracking-widest font-bold">Maschinn</TableHead>
+                       <TableHead className="text-xs uppercase tracking-widest font-bold">Maschine</TableHead>
                       <TableHead className="text-xs uppercase tracking-widest font-bold">Typ</TableHead>
-                      <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Tauben ausgeléist</TableHead>
-                      <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Anteel</TableHead>
+                       <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Tauben ausgelöst</TableHead>
+                       <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Anteil</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -584,7 +584,7 @@ function TabTauben({ token }: { token: string | null }) {
                             </span>
                           </TableCell>
                           <TableCell className="text-muted-foreground text-sm">
-                            {m === "H" ? "Doublette (H1 + H2)" : "Eenzel Taube"}
+                             {m === "H" ? "Dublette (H1 + H2)" : "Einzelne Taube"}
                           </TableCell>
                           <TableCell className="text-right font-mono font-bold text-foreground">{n}</TableCell>
                           <TableCell className="text-right">
@@ -622,9 +622,9 @@ function TabTauben({ token }: { token: string | null }) {
 type TabId = "dag" | "joer" | "tauben";
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "dag",    label: "Dag" },
-  { id: "joer",   label: "Joer" },
-  { id: "tauben", label: "Ausgeléist Tauben" },
+   { id: "dag",    label: "Tag" },
+   { id: "joer",   label: "Jahr" },
+   { id: "tauben", label: "Ausgelöste Tauben" },
 ];
 
 export default function AdminKredite() {
@@ -634,9 +634,9 @@ export default function AdminKredite() {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <header className="border-b border-border/50 pb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Kreditter</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Guthaben</h1>
         <p className="text-muted-foreground mt-2 text-sm font-medium">
-          Dagesiwwersicht, Joereszesummefassung an ausgeléist Tauben.
+          Tagesübersicht, Jahreszusammenfassung und ausgelöste Tauben.
         </p>
       </header>
 

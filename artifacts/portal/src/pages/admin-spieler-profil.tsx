@@ -71,10 +71,10 @@ export default function AdminSpielrProfil() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-spieler"] });
       setEditing(false);
-      toast({ title: "Spiller aktualiséiert" });
+      toast({ title: "Spieler aktualisiert" });
     },
     onError: (e: Error) =>
-      toast({ title: "Feeler", description: e.message, variant: "destructive" }),
+      toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
 
   const openEdit = () => {
@@ -98,7 +98,7 @@ export default function AdminSpielrProfil() {
           className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors group"
         >
           <ChevronLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
-          Zréck zur Spillerverwaltung
+          Zurück zur Spielerverwaltung
         </button>
       </div>
 
@@ -155,7 +155,7 @@ export default function AdminSpielrProfil() {
                           }`}
                         />
                       </div>
-                      Portal Aktiv
+                      Portal aktiv
                     </button>
 
                     <div className="flex gap-2">
@@ -163,7 +163,7 @@ export default function AdminSpielrProfil() {
                         onClick={cancelEdit}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
                       >
-                        <X size={14} /> Ofbriechen
+                        <X size={14} /> Abbrechen
                       </button>
                       <button
                         onClick={saveEdit}
@@ -171,7 +171,7 @@ export default function AdminSpielrProfil() {
                         className="flex items-center gap-1.5 px-4 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-50"
                       >
                         <Check size={14} />
-                        {updateMut.isPending ? "Späicheren…" : "Späicheren"}
+                        {updateMut.isPending ? "Wird gespeichert…" : "Speichern"}
                       </button>
                     </div>
                   </div>
@@ -182,7 +182,7 @@ export default function AdminSpielrProfil() {
                     {player.email ? (
                       <span className="font-mono">{player.email}</span>
                     ) : (
-                      <span className="opacity-40 italic">Keng Email</span>
+                       <span className="opacity-40 italic">Keine E-Mail-Adresse</span>
                     )}
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-widest ${
@@ -198,7 +198,7 @@ export default function AdminSpielrProfil() {
                     onClick={openEdit}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-secondary/60 rounded-lg transition-colors"
                   >
-                    <Pencil size={13} /> Änneren
+                    <Pencil size={13} /> Bearbeiten
                   </button>
                 </div>
               )}
@@ -206,10 +206,10 @@ export default function AdminSpielrProfil() {
 
             {/* Stats */}
             <div className="flex gap-6 shrink-0">
-              <StatPill label="Spiller" value={player.anzahlSpiele} icon={<Activity size={14} />} />
+              <StatPill label="Spiele" value={player.anzahlSpiele} icon={<Activity size={14} />} />
               <StatPill label="Ø / 36" value={player.durchschnitt.toFixed(1)} icon={<Target size={14} />} />
               <StatPill
-                label="Bescht"
+                 label="Bestes Ergebnis"
                 value={player.bestPunkte > 0 ? player.bestPunkte : "–"}
                 icon={<Trophy size={14} />}
               />
@@ -218,7 +218,7 @@ export default function AdminSpielrProfil() {
         </header>
       ) : (
         <div className="border-b border-border/50 pb-6">
-          <p className="text-muted-foreground font-medium">Spiller net fonnt.</p>
+          <p className="text-muted-foreground font-medium">Spieler nicht gefunden.</p>
         </div>
       )}
 

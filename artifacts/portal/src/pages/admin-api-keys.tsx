@@ -55,7 +55,7 @@ export default function AdminApiKeys() {
     mutationFn: ({ id, active }: { id: number; active: boolean }) =>
       apiFetch(`/api/admin/api-keys/${id}`, { method: "PATCH", body: JSON.stringify({ active }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-api-keys"] }),
-    onError: (e: Error) => toast({ title: "Feeler", description: e.message, variant: "destructive" }),
+    onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
 
   const regenMut = useMutation({
@@ -66,7 +66,7 @@ export default function AdminApiKeys() {
       setRevealed({ id: data.id, fullKey: data.key });
       setCopied(false);
     },
-    onError: (e: Error) => toast({ title: "Feeler", description: e.message, variant: "destructive" }),
+    onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
 
   const handleCopy = async () => {
@@ -79,9 +79,9 @@ export default function AdminApiKeys() {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <header className="border-b border-border/50 pb-6">
-        <h1 className="text-3xl font-bold tracking-tight">API Schlësselen</h1>
+        <h1 className="text-3xl font-bold tracking-tight">API-Schlüssel</h1>
         <p className="text-muted-foreground mt-2 text-sm font-medium">
-          Sync-Schlësselen fir d'Emulator an d'Terminals. Regeneréieren ersetzt de Schlëssel direkt.
+          Synchronisierungsschlüssel für Emulator und Terminals. Beim Regenerieren wird der Schlüssel sofort ersetzt.
         </p>
       </header>
 
@@ -95,9 +95,9 @@ export default function AdminApiKeys() {
             <Table>
               <TableHeader className="bg-secondary/20">
                 <TableRow className="border-border/50 hover:bg-transparent">
-                  <TableHead className="text-xs uppercase tracking-widest font-bold">Numm</TableHead>
+                  <TableHead className="text-xs uppercase tracking-widest font-bold">Name</TableHead>
                   <TableHead className="text-xs uppercase tracking-widest font-bold">Typ</TableHead>
-                  <TableHead className="text-xs uppercase tracking-widest font-bold">Schlëssel (leschten 8)</TableHead>
+                  <TableHead className="text-xs uppercase tracking-widest font-bold">Schlüssel (letzte 8)</TableHead>
                   <TableHead className="text-center text-xs uppercase tracking-widest font-bold">Aktiv</TableHead>
                   <TableHead className="w-36"></TableHead>
                 </TableRow>
@@ -126,7 +126,7 @@ export default function AdminApiKeys() {
                         onClick={() => toggleMut.mutate({ id: k.id, active: !k.active })}
                         disabled={toggleMut.isPending}
                         className={`w-10 h-5 rounded-full transition-colors relative ${k.active ? "bg-primary" : "bg-secondary"}`}
-                        title={k.active ? "Deaktivéieren" : "Aktivéieren"}
+                        title={k.active ? "Deaktivieren" : "Aktivieren"}
                       >
                         <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${k.active ? "translate-x-5" : "translate-x-0.5"}`} />
                       </button>
@@ -135,11 +135,11 @@ export default function AdminApiKeys() {
                       <button
                         onClick={() => regenMut.mutate(k.id)}
                         disabled={regenMut.isPending}
-                        title="Schlëssel regeneréieren"
+                        title="Schlüssel regenerieren"
                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors ml-auto"
                       >
                         <RefreshCw size={13} className={regenMut.isPending ? "animate-spin" : ""} />
-                        Regeneréieren
+                        Regenerieren
                       </button>
                     </TableCell>
                   </TableRow>
@@ -151,12 +151,12 @@ export default function AdminApiKeys() {
       </div>
 
       <div className="bg-secondary/20 border border-border/50 rounded-xl p-5">
-        <h3 className="text-xs font-black uppercase tracking-widest text-muted-foreground mb-2">Wéi benotzen?</h3>
+         <h3 className="text-xs font-black uppercase tracking-widest text-muted-foreground mb-2">So verwenden Sie ihn</h3>
         <ol className="text-sm text-muted-foreground space-y-1 font-medium list-decimal list-inside">
-          <li>Klickt <strong className="text-foreground">Regeneréieren</strong> fir e neie Schlëssel ze generéieren.</li>
-          <li>Kopéiert de komplette Schlëssel mat dem Copy-Button (nëmmen eemol ugewisen).</li>
-          <li>Am Emulator / Terminal: <strong className="text-foreground">Astellungen</strong> → API URL an Schlëssel aginn.</li>
-          <li>De Schlëssel gëtt direkt aktiv a replazéiert den ale.</li>
+           <li>Klicken Sie auf <strong className="text-foreground">Regenerieren</strong>, um einen neuen Schlüssel zu erzeugen.</li>
+           <li>Kopieren Sie den vollständigen Schlüssel über die Kopierschaltfläche (er wird nur einmal angezeigt).</li>
+           <li>Im Emulator bzw. Terminal: <strong className="text-foreground">Einstellungen</strong> → API-URL und Schlüssel eingeben.</li>
+           <li>Der Schlüssel wird sofort aktiv und ersetzt den bisherigen Schlüssel.</li>
         </ol>
       </div>
 
@@ -164,9 +164,9 @@ export default function AdminApiKeys() {
       <Dialog open={!!revealed} onOpenChange={(o) => !o && setRevealed(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Neie Schlëssel generéiert ✓</DialogTitle>
+            <DialogTitle>Neuer Schlüssel generiert ✓</DialogTitle>
             <DialogDescription>
-              Kopéiert de Schlëssel elo — hien gëtt nëmmen <strong>eemol</strong> am Kloertext ugewisen.
+              Kopieren Sie den Schlüssel jetzt – er wird nur <strong>einmal</strong> im Klartext angezeigt.
             </DialogDescription>
           </DialogHeader>
           <div className="py-3">
@@ -180,7 +180,7 @@ export default function AdminApiKeys() {
                   copied ? "bg-green-500/20 text-green-400 border border-green-500/30" : "bg-secondary hover:bg-secondary/80 text-foreground"
                 }`}
               >
-                {copied ? <><Check size={14} /> Kopéiert!</> : <><Copy size={14} /> Kopéieren</>}
+                {copied ? <><Check size={14} /> Kopiert!</> : <><Copy size={14} /> Kopieren</>}
               </button>
             </div>
           </div>
@@ -189,7 +189,7 @@ export default function AdminApiKeys() {
               onClick={() => setRevealed(null)}
               className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg transition-colors"
             >
-              Fäerdeg
+              Fertig
             </button>
           </DialogFooter>
         </DialogContent>
