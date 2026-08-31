@@ -489,7 +489,10 @@ static void build_player_list(void)
 
         // Name + the three independent daily counters.
         lv_obj_t *info = lv_obj_create(row);
-        lv_obj_set_size(info, 300, LV_SIZE_CONTENT);
+        // Keep the player details in a generous first column. The controls
+        // belong to a separate, wider column so their complete group can be
+        // aligned against the right edge instead of being clipped.
+        lv_obj_set_size(info, 420, LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(info, LV_OPA_0, 0);
         lv_obj_set_style_border_width(info, 0, 0);
         lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
@@ -523,12 +526,14 @@ static void build_player_list(void)
         // Keep every operation in an explicitly labelled group.  This makes
         // the two ammunition calibers unambiguous and leaves tap spacing.
         lv_obj_t *btn_grp = lv_obj_create(row);
-        lv_obj_set_size(btn_grp, 420, 104);
+        lv_obj_set_size(btn_grp, 760, 104);
         lv_obj_set_style_bg_opa(btn_grp, LV_OPA_0, 0);
         lv_obj_set_style_border_width(btn_grp, 0, 0);
         lv_obj_set_style_pad_all(btn_grp, 0, 0);
         lv_obj_set_style_pad_bottom(btn_grp, 8, 0);
         lv_obj_set_flex_flow(btn_grp, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(btn_grp, LV_FLEX_ALIGN_END,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(btn_grp, 10, 0);
         lv_obj_set_scroll_dir(btn_grp, LV_DIR_HOR);
         lv_obj_set_scrollbar_mode(btn_grp, LV_SCROLLBAR_MODE_AUTO);
