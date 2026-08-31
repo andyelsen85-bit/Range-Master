@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_spiller.h"
@@ -282,14 +283,14 @@ static void build_list(void)
             lv_label_set_text(name_lbl, ps->name);
             lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_TEXT), 0);
         }
-        lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(name_lbl, UI_FONT_16, 0);
         lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(name_lbl, LV_PCT(100));
 
         if (player_is_registered_for_day(ps->id)) {
             lv_obj_t *day_lbl = lv_label_create(info);
             lv_label_set_text(day_lbl, LV_SYMBOL_OK "  SPIELER DES TAGES");
-            lv_obj_set_style_text_font(day_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(day_lbl, UI_FONT_12, 0);
             lv_obj_set_style_text_color(day_lbl, lv_color_hex(CLR_SUCCESS), 0);
         }
 
@@ -299,7 +300,7 @@ static void build_list(void)
             char nr_buf[36];
             snprintf(nr_buf, sizeof(nr_buf), "Nr. %s", ps->mitgliedNr);
             lv_label_set_text(nr_lbl, nr_buf);
-            lv_obj_set_style_text_font(nr_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(nr_lbl, UI_FONT_12, 0);
             lv_obj_set_style_text_color(nr_lbl, lv_color_hex(CLR_MUTED), 0);
         }
 
@@ -308,19 +309,19 @@ static void build_list(void)
         char kred_buf[10];
         snprintf(kred_buf, sizeof(kred_buf), "%dKr", kredit);
         lv_label_set_text(kred_lbl, kred_buf);
-        lv_obj_set_style_text_font(kred_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(kred_lbl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(kred_lbl,
             kredit > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_MUTED), 0);
 
         lv_obj_t *aktiv_lbl = lv_label_create(row);
         lv_label_set_text(aktiv_lbl, ps->portalAktiv ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE);
-        lv_obj_set_style_text_font(aktiv_lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(aktiv_lbl, UI_FONT_16, 0);
         lv_obj_set_style_text_color(aktiv_lbl,
             ps->portalAktiv ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_MUTED), 0);
 
         lv_obj_t *chev = lv_label_create(row);
         lv_label_set_text(chev, LV_SYMBOL_RIGHT);
-        lv_obj_set_style_text_font(chev, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(chev, UI_FONT_16, 0);
         lv_obj_set_style_text_color(chev, lv_color_hex(CLR_MUTED), 0);
 
         shown++;
@@ -331,7 +332,7 @@ static void build_list(void)
         lv_label_set_text(empty, has_search
             ? "KEINE ERGEBNISSE"
             : "KEINE SPIELER.\nPORTAL-SYNC ODER LOKAL HINZUFÜGEN.");
-        lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(empty, UI_FONT_14, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
         lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(empty, LV_PCT(100));
@@ -398,14 +399,14 @@ lv_obj_t *screen_spiller_create(void)
 
     lv_obj_t *title = lv_label_create(hdr);
     lv_label_set_text(title, LV_SYMBOL_LIST "  SPIELERVERWALTUNG");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_20, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_set_flex_grow(title, 1);
 
     // Pending updates badge
     s_lbl_pending = lv_label_create(hdr);
     lv_label_set_text(s_lbl_pending, "");
-    lv_obj_set_style_text_font(s_lbl_pending, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_lbl_pending, UI_FONT_12, 0);
     lv_obj_set_style_text_color(s_lbl_pending, lv_color_hex(CLR_WARN), 0);
     lv_obj_set_style_bg_color(s_lbl_pending, lv_color_hex(0x78350F), 0);
     lv_obj_set_style_bg_opa(s_lbl_pending, LV_OPA_COVER, 0);
@@ -417,7 +418,7 @@ lv_obj_t *screen_spiller_create(void)
     // Sync status text
     s_lbl_status = lv_label_create(hdr);
     lv_label_set_text(s_lbl_status, "");
-    lv_obj_set_style_text_font(s_lbl_status, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_lbl_status, UI_FONT_12, 0);
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
 
     // Sync button
@@ -480,7 +481,7 @@ lv_obj_t *screen_spiller_create(void)
 
     lv_obj_t *add_hdr_lbl = lv_label_create(add_card);
     lv_label_set_text(add_hdr_lbl, "NEU:");
-    lv_obj_set_style_text_font(add_hdr_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(add_hdr_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(add_hdr_lbl, lv_color_hex(CLR_MUTED), 0);
 
     s_ta_new_name = lv_textarea_create(add_card);
@@ -488,7 +489,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_height(s_ta_new_name, 42);
     lv_textarea_set_placeholder_text(s_ta_new_name, "Lokaler Spieler...");
     lv_textarea_set_one_line(s_ta_new_name, true);
-    lv_obj_set_style_text_font(s_ta_new_name, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_ta_new_name, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_ta_new_name, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_new_name, lv_color_hex(CLR_TEXT), 0);
 
@@ -498,7 +499,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_add_event_cb(add_btn, add_local_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *abl = lv_label_create(add_btn);
     lv_label_set_text(abl, "+ LOKAL");
-    lv_obj_set_style_text_font(abl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(abl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(abl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(abl);
 
@@ -513,7 +514,7 @@ lv_obj_t *screen_spiller_create(void)
 
     lv_obj_t *ph_lbl = lv_label_create(s_placeholder);
     lv_label_set_text(ph_lbl, LV_SYMBOL_RIGHT "  SPIELER ANTIPPEN\nZUM BEARBEITEN");
-    lv_obj_set_style_text_font(ph_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ph_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(ph_lbl, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_style_text_align(ph_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(ph_lbl, LV_PCT(100));
@@ -536,27 +537,27 @@ lv_obj_t *screen_spiller_create(void)
     // Name field
     lv_obj_t *name_hdr = lv_label_create(s_edit_form);
     lv_label_set_text(name_hdr, "NAME");
-    lv_obj_set_style_text_font(name_hdr, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(name_hdr, UI_FONT_12, 0);
     lv_obj_set_style_text_color(name_hdr, lv_color_hex(CLR_MUTED), 0);
 
     s_ta_name = lv_textarea_create(s_edit_form);
     lv_obj_set_size(s_ta_name, LV_PCT(100), 48);
     lv_textarea_set_one_line(s_ta_name, true);
-    lv_obj_set_style_text_font(s_ta_name, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_ta_name, UI_FONT_16, 0);
     lv_obj_set_style_bg_color(s_ta_name, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_name, lv_color_hex(CLR_TEXT), 0);
 
     // Email field
     lv_obj_t *email_hdr = lv_label_create(s_edit_form);
     lv_label_set_text(email_hdr, "EMAIL");
-    lv_obj_set_style_text_font(email_hdr, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(email_hdr, UI_FONT_12, 0);
     lv_obj_set_style_text_color(email_hdr, lv_color_hex(CLR_MUTED), 0);
 
     s_ta_email = lv_textarea_create(s_edit_form);
     lv_obj_set_size(s_ta_email, LV_PCT(100), 48);
     lv_textarea_set_one_line(s_ta_email, true);
     lv_textarea_set_placeholder_text(s_ta_email, "spieler@beispiel.de");
-    lv_obj_set_style_text_font(s_ta_email, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_ta_email, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_ta_email, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_email, lv_color_hex(CLR_TEXT), 0);
 
@@ -567,7 +568,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_style_border_width(s_aktiv_btn, 0, 0);
     lv_obj_add_event_cb(s_aktiv_btn, aktiv_toggle_cb, LV_EVENT_CLICKED, NULL);
     s_lbl_aktiv = lv_label_create(s_aktiv_btn);
-    lv_obj_set_style_text_font(s_lbl_aktiv, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_aktiv, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_aktiv, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(s_lbl_aktiv);
     update_aktiv_btn();
@@ -579,7 +580,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_style_border_width(s_day_btn, 0, 0);
     lv_obj_add_event_cb(s_day_btn, add_day_cb, LV_EVENT_CLICKED, NULL);
     s_lbl_day = lv_label_create(s_day_btn);
-    lv_obj_set_style_text_font(s_lbl_day, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_day, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_day, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(s_lbl_day);
     update_day_btn();
@@ -601,7 +602,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_add_event_cb(save_btn, save_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *save_lbl = lv_label_create(save_btn);
     lv_label_set_text(save_lbl, LV_SYMBOL_SAVE "  SPEICHERN");
-    lv_obj_set_style_text_font(save_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(save_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(save_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(save_lbl);
 
@@ -612,7 +613,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_add_event_cb(pwd_btn, pwd_reset_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *pwd_lbl = lv_label_create(pwd_btn);
     lv_label_set_text(pwd_lbl, LV_SYMBOL_LOOP "  PWD RESET");
-    lv_obj_set_style_text_font(pwd_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(pwd_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(pwd_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(pwd_lbl);
 
@@ -623,14 +624,14 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_add_event_cb(cancel_btn, cancel_edit_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
     lv_label_set_text(cancel_lbl, "ABBRECHEN");
-    lv_obj_set_style_text_font(cancel_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(cancel_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(cancel_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(cancel_lbl);
 
     // Edit status label (queued / error feedback)
     s_lbl_edit_status = lv_label_create(s_edit_form);
     lv_label_set_text(s_lbl_edit_status, "");
-    lv_obj_set_style_text_font(s_lbl_edit_status, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_lbl_edit_status, UI_FONT_12, 0);
     lv_obj_set_width(s_lbl_edit_status, LV_PCT(100));
     lv_obj_set_style_text_align(s_lbl_edit_status, LV_TEXT_ALIGN_CENTER, 0);
 
@@ -653,7 +654,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_textarea_set_placeholder_text(s_ta_search,
         LV_SYMBOL_LIST "  Spieler suchen (Name oder Mitglieds-Nr.)...");
     lv_textarea_set_one_line(s_ta_search, true);
-    lv_obj_set_style_text_font(s_ta_search, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_ta_search, UI_FONT_16, 0);
     lv_obj_set_style_bg_color(s_ta_search, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_text_color(s_ta_search, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_border_color(s_ta_search, lv_color_hex(CLR_BORDER), LV_PART_MAIN);
@@ -685,7 +686,7 @@ lv_obj_t *screen_spiller_create(void)
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_BORDER), LV_PART_ITEMS);
     lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_text_color(s_kb, lv_color_hex(CLR_TEXT), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(s_kb, &lv_font_montserrat_16, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_kb, UI_FONT_16, LV_PART_ITEMS);
     lv_obj_set_style_radius(s_kb, 6, LV_PART_ITEMS);
     lv_obj_set_style_border_width(s_kb, 1, LV_PART_ITEMS);
     lv_obj_set_style_border_color(s_kb, lv_color_hex(CLR_BG), LV_PART_ITEMS);

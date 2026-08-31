@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -130,7 +131,7 @@ lv_obj_t *screen_wifi_create(void)
 
     lv_obj_t *title = lv_label_create(hdr);
     lv_label_set_text(title, LV_SYMBOL_WIFI "  WIFI-EINSTELLUNGEN");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *back = lv_btn_create(hdr);
@@ -164,7 +165,7 @@ lv_obj_t *screen_wifi_create(void)
 
     lv_obj_t *net_hdr = lv_label_create(left);
     lv_label_set_text(net_hdr, "VERFÜGBARE NETZWERKE");
-    lv_obj_set_style_text_font(net_hdr, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(net_hdr, UI_FONT_16, 0);
     lv_obj_set_style_text_color(net_hdr, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *scan_btn = lv_btn_create(left);
@@ -183,7 +184,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_border_color(s_list_networks, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_border_width(s_list_networks, 1, 0);
     lv_obj_set_style_radius(s_list_networks, 8, 0);
-    lv_obj_set_style_text_font(s_list_networks, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_list_networks, UI_FONT_14, 0);
     lv_list_add_text(s_list_networks, "SCAN DRÜCKEN, UM NETZWERKE ZU SUCHEN");
 
     // Right: SSID/pass/connect
@@ -197,20 +198,20 @@ lv_obj_t *screen_wifi_create(void)
 
     lv_obj_t *ssid_lbl = lv_label_create(right);
     lv_label_set_text(ssid_lbl, "SSID");
-    lv_obj_set_style_text_font(ssid_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ssid_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(ssid_lbl, lv_color_hex(CLR_TEXT), 0);
 
     s_ta_ssid = lv_textarea_create(right);
     lv_obj_set_size(s_ta_ssid, LV_PCT(100), 50);
     lv_textarea_set_text(s_ta_ssid, g_store.wifiSsid);
     lv_textarea_set_one_line(s_ta_ssid, true);
-    lv_obj_set_style_text_font(s_ta_ssid, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_ta_ssid, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_ta_ssid, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_ssid, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *pass_lbl = lv_label_create(right);
     lv_label_set_text(pass_lbl, "PASSWORT");
-    lv_obj_set_style_text_font(pass_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(pass_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(pass_lbl, lv_color_hex(CLR_TEXT), 0);
 
     s_ta_pass = lv_textarea_create(right);
@@ -218,7 +219,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_textarea_set_text(s_ta_pass, g_store.wifiPass);
     lv_textarea_set_one_line(s_ta_pass, true);
     lv_textarea_set_password_mode(s_ta_pass, true);
-    lv_obj_set_style_text_font(s_ta_pass, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_ta_pass, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_ta_pass, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_pass, lv_color_hex(CLR_TEXT), 0);
 
@@ -228,13 +229,13 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_add_event_cb(s_btn_connect, connect_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cl = lv_label_create(s_btn_connect);
     lv_label_set_text(cl, LV_SYMBOL_WIFI "  VERBINDEN");
-    lv_obj_set_style_text_font(cl, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(cl, UI_FONT_18, 0);
     lv_obj_set_style_text_color(cl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(cl);
 
     s_lbl_status = lv_label_create(right);
     lv_label_set_text(s_lbl_status, "");
-    lv_obj_set_style_text_font(s_lbl_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_status, UI_FONT_14, 0);
 
     s_lbl_ip = lv_label_create(right);
     if (g_store.wifiConnected) {
@@ -246,7 +247,7 @@ lv_obj_t *screen_wifi_create(void)
         lv_label_set_text(s_lbl_ip, "NICHT VERBUNDEN");
         lv_obj_set_style_text_color(s_lbl_ip, lv_color_hex(CLR_MUTED), 0);
     }
-    lv_obj_set_style_text_font(s_lbl_ip, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_ip, UI_FONT_14, 0);
 
     // ── On-screen keyboard ────────────────────────────────────────
     // Created last so it renders on top of all other content.
@@ -267,7 +268,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_BORDER), LV_PART_ITEMS);
     lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_text_color(s_kb, lv_color_hex(CLR_TEXT), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(s_kb, &lv_font_montserrat_16, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_kb, UI_FONT_16, LV_PART_ITEMS);
     lv_obj_set_style_radius(s_kb, 6, LV_PART_ITEMS);
     lv_obj_set_style_border_width(s_kb, 1, LV_PART_ITEMS);
     lv_obj_set_style_border_color(s_kb, lv_color_hex(CLR_BG), LV_PART_ITEMS);

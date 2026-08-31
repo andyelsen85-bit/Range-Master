@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_spiel.h"
@@ -131,7 +132,7 @@ static void quit_open_cb(lv_event_t *e)
 
     lv_obj_t *title = lv_label_create(dialog);
     lv_label_set_text(title, "SPIEL BEENDEN?");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_24, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_DANGER), 0);
 
     s_quit_message = lv_label_create(dialog);
@@ -191,17 +192,17 @@ lv_obj_t *screen_spiel_create(void)
 
     s_lbl_modus = lv_label_create(topbar);
     lv_label_set_text(s_lbl_modus, "NORMAL");
-    lv_obj_set_style_text_font(s_lbl_modus, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(s_lbl_modus, UI_FONT_20, 0);
     lv_obj_set_style_text_color(s_lbl_modus, lv_color_hex(CLR_PRIMARY), 0);
 
     s_lbl_lauf = lv_label_create(topbar);
     lv_label_set_text(s_lbl_lauf, "LAUF 1");
-    lv_obj_set_style_text_font(s_lbl_lauf, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(s_lbl_lauf, UI_FONT_18, 0);
     lv_obj_set_style_text_color(s_lbl_lauf, lv_color_hex(CLR_TEXT), 0);
 
     s_lbl_taube = lv_label_create(topbar);
     lv_label_set_text(s_lbl_taube, "TAUBE 1 / 8");
-    lv_obj_set_style_text_font(s_lbl_taube, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_lbl_taube, UI_FONT_16, 0);
     lv_obj_set_style_text_color(s_lbl_taube, lv_color_hex(CLR_MUTED), 0);
 
     lv_obj_t *quit_btn = lv_btn_create(topbar);
@@ -248,7 +249,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_add_event_cb(s_btn_wiederhole, wiederhole_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *wl = lv_label_create(s_btn_wiederhole);
     lv_label_set_text(wl, LV_SYMBOL_REFRESH " WDH");
-    lv_obj_set_style_text_font(wl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(wl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(wl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(wl);
 
@@ -259,7 +260,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_add_event_cb(skip_btn, skip_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *sl = lv_label_create(skip_btn);
     lv_label_set_text(sl, LV_SYMBOL_NEXT " SKIP");
-    lv_obj_set_style_text_font(sl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(sl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(sl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sl);
 
@@ -283,7 +284,7 @@ lv_obj_t *screen_spiel_create(void)
                             (void*)(intptr_t)sc_pts[i]);
         lv_obj_t *lbl = lv_label_create(btn);
         lv_label_set_text(lbl, sc_labels[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_36, 0);
+        lv_obj_set_style_text_font(lbl, UI_FONT_36, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(lbl);
     }
@@ -291,12 +292,12 @@ lv_obj_t *screen_spiel_create(void)
     // ── Throw target, directly above the FIRE trigger ──────
     lv_obj_t *mach_hdr = lv_label_create(left);
     lv_label_set_text(mach_hdr, "WERFER");
-    lv_obj_set_style_text_font(mach_hdr, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(mach_hdr, UI_FONT_14, 0);
     lv_obj_set_style_text_color(mach_hdr, lv_color_hex(CLR_MUTED), 0);
 
     s_lbl_maschine = lv_label_create(left);
     lv_label_set_text(s_lbl_maschine, "A");
-    lv_obj_set_style_text_font(s_lbl_maschine, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_font(s_lbl_maschine, UI_FONT_48, 0);
     lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
 
     // ── FIRE trigger at the bottom of the control stack ────
@@ -309,7 +310,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_obj_add_event_cb(s_btn_fire, fire_cb, LV_EVENT_CLICKED, NULL);
     s_lbl_fire_button = lv_label_create(s_btn_fire);
     lv_label_set_text(s_lbl_fire_button, LV_SYMBOL_PLAY " MASCHINE A STARTEN");
-    lv_obj_set_style_text_font(s_lbl_fire_button, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(s_lbl_fire_button, UI_FONT_18, 0);
     lv_obj_set_style_text_color(s_lbl_fire_button, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(s_lbl_fire_button);
 
@@ -328,7 +329,7 @@ lv_obj_t *screen_spiel_create(void)
     // ── 1. Post grid header
     lv_obj_t *pg_hdr = lv_label_create(right);
     lv_label_set_text(pg_hdr, "STÄNDE");
-    lv_obj_set_style_text_font(pg_hdr, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(pg_hdr, UI_FONT_14, 0);
     lv_obj_set_style_text_color(pg_hdr, lv_color_hex(CLR_MUTED), 0);
 
     // ── 2. Five-post grid (children rebuilt in refresh)
@@ -369,12 +370,12 @@ lv_obj_t *screen_spiel_create(void)
 
     lv_obj_t *shooter_hdr_lbl = lv_label_create(name_col);
     lv_label_set_text(shooter_hdr_lbl, "AKTUELLER SCHÜTZE");
-    lv_obj_set_style_text_font(shooter_hdr_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(shooter_hdr_lbl, UI_FONT_12, 0);
     lv_obj_set_style_text_color(shooter_hdr_lbl, lv_color_hex(CLR_PRIMARY), 0);
 
     s_lbl_active_name = lv_label_create(name_col);
     lv_label_set_text(s_lbl_active_name, "---");
-    lv_obj_set_style_text_font(s_lbl_active_name, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(s_lbl_active_name, UI_FONT_22, 0);
     lv_obj_set_style_text_color(s_lbl_active_name, lv_color_hex(CLR_TEXT), 0);
     lv_label_set_long_mode(s_lbl_active_name, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_lbl_active_name, LV_PCT(100));
@@ -382,12 +383,12 @@ lv_obj_t *screen_spiel_create(void)
     // Post + Points
     s_lbl_active_post = lv_label_create(shooter_bar);
     lv_label_set_text(s_lbl_active_post, "P-");
-    lv_obj_set_style_text_font(s_lbl_active_post, &lv_font_montserrat_36, 0);
+    lv_obj_set_style_text_font(s_lbl_active_post, UI_FONT_36, 0);
     lv_obj_set_style_text_color(s_lbl_active_post, lv_color_hex(CLR_PRIMARY), 0);
 
     s_lbl_active_pts = lv_label_create(shooter_bar);
     lv_label_set_text(s_lbl_active_pts, "0 PKT");
-    lv_obj_set_style_text_font(s_lbl_active_pts, &lv_font_montserrat_36, 0);
+    lv_obj_set_style_text_font(s_lbl_active_pts, UI_FONT_36, 0);
     lv_obj_set_style_text_color(s_lbl_active_pts, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *network_row = lv_obj_create(right);
@@ -400,16 +401,16 @@ lv_obj_t *screen_spiel_create(void)
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     s_lbl_wifi_status = lv_label_create(network_row);
     lv_label_set_text(s_lbl_wifi_status, "WIFI: -");
-    lv_obj_set_style_text_font(s_lbl_wifi_status, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_lbl_wifi_status, UI_FONT_12, 0);
     s_lbl_fire_status = lv_label_create(network_row);
     lv_label_set_text(s_lbl_fire_status, "Gateway: -");
-    lv_obj_set_style_text_font(s_lbl_fire_status, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_lbl_fire_status, UI_FONT_12, 0);
     lv_obj_set_style_text_color(s_lbl_fire_status, lv_color_hex(CLR_MUTED), 0);
 
     // ── 4. Score table header
     lv_obj_t *sc_hdr = lv_label_create(right);
     lv_label_set_text(sc_hdr, "PUNKTESTAND");
-    lv_obj_set_style_text_font(sc_hdr, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(sc_hdr, UI_FONT_14, 0);
     lv_obj_set_style_text_color(sc_hdr, lv_color_hex(CLR_TEXT), 0);
 
     // ── 5. Score table
@@ -422,7 +423,7 @@ lv_obj_t *screen_spiel_create(void)
     lv_table_set_cell_value(s_score_table, 0, 0, "SPIELER");
     lv_table_set_cell_value(s_score_table, 0, 1, "STAND");
     lv_table_set_cell_value(s_score_table, 0, 2, "PUNKTE");
-    lv_obj_set_style_text_font(s_score_table, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_score_table, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_score_table, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_bg_color(s_score_table, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_color(s_score_table, lv_color_hex(CLR_BORDER), 0);
@@ -589,7 +590,7 @@ void screen_spiel_refresh(void)
         char phdr[16];
             snprintf(phdr, sizeof(phdr), "STAND %d", post);
         lv_label_set_text(post_hdr, phdr);
-        lv_obj_set_style_text_font(post_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(post_hdr, UI_FONT_12, 0);
         lv_obj_set_style_text_color(post_hdr,
             isActivePost ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_MUTED), 0);
 
@@ -615,7 +616,7 @@ void screen_spiel_refresh(void)
 
             lv_obj_t *name_lbl = lv_label_create(prow);
             lv_label_set_text(name_lbl, s->spieler[i].name);
-            lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(name_lbl, UI_FONT_12, 0);
             lv_obj_set_style_text_color(name_lbl,
                 isActive ? lv_color_hex(0x000000) : lv_color_hex(CLR_TEXT), 0);
             lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
@@ -626,7 +627,7 @@ void screen_spiel_refresh(void)
             snprintf(pts_buf, sizeof(pts_buf), "%dp", s->spieler[i].punkte);
             lv_obj_t *pts_lbl = lv_label_create(prow);
             lv_label_set_text(pts_lbl, pts_buf);
-            lv_obj_set_style_text_font(pts_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(pts_lbl, UI_FONT_12, 0);
             lv_obj_set_style_text_color(pts_lbl,
                 isActive ? lv_color_hex(0x000000) : lv_color_hex(CLR_PRIMARY), 0);
             lv_obj_set_width(pts_lbl, 32);
@@ -635,7 +636,7 @@ void screen_spiel_refresh(void)
         if (!anyPlayer) {
             lv_obj_t *dash = lv_label_create(col);
             lv_label_set_text(dash, "-");
-            lv_obj_set_style_text_font(dash, &lv_font_montserrat_18, 0);
+            lv_obj_set_style_text_font(dash, UI_FONT_18, 0);
             lv_obj_set_style_text_color(dash, lv_color_hex(CLR_BORDER), 0);
         }
         }

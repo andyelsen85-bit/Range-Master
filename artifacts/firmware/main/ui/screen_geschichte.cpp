@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_geschichte.h"
@@ -132,13 +133,13 @@ static void build_history_rows(void)
             fmt_local_time(fg->finishedAt, ts_disp, sizeof(ts_disp));
             lv_label_set_text(ts_lbl, ts_disp[0] ? ts_disp : "-");
         }
-        lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(ts_lbl, UI_FONT_12, 0);
         lv_obj_set_style_text_color(ts_lbl, lv_color_hex(CLR_MUTED), 0);
         lv_obj_set_width(ts_lbl, 170);
 
         lv_obj_t *mode_lbl = lv_label_create(btn);
         lv_label_set_text(mode_lbl, modus_label(fg->base.modus));
-        lv_obj_set_style_text_font(mode_lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(mode_lbl, UI_FONT_16, 0);
         lv_obj_set_style_text_color(mode_lbl, lv_color_hex(CLR_PRIMARY), 0);
         lv_obj_set_width(mode_lbl, 110);
 
@@ -147,7 +148,7 @@ static void build_history_rows(void)
                  winner, best_pts);
         lv_obj_t *win_lbl = lv_label_create(btn);
         lv_label_set_text(win_lbl, w_buf);
-        lv_obj_set_style_text_font(win_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(win_lbl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(win_lbl, lv_color_hex(CLR_TEXT), 0);
         lv_label_set_long_mode(win_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(win_lbl, 0);
@@ -157,7 +158,7 @@ static void build_history_rows(void)
         snprintf(p_buf, sizeof(p_buf), "%d " LV_SYMBOL_LIST, fg->spieler_count);
         lv_obj_t *p_lbl = lv_label_create(btn);
         lv_label_set_text(p_lbl, p_buf);
-        lv_obj_set_style_text_font(p_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(p_lbl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(p_lbl, lv_color_hex(CLR_MUTED), 0);
 
         // Click handler — pass absolute history index so show_detail() finds the right game
@@ -191,7 +192,7 @@ lv_obj_t *screen_geschichte_create(void)
 
     lv_obj_t *title = lv_label_create(hdr);
     lv_label_set_text(title, LV_SYMBOL_LIST "  SPIELVERLAUF");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *back = lv_btn_create(hdr);
@@ -207,7 +208,7 @@ lv_obj_t *screen_geschichte_create(void)
     // Empty placeholder
     s_lbl_empty = lv_label_create(s_scr);
     lv_label_set_text(s_lbl_empty, "NOCH KEINE SPIELE");
-    lv_obj_set_style_text_font(s_lbl_empty, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(s_lbl_empty, UI_FONT_18, 0);
     lv_obj_set_style_text_color(s_lbl_empty, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_empty, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(s_lbl_empty, LV_OBJ_FLAG_HIDDEN);
@@ -235,19 +236,19 @@ lv_obj_t *screen_geschichte_create(void)
     // Detail header
     lv_obj_t *d_title = lv_label_create(s_detail_card);
     lv_label_set_text(d_title, "ERGEBNIS");
-    lv_obj_set_style_text_font(d_title, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(d_title, UI_FONT_14, 0);
     lv_obj_set_style_text_color(d_title, lv_color_hex(CLR_MUTED), 0);
 
     s_detail_hdr = lv_label_create(s_detail_card);
     lv_label_set_text(s_detail_hdr, "---");
-    lv_obj_set_style_text_font(s_detail_hdr, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(s_detail_hdr, UI_FONT_18, 0);
     lv_obj_set_style_text_color(s_detail_hdr, lv_color_hex(CLR_PRIMARY), 0);
     lv_label_set_long_mode(s_detail_hdr, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_detail_hdr, DETAIL_W - 32);
 
     s_detail_date = lv_label_create(s_detail_card);
     lv_label_set_text(s_detail_date, "");
-    lv_obj_set_style_text_font(s_detail_date, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_detail_date, UI_FONT_12, 0);
     lv_obj_set_style_text_color(s_detail_date, lv_color_hex(CLR_MUTED), 0);
 
     // Divider
@@ -264,7 +265,7 @@ lv_obj_t *screen_geschichte_create(void)
     lv_table_set_col_width(s_detail_table, 0, DETAIL_W - 32 - 60 - 60);
     lv_table_set_col_width(s_detail_table, 1, 60);
     lv_table_set_col_width(s_detail_table, 2, 60);
-    lv_obj_set_style_text_font(s_detail_table, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_detail_table, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_detail_table, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_bg_color(s_detail_table, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_color(s_detail_table, lv_color_hex(CLR_BORDER), 0);

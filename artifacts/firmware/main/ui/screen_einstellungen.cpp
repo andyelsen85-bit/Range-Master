@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_einstellungen.h"
@@ -221,25 +222,25 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
 
     lv_obj_t *section = lv_label_create(parent);
     lv_label_set_text(section, "VERBINDUNG");
-    lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(section, UI_FONT_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *url_lbl = lv_label_create(parent);
     lv_label_set_text(url_lbl, "PORTAL API URL");
-    lv_obj_set_style_text_font(url_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(url_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(url_lbl, lv_color_hex(CLR_TEXT), 0);
 
     s_ta_url = lv_textarea_create(parent);
     lv_obj_set_size(s_ta_url, LV_PCT(100), 50);
     lv_textarea_set_text(s_ta_url, g_store.apiUrl);
     lv_textarea_set_one_line(s_ta_url, true);
-    lv_obj_set_style_text_font(s_ta_url, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_ta_url, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_ta_url, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_url, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *key_lbl = lv_label_create(parent);
     lv_label_set_text(key_lbl, "API KEY");
-    lv_obj_set_style_text_font(key_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(key_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(key_lbl, lv_color_hex(CLR_TEXT), 0);
 
     s_ta_key = lv_textarea_create(parent);
@@ -247,26 +248,26 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_textarea_set_text(s_ta_key, g_store.apiKey);
     lv_textarea_set_one_line(s_ta_key, true);
     lv_textarea_set_password_mode(s_ta_key, true);
-    lv_obj_set_style_text_font(s_ta_key, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_ta_key, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_ta_key, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_key, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *gateway_lbl = lv_label_create(parent);
     lv_label_set_text(gateway_lbl, "TRAPMASTER GATEWAY URL");
-    lv_obj_set_style_text_font(gateway_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(gateway_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(gateway_lbl, lv_color_hex(CLR_TEXT), 0);
 
     s_ta_gateway = lv_textarea_create(parent);
     lv_obj_set_size(s_ta_gateway, LV_PCT(100), 50);
     lv_textarea_set_text(s_ta_gateway, g_store.gatewayUrl);
     lv_textarea_set_one_line(s_ta_gateway, true);
-    lv_obj_set_style_text_font(s_ta_gateway, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_ta_gateway, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_ta_gateway, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_gateway, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *gateway_token_lbl = lv_label_create(parent);
     lv_label_set_text(gateway_token_lbl, "TRAPMASTER GATEWAY AUTH KEY");
-    lv_obj_set_style_text_font(gateway_token_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(gateway_token_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(gateway_token_lbl, lv_color_hex(CLR_TEXT), 0);
 
     s_ta_gateway_token = lv_textarea_create(parent);
@@ -274,7 +275,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_textarea_set_text(s_ta_gateway_token, g_store.gatewayToken);
     lv_textarea_set_one_line(s_ta_gateway_token, true);
     lv_textarea_set_password_mode(s_ta_gateway_token, true);
-    lv_obj_set_style_text_font(s_ta_gateway_token, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_ta_gateway_token, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_ta_gateway_token, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_ta_gateway_token, lv_color_hex(CLR_TEXT), 0);
 
@@ -316,7 +317,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
 
     s_lbl_api_status = lv_label_create(parent);
     lv_label_set_text(s_lbl_api_status, "");
-    lv_obj_set_style_text_font(s_lbl_api_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_api_status, UI_FONT_14, 0);
 
     lv_obj_t *backup_btn = lv_btn_create(parent);
     lv_obj_add_style(backup_btn, &g_style_btn_secondary, 0);
@@ -335,7 +336,7 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
                  g_store.lastConfigBackupAt[0] ? "\nLETZTES BACKUP: " : "",
              g_store.lastConfigBackupAt);
     lv_label_set_text(s_config_backup_status, backup_status);
-    lv_obj_set_style_text_font(s_config_backup_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_config_backup_status, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_config_backup_status, lv_color_hex(CLR_MUTED), 0);
 
     return parent;
@@ -388,7 +389,7 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 
     lv_obj_t *section = lv_label_create(parent);
     lv_label_set_text(section, "MASCHINENKONFIGURATION");
-    lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(section, UI_FONT_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
     for (int m = 0; m < MASCHINE_COUNT; m++) {
@@ -402,7 +403,7 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 
         lv_obj_t *lbl = lv_label_create(row);
         lv_label_set_text(lbl, labels[m]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(lbl, UI_FONT_16, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(lbl, 0);
@@ -416,7 +417,7 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
                             (void *)(intptr_t)m);
         lv_obj_t *test_label = lv_label_create(test);
         lv_label_set_text(test_label, LV_SYMBOL_PLAY " TESTAUSLÖSUNG");
-        lv_obj_set_style_text_font(test_label, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(test_label, UI_FONT_12, 0);
         lv_obj_set_style_text_color(test_label, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(test_label);
 
@@ -430,7 +431,7 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
     s_lbl_machine_test_status = lv_label_create(parent);
     lv_label_set_text(s_lbl_machine_test_status,
                        "TESTAUSLÖSUNG STARTET GENAU EINEN SCHUSS — KEIN SPIEL.");
-    lv_obj_set_style_text_font(s_lbl_machine_test_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_machine_test_status, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_machine_test_status, lv_color_hex(CLR_MUTED), 0);
     return parent;
 }
@@ -481,7 +482,7 @@ static void refresh_custom_seq(int ci)
         lv_obj_t *ph = lv_label_create(cont);
         lv_label_set_text(ph, "KEINE WÜRFE");
         lv_obj_set_style_text_color(ph, lv_color_hex(CLR_MUTED), 0);
-        lv_obj_set_style_text_font(ph, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(ph, UI_FONT_14, 0);
         lv_obj_center(ph);
         return;
     }
@@ -525,7 +526,7 @@ static void refresh_custom_seq(int ci)
         }
         lv_label_set_text(lbl, badge_text);
         lv_obj_set_style_text_font(lbl,
-            entry->isDoublette && !isH ? &lv_font_montserrat_12 : &lv_font_montserrat_18, 0);
+            entry->isDoublette && !isH ? UI_FONT_12 : UI_FONT_18, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(lbl);
@@ -569,7 +570,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
 
     lv_obj_t *section = lv_label_create(parent);
     lv_label_set_text(section, "EIGENE SPIELKONFIGURATION");
-    lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(section, UI_FONT_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
     for (int ci = 0; ci < 4; ci++) {
@@ -596,7 +597,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
 
         lv_obj_t *cname = lv_label_create(title_row);
         lv_label_set_text(cname, CUSTOM_NAMES[ci]);
-        lv_obj_set_style_text_font(cname, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(cname, UI_FONT_16, 0);
         lv_obj_set_style_text_color(cname, lv_color_hex(CLR_TEXT), 0);
         lv_label_set_long_mode(cname, LV_LABEL_LONG_DOT);
         lv_obj_set_width(cname, 0);
@@ -614,14 +615,14 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         }, LV_EVENT_CLICKED, (void*)(intptr_t)ci);
         lv_obj_t *clrl = lv_label_create(clr);
         lv_label_set_text(clrl, LV_SYMBOL_CLOSE "  LÖSCHEN");
-        lv_obj_set_style_text_font(clrl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(clrl, UI_FONT_12, 0);
         lv_obj_set_style_text_color(clrl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(clrl);
 
         // ── Section label: SEQUENZ ────────────────────────────
         lv_obj_t *seq_hdr = lv_label_create(card);
         lv_label_set_text(seq_hdr, "SEQUENZ  (WURF ANTIPPEN ZUM LÖSCHEN)");
-        lv_obj_set_style_text_font(seq_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(seq_hdr, UI_FONT_12, 0);
         lv_obj_set_style_text_color(seq_hdr, lv_color_hex(CLR_MUTED), 0);
 
         // ── Sequence strip (horizontally scrollable) ──────────
@@ -646,7 +647,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         // ── Section label: single A-G entries ─────────────────
         lv_obj_t *add_hdr = lv_label_create(card);
         lv_label_set_text(add_hdr, "EINZELWURF HINZUFÜGEN");
-        lv_obj_set_style_text_font(add_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(add_hdr, UI_FONT_12, 0);
         lv_obj_set_style_text_color(add_hdr, lv_color_hex(CLR_MUTED), 0);
 
         // ── A-G single-machine add buttons ────────────────────
@@ -679,7 +680,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
             lv_obj_t *ml = lv_label_create(ab);
             lv_label_set_text(ml, MACH_LBL[mi]);
-            lv_obj_set_style_text_font(ml, &lv_font_montserrat_18, 0);
+            lv_obj_set_style_text_font(ml, UI_FONT_18, 0);
             lv_obj_set_style_text_color(ml, lv_color_hex(CLR_TEXT), 0);
             lv_obj_center(ml);
         }
@@ -687,7 +688,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         // ── Doublette builder ─────────────────────────────────
         lv_obj_t *pair_hdr = lv_label_create(card);
         lv_label_set_text(pair_hdr, "DUBLETTE: A-G + PARTNER (VERZÖGERUNG IN SEKUNDEN)");
-        lv_obj_set_style_text_font(pair_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(pair_hdr, UI_FONT_12, 0);
         lv_obj_set_style_text_color(pair_hdr, lv_color_hex(CLR_MUTED), 0);
 
         lv_obj_t *pair_cfg = lv_obj_create(card);
@@ -701,7 +702,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
 
         lv_obj_t *delay_lbl = lv_label_create(pair_cfg);
         lv_label_set_text(delay_lbl, "VERZÖGERUNG:");
-        lv_obj_set_style_text_font(delay_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(delay_lbl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(delay_lbl, lv_color_hex(CLR_TEXT), 0);
         s_pair_delay_ta[ci] = lv_textarea_create(pair_cfg);
         lv_obj_set_size(s_pair_delay_ta[ci], 110, 42);
@@ -712,7 +713,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         lv_obj_set_style_text_color(s_pair_delay_ta[ci], lv_color_hex(CLR_TEXT), 0);
         lv_obj_t *seconds_lbl = lv_label_create(pair_cfg);
         lv_label_set_text(seconds_lbl, "SEK.  (0-10)");
-        lv_obj_set_style_text_font(seconds_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(seconds_lbl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(seconds_lbl, lv_color_hex(CLR_MUTED), 0);
 
         lv_obj_t *pair_row = lv_obj_create(card);
@@ -755,7 +756,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             }, LV_EVENT_CLICKED, (void*)(intptr_t)packed);
             lv_obj_t *pl = lv_label_create(pb);
             lv_label_set_text(pl, MACH_LBL[mi]);
-            lv_obj_set_style_text_font(pl, &lv_font_montserrat_18, 0);
+            lv_obj_set_style_text_font(pl, UI_FONT_18, 0);
             lv_obj_set_style_text_color(pl, lv_color_hex(CLR_TEXT), 0);
             lv_obj_center(pl);
         }
@@ -777,19 +778,19 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         }, LV_EVENT_CLICKED, (void*)(intptr_t)ci);
         lv_obj_t *hl = lv_label_create(h_pair);
         lv_label_set_text(hl, "H  H1/H2");
-        lv_obj_set_style_text_font(hl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(hl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(hl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(hl);
 
         s_pair_status[ci] = lv_label_create(card);
         lv_label_set_text(s_pair_status[ci], "1. MASCHINE WÄHLEN - DANN PARTNER");
-        lv_obj_set_style_text_font(s_pair_status[ci], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(s_pair_status[ci], UI_FONT_12, 0);
         lv_obj_set_style_text_color(s_pair_status[ci], lv_color_hex(CLR_MUTED), 0);
 
         // ── Läufe toggle (1 / 2) ─────────────────────────────
         lv_obj_t *lauf_hdr = lv_label_create(card);
         lv_label_set_text(lauf_hdr, "ANZAHL DER LÄUFE");
-        lv_obj_set_style_text_font(lauf_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(lauf_hdr, UI_FONT_12, 0);
         lv_obj_set_style_text_color(lauf_hdr, lv_color_hex(CLR_MUTED), 0);
 
         lv_obj_t *lauf_row = lv_obj_create(card);
@@ -834,7 +835,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             char lbuf[16];
             snprintf(lbuf, sizeof(lbuf), "%d %s", li + 1, li == 0 ? "LAUF" : "LÄUFE");
             lv_label_set_text(ll, lbuf);
-            lv_obj_set_style_text_font(ll, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(ll, UI_FONT_14, 0);
             lv_obj_set_style_text_color(ll, lv_color_hex(CLR_TEXT), 0);
             lv_obj_center(ll);
         }
@@ -867,12 +868,12 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
             lv_obj_t *sv = lv_label_create(sc);
             *stat_ptrs[si] = sv;
             lv_label_set_text(sv, "0");
-            lv_obj_set_style_text_font(sv, &lv_font_montserrat_22, 0);
+            lv_obj_set_style_text_font(sv, UI_FONT_22, 0);
             lv_obj_set_style_text_color(sv, lv_color_hex(CLR_PRIMARY), 0);
 
             lv_obj_t *sl = lv_label_create(sc);
             lv_label_set_text(sl, stat_lbl[si]);
-            lv_obj_set_style_text_font(sl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(sl, UI_FONT_12, 0);
             lv_obj_set_style_text_color(sl, lv_color_hex(CLR_MUTED), 0);
         }
 
@@ -889,12 +890,12 @@ static lv_obj_t *build_wifi_tab(lv_obj_t *parent)
 
     lv_obj_t *section = lv_label_create(parent);
     lv_label_set_text(section, "WIFI");
-    lv_obj_set_style_text_font(section, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(section, UI_FONT_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *info = lv_label_create(parent);
     lv_label_set_text(info, "WIFI-EINSTELLUNGEN KÖNNEN AUF DER WIFI-SEITE GEÄNDERT WERDEN.");
-    lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(info, UI_FONT_14, 0);
     lv_obj_set_style_text_color(info, lv_color_hex(CLR_MUTED), 0);
 
     lv_obj_t *btn = lv_btn_create(parent);
@@ -925,7 +926,7 @@ static lv_obj_t *build_products_tab(lv_obj_t *parent)
     for (unsigned i = 0; i < sizeof(price_fields)/sizeof(price_fields[0]); ++i) {
         lv_obj_t *label = lv_label_create(parent);
         lv_label_set_text(label, price_fields[i].label);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(label, UI_FONT_14, 0);
         lv_obj_set_style_text_color(label, lv_color_hex(CLR_TEXT), 0);
         *price_fields[i].out = lv_textarea_create(parent);
         lv_obj_set_size(*price_fields[i].out, 180, 50);
@@ -951,10 +952,10 @@ static lv_obj_t *build_day_stats_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_row(parent, 8, 0);
     lv_obj_t *heading = lv_label_create(parent);
     lv_label_set_text(heading, "TAGESSTATISTIK");
-    lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(heading, UI_FONT_16, 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(CLR_PRIMARY), 0);
     s_bill_day_summary = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_bill_day_summary, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_bill_day_summary, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_TEXT), 0);
     lv_label_set_long_mode(s_bill_day_summary, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_bill_day_summary, LV_PCT(100));
@@ -1020,7 +1021,7 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
 
     lv_obj_t *heading = lv_label_create(parent);
     lv_label_set_text(heading, "PRODUKTE & ABRECHNUNG / CATERING");
-    lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(heading, UI_FONT_16, 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_t *help = lv_label_create(parent);
     lv_label_set_text(help,
@@ -1087,7 +1088,7 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
 
     lv_obj_t *snd_lbl = lv_label_create(snd_row);
     lv_label_set_text(snd_lbl, LV_SYMBOL_VOLUME_MAX "  KLICK-SOUND");
-    lv_obj_set_style_text_font(snd_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(snd_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(snd_lbl, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *snd_sw = lv_switch_create(snd_row);
@@ -1157,7 +1158,7 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     for (int i = 0; i < (int)(sizeof(info_rows)/sizeof(info_rows[0])); i++) {
         lv_obj_t *lbl = lv_label_create(parent);
         lv_label_set_text(lbl, info_rows[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(lbl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_MUTED), 0);
     }
     return parent;
@@ -1187,7 +1188,7 @@ lv_obj_t *screen_einstellungen_create(void)
 
     lv_obj_t *title = lv_label_create(hdr);
     lv_label_set_text(title, LV_SYMBOL_SETTINGS "  EINSTELLUNGEN");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *back = lv_btn_create(hdr);
@@ -1206,7 +1207,7 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_align(s_tab_view, LV_ALIGN_TOP_LEFT, 0, 70);
     lv_tabview_set_tab_bar_size(s_tab_view, 52);
     lv_obj_set_style_bg_color(s_tab_view, lv_color_hex(CLR_BG), 0);
-    lv_obj_set_style_text_font(s_tab_view, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_tab_view, UI_FONT_14, 0);
 
     lv_obj_t *tab_conn     = lv_tabview_add_tab(s_tab_view, "Portal & Gateway");
     lv_obj_t *tab_machines = lv_tabview_add_tab(s_tab_view, "Maschinen");
@@ -1245,7 +1246,7 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(CLR_BORDER), LV_PART_ITEMS);
     lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_text_color(s_kb, lv_color_hex(CLR_TEXT), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(s_kb, &lv_font_montserrat_16, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_kb, UI_FONT_16, LV_PART_ITEMS);
     lv_obj_set_style_radius(s_kb, 6, LV_PART_ITEMS);
     lv_obj_set_style_border_width(s_kb, 1, LV_PART_ITEMS);
     lv_obj_set_style_border_color(s_kb, lv_color_hex(CLR_BG), LV_PART_ITEMS);

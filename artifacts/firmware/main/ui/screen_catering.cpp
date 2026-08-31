@@ -2,6 +2,7 @@
 #include <string.h>
 #include <time.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_catering.h"
@@ -236,7 +237,7 @@ static void rebuild(void) {
     memset(s_product_qty_labels, 0, sizeof(s_product_qty_labels));
     lv_obj_t *heading = lv_label_create(s_players);
     lv_label_set_text(heading, "SPIELER DES TAGES");
-    lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(heading, UI_FONT_16, 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(CLR_MUTED), 0);
     for (int i = 0; i < g_store.portalSpielerCount; ++i) if (player_today(&g_store.portalSpieler[i])) {
         lv_obj_t *b = button(s_players, g_store.portalSpieler[i].name,
@@ -247,7 +248,7 @@ static void rebuild(void) {
     }
     heading = lv_label_create(s_products);
     lv_label_set_text(heading, "ESSEN & GETRÄNKE");
-    lv_obj_set_style_text_font(heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(heading, UI_FONT_16, 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(CLR_MUTED), 0);
     for (int i = 0; i < g_store.produkteCount; ++i) {
         Produkt *p = &g_store.produkte[i];
@@ -279,7 +280,7 @@ lv_obj_t *screen_catering_create(void) {
     s_scr = lv_obj_create(NULL); lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H); screen_base_init(s_scr);
     lv_obj_set_style_text_color(s_scr, lv_color_hex(CLR_TEXT), 0);
     lv_obj_t *title = lv_label_create(s_scr); lv_label_set_text(title, "CATERING"); lv_obj_add_style(title, &g_style_label_title, 0); lv_obj_align(title, LV_ALIGN_TOP_LEFT, 18, 18);
-    s_wifi_status = lv_label_create(s_scr); lv_obj_set_style_text_font(s_wifi_status, &lv_font_montserrat_14, 0);
+    s_wifi_status = lv_label_create(s_scr); lv_obj_set_style_text_font(s_wifi_status, UI_FONT_14, 0);
     lv_obj_align(s_wifi_status, LV_ALIGN_TOP_RIGHT, -285, 34);
     s_rendered_wifi_status[0] = '\0'; refresh_wifi_status();
     lv_obj_t *exit = button(s_scr, "CATERING VERLASSEN", &g_style_btn_danger);
@@ -290,10 +291,10 @@ lv_obj_t *screen_catering_create(void) {
     s_products = lv_obj_create(s_scr); lv_obj_set_size(s_products, 620, 670); lv_obj_align(s_products, LV_ALIGN_TOP_LEFT, 326, 92); lv_obj_add_style(s_products, &g_style_card, 0); lv_obj_set_flex_flow(s_products, LV_FLEX_FLOW_COLUMN);
     s_checkout = lv_obj_create(s_scr); lv_obj_set_size(s_checkout, 298, 670); lv_obj_align(s_checkout, LV_ALIGN_TOP_LEFT, 964, 92); lv_obj_add_style(s_checkout, &g_style_card, 0);
     lv_obj_t *checkout_heading = lv_label_create(s_checkout); lv_label_set_text(checkout_heading, "BESTELLUNG");
-    lv_obj_set_style_text_font(checkout_heading, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(checkout_heading, UI_FONT_16, 0);
     lv_obj_set_style_text_color(checkout_heading, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(checkout_heading, LV_ALIGN_TOP_LEFT, 0, 0);
-    s_total = lv_label_create(s_checkout); lv_obj_align(s_total, LV_ALIGN_TOP_LEFT, 0, 42); lv_obj_set_style_text_font(s_total, &lv_font_montserrat_20, 0);
+    s_total = lv_label_create(s_checkout); lv_obj_align(s_total, LV_ALIGN_TOP_LEFT, 0, 42); lv_obj_set_style_text_font(s_total, UI_FONT_20, 0);
     lv_obj_set_style_text_color(s_total, lv_color_hex(CLR_TEXT), 0);
     s_status = lv_label_create(s_checkout); lv_obj_set_width(s_status, LV_PCT(100)); lv_obj_align(s_status, LV_ALIGN_TOP_LEFT, 0, 82);
     lv_label_set_long_mode(s_status, LV_LABEL_LONG_WRAP);

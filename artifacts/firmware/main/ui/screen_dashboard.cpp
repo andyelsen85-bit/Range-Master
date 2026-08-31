@@ -10,6 +10,7 @@
 #include <time.h>
 #include "ui_time_fmt.h"
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "ui_manager.h"
@@ -84,12 +85,12 @@ static lv_obj_t *big_btn(lv_obj_t *parent, const char *sym,
 
     lv_obj_t *ic = lv_label_create(btn);
     lv_label_set_text(ic, sym);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(ic, UI_FONT_28, 0);
     lv_obj_set_style_text_color(ic, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *lbl = lv_label_create(btn);
     lv_label_set_text(lbl, label);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(lbl, UI_FONT_16, 0);
     lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
     return btn;
 }
@@ -112,12 +113,12 @@ static lv_obj_t *sec_btn(lv_obj_t *parent, const char *sym,
 
     lv_obj_t *ic = lv_label_create(btn);
     lv_label_set_text(ic, sym);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(ic, UI_FONT_22, 0);
     lv_obj_set_style_text_color(ic, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *lbl = lv_label_create(btn);
     lv_label_set_text(lbl, label);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
     return btn;
 }
@@ -211,7 +212,7 @@ static void shutdown_open_cb(lv_event_t *e)
 
     lv_obj_t *title = lv_label_create(dialog);
     lv_label_set_text(title, "SYNC & AUSSCHALTEN?");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_24, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_DANGER), 0);
 
     s_shutdown_message = lv_label_create(dialog);
@@ -238,7 +239,7 @@ static void shutdown_open_cb(lv_event_t *e)
     lv_obj_add_event_cb(confirm, shutdown_confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *confirm_label = lv_label_create(confirm);
     lv_label_set_text(confirm_label, LV_SYMBOL_POWER "  SYNC & AUSSCHALTEN");
-    lv_obj_set_style_text_font(confirm_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(confirm_label, UI_FONT_14, 0);
     lv_obj_center(confirm_label);
 
     lv_obj_t *cancel = lv_btn_create(actions);
@@ -272,26 +273,26 @@ lv_obj_t *screen_dashboard_create(void)
 
     lv_obj_t *club_lbl = lv_label_create(header);
     lv_label_set_text(club_lbl, CLUB_NAME);
-    lv_obj_set_style_text_font(club_lbl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(club_lbl, UI_FONT_20, 0);
     lv_obj_set_style_text_color(club_lbl, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_align(club_lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
     // WiFi status (right side of header)
     s_lbl_wifi = lv_label_create(header);
     lv_label_set_text(s_lbl_wifi, LV_SYMBOL_WIFI "  NICHT VERBUNDEN");
-    lv_obj_set_style_text_font(s_lbl_wifi, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_wifi, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_wifi, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_wifi, LV_ALIGN_RIGHT_MID, 0, 0);
 
     s_lbl_gateway = lv_label_create(header);
     lv_label_set_text(s_lbl_gateway, "GATEWAY: NICHT KONFIGURIERT");
-    lv_obj_set_style_text_font(s_lbl_gateway, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_gateway, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(CLR_MUTED), 0);
     lv_obj_align(s_lbl_gateway, LV_ALIGN_RIGHT_MID, -260, 0);
 
     s_lbl_clock = lv_label_create(header);
     lv_label_set_text(s_lbl_clock, "ZEIT: NICHT SYNCHRONISIERT");
-    lv_obj_set_style_text_font(s_lbl_clock, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_clock, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_clock, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_width(s_lbl_clock, 250);
     lv_label_set_long_mode(s_lbl_clock, LV_LABEL_LONG_DOT);
@@ -318,7 +319,7 @@ lv_obj_t *screen_dashboard_create(void)
 
     lv_obj_t *hist_hdr = lv_label_create(hist_card);
     lv_label_set_text(hist_hdr, "LETZTE SPIELE");
-    lv_obj_set_style_text_font(hist_hdr, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(hist_hdr, UI_FONT_16, 0);
     lv_obj_set_style_text_color(hist_hdr, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_style_text_letter_space(hist_hdr, 2, 0);
 
@@ -383,12 +384,12 @@ lv_obj_t *screen_dashboard_create(void)
 
     lv_obj_t *hist_ic = lv_label_create(hist_btn);
     lv_label_set_text(hist_ic, LV_SYMBOL_FILE);
-    lv_obj_set_style_text_font(hist_ic, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(hist_ic, UI_FONT_18, 0);
     lv_obj_set_style_text_color(hist_ic, lv_color_hex(CLR_MUTED), 0);
 
     lv_obj_t *hist_lbl = lv_label_create(hist_btn);
     lv_label_set_text(hist_lbl, "SPIELVERLAUF");
-    lv_obj_set_style_text_font(hist_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(hist_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(hist_lbl, lv_color_hex(CLR_MUTED), 0);
 
     // 5. Graceful shutdown: sync first, then put the ESP32 into deep sleep.
@@ -398,7 +399,7 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_add_event_cb(shutdown_btn, shutdown_open_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *shutdown_label = lv_label_create(shutdown_btn);
     lv_label_set_text(shutdown_label, LV_SYMBOL_POWER "  AUSSCHALTEN");
-    lv_obj_set_style_text_font(shutdown_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(shutdown_label, UI_FONT_14, 0);
     lv_obj_center(shutdown_label);
 
     // 6. Offline Queue panel - flex-grow fills the remaining space
@@ -419,20 +420,20 @@ lv_obj_t *screen_dashboard_create(void)
 
     lv_obj_t *q_hdr = lv_label_create(queue);
     lv_label_set_text(q_hdr, "OFFLINE-WARTESCHLANGE");
-    lv_obj_set_style_text_font(q_hdr, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(q_hdr, UI_FONT_12, 0);
     lv_obj_set_style_text_color(q_hdr, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_style_text_letter_space(q_hdr, 1, 0);
 
     s_lbl_pending = lv_label_create(queue);
     lv_label_set_text(s_lbl_pending, "0 AKTIONEN AUSSTEHEND");
-    lv_obj_set_style_text_font(s_lbl_pending, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_pending, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_pending, lv_color_hex(CLR_TEXT), 0);
     lv_label_set_long_mode(s_lbl_pending, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_lbl_pending, LV_PCT(100));
 
     s_lbl_sync_status = lv_label_create(queue);
     lv_label_set_text(s_lbl_sync_status, "BEREET");
-    lv_obj_set_style_text_font(s_lbl_sync_status, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(s_lbl_sync_status, UI_FONT_12, 0);
     lv_obj_set_style_text_color(s_lbl_sync_status, lv_color_hex(CLR_MUTED), 0);
     lv_label_set_long_mode(s_lbl_sync_status, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_lbl_sync_status, LV_PCT(100));
@@ -444,7 +445,7 @@ lv_obj_t *screen_dashboard_create(void)
 
     lv_obj_t *sync_lbl = lv_label_create(sync_btn);
     lv_label_set_text(sync_lbl, LV_SYMBOL_REFRESH "  ALLES SYNCHRONISIEREN");
-    lv_obj_set_style_text_font(sync_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(sync_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(sync_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sync_lbl);
 
@@ -538,7 +539,7 @@ void screen_dashboard_refresh(void)
     if (g_store.historyCount == 0) {
         lv_obj_t *empty = lv_label_create(s_history_list);
         lv_label_set_text(empty, "NOCH KEINE SPIELE");
-        lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(empty, UI_FONT_16, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
     } else {
         // Sort indices newest-first by finishedAt (ISO strings compare chronologically)
@@ -588,13 +589,13 @@ void screen_dashboard_refresh(void)
             fmt_local_time(fg->finishedAt, ts, sizeof(ts));
             lv_obj_t *ts_lbl = lv_label_create(row);
             lv_label_set_text(ts_lbl, ts[0] ? ts : "-");
-            lv_obj_set_style_text_font(ts_lbl, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(ts_lbl, UI_FONT_14, 0);
             lv_obj_set_style_text_color(ts_lbl, lv_color_hex(CLR_MUTED), 0);
             lv_obj_set_width(ts_lbl, 180);
 
             lv_obj_t *mode_lbl = lv_label_create(row);
             lv_label_set_text(mode_lbl, modus_label(fg->base.modus));
-            lv_obj_set_style_text_font(mode_lbl, &lv_font_montserrat_16, 0);
+            lv_obj_set_style_text_font(mode_lbl, UI_FONT_16, 0);
             lv_obj_set_style_text_color(mode_lbl, lv_color_hex(CLR_PRIMARY), 0);
             lv_obj_set_width(mode_lbl, 120);
 
@@ -603,7 +604,7 @@ void screen_dashboard_refresh(void)
                      winner, best_pts);
             lv_obj_t *win_lbl = lv_label_create(row);
             lv_label_set_text(win_lbl, w_buf);
-            lv_obj_set_style_text_font(win_lbl, &lv_font_montserrat_16, 0);
+            lv_obj_set_style_text_font(win_lbl, UI_FONT_16, 0);
             lv_obj_set_style_text_color(win_lbl, lv_color_hex(CLR_TEXT), 0);
             lv_label_set_long_mode(win_lbl, LV_LABEL_LONG_DOT);
             lv_obj_set_width(win_lbl, 0);
@@ -613,7 +614,7 @@ void screen_dashboard_refresh(void)
             snprintf(p_buf, sizeof(p_buf), "%d SPIELER", fg->spieler_count);
             lv_obj_t *p_lbl = lv_label_create(row);
             lv_label_set_text(p_lbl, p_buf);
-            lv_obj_set_style_text_font(p_lbl, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(p_lbl, UI_FONT_14, 0);
             lv_obj_set_style_text_color(p_lbl, lv_color_hex(CLR_MUTED), 0);
         }
     }

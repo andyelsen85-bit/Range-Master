@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_kredite.h"
@@ -199,7 +200,7 @@ static void bill_cb(lv_event_t *e)
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *title = lv_label_create(card);
     char title_text[100]; snprintf(title_text, sizeof(title_text), "RECHNUNG - %s", name);
-    lv_label_set_text(title, title_text); lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_label_set_text(title, title_text); lv_obj_set_style_text_font(title, UI_FONT_22, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_set_width(title, LV_PCT(100));
     char totals[256];
@@ -215,7 +216,7 @@ static void bill_cb(lv_event_t *e)
              bill_data ? bill_data->completedGames : 0,
              bill_data ? bill_data->confirmedClays : 0);
     lv_obj_t *summary = lv_label_create(card); lv_label_set_text(summary, totals);
-    lv_obj_set_style_text_font(summary, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(summary, UI_FONT_16, 0);
     lv_obj_set_style_text_color(summary, lv_color_hex(CLR_TEXT), 0);
     // The item list alone scrolls: settlement controls stay visible even for
     // a long Catering bill.
@@ -259,7 +260,7 @@ static void bill_cb(lv_event_t *e)
                       pending ? "AUSSTEHEND  " : "", product, category, quantity,
                      unit_cent / 100, abs(unit_cent % 100));
         lv_label_set_text(left, left_text);
-        lv_obj_set_style_text_font(left, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(left, UI_FONT_14, 0);
         lv_obj_set_style_text_color(left,
             pending ? lv_color_hex(CLR_WARN) : lv_color_hex(0x111827), 0);
         lv_label_set_long_mode(left, LV_LABEL_LONG_DOT);
@@ -273,7 +274,7 @@ static void bill_cb(lv_event_t *e)
         // The monetary amount is the operator's settlement target. Keep it
         // visibly distinct on the light card rather than relying on the small
         // default label weight.
-        lv_obj_set_style_text_font(right, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(right, UI_FONT_18, 0);
         lv_obj_set_style_text_color(right,
             price_unknown ? lv_color_hex(CLR_WARN) : lv_color_hex(CLR_PRIMARY), 0);
          lv_obj_set_width(right, 120);
@@ -324,7 +325,7 @@ static void bill_cb(lv_event_t *e)
               bill_data && bill_data->state == BILL_PAID ? "BEZAHLT" :
               bill_data && bill_data->state == BILL_PENDING_NEUTRAL ? "NEUTRAL AUSSTEHEND" : "OFFEN");
     lv_label_set_text(general, general_text);
-    lv_obj_set_style_text_font(general, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(general, UI_FONT_18, 0);
     lv_obj_set_style_text_color(general, lv_color_hex(CLR_PRIMARY), 0);
     if (bill_data && bill_data->lineOverflow) {
         lv_obj_t *overflow = lv_label_create(card);
@@ -339,7 +340,7 @@ static void bill_cb(lv_event_t *e)
              bill_data && bill_data->paidAt[0] ? "  (PORTAL-PRÜFUNG GESPEICHERT)" :
               "  ZAHLUNG BLEIBT BIS ZUR PORTAL-BESTÄTIGUNG AUSSTEHEND.");
     lv_label_set_text(hint, audit);
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(hint, UI_FONT_12, 0);
     lv_obj_set_style_text_color(hint, lv_color_hex(CLR_MUTED), 0);
     lv_obj_t *actions = lv_obj_create(card);
     lv_obj_set_size(actions, LV_PCT(100), 60); lv_obj_set_style_bg_opa(actions, LV_OPA_0, 0);
@@ -451,7 +452,7 @@ static void build_player_list(void)
               "KREDITE                 CAL.12: %" PRId32 "       CAL.20: %" PRId32,
              g_store.verkaufCal12Total, g_store.verkaufCal20Total);
     lv_label_set_text(columns, columns_text);
-    lv_obj_set_style_text_font(columns, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(columns, UI_FONT_12, 0);
     lv_obj_set_style_text_color(columns, lv_color_hex(CLR_MUTED), 0);
     for (int i = 0; day_ready && i < MAX_PORTAL_SPIELER; i++) {
         if (g_store.kreditPlayerIds[i] == 0) continue;
@@ -487,7 +488,7 @@ static void build_player_list(void)
 
         lv_obj_t *name_lbl = lv_label_create(info);
         lv_label_set_text(name_lbl, name);
-        lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(name_lbl, UI_FONT_16, 0);
         lv_obj_set_style_text_color(name_lbl, lv_color_hex(CLR_TEXT), 0);
         lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(name_lbl, LV_PCT(100));
@@ -500,7 +501,7 @@ static void build_player_list(void)
                  avail, k->verbraucht, k->gewaehrt);
         lv_obj_t *cred_lbl = lv_label_create(info);
         lv_label_set_text(cred_lbl, cred_buf);
-        lv_obj_set_style_text_font(cred_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(cred_lbl, UI_FONT_12, 0);
         lv_obj_set_style_text_color(cred_lbl,
             avail > 0 ? lv_color_hex(CLR_SUCCESS) : lv_color_hex(CLR_DANGER), 0);
         char ammo_buf[48];
@@ -508,7 +509,7 @@ static void build_player_list(void)
                  store_munition_cal12(sid), store_munition_cal20(sid));
         lv_obj_t *ammo_lbl = lv_label_create(info);
         lv_label_set_text(ammo_lbl, ammo_buf);
-        lv_obj_set_style_text_font(ammo_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(ammo_lbl, UI_FONT_12, 0);
         lv_obj_set_style_text_color(ammo_lbl, lv_color_hex(CLR_PRIMARY), 0);
 
         // Keep every operation in an explicitly labelled group.  This makes
@@ -530,7 +531,7 @@ static void build_player_list(void)
             lv_obj_set_style_pad_row(group, 3, 0);
             lv_obj_t *label = lv_label_create(group);
             lv_label_set_text(label, caption);
-            lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(label, UI_FONT_12, 0);
             lv_obj_set_style_text_color(label, lv_color_hex(CLR_MUTED), 0);
             return group;
         };
@@ -542,7 +543,7 @@ static void build_player_list(void)
         lv_obj_add_event_cb(bill, bill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)sid);
         lv_obj_t *bill_label = lv_label_create(bill);
         lv_label_set_text(bill_label, store_payment_pending(sid) ? "AUSSTEHEND" : "RECHNUNG");
-        lv_obj_set_style_text_font(bill_label, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(bill_label, UI_FONT_12, 0);
         lv_obj_center(bill_label);
 
         lv_obj_t *credit_group = control_group("KREDIT", 92);
@@ -563,7 +564,7 @@ static void build_player_list(void)
         if (avail <= 0) lv_obj_add_state(btn_minus, LV_STATE_DISABLED);
         lv_obj_t *bml = lv_label_create(btn_minus);
         lv_label_set_text(bml, "-1");
-        lv_obj_set_style_text_font(bml, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(bml, UI_FONT_16, 0);
         lv_obj_set_style_text_color(bml, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(bml);
 
@@ -575,7 +576,7 @@ static void build_player_list(void)
                             (void *)(intptr_t)sid);
         lv_obj_t *bpl = lv_label_create(btn_plus);
         lv_label_set_text(bpl, "+1");
-        lv_obj_set_style_text_font(bpl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(bpl, UI_FONT_16, 0);
         lv_obj_set_style_text_color(bpl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(bpl);
 
@@ -621,7 +622,7 @@ static void build_player_list(void)
                 lv_obj_add_state(ammo, LV_STATE_DISABLED);
             lv_obj_t *al = lv_label_create(ammo);
             lv_label_set_text(al, ammo_actions[action].label);
-            lv_obj_set_style_text_font(al, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(al, UI_FONT_12, 0);
             lv_obj_set_style_text_color(al, lv_color_hex(CLR_TEXT), 0);
             lv_obj_center(al);
         }
@@ -638,7 +639,7 @@ static void build_player_list(void)
                             (void*)(intptr_t)sid);
         lv_obj_t *bdl = lv_label_create(btn_del);
         lv_label_set_text(bdl, LV_SYMBOL_TRASH);
-        lv_obj_set_style_text_font(bdl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(bdl, UI_FONT_16, 0);
         lv_obj_set_style_text_color(bdl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(bdl);
 
@@ -648,7 +649,7 @@ static void build_player_list(void)
     if (count == 0) {
         lv_obj_t *empty = lv_label_create(s_player_list);
         lv_label_set_text(empty, "KEINE SPIELER FÜR HEUTE REGISTRIERT");
-        lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(empty, UI_FONT_16, 0);
         lv_obj_set_style_text_color(empty, lv_color_hex(CLR_MUTED), 0);
     }
 }
@@ -677,7 +678,7 @@ lv_obj_t *screen_kredite_create(void)
 
     lv_obj_t *title = lv_label_create(hdr);
     lv_label_set_text(title, LV_SYMBOL_CHARGE "  SPIELER DES TAGES");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *back = lv_btn_create(hdr);
@@ -702,12 +703,12 @@ lv_obj_t *screen_kredite_create(void)
 
     lv_obj_t *add_lbl = lv_label_create(add_row);
     lv_label_set_text(add_lbl, "SPIELER HINZUFÜGEN:");
-    lv_obj_set_style_text_font(add_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(add_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(add_lbl, lv_color_hex(CLR_TEXT), 0);
 
     s_dd_add = lv_dropdown_create(add_row);
     lv_obj_set_size(s_dd_add, 300, 44);
-    lv_obj_set_style_text_font(s_dd_add, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_dd_add, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_dd_add, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_dd_add, lv_color_hex(CLR_TEXT), 0);
     lv_dropdown_set_options(s_dd_add, "-");
@@ -718,14 +719,14 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_add_event_cb(add_btn, add_player_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *abl = lv_label_create(add_btn);
     lv_label_set_text(abl, "+ HINZUFÜGEN");
-    lv_obj_set_style_text_font(abl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(abl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(abl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(abl);
 
     s_lbl_status = lv_label_create(s_scr);
     lv_label_set_text(s_lbl_status, "");
     lv_obj_align(s_lbl_status, LV_ALIGN_TOP_MID, 0, 148);
-    lv_obj_set_style_text_font(s_lbl_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_status, UI_FONT_14, 0);
     lv_label_set_long_mode(s_lbl_status, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_lbl_status, DISPLAY_LOGICAL_W - 40);
 

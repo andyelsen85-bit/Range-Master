@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_resultate.h"
@@ -38,12 +39,12 @@ lv_obj_t *screen_resultate_create(void)
 
     lv_obj_t *title = lv_label_create(hdr);
     lv_label_set_text(title, LV_SYMBOL_CHARGE "  ERGEBNISSE");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
     s_lbl_meta = lv_label_create(hdr);
     lv_label_set_text(s_lbl_meta, "");
-    lv_obj_set_style_text_font(s_lbl_meta, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_meta, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_meta, lv_color_hex(CLR_MUTED), 0);
 
     lv_obj_t *done_btn = lv_btn_create(hdr);
@@ -73,12 +74,12 @@ lv_obj_t *screen_resultate_create(void)
 
     lv_obj_t *trophy = lv_label_create(win_card);
     lv_label_set_text(trophy, LV_SYMBOL_CHARGE);
-    lv_obj_set_style_text_font(trophy, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(trophy, UI_FONT_28, 0);
     lv_obj_set_style_text_color(trophy, lv_color_hex(CLR_WARN), 0);
 
     s_lbl_winner = lv_label_create(win_card);
     lv_label_set_text(s_lbl_winner, "SIEGER: -");
-    lv_obj_set_style_text_font(s_lbl_winner, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(s_lbl_winner, UI_FONT_24, 0);
     lv_obj_set_style_text_color(s_lbl_winner, lv_color_hex(CLR_WARN), 0);
     lv_label_set_long_mode(s_lbl_winner, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_lbl_winner, 0);
@@ -86,7 +87,7 @@ lv_obj_t *screen_resultate_create(void)
 
     s_lbl_max = lv_label_create(win_card);
     lv_label_set_text(s_lbl_max, "");
-    lv_obj_set_style_text_font(s_lbl_max, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_lbl_max, UI_FONT_16, 0);
     lv_obj_set_style_text_color(s_lbl_max, lv_color_hex(CLR_MUTED), 0);
 
     // Ranking table
@@ -100,7 +101,7 @@ lv_obj_t *screen_resultate_create(void)
     lv_table_set_col_width(s_table, 2, 110); // LAUF 1
     lv_table_set_col_width(s_table, 3, 110); // LAUF 2
     lv_table_set_col_width(s_table, 4, 110); // TOTAL
-    lv_obj_set_style_text_font(s_table, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_table, UI_FONT_16, 0);
     lv_obj_set_style_text_color(s_table, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_bg_color(s_table, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_color(s_table, lv_color_hex(CLR_BORDER), 0);

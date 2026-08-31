@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -111,7 +112,7 @@ lv_obj_t *screen_bluetooth_create(void)
 
     lv_obj_t *title = lv_label_create(hdr);
     lv_label_set_text(title, LV_SYMBOL_BLUETOOTH "  BLUETOOTH-TASTATUR");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
     lv_obj_t *back = lv_btn_create(hdr);
@@ -142,7 +143,7 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_t *warn_lbl = lv_label_create(sim_warn);
     lv_label_set_text(warn_lbl, LV_SYMBOL_WARNING
         "  BLUETOOTH NUR AM PHYSISCHEN TERMINAL VERFÜGBAR");
-    lv_obj_set_style_text_font(warn_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(warn_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(warn_lbl, lv_color_hex(CLR_WARN), 0);
 
     // Content
@@ -164,12 +165,12 @@ lv_obj_t *screen_bluetooth_create(void)
 
     s_lbl_state = lv_label_create(status_card);
     lv_label_set_text(s_lbl_state, "NICHT VERBUNDEN");
-    lv_obj_set_style_text_font(s_lbl_state, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(s_lbl_state, UI_FONT_18, 0);
     lv_obj_set_style_text_color(s_lbl_state, lv_color_hex(CLR_MUTED), 0);
 
     s_lbl_device = lv_label_create(status_card);
     lv_label_set_text(s_lbl_device, "-");
-    lv_obj_set_style_text_font(s_lbl_device, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_device, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_device, lv_color_hex(CLR_MUTED), 0);
 
     // Buttons
@@ -187,7 +188,7 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_add_event_cb(s_btn_pair, pair_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *pl = lv_label_create(s_btn_pair);
     lv_label_set_text(pl, LV_SYMBOL_BLUETOOTH "  KOPPLUNG STARTEN");
-    lv_obj_set_style_text_font(pl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(pl, UI_FONT_16, 0);
     lv_obj_set_style_text_color(pl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(pl);
 
@@ -198,14 +199,14 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_add_flag(s_btn_unpair, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *upl = lv_label_create(s_btn_unpair);
     lv_label_set_text(upl, LV_SYMBOL_CLOSE "  TRENNEN");
-    lv_obj_set_style_text_font(upl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(upl, UI_FONT_16, 0);
     lv_obj_set_style_text_color(upl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(upl);
 
     // Event log
     lv_obj_t *log_hdr = lv_label_create(content);
     lv_label_set_text(log_hdr, "EREIGNISSE");
-    lv_obj_set_style_text_font(log_hdr, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(log_hdr, UI_FONT_14, 0);
     lv_obj_set_style_text_color(log_hdr, lv_color_hex(CLR_MUTED), 0);
 
     s_list_log = lv_list_create(content);
@@ -214,7 +215,7 @@ lv_obj_t *screen_bluetooth_create(void)
     lv_obj_set_style_border_color(s_list_log, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_border_width(s_list_log, 1, 0);
     lv_obj_set_style_radius(s_list_log, 8, 0);
-    lv_obj_set_style_text_font(s_list_log, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_list_log, UI_FONT_14, 0);
     lv_list_add_text(s_list_log, "KEINE EREIGNISSE");
 
     return s_scr;

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "lvgl.h"
+#include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_start.h"
@@ -202,7 +203,7 @@ lv_obj_t *screen_start_create(void)
 
     lv_obj_t *hdr_lbl = lv_label_create(hdr);
     lv_label_set_text(hdr_lbl, LV_SYMBOL_PLAY "  SPIEL STARTEN");
-    lv_obj_set_style_text_font(hdr_lbl, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(hdr_lbl, UI_FONT_22, 0);
     lv_obj_set_style_text_color(hdr_lbl, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_align(hdr_lbl, LV_ALIGN_LEFT_MID, 20, 0);
 
@@ -238,7 +239,7 @@ lv_obj_t *screen_start_create(void)
 
     lv_obj_t *players_hdr = lv_label_create(left);
     lv_label_set_text(players_hdr, "SPIELER ZUWEISEN");
-    lv_obj_set_style_text_font(players_hdr, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(players_hdr, UI_FONT_16, 0);
     lv_obj_set_style_text_color(players_hdr, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *tools = lv_obj_create(left);
@@ -281,7 +282,7 @@ lv_obj_t *screen_start_create(void)
         snprintf(pos_str, sizeof(pos_str), "P%d", i + 1);
         lv_obj_t *pos_lbl = lv_label_create(row);
         lv_label_set_text(pos_lbl, pos_str);
-        lv_obj_set_style_text_font(pos_lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(pos_lbl, UI_FONT_16, 0);
         lv_obj_set_style_text_color(pos_lbl, lv_color_hex(CLR_PRIMARY), 0);
         lv_obj_set_width(pos_lbl, 32);
 
@@ -289,7 +290,7 @@ lv_obj_t *screen_start_create(void)
         lv_dropdown_set_options(dd, opts ? opts : "-"); // safe if malloc failed
         lv_obj_set_flex_grow(dd, 1);
         lv_obj_set_height(dd, 40);
-        lv_obj_set_style_text_font(dd, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(dd, UI_FONT_14, 0);
         lv_obj_set_style_bg_color(dd, lv_color_hex(CLR_BORDER), 0);
         lv_obj_set_style_text_color(dd, lv_color_hex(CLR_TEXT), 0);
         s_player_dropdowns[i] = dd;
@@ -307,7 +308,7 @@ lv_obj_t *screen_start_create(void)
             lv_obj_add_event_cb(move, lineup_action_cb, LV_EVENT_CLICKED, (void *)action);
             lv_obj_t *label = lv_label_create(move);
             lv_label_set_text(label, dir == 0 ? LV_SYMBOL_UP : LV_SYMBOL_DOWN);
-            lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
+            lv_obj_set_style_text_font(label, UI_FONT_18, 0);
             lv_obj_center(label);
         }
     }
@@ -317,7 +318,7 @@ lv_obj_t *screen_start_create(void)
     lv_label_set_text(s_lbl_error, g_store.lineupWarning);
     if (g_store.lineupWarning[0])
         lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);
-    lv_obj_set_style_text_font(s_lbl_error, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_error, UI_FONT_14, 0);
 
     // Right column: modus + machines + start button
     lv_obj_t *right = lv_obj_create(content);
@@ -331,7 +332,7 @@ lv_obj_t *screen_start_create(void)
     // Modus buttons
     lv_obj_t *modus_hdr = lv_label_create(right);
     lv_label_set_text(modus_hdr, "SPIELMODUS");
-    lv_obj_set_style_text_font(modus_hdr, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(modus_hdr, UI_FONT_16, 0);
     lv_obj_set_style_text_color(modus_hdr, lv_color_hex(CLR_TEXT), 0);
 
     static const char *MODUS_NAMES[] = {"NORMAL","HARAKIRI","CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4"};
@@ -356,7 +357,7 @@ lv_obj_t *screen_start_create(void)
         s_modus_btns[m] = mb;
         lv_obj_t *ml = lv_label_create(mb);
         lv_label_set_text(ml, MODUS_NAMES[m]);
-        lv_obj_set_style_text_font(ml, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(ml, UI_FONT_14, 0);
         lv_obj_set_style_text_color(ml, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(ml);
     }
@@ -364,7 +365,7 @@ lv_obj_t *screen_start_create(void)
     // Machine toggles
     lv_obj_t *mach_hdr = lv_label_create(right);
     lv_label_set_text(mach_hdr, "AKTIVE MASCHINEN");
-    lv_obj_set_style_text_font(mach_hdr, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(mach_hdr, UI_FONT_16, 0);
     lv_obj_set_style_text_color(mach_hdr, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *mach_row = lv_obj_create(right);
@@ -384,7 +385,7 @@ lv_obj_t *screen_start_create(void)
         s_maschinen_btns[m] = mb;
         lv_obj_t *ml = lv_label_create(mb);
         lv_label_set_text(ml, MACH_LABELS[m]);
-        lv_obj_set_style_text_font(ml, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(ml, UI_FONT_18, 0);
         lv_obj_set_style_text_color(ml, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(ml);
     }
@@ -396,7 +397,7 @@ lv_obj_t *screen_start_create(void)
     lv_obj_add_event_cb(start_btn, start_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *start_lbl = lv_label_create(start_btn);
     lv_label_set_text(start_lbl, LV_SYMBOL_PLAY "  SPIEL STARTEN");
-    lv_obj_set_style_text_font(start_lbl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(start_lbl, UI_FONT_20, 0);
     lv_obj_set_style_text_color(start_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(start_lbl);
 

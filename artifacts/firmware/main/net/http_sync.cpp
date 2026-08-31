@@ -487,50 +487,100 @@ esp_err_t http_restore_config(const char *restore_code)
     return ESP_OK;
 }
 
-// ── UTF-8 → display-safe ASCII ────────────────────────────────
-// Replaces accented / umlaut characters (ä ö ü é à è …) with
-// uppercase ASCII equivalents the Montserrat font can render.
-// German umlauts follow the standard ae/oe/ue expansion.
+// ── UTF-8 → display-safe terminal text ─────────────────────────
+// The UI font chain contains these common Latin and firmware symbols as
+// UTF-8 glyphs. Preserve them for portal-provided names while degrading
+// unsupported characters to the ASCII substitutions used by older firmware.
+static bool append_display_utf8(char *dst, size_t dst_max, size_t *dst_len,
+                                const unsigned char *src, size_t src_len)
+{
+    if (*dst_len + src_len >= dst_max) return false;
+    memcpy(dst + *dst_len, src, src_len);
+    *dst_len += src_len;
+    return true;
+}
+
+static size_t utf8_sequence_len(const unsigned char *src)
+{
+    size_t len;
+    if      (src[0] < 0x80) len = 1;
+    else if (src[0] >= 0xC2 && src[0] < 0xE0) len = 2;
+    else if (src[0] >= 0xE0 && src[0] < 0xF0) len = 3;
+    else if (src[0] >= 0xF0 && src[0] < 0xF5) len = 4;
+    else return 1;
+
+    for (size_t i = 1; i < len; ++i)
+        if (!src[i] || (src[i] & 0xC0) != 0x80) return 1;
+    return len;
+}
+
 static void utf8_to_display(char *dst, const char *src, size_t dst_max)
 {
+    if (!dst || !dst_max) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+
     size_t di = 0;
     const unsigned char *s = (const unsigned char *)src;
     while (*s && di + 1 < dst_max) {
         unsigned char c = *s;
         if (c < 0x80) {
-            // Plain ASCII — pass through as-is
             dst[di++] = (char)c;
             s++;
-        } else if (c == 0xC3 && s[1]) {
+            continue;
+        }
+
+        size_t utf8_len = utf8_sequence_len(s);
+        if (utf8_len == 1) {
+            // Invalid UTF-8 lead/continuation byte: drop it safely.
+            s++;
+            continue;
+        }
+
+        bool font_supported =
+            (c == 0xC2 && (s[1] == 0xB0 || s[1] == 0xB2)) ||       // ° ²
+            (c == 0xC3 &&                                            // Latin fallback glyphs
+             (s[1] == 0x80 || s[1] == 0x84 || s[1] == 0x88 ||
+              s[1] == 0x89 || s[1] == 0x8A || s[1] == 0x96 ||
+              s[1] == 0x97 || s[1] == 0x9C || s[1] == 0x9F ||
+              s[1] == 0xA0 || s[1] == 0xA4 || s[1] == 0xA8 ||
+              s[1] == 0xA9 || s[1] == 0xAA || s[1] == 0xB6 ||
+              s[1] == 0xBB || s[1] == 0xBC)) ||
+            (c == 0xE2 &&                                           // € — → ≈ ─ ⚠
+             ((s[1] == 0x82 && s[2] == 0xAC) ||
+              (s[1] == 0x80 && s[2] == 0x94) ||
+              (s[1] == 0x86 && s[2] == 0x92) ||
+              (s[1] == 0x89 && s[2] == 0x88) ||
+              (s[1] == 0x94 && s[2] == 0x80) ||
+              (s[1] == 0x9A && s[2] == 0xA0)));
+        if (font_supported) {
+            if (!append_display_utf8(dst, dst_max, &di, s, utf8_len)) break;
+            s += utf8_len;
+        } else if (c == 0xC3) {
             // Latin-1 Supplement block (U+00C0–U+00FF)
             unsigned char n = s[1];
             const char *rep = NULL;
-            if      (n == 0x84 || n == 0xA4) rep = "AE"; // Ä / ä
-            else if (n == 0x96 || n == 0xB6) rep = "OE"; // Ö / ö
-            else if (n == 0x9C || n == 0xBC) rep = "UE"; // Ü / ü
-            else if (n == 0x9F)              rep = "SS"; // ß
-            else if (n==0x80||n==0xA0||n==0x81||n==0xA1||
-                     n==0x82||n==0xA2||n==0x83||n==0xA3) rep = "A"; // À Á Â Ã
+            if      (n==0x81||n==0xA1||n==0x82||n==0xA2||n==0x83||n==0xA3)
+                rep = "A"; // Á Â Ã á â ã
             else if (n == 0x87 || n == 0xA7)             rep = "C"; // Ç / ç
-            else if (n==0x88||n==0xA8||n==0x89||n==0xA9||
-                     n==0x8A||n==0xAA||n==0x8B||n==0xAB) rep = "E"; // È É Ê Ë
+            else if (n==0x8B || n==0xAB)                 rep = "E"; // Ë / ë
             else if (n==0x8C||n==0xAC||n==0x8D||n==0xAD||
                      n==0x8E||n==0xAE||n==0x8F||n==0xAF) rep = "I"; // Ì Í Î Ï
             else if (n == 0x91 || n == 0xB1)             rep = "N"; // Ñ / ñ
             else if (n==0x92||n==0xB2||n==0x93||n==0xB3||
                      n==0x94||n==0xB4||n==0x95||n==0xB5) rep = "O"; // Ò Ó Ô Õ
             else if (n==0x99||n==0xB9||n==0x9A||n==0xBA||
-                     n==0x9B||n==0xBB)                   rep = "U"; // Ù Ú Û
+                     n==0x9B)                             rep = "U"; // Ù Ú Û
             s += 2;
             if (rep) {
                 for (int i = 0; rep[i] && di + 1 < dst_max; i++)
                     dst[di++] = rep[i];
             }
         } else {
-            // Skip any other multibyte sequence
-            if      (c < 0xE0) s += 2;
-            else if (c < 0xF0) s += 3;
-            else               s += 4;
+            // No glyph is available for this valid multibyte sequence.
+            s += utf8_len;
         }
     }
     dst[di] = '\0';
@@ -989,13 +1039,11 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
             utf8_to_display(ps->name, jname->valuestring, MAX_NAME_LEN);
         }
         if (jnr && cJSON_IsString(jnr)) {
-            strncpy(ps->mitgliedNr, jnr->valuestring, sizeof(ps->mitgliedNr) - 1);
-            ps->mitgliedNr[sizeof(ps->mitgliedNr) - 1] = '\0';
+            utf8_to_display(ps->mitgliedNr, jnr->valuestring, sizeof(ps->mitgliedNr));
         }
         if (jaktiv && cJSON_IsBool(jaktiv)) ps->portalAktiv = cJSON_IsTrue(jaktiv);
         if (jemail && cJSON_IsString(jemail)) {
-            strncpy(ps->email, jemail->valuestring, MAX_EMAIL_LEN - 1);
-            ps->email[MAX_EMAIL_LEN - 1] = '\0';
+            utf8_to_display(ps->email, jemail->valuestring, MAX_EMAIL_LEN);
         }
     }
 
@@ -1682,7 +1730,7 @@ esp_err_t http_fetch_produkte(void)
         p->id = (int)id->valuedouble;
         if (cJSON_IsString(code)) strncpy(p->code, code->valuestring, sizeof(p->code) - 1);
         strncpy(p->category, category->valuestring, sizeof(p->category) - 1);
-        strncpy(p->name, name->valuestring, sizeof(p->name) - 1);
+        utf8_to_display(p->name, name->valuestring, sizeof(p->name));
         p->active = cJSON_IsTrue(active);
         if (current_price && !cJSON_IsNull(current_price)) {
             p->preisCent = (int)price->valuedouble;

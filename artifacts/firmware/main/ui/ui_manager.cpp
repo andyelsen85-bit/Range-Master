@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "ui_fonts.h"
 
 #include "ui_manager.h"
 #include "game_store.h"
@@ -143,12 +144,12 @@ static void styles_init(void)
     // Title label
     lv_style_init(&g_style_label_title);
     lv_style_set_text_color(&g_style_label_title, lv_color_hex(CLR_TEXT));
-    lv_style_set_text_font(&g_style_label_title, &lv_font_montserrat_24);
+    lv_style_set_text_font(&g_style_label_title, UI_FONT_24);
 
     // Mono label
     lv_style_init(&g_style_label_mono);
     lv_style_set_text_color(&g_style_label_mono, lv_color_hex(CLR_MUTED));
-    lv_style_set_text_font(&g_style_label_mono, &lv_font_montserrat_14);
+    lv_style_set_text_font(&g_style_label_mono, UI_FONT_14);
 
     // Sidebar
     lv_style_init(&g_style_sidebar);
@@ -174,6 +175,7 @@ void screen_base_init(lv_obj_t *scr)
 void ui_manager_init(void)
 {
     ESP_LOGI(TAG, "Building LVGL screens...");
+    ui_fonts_init();
     styles_init();
 
     // Create persistent WiFi worker tasks NOW, before any screen_*_create()
