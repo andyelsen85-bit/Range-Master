@@ -739,6 +739,72 @@ export const GetAdminBillDaySummaryResponse = zod.object({
 })
 
 
+export const GetAdminBillActivityDaysQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date()
+})
+
+export const GetAdminBillActivityDaysResponse = zod.object({
+  "from": zod.coerce.date(),
+  "to": zod.coerce.date(),
+  "days": zod.array(zod.coerce.date())
+})
+
+
+export const GetAdminBillPeriodSummaryQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date()
+})
+
+export const GetAdminBillPeriodSummaryResponse = zod.object({
+  "from": zod.coerce.date(),
+  "to": zod.coerce.date(),
+  "players": zod.array(zod.object({
+  "spielerId": zod.number().int(),
+  "spielerName": zod.string(),
+  "mitgliedNr": zod.string().nullable(),
+  "lines": zod.array(zod.object({
+  "productId": zod.number().int(),
+  "productName": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "priceRevisionId": zod.number().int(),
+  "unitPriceCents": zod.number().int(),
+  "quantity": zod.number().int(),
+  "totalCents": zod.number().int()
+})),
+  "categorySubtotals": zod.record(zod.string(), zod.number().int()),
+  "totalCents": zod.number().int(),
+  "openTotalCents": zod.number().int(),
+  "credit": zod.object({
+  "granted": zod.number().int(),
+  "used": zod.number().int(),
+  "remaining": zod.number().int()
+}),
+  "games": zod.number().int(),
+  "completedGames": zod.number().int(),
+  "confirmedClays": zod.number().int(),
+  "paidDays": zod.number().int(),
+  "state": zod.enum(['OPEN', 'PENDING_NEUTRAL', 'PAID'])
+})),
+  "categorySubtotals": zod.record(zod.string(), zod.number().int()),
+  "productTotals": zod.record(zod.string(), zod.object({
+  "productId": zod.number().int(),
+  "productName": zod.string(),
+  "category": zod.enum(['GAME_CREDIT', 'AMMO_CAL12', 'AMMO_CAL20', 'FOOD', 'DRINK']),
+  "priceRevisionId": zod.number().int(),
+  "unitPriceCents": zod.number().int(),
+  "quantity": zod.number().int(),
+  "totalCents": zod.number().int()
+})),
+  "generalTotalCents": zod.number().int(),
+  "uniquePlayers": zod.number().int(),
+  "paidPlayers": zod.number().int(),
+  "games": zod.number().int(),
+  "completedGames": zod.number().int(),
+  "confirmedClays": zod.number().int()
+})
+
+
 export const MarkAdminBillPaidParams = zod.object({
   "spielerId": zod.coerce.number().int()
 })

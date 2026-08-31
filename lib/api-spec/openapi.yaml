@@ -646,6 +646,28 @@ paths:
       parameters: [{ name: datum, in: query, required: true, schema: { type: string, format: date } }]
       responses:
         "200": { description: Authoritative bill day summary, content: { application/json: { schema: { $ref: "#/components/schemas/BillDaySummary" } } } }
+  /admin/bills/activity-days:
+    get:
+      operationId: getAdminBillActivityDays
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200": { description: "Dates with synchronized billing, game, or payment activity", content: { application/json: { schema: { $ref: "#/components/schemas/BillActivityDays" } } } }
+        "400": { description: Invalid or oversized date range, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+  /admin/bills/period-summary:
+    get:
+      operationId: getAdminBillPeriodSummary
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200": { description: Authoritative inclusive billing period summary, content: { application/json: { schema: { $ref: "#/components/schemas/BillPeriodSummary" } } } }
+        "400": { description: Invalid or oversized date range, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
   /admin/bills/{spielerId}/paid:
     post:
       operationId: markAdminBillPaid
@@ -856,6 +878,60 @@ components:
         games: { type: integer }
         completedGames: { type: integer }
         confirmedClays: { type: integer }
+    BillActivityDays:
+      type: object
+      required: [from, to, days]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        days:
+          type: array
+          items: { type: string, format: date }
+    BillPeriodSummary:
+      type: object
+      required: [from, to, players, categorySubtotals, productTotals, generalTotalCents, uniquePlayers, paidPlayers, games, completedGames, confirmedClays]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        players:
+          type: array
+          items: { $ref: "#/components/schemas/BillPeriodPlayer" }
+        categorySubtotals: { type: object, additionalProperties: { type: integer } }
+        productTotals:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/BillProductTotal"
+        generalTotalCents: { type: integer }
+        uniquePlayers: { type: integer }
+        paidPlayers: { type: integer }
+        games: { type: integer }
+        completedGames: { type: integer }
+        confirmedClays: { type: integer }
+    BillPeriodPlayer:
+      type: object
+      required: [spielerId, spielerName, mitgliedNr, lines, categorySubtotals, totalCents, openTotalCents, credit, games, completedGames, confirmedClays, paidDays, state]
+      properties:
+        spielerId: { type: integer }
+        spielerName: { type: string }
+        mitgliedNr: { type: [string, "null"] }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/BillProductTotal" }
+        categorySubtotals: { type: object, additionalProperties: { type: integer } }
+        totalCents: { type: integer }
+        openTotalCents: { type: integer }
+        credit:
+          type: object
+          required: [granted, used, remaining]
+          properties:
+            granted: { type: integer }
+            used: { type: integer }
+            remaining: { type: integer }
+        games: { type: integer }
+        completedGames: { type: integer }
+        confirmedClays: { type: integer }
+        paidDays: { type: integer }
+        state: { type: string, enum: [OPEN, PENDING_NEUTRAL, PAID] }
     BillProductTotal:
       type: object
       required: [productId, productName, category, priceRevisionId, unitPriceCents, quantity, totalCents]

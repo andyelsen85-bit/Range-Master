@@ -26,11 +26,15 @@ import type {
   AdminCreditAdjustmentResult,
   AdminPurgeInput,
   AdminPurgeResult,
+  BillActivityDays,
   BillDaySummary,
+  BillPeriodSummary,
   DaySalesReport,
   ErrorResponse,
   FlexibleProductInput,
+  GetAdminBillActivityDaysParams,
   GetAdminBillDaySummaryParams,
+  GetAdminBillPeriodSummaryParams,
   GetAdminDaySalesParams,
   GetMyPurchases200,
   GetRangliste200,
@@ -2648,6 +2652,162 @@ export function useGetAdminBillDaySummary<TData = Awaited<ReturnType<typeof getA
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAdminBillDaySummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAdminBillActivityDaysUrl = (params: GetAdminBillActivityDaysParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/bills/activity-days?${stringifiedParams}` : `/api/admin/bills/activity-days`
+}
+
+export const getAdminBillActivityDays = async (params: GetAdminBillActivityDaysParams, options?: Parameters<typeof customFetch>[1]): Promise<BillActivityDays> => {
+
+  return customFetch<BillActivityDays>(getGetAdminBillActivityDaysUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminBillActivityDaysQueryKey = (params?: GetAdminBillActivityDaysParams,) => {
+    return [
+    `/api/admin/bills/activity-days`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAdminBillActivityDaysQueryOptions = <TData = Awaited<ReturnType<typeof getAdminBillActivityDays>>, TError = ErrorType<ErrorResponse>>(params: GetAdminBillActivityDaysParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminBillActivityDays>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminBillActivityDaysQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminBillActivityDays>>> = ({ signal }) => getAdminBillActivityDays(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminBillActivityDays>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminBillActivityDaysQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminBillActivityDays>>>
+export type GetAdminBillActivityDaysQueryError = ErrorType<ErrorResponse>
+
+
+
+export function useGetAdminBillActivityDays<TData = Awaited<ReturnType<typeof getAdminBillActivityDays>>, TError = ErrorType<ErrorResponse>>(
+ params: GetAdminBillActivityDaysParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminBillActivityDays>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminBillActivityDaysQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAdminBillPeriodSummaryUrl = (params: GetAdminBillPeriodSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/bills/period-summary?${stringifiedParams}` : `/api/admin/bills/period-summary`
+}
+
+export const getAdminBillPeriodSummary = async (params: GetAdminBillPeriodSummaryParams, options?: Parameters<typeof customFetch>[1]): Promise<BillPeriodSummary> => {
+
+  return customFetch<BillPeriodSummary>(getGetAdminBillPeriodSummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminBillPeriodSummaryQueryKey = (params?: GetAdminBillPeriodSummaryParams,) => {
+    return [
+    `/api/admin/bills/period-summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAdminBillPeriodSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getAdminBillPeriodSummary>>, TError = ErrorType<ErrorResponse>>(params: GetAdminBillPeriodSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminBillPeriodSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminBillPeriodSummaryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminBillPeriodSummary>>> = ({ signal }) => getAdminBillPeriodSummary(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminBillPeriodSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminBillPeriodSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminBillPeriodSummary>>>
+export type GetAdminBillPeriodSummaryQueryError = ErrorType<ErrorResponse>
+
+
+
+export function useGetAdminBillPeriodSummary<TData = Awaited<ReturnType<typeof getAdminBillPeriodSummary>>, TError = ErrorType<ErrorResponse>>(
+ params: GetAdminBillPeriodSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminBillPeriodSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminBillPeriodSummaryQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

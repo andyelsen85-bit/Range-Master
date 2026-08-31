@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useToast } from "@/hooks/use-toast";
+import { Calendar } from "@/components/ui/calendar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Coins, FileText, CheckCircle2, AlertCircle, ShoppingCart, Info, Activity, Target, Receipt, CheckCircle, Clock } from "lucide-react";
+import { Coins, AlertCircle, ShoppingCart, Activity, Target, Receipt, CheckCircle, Clock, CalendarRange, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { endOfMonth, format, parseISO, startOfMonth } from "date-fns";
+import { de } from "date-fns/locale";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -44,7 +47,7 @@ interface DaySummaryPlayerBill {
     unitPriceCents: number;
     totalCents: number;
   }[];
-  dayLines: {
+  dayLines?: {
     productId: number;
     productName: string;
     category: string;
@@ -54,9 +57,14 @@ interface DaySummaryPlayerBill {
   }[];
 
   categorySubtotals: Record<string, number>;
-  dayCategorySubtotals: Record<string, number>;
+  dayCategorySubtotals?: Record<string, number>;
   totalCents: number;
-  dayTotalCents: number;
+  dayTotalCents?: number;
+  openTotalCents?: number;
+  games?: number;
+  completedGames?: number;
+  confirmedClays?: number;
+  paidDays?: number;
 }
 
 interface DaySummaryProductTotal {
@@ -67,13 +75,23 @@ interface DaySummaryProductTotal {
 }
 
 interface DaySummary {
-  datum: string;
+  datum?: string;
+  from?: string;
+  to?: string;
   generalTotalCents: number;
+  uniquePlayers: number;
+  paidPlayers: number;
   games: number;
   completedGames: number;
   confirmedClays: number;
   productTotals: Record<string, DaySummaryProductTotal>;
   players: DaySummaryPlayerBill[];
+}
+
+interface ActivityDays {
+  from: string;
+  to: string;
+  days: string[];
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -85,6 +103,15 @@ function formatMoney(cents: number) {
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function dateStr(date: Date): string {
+  return format(date, "yyyy-MM-dd");
+}
+
+function periodLabel(from: string, to: string): string {
+  if (from === to) return format(parseISO(from), "dd. MMMM yyyy", { locale: de });
+  return `${format(parseISO(from), "dd. MMM yyyy", { locale: de })} – ${format(parseISO(to), "dd. MMM yyyy", { locale: de })}`;
 }
 
 function StatCard({ label, value, sub, icon: Icon }: { label: string; value: number | string; sub?: string; icon: any }) {
@@ -110,21 +137,33 @@ export default function AdminOfrechnung() {
   const { toast } = useToast();
   const qc = useQueryClient();
   
-  const [datum, setDatum] = useState(todayStr());
+  const today = todayStr();
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const [pendingStart, setPendingStart] = useState<string | null>(null);
+  const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(parseISO(today)));
   const [filterState, setFilterState] = useState<"ALL" | "OPEN" | "PENDING_NEUTRAL" | "PAID">("ALL");
   const [selectedBill, setSelectedBill] = useState<DaySummaryPlayerBill | null>(null);
+  const isSingleDay = from === to && pendingStart === null;
+  const visibleMonthFrom = dateStr(startOfMonth(calendarMonth));
+  const visibleMonthTo = dateStr(endOfMonth(calendarMonth));
 
   const { data, isLoading, error } = useQuery<DaySummary>({
-    queryKey: ["admin-day-summary", datum],
+    queryKey: ["admin-bill-summary", from, to],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/bills/day-summary?datum=${datum}`, {
+      const endpoint = from === to
+        ? `/api/admin/bills/day-summary?datum=${from}`
+        : `/api/admin/bills/period-summary?from=${from}&to=${to}`;
+      const res = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
         if (res.status === 404) {
           return {
-            datum,
+            ...(from === to ? { datum: from } : { from, to }),
             generalTotalCents: 0,
+            uniquePlayers: 0,
+            paidPlayers: 0,
             games: 0,
             completedGames: 0,
             confirmedClays: 0,
@@ -139,6 +178,67 @@ export default function AdminOfrechnung() {
     },
   });
 
+  const { data: activityData, error: activityError } = useQuery<ActivityDays>({
+    queryKey: ["admin-bill-activity-days", visibleMonthFrom, visibleMonthTo],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/bills/activity-days?from=${visibleMonthFrom}&to=${visibleMonthTo}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      return await res.json();
+    },
+  });
+
+  const activityDates = useMemo(() => (activityData?.days ?? []).map((value) => parseISO(value)), [activityData?.days]);
+
+  useEffect(() => {
+    setSelectedBill(null);
+  }, [from, to]);
+
+  function selectCalendarDay(selected: Date) {
+    const selectedDate = dateStr(selected);
+    if (pendingStart === null) {
+      setPendingStart(selectedDate);
+      setFrom(selectedDate);
+      setTo(selectedDate);
+      return;
+    }
+    if (selectedDate < pendingStart) {
+      setFrom(selectedDate);
+      setTo(pendingStart);
+    } else {
+      setFrom(pendingStart);
+      setTo(selectedDate);
+    }
+    setPendingStart(null);
+  }
+
+  function updateFrom(value: string) {
+    if (!value) return;
+    setPendingStart(null);
+    setFrom(value);
+    if (value > to) setTo(value);
+    setCalendarMonth(startOfMonth(parseISO(value)));
+  }
+
+  function updateTo(value: string) {
+    if (!value) return;
+    setPendingStart(null);
+    setTo(value);
+    if (value < from) setFrom(value);
+    setCalendarMonth(startOfMonth(parseISO(value)));
+  }
+
+  function resetToday() {
+    setPendingStart(null);
+    setFrom(today);
+    setTo(today);
+    setCalendarMonth(startOfMonth(parseISO(today)));
+  }
+
   const payMut = useMutation({
     mutationFn: async (spielerId: number) => {
       const res = await fetch(`/api/admin/bills/${spielerId}/paid`, {
@@ -147,7 +247,7 @@ export default function AdminOfrechnung() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ datum }),
+        body: JSON.stringify({ datum: from }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -156,7 +256,8 @@ export default function AdminOfrechnung() {
       return await res.json();
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["admin-day-summary", datum] });
+      qc.invalidateQueries({ queryKey: ["admin-bill-summary", from, to] });
+      qc.invalidateQueries({ queryKey: ["admin-bill-activity-days"] });
       toast({ title: "Bezahlt", description: "Die Rechnung wurde als bezahlt markiert." });
       setSelectedBill(null);
     },
@@ -172,11 +273,11 @@ export default function AdminOfrechnung() {
     return true;
   });
 
-  const summary = data ?? { generalTotalCents: 0, games: 0, completedGames: 0, confirmedClays: 0, productTotals: {} };
+  const summary = data ?? { generalTotalCents: 0, uniquePlayers: 0, paidPlayers: 0, games: 0, completedGames: 0, confirmedClays: 0, productTotals: {}, players: [] };
   const products = Object.values(summary.productTotals || {}) as DaySummaryProductTotal[];
-  const selectedDayLines = selectedBill?.dayLines ?? selectedBill?.lines ?? [];
-  const selectedDayCategories = selectedBill?.dayCategorySubtotals ?? selectedBill?.categorySubtotals ?? {};
-  const selectedDayTotal = selectedBill?.dayTotalCents ?? selectedBill?.totalCents ?? 0;
+  const selectedDayLines = isSingleDay ? selectedBill?.dayLines ?? selectedBill?.lines ?? [] : selectedBill?.lines ?? [];
+  const selectedDayCategories = isSingleDay ? selectedBill?.dayCategorySubtotals ?? selectedBill?.categorySubtotals ?? {} : selectedBill?.categorySubtotals ?? {};
+  const selectedDayTotal = isSingleDay ? selectedBill?.dayTotalCents ?? selectedBill?.totalCents ?? 0 : selectedBill?.totalCents ?? 0;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
@@ -184,29 +285,123 @@ export default function AdminOfrechnung() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Tagesabrechnung</h1>
           <p className="text-muted-foreground mt-2 text-sm font-medium">
-            Vollständige Übersicht des Tages, der Spielerrechnungen und Zahlungen.
+            Vollständige Übersicht für einen Tag oder einen frei gewählten Zeitraum.
           </p>
         </div>
-        <div className="flex items-center gap-3 bg-secondary/20 p-1.5 rounded-xl border border-border/40 w-fit">
-          <div className="px-3">
-            <Clock size={16} className="text-muted-foreground" />
-          </div>
-          <input
-            type="date"
-            value={datum}
-            onChange={(e) => e.target.value && setDatum(e.target.value)}
-            className="bg-card border border-border/60 rounded-lg px-4 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors"
-            data-testid="date-picker-summary"
-          />
+        <div className="text-right">
+          <p className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Ausgewählter Zeitraum</p>
+          <p className="mt-1 text-sm font-bold">{periodLabel(from, to)}</p>
         </div>
       </header>
 
+      <section className="grid grid-cols-1 lg:grid-cols-[auto_minmax(0,1fr)] gap-5">
+        <div className="bg-card border border-border/50 rounded-xl shadow-sm overflow-hidden">
+          <Calendar
+            mode="range"
+            month={calendarMonth}
+            onMonthChange={setCalendarMonth}
+            selected={{
+              from: parseISO(from),
+              to: pendingStart === null ? parseISO(to) : undefined,
+            }}
+            onDayClick={selectCalendarDay}
+            locale={de}
+            modifiers={{ activity: activityDates }}
+            modifiersClassNames={{
+              activity: "after:absolute after:bottom-1 after:left-1/2 after:z-20 after:h-1.5 after:w-1.5 after:-translate-x-1/2 after:rounded-full after:bg-emerald-500",
+            }}
+            className="w-full p-4 [--cell-size:2.6rem] sm:[--cell-size:3rem]"
+            data-testid="billing-calendar"
+          />
+          <div className="border-t border-border/40 px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              Tag mit Aktivität
+            </span>
+            {activityError && (
+              <span className="flex items-center gap-1.5 text-destructive">
+                <AlertCircle size={13} />
+                Aktivitätsmarkierungen konnten nicht geladen werden
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-card border border-border/50 rounded-xl p-5 shadow-sm flex flex-col justify-between gap-6">
+          <div>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <CalendarRange size={20} />
+                </div>
+                <div>
+                  <h2 className="font-bold">Zeitraum auswählen</h2>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    {pendingStart
+                      ? "Startdatum gewählt – jetzt das Enddatum auswählen."
+                      : "Erster Klick: Von-Datum. Zweiter Klick: Bis-Datum."}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={resetToday}
+                className="h-9 px-3 rounded-lg border border-border/60 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-secondary/40 transition-colors flex items-center gap-2"
+              >
+                <RotateCcw size={14} />
+                Heute
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+              <label className="space-y-2">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Von</span>
+                <input
+                  type="date"
+                  value={from}
+                  onChange={(event) => updateFrom(event.target.value)}
+                  className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  data-testid="date-picker-from"
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Bis</span>
+                <input
+                  type="date"
+                  value={to}
+                  onChange={(event) => updateTo(event.target.value)}
+                  className="w-full bg-background border border-border/60 rounded-lg px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  data-testid="date-picker-to"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className={cn(
+            "rounded-xl border px-4 py-3 text-sm",
+            pendingStart
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              : "border-primary/20 bg-primary/5 text-foreground"
+          )}>
+            <p className="font-bold">
+              {pendingStart ? `Von ${format(parseISO(pendingStart), "dd.MM.yyyy", { locale: de })}` : periodLabel(from, to)}
+            </p>
+            <p className="text-xs mt-1 opacity-75">
+              {pendingStart
+                ? "Wähle denselben Tag erneut für eine Einzeltagesansicht."
+                : isSingleDay
+                  ? "Einzeltagesansicht – Rechnungen können als bezahlt markiert werden."
+                  : "Zeitraumansicht – Zahlungen werden nur in einer Einzeltagesansicht geändert."}
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-         <StatCard label="Gesamtumsatz" value={formatMoney(summary.generalTotalCents)} sub="Alle Produkte" icon={Coins} />
+         <StatCard label="Gesamtumsatz" value={formatMoney(summary.generalTotalCents)} sub={isSingleDay ? "Alle Produkte des Tages" : "Alle Produkte im Zeitraum"} icon={Coins} />
          <StatCard label="Spiele" value={summary.games} sub={`${summary.completedGames} abgeschlossen`} icon={Activity} />
          <StatCard label="Tauben" value={summary.confirmedClays} sub="Ausgelöst (A-G: 1, H: 2)" icon={Target} />
-         <StatCard label="Rechnungen" value={data?.players.length ?? 0} sub={`${data?.players.filter(b => b.state === "PAID").length ?? 0} bezahlt`} icon={Receipt} />
+         <StatCard label={isSingleDay ? "Rechnungen" : "Spieler"} value={summary.uniquePlayers} sub={`${summary.paidPlayers} vollständig bezahlt`} icon={Receipt} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -214,7 +409,7 @@ export default function AdminOfrechnung() {
         {/* Left Column: Player Bills */}
         <div className="xl:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold tracking-tight">Spielerrechnungen</h2>
+            <h2 className="text-xl font-bold tracking-tight">{isSingleDay ? "Spielerrechnungen" : "Spieleraktivitäten"}</h2>
             <div className="flex gap-1 bg-secondary/20 rounded-xl p-1 border border-border/40">
               {(["ALL", "OPEN", "PENDING_NEUTRAL", "PAID"] as const).map(f => (
                 <button
@@ -246,7 +441,7 @@ export default function AdminOfrechnung() {
             ) : filteredBills.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <Receipt size={32} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-medium">Keine Rechnungen gefunden.</p>
+                <p className="text-sm font-medium">Keine Aktivitäten im ausgewählten Zeitraum gefunden.</p>
               </div>
             ) : (
               <div className="divide-y divide-border/30">
@@ -276,9 +471,14 @@ export default function AdminOfrechnung() {
                     
                     <div className="flex flex-col items-end gap-1">
                       <p className="font-mono font-black text-lg">{formatMoney(bill.totalCents)}</p>
-                      {bill.dayTotalCents !== bill.totalCents && (
+                      {isSingleDay && bill.dayTotalCents !== undefined && bill.dayTotalCents !== bill.totalCents && (
                         <span className="text-[10px] font-mono text-muted-foreground">
                            Tag: {formatMoney(bill.dayTotalCents)}
+                        </span>
+                      )}
+                      {!isSingleDay && bill.openTotalCents !== undefined && (
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          Davon offen: {formatMoney(bill.openTotalCents)}
                         </span>
                       )}
                       {bill.state === "PAID" ? (
@@ -383,8 +583,12 @@ export default function AdminOfrechnung() {
                   </div>
                 </div>
                 <div className="text-right">
-                   <p className="text-xs uppercase tracking-widest font-bold opacity-60 mb-1">Aktuell offen</p>
-                  <p className="text-4xl font-mono font-black">{formatMoney(selectedBill.totalCents)}</p>
+                   <p className="text-xs uppercase tracking-widest font-bold opacity-60 mb-1">
+                     {isSingleDay ? "Aktuell offen" : "Aktivität im Zeitraum"}
+                   </p>
+                  <p className="text-4xl font-mono font-black">
+                    {formatMoney(isSingleDay ? selectedBill.totalCents : selectedDayTotal)}
+                  </p>
                 </div>
               </div>
 
@@ -404,14 +608,18 @@ export default function AdminOfrechnung() {
                     <p className="font-mono font-black mt-1 text-lg text-primary">{selectedBill.credit.remaining}</p>
                   </div>
                   <div>
-                     <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Tagessumme</p>
+                     <p className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
+                       {isSingleDay ? "Tagessumme" : "Zeitraumsumme"}
+                     </p>
                     <p className="font-mono font-black mt-1 text-lg">{formatMoney(selectedDayTotal)}</p>
                   </div>
                 </div>
 
                 {/* Subtotals by category */}
                 <div className="mb-6">
-                   <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Zusammenfassung des Tages</h4>
+                   <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">
+                     {isSingleDay ? "Zusammenfassung des Tages" : "Zusammenfassung des Zeitraums"}
+                   </h4>
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(selectedDayCategories).map(([cat, cents]) => (
                       <div key={cat} className="flex items-center gap-2 bg-background border border-border/50 rounded-lg px-3 py-1.5 shadow-sm">
@@ -424,7 +632,9 @@ export default function AdminOfrechnung() {
 
                 {/* Line Items */}
                 <div>
-                   <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">Einkäufe des Tages</h4>
+                   <h4 className="text-xs uppercase tracking-widest font-bold text-muted-foreground mb-3">
+                     {isSingleDay ? "Einkäufe des Tages" : "Aktivitäten im Zeitraum"}
+                   </h4>
                   <div className="border border-border/50 rounded-xl overflow-hidden shadow-sm">
                     <Table>
                       <TableHeader className="bg-secondary/20">
@@ -450,7 +660,7 @@ export default function AdminOfrechnung() {
                         {selectedDayLines.length === 0 && (
                           <TableRow>
                             <TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
-                               Keine abgerechneten Aktivitäten für diesen Tag
+                               Keine abgerechneten Aktivitäten für den ausgewählten Zeitraum
                             </TableCell>
                           </TableRow>
                         )}
@@ -467,7 +677,7 @@ export default function AdminOfrechnung() {
                 >
                   Schließen
                 </button>
-                {selectedBill.state !== "PAID" && (
+                {isSingleDay && selectedBill.state !== "PAID" && (
                   <button 
                     onClick={() => payMut.mutate(selectedBill.spielerId)}
                     disabled={payMut.isPending}
@@ -481,6 +691,11 @@ export default function AdminOfrechnung() {
                       </>
                     )}
                   </button>
+                )}
+                {!isSingleDay && (
+                  <p className="mr-auto self-center text-xs text-muted-foreground">
+                    Zum Bezahlen bitte einen einzelnen Tag auswählen.
+                  </p>
                 )}
               </div>
             </>

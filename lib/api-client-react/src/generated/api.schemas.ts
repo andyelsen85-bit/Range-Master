@@ -279,6 +279,64 @@ export interface BillDaySummary {
   confirmedClays: number;
 }
 
+export interface BillActivityDays {
+  from: string;
+  to: string;
+  days: string[];
+}
+
+export type BillPeriodSummaryCategorySubtotals = {[key: string]: number};
+
+export type BillPeriodSummaryProductTotals = {[key: string]: BillProductTotal};
+
+export type BillPeriodPlayerState = typeof BillPeriodPlayerState[keyof typeof BillPeriodPlayerState];
+
+
+export const BillPeriodPlayerState = {
+  OPEN: 'OPEN',
+  PENDING_NEUTRAL: 'PENDING_NEUTRAL',
+  PAID: 'PAID',
+} as const;
+
+export type BillPeriodPlayerCategorySubtotals = {[key: string]: number};
+
+export type BillPeriodPlayerCredit = {
+  granted: number;
+  used: number;
+  remaining: number;
+};
+
+export interface BillPeriodPlayer {
+  spielerId: number;
+  spielerName: string;
+  /** @nullable */
+  mitgliedNr: string | null;
+  lines: BillProductTotal[];
+  categorySubtotals: BillPeriodPlayerCategorySubtotals;
+  totalCents: number;
+  openTotalCents: number;
+  credit: BillPeriodPlayerCredit;
+  games: number;
+  completedGames: number;
+  confirmedClays: number;
+  paidDays: number;
+  state: BillPeriodPlayerState;
+}
+
+export interface BillPeriodSummary {
+  from: string;
+  to: string;
+  players: BillPeriodPlayer[];
+  categorySubtotals: BillPeriodSummaryCategorySubtotals;
+  productTotals: BillPeriodSummaryProductTotals;
+  generalTotalCents: number;
+  uniquePlayers: number;
+  paidPlayers: number;
+  games: number;
+  completedGames: number;
+  confirmedClays: number;
+}
+
 export interface DaySalesItem {
   spielerId: number;
   spielerName?: string;
@@ -624,6 +682,16 @@ export type PostSyncBillPayments200 = {
 
 export type GetAdminBillDaySummaryParams = {
 datum: string;
+};
+
+export type GetAdminBillActivityDaysParams = {
+from: string;
+to: string;
+};
+
+export type GetAdminBillPeriodSummaryParams = {
+from: string;
+to: string;
 };
 
 export type MarkAdminBillPaidBody = {

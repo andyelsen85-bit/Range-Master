@@ -11,6 +11,12 @@ export function isSettlementRedundant(status: { hasPayment: boolean; hasLaterBil
   return status.hasPayment && !status.hasLaterBillableActivity;
 }
 
+export function periodSettlementState(openDays: number, billableDays: number): "OPEN" | "PAID" | "PENDING_NEUTRAL" {
+  if (openDays > 0) return "OPEN";
+  if (billableDays > 0) return "PAID";
+  return "PENDING_NEUTRAL";
+}
+
 /** Settlements are ordered by server receipt time, never a terminal clock. */
 export function isActivityAfterPayment(createdAt: Date, paidAt: Date | null): boolean {
   return paidAt === null || createdAt.getTime() > paidAt.getTime();
@@ -176,4 +182,191 @@ export async function dayBillSummary(datum: string) {
   return { datum, players, categorySubtotals, productTotals, generalTotalCents: fullDayLines.reduce((n: number, line: any) => n + Number(line.totalCents), 0),
     uniquePlayers: players.length, paidPlayers: players.filter(p => p.state === "PAID").length,
     games: Number(gameTotals?.games ?? 0), completedGames: Number(gameTotals?.completed_games ?? 0), confirmedClays: Number(gameTotals?.confirmed_clays ?? 0) };
+}
+
+/** Dates with any authoritative activity, used to decorate the portal calendar. */
+export async function activityDays(from: string, to: string) {
+  const result = await db.execute(sql`
+    SELECT activity_date::text AS activity_date
+    FROM (
+      SELECT datum AS activity_date
+      FROM sale_events
+      WHERE datum BETWEEN ${from} AND ${to}
+      UNION
+      SELECT datum AS activity_date
+      FROM kredit_events
+      WHERE datum BETWEEN ${from} AND ${to}
+      UNION
+      SELECT (datum AT TIME ZONE 'UTC')::date AS activity_date
+      FROM spiele
+      WHERE (datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+      UNION
+      SELECT datum AS activity_date
+      FROM bill_payments
+      WHERE datum BETWEEN ${from} AND ${to}
+    ) days
+    ORDER BY activity_date
+  `);
+  return { from, to, days: result.rows.map((row: any) => String(row.activity_date)) };
+}
+
+/** Inclusive period report. Billable totals are full activity; open totals retain payment context. */
+export async function periodBillSummary(from: string, to: string) {
+  const result = await db.execute(sql`
+    WITH latest_payments AS (
+      SELECT DISTINCT ON (spieler_id, datum) spieler_id, datum, paid_at
+      FROM bill_payments
+      WHERE datum BETWEEN ${from} AND ${to} AND status = 'PAID'
+      ORDER BY spieler_id, datum, paid_at DESC, id DESC
+    ), activity AS (
+      SELECT spieler_id FROM sale_events WHERE datum BETWEEN ${from} AND ${to}
+      UNION SELECT spieler_id FROM kredit_events WHERE datum BETWEEN ${from} AND ${to}
+      UNION SELECT st.spieler_id FROM spiel_teilnahmen st
+        JOIN spiele g ON g.id = st.spiel_id
+        WHERE (g.datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+      UNION SELECT spieler_id FROM bill_payments WHERE datum BETWEEN ${from} AND ${to}
+    ), billable_events AS (
+      SELECT s.spieler_id, s.datum, s.product_id, s.product_name, s.product_category AS category,
+        s.price_revision_id, s.unit_price_cents, s.quantity, s.created_at
+      FROM sale_events s
+      WHERE s.datum BETWEEN ${from} AND ${to} AND s.product_category <> 'GAME_CREDIT'
+      UNION ALL
+      SELECT k.spieler_id, k.datum, p.id, p.name, p.category,
+        COALESCE(k.price_revision_id, pr.id),
+        COALESCE(k.unit_price_cents, pr.unit_price_cents), k.anzahl, k.created_at
+      FROM kredit_events k
+      JOIN products p ON p.code = 'GAME_CREDIT'
+      LEFT JOIN LATERAL (
+        SELECT id, unit_price_cents FROM product_price_revisions
+        WHERE product_id = p.id AND effective_from <= COALESCE(k.occurred_at, k.created_at)
+        ORDER BY effective_from DESC, id DESC LIMIT 1
+      ) pr ON true
+      WHERE k.datum BETWEEN ${from} AND ${to} AND k.typ = 'USE'
+    ), open_events AS (
+      SELECT b.*
+      FROM billable_events b
+      LEFT JOIN latest_payments lp ON lp.spieler_id = b.spieler_id AND lp.datum = b.datum
+      WHERE b.created_at > COALESCE(lp.paid_at, '-infinity'::timestamptz)
+    ), full_lines AS (
+      SELECT spieler_id, product_id, product_name, category, price_revision_id, unit_price_cents,
+        SUM(quantity)::int quantity, SUM(quantity * unit_price_cents)::int total_cents
+      FROM billable_events
+      GROUP BY spieler_id, product_id, product_name, category, price_revision_id, unit_price_cents
+    ), open_totals AS (
+      SELECT spieler_id, SUM(quantity * unit_price_cents)::int total_cents
+      FROM open_events
+      GROUP BY spieler_id
+    ), day_states AS (
+      SELECT b.spieler_id, b.datum,
+        SUM(b.quantity * b.unit_price_cents)::int full_total_cents,
+        SUM(CASE
+          WHEN b.created_at > COALESCE(lp.paid_at, '-infinity'::timestamptz)
+          THEN b.quantity * b.unit_price_cents ELSE 0
+        END)::int open_total_cents
+      FROM billable_events b
+      LEFT JOIN latest_payments lp ON lp.spieler_id = b.spieler_id AND lp.datum = b.datum
+      GROUP BY b.spieler_id, b.datum
+    ), credit AS (
+      SELECT spieler_id,
+        COALESCE(SUM(CASE WHEN typ = 'GRANT' THEN anzahl ELSE 0 END), 0)::int granted,
+        COALESCE(SUM(CASE WHEN typ = 'USE' THEN anzahl ELSE 0 END), 0)::int used
+      FROM kredit_events
+      WHERE datum BETWEEN ${from} AND ${to}
+      GROUP BY spieler_id
+    ), game_counts AS (
+      SELECT st.spieler_id, COUNT(DISTINCT g.id)::int games,
+        COUNT(DISTINCT g.id) FILTER (WHERE g.abgeschlossen)::int completed_games,
+        COALESCE(SUM(g.confirmed_launches) FILTER (WHERE g.abgeschlossen), 0)::int confirmed_clays
+      FROM spiel_teilnahmen st JOIN spiele g ON g.id = st.spiel_id
+      WHERE (g.datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+      GROUP BY st.spieler_id
+    )
+    SELECT a.spieler_id, sp.name spieler_name, sp.mitglied_nr,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'productId', l.product_id, 'productName', l.product_name, 'category', l.category,
+        'priceRevisionId', l.price_revision_id, 'unitPriceCents', l.unit_price_cents,
+        'quantity', l.quantity, 'totalCents', l.total_cents) ORDER BY l.product_name, l.price_revision_id)
+        FROM full_lines l WHERE l.spieler_id = a.spieler_id), '[]'::jsonb) lines,
+      COALESCE((SELECT jsonb_object_agg(category, cents) FROM (
+        SELECT category, SUM(total_cents)::int cents FROM full_lines WHERE spieler_id = a.spieler_id GROUP BY category
+      ) categories), '{}'::jsonb) category_subtotals,
+      COALESCE((SELECT SUM(total_cents) FROM full_lines WHERE spieler_id = a.spieler_id), 0)::int total_cents,
+      COALESCE(ot.total_cents, 0)::int open_total_cents,
+      COALESCE(c.granted, 0)::int credit_granted, COALESCE(c.used, 0)::int credit_used,
+      (COALESCE(c.granted, 0) - COALESCE(c.used, 0))::int credit_remaining,
+      COALESCE(gc.games, 0)::int games, COALESCE(gc.completed_games, 0)::int completed_games,
+      COALESCE(gc.confirmed_clays, 0)::int confirmed_clays,
+      COALESCE((SELECT COUNT(*) FROM latest_payments lp WHERE lp.spieler_id = a.spieler_id), 0)::int paid_days,
+      COALESCE((SELECT COUNT(*) FROM day_states ds
+        WHERE ds.spieler_id = a.spieler_id AND ds.open_total_cents <> 0), 0)::int open_days,
+      COALESCE((SELECT COUNT(*) FROM day_states ds
+        WHERE ds.spieler_id = a.spieler_id AND ds.full_total_cents <> 0), 0)::int billable_days
+    FROM activity a
+    JOIN spieler sp ON sp.id = a.spieler_id
+    LEFT JOIN open_totals ot ON ot.spieler_id = a.spieler_id
+    LEFT JOIN credit c ON c.spieler_id = a.spieler_id
+    LEFT JOIN game_counts gc ON gc.spieler_id = a.spieler_id
+    ORDER BY sp.name, sp.id
+  `);
+  const rows = result.rows as any[];
+  const players = rows.map(row => {
+    const totalCents = Number(row.total_cents);
+    const openTotalCents = Number(row.open_total_cents);
+    return {
+      spielerId: Number(row.spieler_id),
+      spielerName: row.spieler_name,
+      mitgliedNr: row.mitglied_nr,
+      lines: row.lines,
+      categorySubtotals: row.category_subtotals,
+      totalCents,
+      openTotalCents,
+      credit: {
+        granted: Number(row.credit_granted),
+        used: Number(row.credit_used),
+        remaining: Number(row.credit_remaining),
+      },
+      games: Number(row.games),
+      completedGames: Number(row.completed_games),
+      confirmedClays: Number(row.confirmed_clays),
+      paidDays: Number(row.paid_days),
+      state: periodSettlementState(Number(row.open_days), Number(row.billable_days)),
+    };
+  });
+  const productTotals: Record<string, { productId: number; productName: string; category: string; priceRevisionId: number; unitPriceCents: number; quantity: number; totalCents: number }> = {};
+  const categorySubtotals: Record<string, number> = {};
+  for (const line of players.flatMap((player: any) => player.lines ?? [])) {
+    const key = `${line.productId}:${line.priceRevisionId}:${line.unitPriceCents}`;
+    const total = productTotals[key] ?? {
+      productId: Number(line.productId),
+      productName: line.productName,
+      category: line.category,
+      priceRevisionId: Number(line.priceRevisionId),
+      unitPriceCents: Number(line.unitPriceCents),
+      quantity: 0,
+      totalCents: 0,
+    };
+    total.quantity += Number(line.quantity);
+    total.totalCents += Number(line.totalCents);
+    productTotals[key] = total;
+    categorySubtotals[line.category] = (categorySubtotals[line.category] ?? 0) + Number(line.totalCents);
+  }
+  const [gameTotals] = (await db.execute(sql`
+    SELECT COUNT(*)::int games, COUNT(*) FILTER (WHERE abgeschlossen)::int completed_games,
+      COALESCE(SUM(confirmed_launches) FILTER (WHERE abgeschlossen), 0)::int confirmed_clays
+    FROM spiele
+    WHERE (datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+  `)).rows as any[];
+  return {
+    from,
+    to,
+    players,
+    categorySubtotals,
+    productTotals,
+    generalTotalCents: players.reduce((sum: number, player: any) => sum + player.totalCents, 0),
+    uniquePlayers: players.length,
+    paidPlayers: players.filter((player: any) => player.state === "PAID").length,
+    games: Number(gameTotals?.games ?? 0),
+    completedGames: Number(gameTotals?.completed_games ?? 0),
+    confirmedClays: Number(gameTotals?.confirmed_clays ?? 0),
+  };
 }

@@ -8,7 +8,7 @@ import { authenticate, requireAdmin } from "./auth";
 import { z } from "zod";
 import { catalogue, daySalesReport, ensureSystemProducts } from "../lib/products";
 import { createRestoreCode, hashRestoreCode } from "../lib/terminal-config";
-import { billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSettlement } from "../lib/bills";
+import { activityDays, billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSettlement, periodBillSummary } from "../lib/bills";
 
 const router = Router();
 
@@ -476,7 +476,21 @@ router.get("/kredite", async (req, res) => {
 // ─── Product catalogue and sales ─────────────────────────────────────────────
 
 const productId = (raw: string | string[]) => z.coerce.number().int().positive().safeParse(Array.isArray(raw) ? raw[0] : raw);
-const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}, "Date must be a valid calendar day");
+const dateRange = z.object({ from: day, to: day }).superRefine((value, ctx) => {
+  const fromTime = Date.parse(`${value.from}T00:00:00Z`);
+  const toTime = Date.parse(`${value.to}T00:00:00Z`);
+  if (!Number.isFinite(fromTime) || !Number.isFinite(toTime) || fromTime > toTime) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "from must be before or equal to to" });
+    return;
+  }
+  if ((toTime - fromTime) / 86_400_000 > 366) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "The selected period cannot exceed 367 days" });
+  }
+});
 const adminAdjustment = z.object({
   spielerId: z.number().int().positive(),
   datum: day,
@@ -704,6 +718,18 @@ router.get("/bills/day-summary", async (req, res) => {
   const datum = day.safeParse(req.query.datum);
   if (!datum.success) return res.status(400).json({ error: "datum must be YYYY-MM-DD" });
   return res.json(await dayBillSummary(datum.data));
+});
+
+router.get("/bills/activity-days", async (req, res) => {
+  const range = dateRange.safeParse(req.query);
+  if (!range.success) return res.status(400).json({ error: range.error.issues[0]?.message ?? "Invalid date range" });
+  return res.json(await activityDays(range.data.from, range.data.to));
+});
+
+router.get("/bills/period-summary", async (req, res) => {
+  const range = dateRange.safeParse(req.query);
+  if (!range.success) return res.status(400).json({ error: range.error.issues[0]?.message ?? "Invalid date range" });
+  return res.json(await periodBillSummary(range.data.from, range.data.to));
 });
 
 /** Admin settlement uses the same incremental immutable payment events as terminals. */
