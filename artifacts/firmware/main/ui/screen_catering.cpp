@@ -227,6 +227,7 @@ static lv_obj_t *button(lv_obj_t *p, const char *text, lv_style_t *style) {
     lv_obj_t *l = lv_label_create(b); lv_label_set_text(l, text);
     lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
     lv_obj_set_width(l, LV_PCT(100));
+    lv_obj_set_style_text_font(l, UI_FONT_14, 0);
     lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(l); return b;
 }

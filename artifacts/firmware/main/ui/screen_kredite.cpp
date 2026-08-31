@@ -348,7 +348,10 @@ static void bill_cb(lv_event_t *e)
     lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(actions, 16, 0);
     lv_obj_t *cancel = lv_btn_create(actions); lv_obj_add_style(cancel, &g_style_btn_secondary, 0);
     lv_obj_set_size(cancel, 180, 52); lv_obj_add_event_cb(cancel, [](lv_event_t *) { close_bill_modal(); }, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "ZURÜCK"); lv_obj_center(cl);
+    lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "ZURÜCK");
+    lv_obj_set_style_text_font(cl, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(cl, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(cl);
     lv_obj_t *paid = lv_btn_create(actions);
     lv_obj_add_style(paid, store_payment_pending(sid) ? &g_style_btn_secondary : &g_style_btn_primary, 0);
     lv_obj_set_size(paid, 260, 52);
@@ -357,6 +360,8 @@ static void bill_cb(lv_event_t *e)
     bool already_paid = bill_data && bill_data->state == BILL_PAID;
     lv_label_set_text(pl, store_payment_pending(sid) ? "ZAHLUNG AUSSTEHEND" :
                            already_paid ? "BEZAHLT" : LV_SYMBOL_OK "  ZAHLUNG BESTÄTIGEN");
+    lv_obj_set_style_text_font(pl, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(pl, lv_color_hex(CLR_TEXT), 0);
     if (already_paid) lv_obj_add_state(paid, LV_STATE_DISABLED);
     lv_obj_center(pl);
 }
@@ -688,6 +693,7 @@ lv_obj_t *screen_kredite_create(void)
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
     lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURÜCK");
+    lv_obj_set_style_text_font(bl2, UI_FONT_14, 0);
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 

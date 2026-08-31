@@ -1031,6 +1031,7 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
         "\"CATERING STARTEN\" WECHSELT DIREKT IN DEN CATERING-MODUS.");
     lv_label_set_long_mode(help, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(help, LV_PCT(100));
+    lv_obj_set_style_text_font(help, UI_FONT_14, 0);
     lv_obj_set_style_text_color(help, lv_color_hex(CLR_MUTED), 0);
 
     build_products_tab(parent);
@@ -1042,11 +1043,15 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
     lv_obj_set_style_pad_row(cat, 8, 0);
     lv_obj_t *cat_label = lv_label_create(cat);
     lv_label_set_text(cat_label, "ALTE PIN (NUR WENN BEREITS KONFIGURIERT)");
+    lv_obj_set_style_text_font(cat_label, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(cat_label, lv_color_hex(CLR_TEXT), 0);
     s_catering_old_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_old_pin, 260, 44);
     lv_textarea_set_one_line(s_catering_old_pin, true); lv_textarea_set_password_mode(s_catering_old_pin, true);
     lv_textarea_set_accepted_chars(s_catering_old_pin, "0123456789"); lv_textarea_set_max_length(s_catering_old_pin, 16);
     cat_label = lv_label_create(cat);
     lv_label_set_text(cat_label, "NEUE PIN (4-16 ZIFFERN)");
+    lv_obj_set_style_text_font(cat_label, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(cat_label, lv_color_hex(CLR_TEXT), 0);
     s_catering_pin = lv_textarea_create(cat); lv_obj_set_size(s_catering_pin, 260, 44);
     lv_textarea_set_one_line(s_catering_pin, true); lv_textarea_set_password_mode(s_catering_pin, true);
     lv_textarea_set_accepted_chars(s_catering_pin, "0123456789"); lv_textarea_set_max_length(s_catering_pin, 16);
@@ -1060,13 +1065,21 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
     lv_obj_t *pin_save = lv_btn_create(actions); lv_obj_add_style(pin_save, &g_style_btn_secondary, 0);
     lv_obj_set_size(pin_save, 220, 44);
     lv_obj_add_event_cb(pin_save, catering_save_pin_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *pin_save_l = lv_label_create(pin_save); lv_label_set_text(pin_save_l, "PIN SPEICHERN"); lv_obj_center(pin_save_l);
+    lv_obj_t *pin_save_l = lv_label_create(pin_save); lv_label_set_text(pin_save_l, "PIN SPEICHERN");
+    lv_obj_set_style_text_font(pin_save_l, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(pin_save_l, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(pin_save_l);
     lv_obj_t *enter = lv_btn_create(actions); lv_obj_add_style(enter, &g_style_btn_danger, 0);
     lv_obj_set_size(enter, 240, 44);
     lv_obj_add_event_cb(enter, catering_enter_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *enter_l = lv_label_create(enter); lv_label_set_text(enter_l, "CATERING STARTEN"); lv_obj_center(enter_l);
+    lv_obj_t *enter_l = lv_label_create(enter); lv_label_set_text(enter_l, "CATERING STARTEN");
+    lv_obj_set_style_text_font(enter_l, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(enter_l, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(enter_l);
     s_catering_status = lv_label_create(parent);
     lv_label_set_text(s_catering_status, g_store.cateringPinConfigured ? "CATERING-PIN IST KONFIGURIERT." : "KEINE CATERING-PIN KONFIGURIERT.");
+    lv_obj_set_style_text_font(s_catering_status, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(s_catering_status, lv_color_hex(CLR_MUTED), 0);
     return parent;
 }
 
@@ -1198,6 +1211,7 @@ lv_obj_t *screen_einstellungen_create(void)
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *bl2 = lv_label_create(back);
     lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURÜCK");
+    lv_obj_set_style_text_font(bl2, UI_FONT_14, 0);
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 

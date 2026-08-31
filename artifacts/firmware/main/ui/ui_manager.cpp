@@ -115,6 +115,7 @@ static void styles_init(void)
     lv_style_set_bg_color(&g_style_btn_primary, lv_color_hex(CLR_PRIMARY));
     lv_style_set_bg_opa(&g_style_btn_primary, LV_OPA_COVER);
     lv_style_set_text_color(&g_style_btn_primary, lv_color_hex(CLR_TEXT));
+    lv_style_set_text_font(&g_style_btn_primary, UI_FONT_14);
     lv_style_set_radius(&g_style_btn_primary, 8);
     lv_style_set_border_width(&g_style_btn_primary, 0);
     lv_style_set_pad_hor(&g_style_btn_primary, 20);
@@ -125,6 +126,7 @@ static void styles_init(void)
     lv_style_set_bg_color(&g_style_btn_secondary, lv_color_hex(CLR_BORDER));
     lv_style_set_bg_opa(&g_style_btn_secondary, LV_OPA_COVER);
     lv_style_set_text_color(&g_style_btn_secondary, lv_color_hex(CLR_TEXT));
+    lv_style_set_text_font(&g_style_btn_secondary, UI_FONT_14);
     lv_style_set_radius(&g_style_btn_secondary, 8);
     lv_style_set_border_width(&g_style_btn_secondary, 1);
     lv_style_set_border_color(&g_style_btn_secondary, lv_color_hex(CLR_MUTED));
@@ -136,6 +138,7 @@ static void styles_init(void)
     lv_style_set_bg_color(&g_style_btn_danger, lv_color_hex(CLR_DANGER));
     lv_style_set_bg_opa(&g_style_btn_danger, LV_OPA_COVER);
     lv_style_set_text_color(&g_style_btn_danger, lv_color_hex(CLR_TEXT));
+    lv_style_set_text_font(&g_style_btn_danger, UI_FONT_14);
     lv_style_set_radius(&g_style_btn_danger, 8);
     lv_style_set_border_width(&g_style_btn_danger, 0);
     lv_style_set_pad_hor(&g_style_btn_danger, 20);
