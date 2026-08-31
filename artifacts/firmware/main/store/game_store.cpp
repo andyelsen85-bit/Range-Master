@@ -1689,12 +1689,14 @@ void store_remap_spieler_id(int old_id, int new_id)
 
 void store_register_spieler_fuer_tag(int spieler_id)
 {
-    kredit_events_lock();
+    payment_state_lock();
     int prior_ids[MAX_PORTAL_SPIELER];
     KreditStand prior_credits[MAX_PORTAL_SPIELER];
+    MunitionStand prior_munition[MAX_PORTAL_SPIELER];
     char prior_date[sizeof(g_store.kreditDatum)];
     memcpy(prior_ids, g_store.kreditPlayerIds, sizeof(prior_ids));
     memcpy(prior_credits, g_store.kredite, sizeof(prior_credits));
+    memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
     memcpy(prior_date, g_store.kreditDatum, sizeof(prior_date));
     time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
@@ -1705,22 +1707,26 @@ void store_register_spieler_fuer_tag(int spieler_id)
     }
     for (int i = 0; i < MAX_PORTAL_SPIELER; i++) {
         if (g_store.kreditPlayerIds[i] == spieler_id) {
-            kredit_events_unlock();
+            payment_state_unlock();
             return;
         }
         if (g_store.kreditPlayerIds[i] == 0) {
             g_store.kreditPlayerIds[i] = spieler_id;
             g_store.kredite[i] = (KreditStand){0, 0};
-            if (!save_kredit_state_unlocked()) {
+            // A re-added player starts a new operational session. Do not
+            // expose ammunition purchased during the previous session.
+            reset_munition_for_player(spieler_id);
+            if (!save_payment_state_unlocked()) {
                 memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
                 memcpy(g_store.kredite, prior_credits, sizeof(prior_credits));
+                memcpy(g_store.munition, prior_munition, sizeof(prior_munition));
                 memcpy(g_store.kreditDatum, prior_date, sizeof(prior_date));
             }
-            kredit_events_unlock();
+            payment_state_unlock();
             return;
         }
     }
-    kredit_events_unlock();
+    payment_state_unlock();
 }
 
 bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_len)
