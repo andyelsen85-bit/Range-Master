@@ -108,6 +108,21 @@ static void kredit_events_unlock(void)
     xSemaphoreGive(s_kredit_events_mutex);
 }
 
+// Any transition that persists both sales/ammunition and credit/payment state
+// uses this global order to avoid racing a sale or deadlocking Catering.
+static void payment_state_lock(void)
+{
+    configASSERT(s_verkauf_events_mutex);
+    xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
+    kredit_events_lock();
+}
+
+static void payment_state_unlock(void)
+{
+    kredit_events_unlock();
+    xSemaphoreGive(s_verkauf_events_mutex);
+}
+
 static void nvs_lock(void)
 {
     configASSERT(s_nvs_mutex);
@@ -130,6 +145,7 @@ static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anz
 static bool save_kredit_state_unlocked(void);
 static esp_err_t set_counted_blob(const char *key, const void *data,
                                   int count, size_t item_size);
+static esp_err_t set_ammo_blob_unlocked(void);
 
 // Payments and the active-day roster are one state transition: a portal
 // acceptance must never survive locally without retiring the player, nor may a
@@ -147,6 +163,10 @@ static bool save_payment_state_unlocked(void)
                            sizeof(g_store.kreditPlayerIds));
     if (err == ESP_OK)
         err = nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
+    if (err == ESP_OK)
+        err = nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds,
+                           sizeof(g_store.lineupIds));
+    if (err == ESP_OK) err = set_ammo_blob_unlocked();
     if (err == ESP_OK) err = nvs_commit(s_nvs);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Could not persist payment state: %s", esp_err_to_name(err));
@@ -483,7 +503,7 @@ static bool bill_is_authoritatively_paid(int spieler_id, const char *today)
 bool store_queue_payment(int spieler_id)
 {
     if (spieler_id <= 0) return false;
-    kredit_events_lock();
+    payment_state_lock();
     // One unresolved Paid action per player/day is the local idempotency
     // boundary. Re-tapping a pending bill can never create a second payment.
     time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
@@ -495,17 +515,16 @@ bool store_queue_payment(int spieler_id)
             duplicate = true; break;
         }
     if (duplicate || g_store.pendingPaymentEventCount >= MAX_PENDING_PAYMENTS) {
-        kredit_events_unlock();
+        payment_state_unlock();
         return false;
     }
     bool active = false;
     for (int i = 0; i < MAX_PORTAL_SPIELER; ++i)
         if (g_store.kreditPlayerIds[i] == spieler_id) { active = true; break; }
-    // A portal-accepted payment clears the current balance but keeps the daily
-    // roster entry. A later sale or USE is a fresh open bill and remains
-    // settleable immediately.
+    // A portal-accepted payment retires the current daily session. The player
+    // may be explicitly re-added later with fresh zero operational counters.
     if (!active && !has_pending_billable_activity(spieler_id, today)) {
-        kredit_events_unlock();
+        payment_state_unlock();
         return false;
     }
     PaymentEvent *event =
@@ -518,10 +537,10 @@ bool store_queue_payment(int spieler_id)
     if (!save_payment_state_unlocked()) {
         memset(event, 0, sizeof(*event));
         --g_store.pendingPaymentEventCount;
-        kredit_events_unlock();
+        payment_state_unlock();
         return false;
     }
-    kredit_events_unlock();
+    payment_state_unlock();
     return true;
 }
 
@@ -529,7 +548,7 @@ bool store_begin_payment_sync(PaymentEvent *snapshot, int capacity, int *out_cou
 {
     if (out_count) *out_count = 0;
     if (!snapshot || capacity <= 0 || !out_count) return false;
-    kredit_events_lock();
+    payment_state_lock();
     PaymentEvent prior[MAX_PENDING_PAYMENTS];
     memcpy(prior, g_store.pendingPaymentEvents, sizeof(prior));
     int count = 0;
@@ -541,11 +560,11 @@ bool store_begin_payment_sync(PaymentEvent *snapshot, int capacity, int *out_cou
     }
     if (count && !save_payment_state_unlocked()) {
         memcpy(g_store.pendingPaymentEvents, prior, sizeof(prior));
-        kredit_events_unlock();
+        payment_state_unlock();
         return false;
     }
     *out_count = count;
-    kredit_events_unlock();
+    payment_state_unlock();
     return true;
 }
 
@@ -554,16 +573,18 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
                                          const char *error, bool persist)
 {
     if (!snapshot || count <= 0) return true;
-    kredit_events_lock();
+    payment_state_lock();
     PaymentEvent prior_events[MAX_PENDING_PAYMENTS];
     int prior_count = g_store.pendingPaymentEventCount;
     int prior_ids[MAX_PORTAL_SPIELER];
     KreditStand prior_credits[MAX_PORTAL_SPIELER];
     MunitionStand prior_munition[MAX_PORTAL_SPIELER];
+    int prior_lineup[MAX_SPIELER];
     memcpy(prior_events, g_store.pendingPaymentEvents, sizeof(prior_events));
     memcpy(prior_ids, g_store.kreditPlayerIds, sizeof(prior_ids));
     memcpy(prior_credits, g_store.kredite, sizeof(prior_credits));
     memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
+    memcpy(prior_lineup, g_store.lineupIds, sizeof(prior_lineup));
     for (int n = 0; n < count; ++n) {
         bool accepted = false;
         for (int a = 0; a < acceptedCount; ++a)
@@ -573,17 +594,23 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
             PaymentEvent *event = &g_store.pendingPaymentEvents[i];
             if (strcmp(event->externalId, snapshot[n].externalId)) continue;
             if (accepted) {
-                // Portal acceptance settles the current operational balance,
-                // but the Player of Day remains available for later activity.
-                // Sales/history remain append-only elsewhere.
+                // Portal acceptance closes this Player-of-Day session. A later
+                // explicit re-add starts a fresh zero-credit/zero-ammunition
+                // operational session; immutable sales/history remain intact.
                 time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
                 char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
-                for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
+                for (int k = 0; k < MAX_PORTAL_SPIELER; ++k) {
                     if (strcmp(event->datum, today) == 0 &&
                         g_store.kreditPlayerIds[k] == event->spielerId) {
+                        g_store.kreditPlayerIds[k] = 0;
                         g_store.kredite[k] = (KreditStand){};
                         break;
                     }
+                }
+                for (int p = 0; p < MAX_SPIELER; ++p)
+                    if (strcmp(event->datum, today) == 0 &&
+                        g_store.lineupIds[p] == event->spielerId)
+                        g_store.lineupIds[p] = 0;
                 if (strcmp(event->datum, today) == 0)
                     reset_munition_for_player(event->spielerId);
                 memmove(event, event + 1, (size_t)(g_store.pendingPaymentEventCount - i - 1) *
@@ -604,10 +631,11 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
         memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
         memcpy(g_store.kredite, prior_credits, sizeof(prior_credits));
         memcpy(g_store.munition, prior_munition, sizeof(prior_munition));
-        kredit_events_unlock();
+        memcpy(g_store.lineupIds, prior_lineup, sizeof(prior_lineup));
+        payment_state_unlock();
         return false;
     }
-    kredit_events_unlock();
+    payment_state_unlock();
     return true;
 }
 
@@ -765,18 +793,9 @@ void store_rebuild_bill_projection(void)
         g_store.billDay.uniquePlayers = g_store.billDay.playerCount;
     g_store.billDay.authoritative = g_store.billDayBaseline.authoritative;
 
-    // A portal-confirmed payment clears settled operational counters but keeps
-    // the Player of Day available for later activity. Pending activity wins:
-    // it represents a new local balance that has not reached the portal yet.
-    for (int i = 0; i < MAX_PORTAL_SPIELER; ++i) {
-        int spieler_id = g_store.kreditPlayerIds[i];
-        if (spieler_id > 0 &&
-            bill_is_authoritatively_paid(spieler_id, today) &&
-            !has_pending_day_activity(spieler_id, today)) {
-            g_store.kredite[i] = (KreditStand){};
-            reset_munition_for_player(spieler_id);
-        }
-    }
+    // A PAID baseline is audit data, not a recurring roster command. The
+    // accepted payment transition retires the player exactly once; otherwise
+    // a player explicitly re-added later would disappear on every bill pull.
 }
 
 static int munition_caliber_for_product(int produkt_id)
@@ -942,14 +961,12 @@ bool store_queue_catering_basket(int spieler_id, const int *produkt_ids,
         s_catering_error = "ONGULTEGE WEENCHEN";
         return false;
     }
-    xSemaphoreTake(s_verkauf_events_mutex, portMAX_DELAY);
-    kredit_events_lock();
+    payment_state_lock();
     time_t now = time(NULL); struct tm tmi; localtime_r(&now, &tmi);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tmi);
     if (!spieler_fuer_tag_aktiv_unlocked(spieler_id, today)) {
         s_catering_error = "SPILLER NET FIR HAUT AUTORISEIERT";
-        kredit_events_unlock();
-        xSemaphoreGive(s_verkauf_events_mutex);
+        payment_state_unlock();
         return false;
     }
     MunitionStand prior_munition[MAX_PORTAL_SPIELER];
@@ -1756,16 +1773,24 @@ bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_l
         return false;
     }
     KreditStand previous = g_store.kredite[slot];
+    MunitionStand prior_munition[MAX_PORTAL_SPIELER];
+    int prior_lineup[MAX_SPIELER];
+    memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
+    memcpy(prior_lineup, g_store.lineupIds, sizeof(prior_lineup));
     g_store.kreditPlayerIds[slot] = 0;
     g_store.kredite[slot] = (KreditStand){};
-    bool persisted = save_kredit_state_unlocked();
+    reset_munition_for_player(spieler_id);
+    for (int p = 0; p < MAX_SPIELER; ++p)
+        if (g_store.lineupIds[p] == spieler_id) g_store.lineupIds[p] = 0;
+    bool persisted = save_payment_state_unlocked();
     if (!persisted) {
         g_store.kreditPlayerIds[slot] = spieler_id;
         g_store.kredite[slot] = previous;
+        memcpy(g_store.munition, prior_munition, sizeof(prior_munition));
+        memcpy(g_store.lineupIds, prior_lineup, sizeof(prior_lineup));
         if (reason && reason_len) snprintf(reason, reason_len, "NVS SCHREIF-FEELER");
     }
-    kredit_events_unlock();
-    xSemaphoreGive(s_verkauf_events_mutex);
+    payment_state_unlock();
     return persisted;
 }
 
@@ -2614,9 +2639,8 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
     if (bill_is_authoritatively_paid(spieler_id, today) &&
         !has_pending_day_activity(spieler_id, today)) {
-        reset_munition_for_player(spieler_id);
-        if (kreditSlot >= 0)
-            g_store.kredite[kreditSlot] = (KreditStand){};
+        // Payment acceptance already retired the local session atomically.
+        // Do not repeatedly mutate a player explicitly re-added afterwards.
         reconcile_lineup_with_credits_unlocked();
         kredit_events_unlock();
         return;
