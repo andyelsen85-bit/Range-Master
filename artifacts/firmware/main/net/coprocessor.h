@@ -36,6 +36,9 @@ esp_err_t cop_wifi_disconnect(void);
 /** Queue new credentials for the persistent supervisor (non-blocking). */
 esp_err_t cop_wifi_request_connect(const char *ssid, const char *pass);
 
+/** Queue one saved profile for an immediate operator-requested connection. */
+esp_err_t cop_wifi_request_network(int index);
+
 /** Get current IP address (null-terminates buf). */
 esp_err_t cop_wifi_get_ip(char *buf, size_t len);
 

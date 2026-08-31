@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 
-export const TERMINAL_CONFIG_SCHEMA_VERSION = 1;
+export const TERMINAL_CONFIG_SCHEMA_VERSION = 2;
 
 const boundedString = (max: number) => z.string().max(max);
 
@@ -10,6 +10,11 @@ const boundedString = (max: number) => z.string().max(max);
  * roster, credits, games, history, product cache, and all outboxes are
  * intentionally absent from this schema.
  */
+const wifiNetworkSchema = z.object({
+  ssid: boundedString(32).min(1),
+  password: boundedString(63),
+});
+
 export const terminalConfigurationSchema = z.object({
   modus: z.number().int().min(0).max(5),
   maschinenAktiv: z.array(z.boolean()).length(8),
@@ -18,6 +23,8 @@ export const terminalConfigurationSchema = z.object({
   gatewayToken: boundedString(255),
   wifiSsid: boundedString(64),
   wifiPass: boundedString(128),
+  wifiNetworks: z.array(wifiNetworkSchema).max(5).optional(),
+  wifiPreferredIndex: z.number().int().min(-1).max(4).optional(),
   autoSyncEnabled: z.boolean(),
   autoSyncSeconds: z.number().int().min(10).max(86400),
   billingSyncSeconds: z.number().int().min(20).max(30).default(30),
@@ -29,6 +36,22 @@ export const terminalConfigurationSchema = z.object({
     delayMs: z.number().int().min(0).max(10000),
   })).max(16)).length(4),
   customLaeufe: z.array(z.number().int().min(1).max(2)).length(4),
+}).superRefine((configuration, ctx) => {
+  const networks = configuration.wifiNetworks;
+  const preferred = configuration.wifiPreferredIndex;
+  if (networks === undefined && preferred === undefined) return;
+  if (networks === undefined || preferred === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "WiFi profile list and preferred index must be provided together" });
+    return;
+  }
+  if ((networks.length === 0 && preferred !== -1) ||
+      (networks.length > 0 && (preferred < 0 || preferred >= networks.length))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["wifiPreferredIndex"], message: "Preferred WiFi index is outside the profile list" });
+  }
+  const uniqueSsids = new Set(networks.map(network => network.ssid));
+  if (uniqueSsids.size !== networks.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["wifiNetworks"], message: "WiFi SSIDs must be unique" });
+  }
 });
 
 export type TerminalConfiguration = z.infer<typeof terminalConfigurationSchema>;

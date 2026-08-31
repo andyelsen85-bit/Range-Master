@@ -3,6 +3,7 @@
 // Mirrors WifiScreen.tsx
 // ============================================================
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include "lvgl.h"
 #include "ui_fonts.h"
@@ -20,12 +21,15 @@
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_status;
+static lv_obj_t *s_list_saved;
 static lv_obj_t *s_list_networks;
 static lv_obj_t *s_ta_ssid;
 static lv_obj_t *s_ta_pass;
 static lv_obj_t *s_lbl_ip;
 static lv_obj_t *s_btn_connect;
+static lv_obj_t *s_btn_delete;
 static lv_obj_t *s_kb;
+static int s_selected_saved = -1;
 
 // ── Persistent worker tasks — created once at boot while RAM is healthy ───
 // Internal RAM is exhausted (~52 bytes) by the time the WiFi screen is
@@ -38,6 +42,59 @@ static QueueHandle_t     s_scan_queue = NULL;
 static QueueHandle_t     s_scan_result_queue = NULL;
 static volatile bool     s_scan_busy  = false;
 static bool              s_connect_busy = false;
+
+static void render_saved_networks(void);
+
+static void saved_network_select_cb(lv_event_t *e)
+{
+    int index = (int)(intptr_t)lv_event_get_user_data(e);
+    char ssid[TM_MAX_SSID_LEN], pass[MAX_PASS_LEN];
+    if (!store_wifi_copy_network(index, ssid, sizeof(ssid), pass, sizeof(pass)))
+        return;
+    s_selected_saved = index;
+    lv_textarea_set_text(s_ta_ssid, ssid);
+    lv_textarea_set_text(s_ta_pass, pass);
+    if (s_btn_delete) lv_obj_clear_state(s_btn_delete, LV_STATE_DISABLED);
+}
+
+static void render_saved_networks(void)
+{
+    if (!s_list_saved) return;
+    lv_obj_clean(s_list_saved);
+    int count = store_wifi_network_count();
+    int preferred = store_wifi_preferred_index();
+    for (int i = 0; i < count; ++i) {
+        char ssid[TM_MAX_SSID_LEN], pass[MAX_PASS_LEN], label[TM_MAX_SSID_LEN + 8];
+        if (!store_wifi_copy_network(i, ssid, sizeof(ssid), pass, sizeof(pass)))
+            continue;
+        snprintf(label, sizeof(label), "%s%s",
+                 i == preferred ? LV_SYMBOL_OK " " : "", ssid);
+        lv_obj_t *btn = lv_list_add_btn(s_list_saved, LV_SYMBOL_WIFI, label);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_CARD), 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(btn, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_add_event_cb(btn, saved_network_select_cb, LV_EVENT_CLICKED,
+                           (void *)(intptr_t)i);
+    }
+    if (count == 0)
+        lv_list_add_text(s_list_saved, "NOCH KEIN NETZWERK GESPEICHERT");
+}
+
+static void delete_saved_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_selected_saved < 0 ||
+        !store_wifi_remove_network(s_selected_saved))
+        return;
+    game_store_save();
+    s_selected_saved = -1;
+    lv_textarea_set_text(s_ta_ssid, "");
+    lv_textarea_set_text(s_ta_pass, "");
+    lv_obj_add_state(s_btn_delete, LV_STATE_DISABLED);
+    render_saved_networks();
+    lv_label_set_text(s_lbl_status, "GESPEICHERTES NETZWERK GELÖSCHT");
+    lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_WARN), 0);
+}
 
 typedef struct {
     char names[20][33];
@@ -92,14 +149,18 @@ static void connect_cb(lv_event_t *e)
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
         return;
     }
-    strncpy(g_store.wifiSsid, ssid, TM_MAX_SSID_LEN - 1);
-    g_store.wifiSsid[TM_MAX_SSID_LEN - 1] = '\0';
-    strncpy(g_store.wifiPass, pass, MAX_PASS_LEN - 1);
-    g_store.wifiPass[MAX_PASS_LEN - 1] = '\0';
+    int network_index = -1;
+    if (!store_wifi_upsert_network(ssid, pass, &network_index)) {
+        lv_label_set_text(s_lbl_status, "MAXIMAL 5 NETZWERKE GESPEICHERT");
+        lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
+        return;
+    }
     game_store_save();
+    s_selected_saved = network_index;
+    render_saved_networks();
     lv_label_set_text(s_lbl_status, LV_SYMBOL_REFRESH " VERBINDE...");
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);
-    esp_err_t err = cop_wifi_request_connect(g_store.wifiSsid, g_store.wifiPass);
+    esp_err_t err = cop_wifi_request_network(network_index);
     if (err != ESP_OK) {
         lv_label_set_text(s_lbl_status, "WIFI-SUPERVISOR NICHT BEREIT");
         lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_DANGER), 0);
@@ -155,13 +216,37 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(content, 16, 0);
 
-    // Left: network list + scan
+    // Left: saved profiles + scan results
     lv_obj_t *left = lv_obj_create(content);
     lv_obj_set_size(left, 440, LV_PCT(100));
     lv_obj_set_style_bg_opa(left, LV_OPA_0, 0);
     lv_obj_set_style_border_width(left, 0, 0);
     lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(left, 10, 0);
+
+    lv_obj_t *saved_hdr = lv_label_create(left);
+    lv_label_set_text(saved_hdr, "GESPEICHERTE NETZWERKE");
+    lv_obj_set_style_text_font(saved_hdr, UI_FONT_16, 0);
+    lv_obj_set_style_text_color(saved_hdr, lv_color_hex(CLR_TEXT), 0);
+
+    s_list_saved = lv_list_create(left);
+    lv_obj_set_size(s_list_saved, LV_PCT(100), 145);
+    lv_obj_set_style_bg_color(s_list_saved, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_bg_opa(s_list_saved, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(s_list_saved, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_border_width(s_list_saved, 1, 0);
+    lv_obj_set_style_radius(s_list_saved, 8, 0);
+    lv_obj_set_style_text_font(s_list_saved, UI_FONT_14, 0);
+
+    s_btn_delete = lv_btn_create(left);
+    lv_obj_add_style(s_btn_delete, &g_style_btn_secondary, 0);
+    lv_obj_set_size(s_btn_delete, LV_PCT(100), 40);
+    lv_obj_add_event_cb(s_btn_delete, delete_saved_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *delete_label = lv_label_create(s_btn_delete);
+    lv_label_set_text(delete_label, LV_SYMBOL_TRASH "  AUSGEWÄHLTES LÖSCHEN");
+    lv_obj_set_style_text_color(delete_label, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_center(delete_label);
+    lv_obj_add_state(s_btn_delete, LV_STATE_DISABLED);
 
     lv_obj_t *net_hdr = lv_label_create(left);
     lv_label_set_text(net_hdr, "VERFÜGBARE NETZWERKE");
@@ -178,7 +263,8 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_center(sl2);
 
     s_list_networks = lv_list_create(left);
-    lv_obj_set_size(s_list_networks, LV_PCT(100), LV_PCT(80));
+    lv_obj_set_width(s_list_networks, LV_PCT(100));
+    lv_obj_set_flex_grow(s_list_networks, 1);
     lv_obj_set_style_bg_color(s_list_networks, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_bg_opa(s_list_networks, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(s_list_networks, lv_color_hex(CLR_BORDER), 0);
@@ -186,6 +272,13 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_radius(s_list_networks, 8, 0);
     lv_obj_set_style_text_font(s_list_networks, UI_FONT_14, 0);
     lv_list_add_text(s_list_networks, "SCAN DRÜCKEN, UM NETZWERKE ZU SUCHEN");
+
+    render_saved_networks();
+    int preferred = store_wifi_preferred_index();
+    if (preferred >= 0) {
+        s_selected_saved = preferred;
+        lv_obj_clear_state(s_btn_delete, LV_STATE_DISABLED);
+    }
 
     // Right: SSID/pass/connect
     lv_obj_t *right = lv_obj_create(content);
@@ -210,7 +303,7 @@ lv_obj_t *screen_wifi_create(void)
     lv_obj_set_style_text_color(s_ta_ssid, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *pass_lbl = lv_label_create(right);
-    lv_label_set_text(pass_lbl, "PASSWORT");
+    lv_label_set_text(pass_lbl, "PASSWORT (BEI OFFENEM NETZWERK LEER LASSEN)");
     lv_obj_set_style_text_font(pass_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(pass_lbl, lv_color_hex(CLR_TEXT), 0);
 
@@ -368,7 +461,12 @@ void screen_wifi_tick(void)
                         lv_obj_add_event_cb(btn, [](lv_event_t *ev) {
                             lv_obj_t *b = lv_event_get_target_obj(ev);
                             const char *net = lv_list_get_btn_text(s_list_networks, b);
-                            if (s_ta_ssid) lv_textarea_set_text(s_ta_ssid, net);
+                            if (s_ta_ssid) {
+                                s_selected_saved = -1;
+                                lv_textarea_set_text(s_ta_ssid, net);
+                                lv_textarea_set_text(s_ta_pass, "");
+                                lv_obj_add_state(s_btn_delete, LV_STATE_DISABLED);
+                            }
                         }, LV_EVENT_CLICKED, NULL);
                     }
                     if (result.count == 0)

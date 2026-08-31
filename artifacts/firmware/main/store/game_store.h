@@ -32,6 +32,7 @@
 #define MAX_KEY_LEN         65
 #define TM_MAX_SSID_LEN     33
 #define MAX_PASS_LEN        64
+#define MAX_KNOWN_WIFI_NETWORKS 5
 #define CUSTOM_SEQ_MAX      16
 #define AUTO_SYNC_MIN_SECONDS 10u
 #define AUTO_SYNC_MAX_SECONDS 86400u
@@ -42,6 +43,11 @@
 // Current API tokens are "sha256:" plus 64 hex characters. Keep headroom for
 // future opaque revision-token formats and the terminating NUL.
 #define CACHE_MANIFEST_TOKEN_LEN 96
+
+typedef struct {
+    char ssid[TM_MAX_SSID_LEN];
+    char pass[MAX_PASS_LEN];
+} KnownWifiNetwork;
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -340,8 +346,13 @@ typedef struct {
     char    gatewayUrl[MAX_URL_LEN]; // local TrapMaster gateway, e.g. http://192.168.1.50
     char    gatewayToken[MAX_KEY_LEN]; // private HMAC key for the local gateway
     uint32_t gatewaySequence; // persisted, strictly increasing gateway command sequence
+    // wifiSsid/wifiPass remain as a compatibility mirror of the preferred
+    // network. New code should use knownWifiNetworks instead.
     char    wifiSsid[TM_MAX_SSID_LEN];
     char    wifiPass[MAX_PASS_LEN];
+    KnownWifiNetwork knownWifiNetworks[MAX_KNOWN_WIFI_NETWORKS];
+    int     knownWifiNetworkCount;
+    int     preferredWifiNetwork;
     bool    autoSyncEnabled;
     uint32_t autoSyncSeconds;
     uint32_t billingSyncSeconds;
@@ -446,6 +457,19 @@ extern GameStore g_store;
 // ── Lifecycle ────────────────────────────────────────────────
 void game_store_init(void);
 void game_store_save(void);
+
+// ── WiFi network profiles ─────────────────────────────────────
+int  store_wifi_network_count(void);
+int  store_wifi_preferred_index(void);
+int  store_wifi_find_network(const char *ssid);
+bool store_wifi_copy_network(int index, char *ssid, size_t ssid_len,
+                             char *pass, size_t pass_len);
+/** Add or update a profile in RAM. The caller persists it with game_store_save(). */
+bool store_wifi_upsert_network(const char *ssid, const char *pass, int *out_index);
+/** Remove a profile in RAM. The caller persists it with game_store_save(). */
+bool store_wifi_remove_network(int index);
+/** Promote a profile in RAM. The caller persists it with game_store_save(). */
+bool store_wifi_set_preferred(int index);
 
 // ── Navigation ───────────────────────────────────────────────
 void store_navigate(Screen s);

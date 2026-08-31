@@ -18,6 +18,11 @@ const configuration = terminalConfigurationSchema.parse({
   gatewayToken: "gateway-secret",
   wifiSsid: "Range WiFi",
   wifiPass: "wifi-secret",
+  wifiNetworks: [
+    { ssid: "Range WiFi", password: "wifi-secret" },
+    { ssid: "TrapshotGuest", password: "" },
+  ],
+  wifiPreferredIndex: 1,
   autoSyncEnabled: true,
   autoSyncSeconds: 300,
   billingSyncSeconds: 30,
@@ -59,9 +64,26 @@ test("configuration schema rejects fields outside firmware bounds", () => {
     ...configuration,
     customSequenzen: [[{ maschine: 0, isDoublette: true, partner: 1, delayMs: 10001 }], [], [], []],
   }).success, false);
+  assert.equal(terminalConfigurationSchema.safeParse({
+    ...configuration,
+    wifiNetworks: Array.from({ length: 6 }, (_, index) => ({ ssid: `network-${index}`, password: "" })),
+    wifiPreferredIndex: 0,
+  }).success, false);
+  assert.equal(terminalConfigurationSchema.safeParse({
+    ...configuration,
+    wifiPreferredIndex: 4,
+  }).success, false);
 });
 
 test("legacy configuration defaults the billing cadence to 30 seconds", () => {
-  const { billingSyncSeconds: _billingSyncSeconds, ...legacy } = configuration;
-  assert.equal(terminalConfigurationSchema.parse(legacy).billingSyncSeconds, 30);
+  const {
+    billingSyncSeconds: _billingSyncSeconds,
+    wifiNetworks: _wifiNetworks,
+    wifiPreferredIndex: _wifiPreferredIndex,
+    ...legacy
+  } = configuration;
+  const restored = terminalConfigurationSchema.parse(legacy);
+  assert.equal(restored.billingSyncSeconds, 30);
+  assert.equal(restored.wifiSsid, "Range WiFi");
+  assert.equal(restored.wifiNetworks, undefined);
 });

@@ -31,8 +31,12 @@ router.post("/config-backup", requireApiKey, async (req, res) => {
     configuration: terminalConfigurationSchema,
   }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: "Ungültige Terminal-Konfiguration", details: body.error.issues });
-  if (body.data.schemaVersion !== TERMINAL_CONFIG_SCHEMA_VERSION) {
-    return res.status(409).json({ error: "Nicht unterstützte Konfigurationsversion", supportedSchemaVersion: TERMINAL_CONFIG_SCHEMA_VERSION });
+  if (body.data.schemaVersion !== 1 &&
+      body.data.schemaVersion !== TERMINAL_CONFIG_SCHEMA_VERSION) {
+    return res.status(409).json({
+      error: "Nicht unterstützte Konfigurationsversion",
+      supportedSchemaVersions: [1, TERMINAL_CONFIG_SCHEMA_VERSION],
+    });
   }
 
   const [latest] = await db.select().from(terminalConfigBackupsTable)

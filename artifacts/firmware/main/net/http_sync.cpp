@@ -204,7 +204,7 @@ static void redact_query(const char *path, char *out, size_t out_size)
              path[len] == '?' ? "?[redacted]" : "");
 }
 
-#define TERMINAL_CONFIG_SCHEMA_VERSION 1
+#define TERMINAL_CONFIG_SCHEMA_VERSION 2
 
 typedef struct {
     Modus modus;
@@ -214,6 +214,9 @@ typedef struct {
     char gatewayToken[MAX_KEY_LEN];
     char wifiSsid[TM_MAX_SSID_LEN];
     char wifiPass[MAX_PASS_LEN];
+    KnownWifiNetwork wifiNetworks[MAX_KNOWN_WIFI_NETWORKS];
+    int wifiNetworkCount;
+    int preferredWifiNetwork;
     bool autoSyncEnabled;
     uint32_t autoSyncSeconds;
     uint32_t billingSyncSeconds;
@@ -264,6 +267,19 @@ static cJSON *config_snapshot_to_json(void)
     cJSON_AddStringToObject(cfg, "gatewayToken", g_store.gatewayToken);
     cJSON_AddStringToObject(cfg, "wifiSsid", g_store.wifiSsid);
     cJSON_AddStringToObject(cfg, "wifiPass", g_store.wifiPass);
+    cJSON *wifi_networks = cJSON_AddArrayToObject(cfg, "wifiNetworks");
+    int wifi_count = store_wifi_network_count();
+    for (int i = 0; i < wifi_count; ++i) {
+        char ssid[TM_MAX_SSID_LEN], pass[MAX_PASS_LEN];
+        if (!store_wifi_copy_network(i, ssid, sizeof(ssid), pass, sizeof(pass)))
+            continue;
+        cJSON *network = cJSON_CreateObject();
+        cJSON_AddStringToObject(network, "ssid", ssid);
+        cJSON_AddStringToObject(network, "password", pass);
+        cJSON_AddItemToArray(wifi_networks, network);
+    }
+    cJSON_AddNumberToObject(cfg, "wifiPreferredIndex",
+                            store_wifi_preferred_index());
     cJSON_AddBoolToObject(cfg, "autoSyncEnabled", g_store.autoSyncEnabled);
     cJSON_AddNumberToObject(cfg, "autoSyncSeconds", g_store.autoSyncSeconds);
     cJSON_AddNumberToObject(cfg, "billingSyncSeconds", g_store.billingSyncSeconds);
@@ -383,6 +399,43 @@ static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
         !json_string_into(cfg, "gatewayToken", out->gatewayToken, sizeof(out->gatewayToken)) ||
         !json_string_into(cfg, "wifiSsid", out->wifiSsid, sizeof(out->wifiSsid)) ||
         !json_string_into(cfg, "wifiPass", out->wifiPass, sizeof(out->wifiPass))) return false;
+    cJSON *wifi_networks = cJSON_GetObjectItemCaseSensitive(cfg, "wifiNetworks");
+    cJSON *wifi_preferred = cJSON_GetObjectItemCaseSensitive(cfg, "wifiPreferredIndex");
+    if (wifi_networks) {
+        int count = cJSON_IsArray(wifi_networks) ? cJSON_GetArraySize(wifi_networks) : -1;
+        if (count < 0 || count > MAX_KNOWN_WIFI_NETWORKS) return false;
+        for (int i = 0; i < count; ++i) {
+            cJSON *network = cJSON_GetArrayItem(wifi_networks, i);
+            if (!cJSON_IsObject(network) ||
+                !json_string_into(network, "ssid", out->wifiNetworks[i].ssid,
+                                  sizeof(out->wifiNetworks[i].ssid)) ||
+                !json_string_into(network, "password", out->wifiNetworks[i].pass,
+                                  sizeof(out->wifiNetworks[i].pass)) ||
+                !out->wifiNetworks[i].ssid[0])
+                return false;
+            for (int previous = 0; previous < i; ++previous)
+                if (strcmp(out->wifiNetworks[previous].ssid,
+                           out->wifiNetworks[i].ssid) == 0)
+                    return false;
+        }
+        if (!cJSON_IsNumber(wifi_preferred) ||
+            (count == 0 && wifi_preferred->valueint != -1) ||
+            (count > 0 && (wifi_preferred->valueint < 0 ||
+                           wifi_preferred->valueint >= count)))
+            return false;
+        out->wifiNetworkCount = count;
+        out->preferredWifiNetwork = wifi_preferred->valueint;
+    } else if (out->wifiSsid[0]) {
+        // Schema v1 stored exactly one network.
+        out->wifiNetworkCount = 1;
+        out->preferredWifiNetwork = 0;
+        snprintf(out->wifiNetworks[0].ssid, sizeof(out->wifiNetworks[0].ssid),
+                 "%s", out->wifiSsid);
+        snprintf(out->wifiNetworks[0].pass, sizeof(out->wifiNetworks[0].pass),
+                 "%s", out->wifiPass);
+    } else {
+        out->preferredWifiNetwork = -1;
+    }
     out->modus = (Modus)modus->valueint;
     out->autoSyncEnabled = cJSON_IsTrue(auto_enabled);
     out->autoSyncSeconds = (uint32_t)auto_seconds->valuedouble;
@@ -433,8 +486,14 @@ static void apply_config_snapshot(const TerminalConfigSnapshot *cfg)
     snprintf(g_store.apiUrl, sizeof(g_store.apiUrl), "%s", cfg->apiUrl);
     snprintf(g_store.gatewayUrl, sizeof(g_store.gatewayUrl), "%s", cfg->gatewayUrl);
     snprintf(g_store.gatewayToken, sizeof(g_store.gatewayToken), "%s", cfg->gatewayToken);
-    snprintf(g_store.wifiSsid, sizeof(g_store.wifiSsid), "%s", cfg->wifiSsid);
-    snprintf(g_store.wifiPass, sizeof(g_store.wifiPass), "%s", cfg->wifiPass);
+    while (store_wifi_network_count() > 0)
+        store_wifi_remove_network(store_wifi_network_count() - 1);
+    for (int i = 0; i < cfg->wifiNetworkCount; ++i) {
+        store_wifi_upsert_network(cfg->wifiNetworks[i].ssid,
+                                  cfg->wifiNetworks[i].pass, NULL);
+    }
+    if (cfg->preferredWifiNetwork >= 0)
+        store_wifi_set_preferred(cfg->preferredWifiNetwork);
     g_store.autoSyncEnabled = cfg->autoSyncEnabled;
     g_store.autoSyncSeconds = cfg->autoSyncSeconds;
     g_store.billingSyncSeconds = cfg->billingSyncSeconds;
@@ -470,7 +529,8 @@ esp_err_t http_restore_config(const char *restore_code)
     cJSON *configuration = root ? cJSON_GetObjectItemCaseSensitive(root, "configuration") : NULL;
     TerminalConfigSnapshot snapshot;
     bool valid = cJSON_IsNumber(version) &&
-                 version->valueint == TERMINAL_CONFIG_SCHEMA_VERSION &&
+                  (version->valueint == 1 ||
+                   version->valueint == TERMINAL_CONFIG_SCHEMA_VERSION) &&
                  parse_config_snapshot(configuration, &snapshot);
     if (!valid) {
         if (root) cJSON_Delete(root);

@@ -51,6 +51,7 @@ EXT_RAM_BSS_ATTR GameStore g_store;
 // ── NVS helpers ──────────────────────────────────────────────
 static nvs_handle_t s_nvs;
 static SemaphoreHandle_t s_nvs_mutex;
+static SemaphoreHandle_t s_wifi_networks_mutex;
 static SemaphoreHandle_t s_kredit_events_mutex;
 static SemaphoreHandle_t s_verkauf_events_mutex;
 static const char *s_catering_error = "";
@@ -1269,6 +1270,137 @@ static bool nvs_load_str(const char *key, char *buf, size_t len)
 {
     size_t sz = len;
     return nvs_get_str(s_nvs, key, buf, &sz) == ESP_OK;
+}
+
+static void wifi_sync_legacy_fields_unlocked(void)
+{
+    if (g_store.knownWifiNetworkCount > 0 &&
+        g_store.preferredWifiNetwork >= 0 &&
+        g_store.preferredWifiNetwork < g_store.knownWifiNetworkCount) {
+        const KnownWifiNetwork *preferred =
+            &g_store.knownWifiNetworks[g_store.preferredWifiNetwork];
+        snprintf(g_store.wifiSsid, sizeof(g_store.wifiSsid), "%s", preferred->ssid);
+        snprintf(g_store.wifiPass, sizeof(g_store.wifiPass), "%s", preferred->pass);
+    } else {
+        g_store.wifiSsid[0] = '\0';
+        g_store.wifiPass[0] = '\0';
+    }
+}
+
+int store_wifi_network_count(void)
+{
+    xSemaphoreTake(s_wifi_networks_mutex, portMAX_DELAY);
+    int count = g_store.knownWifiNetworkCount;
+    xSemaphoreGive(s_wifi_networks_mutex);
+    return count;
+}
+
+int store_wifi_preferred_index(void)
+{
+    xSemaphoreTake(s_wifi_networks_mutex, portMAX_DELAY);
+    int index = g_store.preferredWifiNetwork;
+    xSemaphoreGive(s_wifi_networks_mutex);
+    return index;
+}
+
+int store_wifi_find_network(const char *ssid)
+{
+    if (!ssid || !ssid[0]) return -1;
+    xSemaphoreTake(s_wifi_networks_mutex, portMAX_DELAY);
+    int index = -1;
+    for (int i = 0; i < g_store.knownWifiNetworkCount; ++i) {
+        if (strcmp(g_store.knownWifiNetworks[i].ssid, ssid) == 0) {
+            index = i;
+            break;
+        }
+    }
+    xSemaphoreGive(s_wifi_networks_mutex);
+    return index;
+}
+
+bool store_wifi_copy_network(int index, char *ssid, size_t ssid_len,
+                             char *pass, size_t pass_len)
+{
+    if (!ssid || !ssid_len || !pass || !pass_len) return false;
+    xSemaphoreTake(s_wifi_networks_mutex, portMAX_DELAY);
+    bool valid = index >= 0 && index < g_store.knownWifiNetworkCount;
+    if (valid) {
+        snprintf(ssid, ssid_len, "%s", g_store.knownWifiNetworks[index].ssid);
+        snprintf(pass, pass_len, "%s", g_store.knownWifiNetworks[index].pass);
+    }
+    xSemaphoreGive(s_wifi_networks_mutex);
+    return valid;
+}
+
+bool store_wifi_upsert_network(const char *ssid, const char *pass, int *out_index)
+{
+    if (!ssid || !ssid[0] || !pass ||
+        strnlen(ssid, TM_MAX_SSID_LEN) >= TM_MAX_SSID_LEN ||
+        strnlen(pass, MAX_PASS_LEN) >= MAX_PASS_LEN)
+        return false;
+    xSemaphoreTake(s_wifi_networks_mutex, portMAX_DELAY);
+    int index = -1;
+    for (int i = 0; i < g_store.knownWifiNetworkCount; ++i) {
+        if (strcmp(g_store.knownWifiNetworks[i].ssid, ssid) == 0) {
+            index = i;
+            break;
+        }
+    }
+    if (index < 0) {
+        if (g_store.knownWifiNetworkCount >= MAX_KNOWN_WIFI_NETWORKS) {
+            xSemaphoreGive(s_wifi_networks_mutex);
+            return false;
+        }
+        index = g_store.knownWifiNetworkCount++;
+    }
+    snprintf(g_store.knownWifiNetworks[index].ssid,
+             sizeof(g_store.knownWifiNetworks[index].ssid), "%s", ssid);
+    snprintf(g_store.knownWifiNetworks[index].pass,
+             sizeof(g_store.knownWifiNetworks[index].pass), "%s", pass);
+    if (g_store.preferredWifiNetwork < 0 ||
+        g_store.preferredWifiNetwork >= g_store.knownWifiNetworkCount)
+        g_store.preferredWifiNetwork = index;
+    wifi_sync_legacy_fields_unlocked();
+    if (out_index) *out_index = index;
+    xSemaphoreGive(s_wifi_networks_mutex);
+    return true;
+}
+
+bool store_wifi_remove_network(int index)
+{
+    xSemaphoreTake(s_wifi_networks_mutex, portMAX_DELAY);
+    if (index < 0 || index >= g_store.knownWifiNetworkCount) {
+        xSemaphoreGive(s_wifi_networks_mutex);
+        return false;
+    }
+    for (int i = index; i + 1 < g_store.knownWifiNetworkCount; ++i)
+        g_store.knownWifiNetworks[i] = g_store.knownWifiNetworks[i + 1];
+    g_store.knownWifiNetworkCount--;
+    memset(&g_store.knownWifiNetworks[g_store.knownWifiNetworkCount], 0,
+           sizeof(g_store.knownWifiNetworks[0]));
+    if (g_store.knownWifiNetworkCount == 0) {
+        g_store.preferredWifiNetwork = -1;
+    } else if (g_store.preferredWifiNetwork == index) {
+        g_store.preferredWifiNetwork = 0;
+    } else if (g_store.preferredWifiNetwork > index) {
+        g_store.preferredWifiNetwork--;
+    }
+    wifi_sync_legacy_fields_unlocked();
+    xSemaphoreGive(s_wifi_networks_mutex);
+    return true;
+}
+
+bool store_wifi_set_preferred(int index)
+{
+    xSemaphoreTake(s_wifi_networks_mutex, portMAX_DELAY);
+    if (index < 0 || index >= g_store.knownWifiNetworkCount) {
+        xSemaphoreGive(s_wifi_networks_mutex);
+        return false;
+    }
+    g_store.preferredWifiNetwork = index;
+    wifi_sync_legacy_fields_unlocked();
+    xSemaphoreGive(s_wifi_networks_mutex);
+    return true;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -2997,8 +3129,15 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "gateway_url", g_store.gatewayUrl);
     nvs_set_str(s_nvs, "gateway_token", g_store.gatewayToken);
     nvs_set_u32(s_nvs, "gateway_seq", g_store.gatewaySequence);
+    xSemaphoreTake(s_wifi_networks_mutex, portMAX_DELAY);
+    wifi_sync_legacy_fields_unlocked();
     nvs_set_str(s_nvs, "wifi_ssid", g_store.wifiSsid);
     nvs_set_str(s_nvs, "wifi_pass", g_store.wifiPass);
+    nvs_set_blob(s_nvs, "wifi_nets", g_store.knownWifiNetworks,
+                 sizeof(g_store.knownWifiNetworks));
+    nvs_set_i32(s_nvs, "wifi_net_cnt", g_store.knownWifiNetworkCount);
+    nvs_set_i32(s_nvs, "wifi_pref", g_store.preferredWifiNetwork);
+    xSemaphoreGive(s_wifi_networks_mutex);
     nvs_set_i32(s_nvs, "modus", (int32_t)g_store.modus);
     nvs_set_i32(s_nvs, "op_mode", (int32_t)g_store.operatingMode);
     nvs_set_i32(s_nvs, "cat_pin_set", g_store.cateringPinConfigured ? 1 : 0);
@@ -3050,6 +3189,8 @@ void game_store_init(void)
     memset(&g_store, 0, sizeof(g_store));
     s_nvs_mutex = xSemaphoreCreateMutex();
     configASSERT(s_nvs_mutex);
+    s_wifi_networks_mutex = xSemaphoreCreateMutex();
+    configASSERT(s_wifi_networks_mutex);
     s_kredit_events_mutex = xSemaphoreCreateMutex();
     configASSERT(s_kredit_events_mutex);
     s_verkauf_events_mutex = xSemaphoreCreateMutex();
@@ -3083,6 +3224,53 @@ void game_store_init(void)
         snprintf(g_store.apiUrl, MAX_URL_LEN, "%s", DEFAULT_API_URL);
     nvs_load_str("wifi_ssid", g_store.wifiSsid, TM_MAX_SSID_LEN);
     nvs_load_str("wifi_pass", g_store.wifiPass, MAX_PASS_LEN);
+    bool wifi_profiles_need_save = false;
+    g_store.preferredWifiNetwork = -1;
+    int32_t stored_wifi_count = 0;
+    size_t wifi_networks_size = sizeof(g_store.knownWifiNetworks);
+    bool wifi_networks_loaded =
+        nvs_get_i32(s_nvs, "wifi_net_cnt", &stored_wifi_count) == ESP_OK &&
+        stored_wifi_count >= 0 &&
+        stored_wifi_count <= MAX_KNOWN_WIFI_NETWORKS &&
+        nvs_get_blob(s_nvs, "wifi_nets", g_store.knownWifiNetworks,
+                     &wifi_networks_size) == ESP_OK &&
+        wifi_networks_size == sizeof(g_store.knownWifiNetworks);
+    for (int i = 0; wifi_networks_loaded && i < stored_wifi_count; ++i) {
+        if (!memchr(g_store.knownWifiNetworks[i].ssid, '\0',
+                    sizeof(g_store.knownWifiNetworks[i].ssid)) ||
+            !memchr(g_store.knownWifiNetworks[i].pass, '\0',
+                    sizeof(g_store.knownWifiNetworks[i].pass)) ||
+            !g_store.knownWifiNetworks[i].ssid[0])
+            wifi_networks_loaded = false;
+    }
+    if (wifi_networks_loaded) {
+        g_store.knownWifiNetworkCount = stored_wifi_count;
+        int32_t stored_preferred = 0;
+        if (nvs_get_i32(s_nvs, "wifi_pref", &stored_preferred) == ESP_OK &&
+            stored_preferred >= 0 &&
+            stored_preferred < g_store.knownWifiNetworkCount)
+            g_store.preferredWifiNetwork = stored_preferred;
+        else if (g_store.knownWifiNetworkCount > 0)
+            g_store.preferredWifiNetwork = 0;
+        if (g_store.knownWifiNetworkCount > 0 &&
+            stored_preferred != g_store.preferredWifiNetwork)
+            wifi_profiles_need_save = true;
+    } else if (g_store.wifiSsid[0]) {
+        // Migrate the released single-profile format on first boot. The
+        // legacy fields remain populated below as a compatibility mirror.
+        g_store.knownWifiNetworkCount = 1;
+        snprintf(g_store.knownWifiNetworks[0].ssid,
+                 sizeof(g_store.knownWifiNetworks[0].ssid), "%s", g_store.wifiSsid);
+        snprintf(g_store.knownWifiNetworks[0].pass,
+                 sizeof(g_store.knownWifiNetworks[0].pass), "%s", g_store.wifiPass);
+        g_store.preferredWifiNetwork = 0;
+        wifi_profiles_need_save = true;
+        ESP_LOGI(TAG, "Migrated the stored WiFi profile to the known-network list");
+    } else {
+        g_store.knownWifiNetworkCount = 0;
+        memset(g_store.knownWifiNetworks, 0, sizeof(g_store.knownWifiNetworks));
+    }
+    wifi_sync_legacy_fields_unlocked();
     nvs_load_str("cfg_backup_at", g_store.lastConfigBackupAt,
                  sizeof(g_store.lastConfigBackupAt));
     nvs_load_str("cfg_backup_st", g_store.configBackupStatus,
@@ -3352,6 +3540,8 @@ void game_store_init(void)
         billing_secs <= BILLING_SYNC_MAX_SECONDS)
         g_store.billingSyncSeconds = billing_secs;
 
+    // Persist migration/normalization even when the terminal remains offline.
+    if (wifi_profiles_need_save) game_store_save();
     ESP_LOGI(TAG, "Store initialised. API: %s modus: %s",
              g_store.apiUrl, modus_label(g_store.modus));
 }

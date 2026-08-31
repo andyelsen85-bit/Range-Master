@@ -436,11 +436,14 @@ export default function App() {
             <Step n={2} title="Netzwierk auswielen">
               Op den Numm vum Netzwierk klicken fir et auszewielen.
             </Step>
-            <Step n={3} title="Passwuert aginn">
-              D'WiFi-Passwuert mat der agebauter Tastatur oder engem Bluetooth-Keyboard aginn (kuckt hei drënner).
+            <Step n={3} title="Passwuert aginn (wann néideg)">
+              Bei engem geschützte Netzwierk d'WiFi-Passwuert mat der agebauter Tastatur oder engem Bluetooth-Keyboard aginn. Bei engem oppene Netzwierk bleift d'Passwuertfeld eidel.
             </Step>
-            <Step n={4} title="Verbindung testen">
-              Op "Verbinden" klicken — de Status wiesselt op <strong>Verbonnen ✓</strong> wann d'Verbindung klappt. Nodeems WiFi funktionéiert, kann de Sync mam Portal getest ginn.
+            <Step n={4} title="Verbannen a späicheren">
+              Op "Verbinden" klicken — de Status wiesselt op <strong>Verbonnen ✓</strong> wann d'Verbindung klappt. Den Terminal späichert bis zu fënnef Netzwierker.
+            </Step>
+            <Step n={5} title="Gespeichert Netzwierker verwalten">
+              E gespäichert Netzwierk kann direkt aus der Lëscht ausgewielt an nees verbonne ginn. Mat "Ausgewieltes läschen" gëtt nëmmen dëst Profil geläscht; Passwierder ginn ni um Ecran ugewisen.
             </Step>
             <Table rows={[
               ['Verbonnen', 'Terminal ass am Netzwierk — Sync méiglech'],
@@ -448,7 +451,7 @@ export default function App() {
               ['Keng IP', 'DHCP op dem Router kontrolléieren'],
             ]} />
             <TipBox>
-              WiFi-Astellunge bleiwen gespäichert och wann den Terminal aus- an ageschalt gëtt. Bei Netzwierkswissel muss nëmme Schrëtt 1–4 widderhuelt ginn.
+              WiFi-Astellunge bleiwen nom Ausschalten erhalen. Beim Start an no engem Verbindungsverloscht probéiert den Terminal als éischt dat lescht erfollegräicht Netzwierk an duerno déi aner gespäichert Netzwierker.
             </TipBox>
 
             <h3 className="font-semibold text-gray-800 mb-3 mt-7">Tab: Bluetooth Tastatur</h3>

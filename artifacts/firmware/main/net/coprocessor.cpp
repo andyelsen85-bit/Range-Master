@@ -43,6 +43,8 @@ static char                s_wifi_status[80] = "WiFi not configured";
 typedef struct {
     bool disconnect;
     bool reconnect;
+    bool use_stored_network;
+    int network_index;
     char ssid[TM_MAX_SSID_LEN];
     char pass[MAX_PASS_LEN];
 } WifiCommand;
@@ -98,10 +100,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
                 s_ip_addr[0]     = '\0';
                 g_store.wifiConnected = false;
                 web_config_stop();
-                set_wifi_state(g_store.wifiSsid[0] ? COP_WIFI_RECONNECTING
-                                                   : COP_WIFI_NOT_CONFIGURED,
-                               g_store.wifiSsid[0] ? "Connection lost; retry pending"
-                                                   : "No stored SSID");
+                bool configured = store_wifi_network_count() > 0;
+                set_wifi_state(configured ? COP_WIFI_RECONNECTING
+                                          : COP_WIFI_NOT_CONFIGURED,
+                               configured ? "Connection lost; retry pending"
+                                          : "No stored network");
                 if (s_wifi_command_queue) {
                     WifiCommand wake = {};
                     wake.reconnect = true;
@@ -212,7 +215,9 @@ static esp_err_t wifi_connect_attempt(const char *ssid, const char *pass)
     memcpy(wifi_cfg.sta.ssid, ssid, ssid_len);
     size_t pass_len = strnlen(pass, sizeof(wifi_cfg.sta.password));
     memcpy(wifi_cfg.sta.password, pass, pass_len);
-    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    // An empty saved password explicitly means an open network.
+    wifi_cfg.sta.threshold.authmode =
+        pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
     // A failed association is already disconnected. Calling disconnect again
     // emits another remote DISCONNECTED event and needlessly wakes recovery.
@@ -265,6 +270,23 @@ esp_err_t cop_wifi_request_connect(const char *ssid, const char *pass)
     if (xQueueOverwrite(s_wifi_command_queue, &command) != pdTRUE)
         return ESP_FAIL;
     set_wifi_state(COP_WIFI_CONNECTING, "Manual connection queued");
+    return ESP_OK;
+}
+
+esp_err_t cop_wifi_request_network(int index)
+{
+    if (!s_wifi_command_queue) return ESP_ERR_INVALID_STATE;
+    char ssid[TM_MAX_SSID_LEN], pass[MAX_PASS_LEN];
+    if (!store_wifi_copy_network(index, ssid, sizeof(ssid), pass, sizeof(pass)))
+        return ESP_ERR_INVALID_ARG;
+    WifiCommand command = {};
+    command.use_stored_network = true;
+    command.network_index = index;
+    snprintf(command.ssid, sizeof(command.ssid), "%s", ssid);
+    snprintf(command.pass, sizeof(command.pass), "%s", pass);
+    if (xQueueOverwrite(s_wifi_command_queue, &command) != pdTRUE)
+        return ESP_FAIL;
+    set_wifi_state(COP_WIFI_CONNECTING, "Saved network queued");
     return ESP_OK;
 }
 
@@ -410,14 +432,20 @@ void cop_wifi_copy_status(char *out, size_t out_len)
 static void wifi_supervisor(void *arg)
 {
     WifiCommand command = {};
-    bool enabled = g_store.wifiSsid[0] != '\0';
+    int network_count = store_wifi_network_count();
+    bool enabled = network_count > 0;
+    int active_index = enabled ? store_wifi_preferred_index() : -1;
+    if (active_index < 0 || active_index >= network_count) active_index = 0;
     char ssid[TM_MAX_SSID_LEN], pass[MAX_PASS_LEN];
-    snprintf(ssid, sizeof(ssid), "%s", g_store.wifiSsid);
-    snprintf(pass, sizeof(pass), "%s", g_store.wifiPass);
+    ssid[0] = '\0';
+    pass[0] = '\0';
+    if (enabled)
+        enabled = store_wifi_copy_network(active_index, ssid, sizeof(ssid),
+                                          pass, sizeof(pass));
     uint32_t backoff_ms = WIFI_BACKOFF_MIN_MS;
     bool retrying = false;
     bool first_attempt = true;
-    if (!enabled) set_wifi_state(COP_WIFI_NOT_CONFIGURED, "No stored SSID");
+    if (!enabled) set_wifi_state(COP_WIFI_NOT_CONFIGURED, "No stored network");
 
     for (;;) {
         bool force_connect = false;
@@ -433,8 +461,8 @@ static void wifi_supervisor(void *arg)
                 xSemaphoreGive(s_wifi_op_mutex);
                 s_wifi_connected = false;
                 g_store.wifiConnected = false;
-                set_wifi_state(g_store.wifiSsid[0] ? COP_WIFI_FAILED
-                                                   : COP_WIFI_NOT_CONFIGURED,
+                set_wifi_state(store_wifi_network_count() > 0 ? COP_WIFI_FAILED
+                                                              : COP_WIFI_NOT_CONFIGURED,
                                "Disconnected");
                 continue;
             }
@@ -442,9 +470,17 @@ static void wifi_supervisor(void *arg)
                 retrying = true;
                 continue;
             }
-            if (command.ssid[0]) {
+            if (command.use_stored_network) {
+                // The command owns a credential snapshot. A concurrent delete
+                // or restore must never retarget this queued connection.
                 snprintf(ssid, sizeof(ssid), "%s", command.ssid);
                 snprintf(pass, sizeof(pass), "%s", command.pass);
+                active_index = command.network_index;
+                force_connect = true;
+            } else if (command.ssid[0]) {
+                snprintf(ssid, sizeof(ssid), "%s", command.ssid);
+                snprintf(pass, sizeof(pass), "%s", command.pass);
+                active_index = -1;
                 force_connect = true;
             }
             enabled = true;
@@ -455,6 +491,21 @@ static void wifi_supervisor(void *arg)
         }
 
         if (!enabled || (s_wifi_connected && !force_connect)) continue;
+        if (!force_connect && active_index >= 0 &&
+            !store_wifi_copy_network(active_index, ssid, sizeof(ssid),
+                                     pass, sizeof(pass))) {
+            network_count = store_wifi_network_count();
+            if (network_count <= 0) {
+                enabled = false;
+                set_wifi_state(COP_WIFI_NOT_CONFIGURED, "No stored network");
+                continue;
+            }
+            active_index = store_wifi_preferred_index();
+            if (active_index < 0 || active_index >= network_count) active_index = 0;
+            if (!store_wifi_copy_network(active_index, ssid, sizeof(ssid),
+                                         pass, sizeof(pass)))
+                continue;
+        }
         set_wifi_state(retrying ? COP_WIFI_RECONNECTING : COP_WIFI_CONNECTING,
                        retrying ? "Reconnecting" : "Connecting");
         xSemaphoreTake(s_wifi_op_mutex, portMAX_DELAY);
@@ -464,6 +515,11 @@ static void wifi_supervisor(void *arg)
             backoff_ms = WIFI_BACKOFF_MIN_MS;
             retrying = false;
             g_store.wifiConnected = true;
+            int connected_index = store_wifi_find_network(ssid);
+            if (connected_index >= 0 &&
+                connected_index != store_wifi_preferred_index() &&
+                store_wifi_set_preferred(connected_index))
+                game_store_save();
             store_sync_after_boot_wifi_connected();
         } else {
             char status[80];
@@ -473,6 +529,17 @@ static void wifi_supervisor(void *arg)
                 backoff_ms *= 2;
                 if (backoff_ms > WIFI_BACKOFF_MAX_MS)
                     backoff_ms = WIFI_BACKOFF_MAX_MS;
+            }
+            network_count = store_wifi_network_count();
+            if (network_count > 0) {
+                int failed_index = store_wifi_find_network(ssid);
+                if (failed_index >= 0)
+                    active_index = (failed_index + 1) % network_count;
+                else {
+                    active_index = store_wifi_preferred_index();
+                    if (active_index < 0 || active_index >= network_count)
+                        active_index = 0;
+                }
             }
             retrying = true;
         }
