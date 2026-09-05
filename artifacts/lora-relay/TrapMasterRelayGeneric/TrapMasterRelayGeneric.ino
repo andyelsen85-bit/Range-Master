@@ -24,14 +24,6 @@
 #error "Could not locate the shared TrapMaster LoRa headers"
 #endif
 
-#ifndef TM_GENERIC_AP_PASSWORD
-#error "Define TM_GENERIC_AP_PASSWORD (at least 8 characters) in TrapMasterRelay.local.h"
-#endif
-
-static constexpr char CONFIG_AP_PASSWORD[] = TM_GENERIC_AP_PASSWORD;
-static_assert(sizeof(CONFIG_AP_PASSWORD) >= 9,
-              "TM_GENERIC_AP_PASSWORD must contain at least 8 characters");
-
 #define RF_FREQUENCY               433000000
 #define TX_OUTPUT_POWER            14
 #define LORA_BANDWIDTH             0
@@ -177,7 +169,7 @@ static void startConfigPortal()
              (unsigned long long)(chipId & 0xFFFFFFULL));
 
     WiFi.mode(WIFI_AP);
-    if (!WiFi.softAP(configApSsid, CONFIG_AP_PASSWORD)) {
+    if (!WiFi.softAP(configApSsid)) {
         Serial.println("Configuration hotspot could not be started");
         return;
     }

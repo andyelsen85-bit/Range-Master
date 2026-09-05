@@ -34,3 +34,4 @@
 - [German UI language](german-ui-language.md) — Portal and terminal user-facing text should be natural German; preserve internal routes, enums, and protocol identifiers
 - [LVGL generated font include path](lvgl-font-include-path.md) — firmware font sources must include simple `lvgl.h`, not nested `lvgl/lvgl.h`
 - [Player deactivation integrity](player-deactivation-integrity.md) — retain history, block inactive ledger writes at the DB boundary, and serialize purges with table locks
+- [Heltec S3 build toolchain](heltec-s3-build-toolchain.md) — the current all-board core exceeds quota; install only S3-required tools when building Wireless Stick V3 firmware

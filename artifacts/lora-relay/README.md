@@ -51,15 +51,8 @@ Machine H → TrapMasterRelayH/TrapMasterRelayH.ino
 ### Generic configurable relay
 
 `TrapMasterRelayGeneric/TrapMasterRelayGeneric.ino` is an additional firmware;
-it does not replace or change any of the fixed A-H projects. Add a private WiFi
-setup password of at least eight characters to the ignored
-`TrapMasterRelay/TrapMasterRelay.local.h` file before compiling it:
-
-```cpp
-#define TM_GENERIC_AP_PASSWORD "use-a-private-password"
-```
-
-After startup, connect a phone or computer to the uniquely named
+it does not replace or change any of the fixed A-H projects. After startup,
+connect a phone or computer to the open, uniquely named
 `TrapMaster-Relay-xxxxxx` hotspot. Its captive page allows assignment to machine
 A through H. The assignment is saved in NVS and applies immediately, so changing
 machines never requires reflashing. The hotspot remains available while the

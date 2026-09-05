@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "xABQxNmvrL9Hbpt7aGku-"
+uri = "file://artifacts/lora-relay/TrapMasterRelayGeneric/release/TrapMasterRelayGeneric-WirelessStickV3.zip"
+type = "unspecified"
+title = "TrapMaster Generic Receiver Firmware"
+description = "Compiled Heltec Wireless Stick V3 firmware with open captive portal, merged flash image, component binaries, and flashing instructions."
+logical_id = "4ec6bebd-7efd-44b5-ac62-b6f20d504e81"
+content_hash = "sha256:67298a8e4990f7f5c451aa10c834aa7fdbc8a6cc2b694801b73b9cd903986623"
+size = 1328361
+mtime_ms = 1788617127465
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/4ec6bebd-7efd-44b5-ac62-b6f20d504e81/95e69982-78d2-41ba-a81a-c94a8ae2f1fe"
+storage_version_token = "1788617146999181"
+content_type = "application/octet-stream"

@@ -1,0 +1,16 @@
+TrapMaster Generic Relay - Heltec Wireless Stick V3
+
+Recommended single-file flash:
+  esptool --chip esp32s3 --port YOUR_SERIAL_PORT --baud 921600 write-flash 0x0 TrapMasterRelayGeneric-WirelessStickV3-full.bin
+
+Erase before the first installation if this board contains unrelated firmware:
+  esptool --chip esp32s3 --port YOUR_SERIAL_PORT erase-flash
+
+After boot:
+1. Connect to the open WiFi hotspot named TrapMaster-Relay-xxxxxx.
+2. Open the captive page (or browse to http://192.168.4.1).
+3. Select machine A through H and save.
+
+The OLED shows ? until a valid machine is selected. The receiver rejects fire
+commands while unconfigured. Existing replay protection is retained when the
+machine assignment changes.
