@@ -48,6 +48,27 @@ Machine G → TrapMasterRelayG/TrapMasterRelayG.ino
 Machine H → TrapMasterRelayH/TrapMasterRelayH.ino
 ```
 
+### Generic configurable relay
+
+`TrapMasterRelayGeneric/TrapMasterRelayGeneric.ino` is an additional firmware;
+it does not replace or change any of the fixed A-H projects. Add a private WiFi
+setup password of at least eight characters to the ignored
+`TrapMasterRelay/TrapMasterRelay.local.h` file before compiling it:
+
+```cpp
+#define TM_GENERIC_AP_PASSWORD "use-a-private-password"
+```
+
+After startup, connect a phone or computer to the uniquely named
+`TrapMaster-Relay-xxxxxx` hotspot. Its captive page allows assignment to machine
+A through H. The assignment is saved in NVS and applies immediately, so changing
+machines never requires reflashing. The hotspot remains available while the
+receiver is operating so the assignment can be changed later.
+
+Until a valid assignment has been saved, the OLED shows `?` and the firmware
+refuses every fire command. The existing replay counter is deliberately retained
+when the assignment changes.
+
 After boot, the Wireless Stick V3 OLED shows the selected machine letter
 (`A` through `H`) centered on the display. The letter is compiled into the
 fixed wrapper project, so it is also a quick visual check that the correct
