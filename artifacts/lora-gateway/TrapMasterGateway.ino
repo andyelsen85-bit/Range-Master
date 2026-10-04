@@ -93,6 +93,29 @@ static String lastResult = "Starting";
 static String lastMachine = "-";
 static bool lastAck = false;
 static bool networkSettingsSaved = false;
+static uint32_t lastHttpRequestMs = 0;
+static uint32_t lastIdleLogMs = 0;
+static uint32_t httpRequestsSinceBoot = 0;
+static constexpr uint32_t HTTP_IDLE_LOG_MS = 60000;
+
+static void noteHttpRequest()
+{
+    lastHttpRequestMs = millis();
+    if (httpRequestsSinceBoot != UINT32_MAX) ++httpRequestsSinceBoot;
+}
+
+static void logHttpIdle()
+{
+    uint32_t now = millis();
+    if (now - lastHttpRequestMs < HTTP_IDLE_LOG_MS ||
+        now - lastIdleLogMs < HTTP_IDLE_LOG_MS) return;
+    lastIdleLogMs = now;
+    Serial.printf("HTTP idle: alive uptimeMs=%lu noRequestMs=%lu requests=%lu wifi=%s rssi=%d busy=%s\n",
+                  (unsigned long)now, (unsigned long)(now - lastHttpRequestMs),
+                  (unsigned long)httpRequestsSinceBoot,
+                  WiFi.status() == WL_CONNECTED ? "connected" : "disconnected",
+                  WiFi.RSSI(), pendingFire ? "true" : "false");
+}
 
 static void renderStatus();
 
@@ -615,6 +638,8 @@ static void handleStatus()
                   "\",\"gateway\":\"" +
                   String(staticAddressEnabled ? staticGatewayText : "") +
                   "\",\"rssi\":" + String(WiFi.RSSI()) +
+                  ",\"httpRequestsSinceBoot\":" + String(httpRequestsSinceBoot) +
+                  ",\"lastRequestAgoMs\":" + String(millis() - lastHttpRequestMs) +
                   ",\"lastMachine\":\"" + lastMachine +
                   "\",\"lastResult\":\"" + lastResult +
                   "\",\"lastAck\":" + String(lastAck ? "true" : "false") + "}";
@@ -676,6 +701,9 @@ void setup()
         delay(3000);
         ESP.restart();
     }
+    // Set this AFTER the station is connected, not before WiFiManager starts.
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
     // WiFiManager connects immediately after portal save. Restart once so a
     // changed DHCP/static selection is applied before the gateway starts HTTP.
     if (networkSettingsSaved) {
@@ -689,14 +717,19 @@ void setup()
     initRadio();
     const char *headerKeys[] = { "X-TrapMaster-Auth" };
     server.collectHeaders(headerKeys, 1);
-    server.on("/nonce", HTTP_GET, handleNonce);
-    server.on("/fire", HTTP_GET, handleFire);
-    server.on("/fire-pair", HTTP_GET, handleFirePair);
-    server.on("/health", HTTP_GET, handleHealth);
-    server.on("/status", HTTP_GET, handleStatus);
+    server.on("/nonce", HTTP_GET, [] { noteHttpRequest(); handleNonce(); });
+    server.on("/fire", HTTP_GET, [] { noteHttpRequest(); handleFire(); });
+    server.on("/fire-pair", HTTP_GET, [] { noteHttpRequest(); handleFirePair(); });
+    server.on("/health", HTTP_GET, [] { noteHttpRequest(); handleHealth(); });
+    server.on("/status", HTTP_GET, [] { noteHttpRequest(); handleStatus(); });
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
-    server.on("/bench-fire", HTTP_GET, handleBenchFire);
+    server.on("/bench-fire", HTTP_GET, [] { noteHttpRequest(); handleBenchFire(); });
 #endif
+    server.onNotFound([] {
+        noteHttpRequest(); // unknown paths/methods are requests too
+        server.send(404, "application/json", "{\"ok\":false,\"error\":\"not found\"}");
+    });
+    lastHttpRequestMs = lastIdleLogMs = millis();
     server.begin();
     lastResult = "Ready";
     renderStatus();
@@ -707,4 +740,5 @@ void loop()
     server.handleClient();
     runPendingFire();
     Radio.IrqProcess();
+    logHttpIdle();
 }

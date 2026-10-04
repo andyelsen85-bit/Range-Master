@@ -54,17 +54,25 @@ void lora_copy_status_text(char *out, size_t size) { snprintf(out, size, "%s", s
 bool lora_request_busy() { return s_request_busy; }
 struct Call { char machine; std::string nonce, key, url; };
 static std::vector<Call> calls;
+static unsigned elapsed_ms = 0;
+static std::vector<unsigned> start_times, finish_times, pauses;
+#define pdMS_TO_TICKS(value) (value)
+void vTaskDelay(unsigned ms) { pauses.push_back(ms); elapsed_ms += ms; }
 static std::vector<int> replies;
 static Call auth;
 namespace tm_auth {
     constexpr size_t MAC_HEX_LEN = 64, NONCE_LEN = 16, NONCE_HEX_LEN = 32;
 }
 bool perform_authenticated_get(const char *url, const char *, int *http, int, int) {
+    start_times.push_back(elapsed_ms);
     auth.url = url; calls.push_back(auth);
+    elapsed_ms += 375; // represents waiting for the complete HTTP/radio/ACK cycle
+    finish_times.push_back(elapsed_ms);
     *http = calls.size() <= replies.size() ? replies[calls.size()-1] : 200;
     return *http >= 200 && *http < 300;
 }
 static unsigned nonce_counter = 0;
+struct { void success() {} } s_health_history;
 """
 
 UI_STUBS = r"""
@@ -75,14 +83,19 @@ static lv_obj_t *s_machine_test_confirm = nullptr;
 static lv_obj_t *s_lbl_machine_test_status = &label;
 static bool s_machine_test_pending = false;
 static std::string dialog_text;
-static int opened = 0, closed = 0;
+static int opened = 0, closed = 0, font_assignments = 0;
+constexpr int UI_FONT_16 = 16, UI_FONT_20 = 20;
 constexpr int LV_EVENT_CLICKED = 1, CLR_WARN = 2, CLR_DANGER = 3;
 void *lv_event_get_user_data(lv_event_t *event) { return event->user_data; }
 void lv_msgbox_close(lv_obj_t *) { ++closed; }
 lv_obj_t *lv_msgbox_create(void *) { ++opened; return &object; }
-void lv_msgbox_add_title(lv_obj_t *, const char *) {}
-void lv_msgbox_add_text(lv_obj_t *, const char *text) { dialog_text = text; }
+lv_obj_t *lv_msgbox_add_title(lv_obj_t *, const char *) { return &label; }
+lv_obj_t *lv_msgbox_add_text(lv_obj_t *, const char *text) { dialog_text = text; return &label; }
 lv_obj_t *lv_msgbox_add_footer_button(lv_obj_t *, const char *) { return &object; }
+lv_obj_t *lv_obj_get_child(lv_obj_t *, int) { return &label; }
+void lv_obj_set_style_text_font(lv_obj_t *, int font, int) {
+    assert(font == UI_FONT_16 || font == UI_FONT_20); ++font_assignments;
+}
 void lv_obj_add_event_cb(lv_obj_t *, void (*)(lv_event_t *), int, void *) {}
 void lv_label_set_text(lv_obj_t *, const char *) {}
 int lv_color_hex(int color) { return color; }
@@ -96,6 +109,7 @@ void reset() {
     strcpy(g_store.gatewayToken, "synthetic-auth-key");
     wifi = queueOK = true; s_request_busy = false; saves = queues = 0;
     calls.clear(); replies.clear(); order.clear(); status.clear(); nonce_counter = 0;
+    elapsed_ms = font_assignments = 0; start_times.clear(); finish_times.clear(); pauses.clear();
     s_machine_test_confirm = nullptr; s_machine_test_pending = false;
 }
 int main() {
@@ -109,6 +123,8 @@ int main() {
     perform_machine_test_batch(&queued);
     assert(calls.size() == 2 && calls[0].machine == 'A' && calls[1].machine == 'H');
     assert(calls[0].nonce != calls[1].nonce);
+    assert(start_times[0] == 0 && start_times[1] - finish_times[0] == 2000);
+    assert((pauses == std::vector<unsigned>{2000})); // no trailing pause
     for (const auto &call : calls) {
         assert(call.key == "synthetic-auth-key");
         assert(call.url.find("http://original-gateway/") == 0);
@@ -129,19 +145,36 @@ int main() {
     perform_machine_test_batch(&queued);
     assert(calls.size() == 1 && status.find("A:FEHLER H:NICHT GESENDET") != std::string::npos);
     assert(state == GATEWAY_AUTH_FAILED);
+    assert(pauses.empty()); // stop on rejection, without a delayed subsequent shot
     reset(); assert(lora_test_enabled_machines(0x81)); replies = {409};
     perform_machine_test_batch(&queued);
     assert(calls.size() == 1 && status.find("A:BELEGT/KONFLIKT H:NICHT GESENDET") != std::string::npos);
     assert(state == GATEWAY_BUSY);
+    assert(pauses.empty());
     reset(); assert(lora_test_enabled_machines(0x81)); replies = {202, 200};
     perform_machine_test_batch(&queued);
     assert(calls.size() == 2 && status.find("A:OHNE ACK H:OK") != std::string::npos);
     assert(status.find("TEST MIT WARNUNG") == 0);
+    assert(start_times[1] - finish_times[0] == 2000); // missing ACK still gets a full pause
+
+    reset(); for (int m = 0; m < 8; ++m) g_store.maschinenAktiv[m] = true;
+    assert(lora_test_enabled_machines(0xff));
+    perform_machine_test_batch(&queued);
+    assert(calls.size() == 8 && pauses.size() == 7 && start_times[0] == 0);
+    for (unsigned i = 1; i < calls.size(); ++i) {
+        assert(calls[i].machine == (char)('A' + i));
+        assert(start_times[i] - finish_times[i - 1] == 2000);
+    }
+    reset(); g_store.maschinenAktiv[7] = false;
+    assert(lora_test_enabled_machines(0x01)); perform_machine_test_batch(&queued);
+    assert(calls.size() == 1 && pauses.empty());
 
     reset(); lv_event_t event = {};
     machine_test_all_cb(&event);
     assert(s_machine_test_confirm && queues == 0 && saves == 0);
     assert(dialog_text.find("A H ") != std::string::npos);
+    assert(dialog_text.find("2 Sekunden Pause nach der Gateway-Antwort") != std::string::npos);
+    assert(dialog_text.find("ausgelöst") != std::string::npos && font_assignments == 4);
     machine_test_all_cancel_cb(&event);
     assert(!s_machine_test_confirm && queues == 0 && saves == 0);
     reset(); machine_test_all_cb(&event);
@@ -155,6 +188,8 @@ int main() {
     std::puts("PASS: enabled-only A-H selection; H once; fresh per-machine nonces; immutable credentials; no NVS writes");
     std::puts("PASS: rejection/no-machine/offline/busy/queue failure; stop on failure; per-machine ACK results");
     std::puts("PASS: confirmation never fires; cancel never fires; changed selection rejected");
+    std::puts("PASS: full 2-second pause after each completed request, before next machine; no leading/trailing or post-error pause");
+    std::puts("PASS: confirmation title, body and both button labels use accent-capable UI fonts");
 }
 """
 

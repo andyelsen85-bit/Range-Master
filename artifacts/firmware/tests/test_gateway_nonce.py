@@ -155,7 +155,9 @@ if __name__ == "__main__":
         "static bool build_health_url", "static bool perform_authenticated_get",
         "const char *lora_gateway_state_label"])
     nonce_helpers = source[source.index("struct NonceResponse"):
-                           source.index("static void perform_machine_test_batch")]
+                           source.index("struct HealthFailure")]
+    nonce_helpers += "\n".join(gateway.function(source, name) for name in [
+        "static bool fetch_gateway_nonce", "static bool prepare_fire_request"])
     assert "gatewaySequence" not in source and "game_store_save" not in source
     assert 'Gateway belegt oder Anfragekonflikt (HTTP 409).' in source
     for page in ("screen_spiel.cpp", "screen_dashboard.cpp"):

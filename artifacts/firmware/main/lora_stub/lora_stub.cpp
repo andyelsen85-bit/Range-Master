@@ -6,6 +6,7 @@
 // ============================================================
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -14,9 +15,11 @@
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
+#include "esp_tls.h"
 #include "esp_log.h"
 #include "cJSON.h"
 #include "lora_stub.h"
+#include "gateway_health.h"
 #include "game_store.h"
 #include "coprocessor.h"
 #include "../../../lora-common/trapmaster_auth.h"
@@ -30,6 +33,9 @@ static GatewayReachability s_gateway_state = GATEWAY_NOT_CONFIGURED;
 static uint32_t s_gateway_state_ms = 0;
 static TickType_t s_last_manual_health_tick = 0;
 static TickType_t s_last_auto_health_tick = 0;
+static GatewayHealthHistory s_health_history;
+static char s_health_url[MAX_URL_LEN];
+static char s_health_token[MAX_KEY_LEN];
 
 typedef enum : uint8_t {
     GATEWAY_REQUEST_FIRE,
@@ -113,6 +119,16 @@ static bool copy_gateway_config(GatewayRequest *request)
     snprintf(request->gateway_url, sizeof(request->gateway_url), "%s", g_store.gatewayUrl);
     snprintf(request->gateway_token, sizeof(request->gateway_token), "%s", g_store.gatewayToken);
     return true;
+}
+
+static void adopt_health_scope(const GatewayRequest &request)
+{
+    if (!strcmp(s_health_url, request.gateway_url) &&
+        !strcmp(s_health_token, request.gateway_token)) return;
+    snprintf(s_health_url, sizeof(s_health_url), "%s", request.gateway_url);
+    snprintf(s_health_token, sizeof(s_health_token), "%s", request.gateway_token);
+    s_health_history.success();
+    set_gateway_state(GATEWAY_CHECKING); // another gateway's green is not evidence
 }
 
 static bool build_fire_url(char *url, size_t url_len, const GatewayRequest *request)
@@ -259,6 +275,84 @@ static esp_err_t nonce_http_event(esp_http_client_event_t *event)
     return ESP_OK;
 }
 
+struct HealthFailure {
+    esp_err_t error = ESP_OK;
+    int socket_errno = 0;
+    int tls_error = 0;
+    int http_status = 0;
+};
+
+static const char *health_failure_reason(const HealthFailure &failure)
+{
+    if (failure.error == ESP_ERR_INVALID_ARG) return "configuration";
+    if (failure.error == ESP_ERR_NO_MEM) return "memory";
+    if (failure.http_status == 401 || failure.http_status == 403) return "unauthorized";
+    if (failure.http_status >= 300) return "http";
+    if (failure.tls_error == ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME) return "DNS";
+    if (failure.error == ESP_ERR_TIMEOUT || failure.socket_errno == ETIMEDOUT ||
+        failure.tls_error == ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT) return "timeout";
+    if (failure.socket_errno == ECONNREFUSED) return "refused";
+    if (failure.socket_errno == ENETUNREACH || failure.socket_errno == EHOSTUNREACH)
+        return "network-unreachable";
+    return "connection";
+}
+
+static bool perform_health_get(const char *url, const char *mac_hex, HealthFailure *failure)
+{
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        *failure = {};
+        esp_http_client_config_t cfg = {};
+        cfg.url = url;
+        cfg.timeout_ms = 2000; // bounds connect AND response waits; at most two attempts
+        cfg.disable_auto_redirect = true;
+        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        if (!client) { failure->error = ESP_ERR_NO_MEM; return false; }
+        esp_http_client_set_header(client, "X-TrapMaster-Auth", mac_hex);
+        failure->error = esp_http_client_perform(client);
+        failure->http_status = esp_http_client_get_status_code(client);
+        failure->socket_errno = esp_http_client_get_errno(client);
+        int tls_flags = 0;
+        esp_http_client_get_and_clear_last_tls_error(client, &failure->tls_error, &tls_flags);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        if (failure->error == ESP_OK) {
+            // A final HTTP response is not a dropped SYN. Never retry a 401.
+            return failure->http_status >= 200 && failure->http_status < 300;
+        }
+        // Immediate fresh connection retry, within this same logical check.
+    }
+    return false;
+}
+
+static void apply_health_result(bool success, const HealthFailure &failure)
+{
+    if (success) {
+        s_health_history.success();
+        set_status("Gateway erreichbar - Schlüssel akzeptiert.");
+        set_gateway_state(GATEWAY_REACHABLE);
+        return;
+    }
+    bool declare_failed = s_health_history.failure();
+    ESP_LOGW(TAG, "Gateway check failed reason=%s http=%d esp=%s(%d) errno=%d tls=%d streak=%lu/3 failedSinceBoot=%lu",
+             health_failure_reason(failure), failure.http_status,
+             esp_err_to_name(failure.error), (int)failure.error,
+             failure.socket_errno, failure.tls_error,
+             (unsigned long)s_health_history.consecutive,
+             (unsigned long)s_health_history.failed_since_boot);
+    // Leave both the visible status text and badge untouched for failures 1/2.
+    if (!declare_failed) return;
+    if (failure.http_status == 401 || failure.http_status == 403) {
+        set_status("Gateway-Schlüssel abgelehnt (3 fehlgeschlagene Prüfungen).");
+        set_gateway_state(GATEWAY_AUTH_FAILED);
+    } else if (failure.http_status >= 300) {
+        set_status("Gateway-Prüfung abgelehnt (3 fehlgeschlagene Prüfungen).");
+        set_gateway_state(GATEWAY_FAILED);
+    } else {
+        set_status("Gateway nicht erreichbar (3 fehlgeschlagene Prüfungen).");
+        set_gateway_state(GATEWAY_UNREACHABLE);
+    }
+}
+
 static bool fetch_gateway_nonce(GatewayRequest *request, int *last_http)
 {
     char url[MAX_URL_LEN + 96];
@@ -324,10 +418,15 @@ static void perform_machine_test_batch(const GatewayRequest *batch)
     char results[256] = "TEST: ";
     bool stopped = false;
     bool warning = false;
+    bool previous_completed = false;
     for (int m = MASCHINE_A; m < MASCHINE_COUNT; ++m) {
         if (!(batch->machine_mask & (1u << m))) continue;
         const char *result = "NICHT GESENDET";
         if (!stopped) {
+            // Let the previous HTTP/radio/ACK cycle finish, then allow the
+            // machinery to settle. Sleep only this worker, never the UI.
+            // Fetch the next nonce AFTER the pause so its TTL is not wasted.
+            if (previous_completed) vTaskDelay(pdMS_TO_TICKS(2000));
             GatewayRequest request = *batch;
             request.kind = GATEWAY_REQUEST_FIRE;
             request.machine = (Maschine)m;
@@ -340,6 +439,8 @@ static void perform_machine_test_batch(const GatewayRequest *batch)
                 success = perform_authenticated_get(url, mac_hex, &http_status, 7000, 3);
             }
             if (success) {
+                previous_completed = true;
+                s_health_history.success();
                 result = http_status == 202 ? "OHNE ACK" : "OK";
                 warning |= http_status == 202;
                 set_gateway_state(GATEWAY_REACHABLE);
@@ -369,12 +470,9 @@ static void gateway_worker(void *arg)
     for (;;) {
         if (xQueueReceive(s_gateway_queue, &request, pdMS_TO_TICKS(1000)) != pdTRUE) {
             TickType_t now = xTaskGetTickCount();
-            if (!cop_wifi_is_connected() || !g_store.gatewayUrl[0] ||
+            if (!g_store.gatewayUrl[0] ||
                 !g_store.gatewayToken[0] ||
                 health_check_throttled(false, now)) {
-                if (!cop_wifi_is_connected() &&
-                    g_store.gatewayUrl[0] && g_store.gatewayToken[0])
-                    set_gateway_state(GATEWAY_UNREACHABLE);
                 if (!g_store.gatewayUrl[0] || !g_store.gatewayToken[0])
                     set_gateway_state(GATEWAY_NOT_CONFIGURED);
                 continue;
@@ -383,15 +481,17 @@ static void gateway_worker(void *arg)
             request = {};
             request.kind = GATEWAY_REQUEST_HEALTH;
             copy_gateway_config(&request);
-            set_gateway_state(GATEWAY_CHECKING);
             // FIRE/manual work queued during the idle timeout takes priority.
-            // Autonomous health never owns s_request_busy and uses one short
+            // Autonomous health never owns s_request_busy and uses bounded
             // request, so it cannot suppress subsequent FIRE requests.
             GatewayRequest queued;
             if (xQueueReceive(s_gateway_queue, &queued, 0) == pdTRUE)
                 request = queued;
         }
 
+        // Bind every request, including FIRE, to its immutable gateway scope.
+        // A successful fire before the first poll remains valid evidence.
+        adopt_health_scope(request);
         if (request.kind == GATEWAY_REQUEST_TEST_ALL) {
             perform_machine_test_batch(&request);
             set_request_busy(false);
@@ -404,33 +504,21 @@ static void gateway_worker(void *arg)
         bool success = false;
 
         if (request.kind == GATEWAY_REQUEST_HEALTH) {
-            bool request_ready = false;
+            HealthFailure failure;
             if (build_health_url(url, sizeof(url), &request) &&
                 tm_auth::make_health_mac((const uint8_t *)request.gateway_token,
                                          strlen(request.gateway_token), mac)) {
-                request_ready = true;
                 tm_auth::mac_to_hex(mac, mac_hex);
-                success = perform_authenticated_get(url, mac_hex, &last_http,
-                    request.manual ? 2000 : 250, request.manual ? 3 : 1);
-            } else if (request.gateway_token[0] && strlen(request.gateway_token) >= 16) {
-                set_status("Gateway auth key invalid");
+                if (cop_wifi_is_connected()) {
+                    success = perform_health_get(url, mac_hex, &failure);
+                } else {
+                    failure.error = ESP_ERR_INVALID_STATE;
+                    failure.socket_errno = ENETUNREACH;
+                }
+            } else {
+                failure.error = ESP_ERR_INVALID_ARG;
             }
-
-            if (success) {
-                set_status("Gateway reachable - key accepted");
-                set_gateway_state(GATEWAY_REACHABLE);
-            } else if (last_http == 401 || last_http == 403) {
-                set_status("Gateway key rejected");
-                set_gateway_state(GATEWAY_AUTH_FAILED);
-            } else if (last_http >= 400) {
-                char msg[96];
-                snprintf(msg, sizeof(msg), "Gateway check rejected (HTTP %d)", last_http);
-                set_status(msg);
-                set_gateway_state(GATEWAY_FAILED);
-            } else if (request_ready) {
-                set_status("Gateway unreachable");
-                set_gateway_state(GATEWAY_UNREACHABLE);
-            }
+            apply_health_result(success, failure);
             if (request.manual) set_request_busy(false);
             continue;
         }
@@ -443,6 +531,7 @@ static void gateway_worker(void *arg)
         }
 
         if (success) {
+            s_health_history.success(); // a successful FIRE is also fresh reachability evidence
             // 202 explicitly means the gateway did not observe a FIRE ACK.
             // Tests use the untagged API, so they cannot affect a game total.
             if (request.gameLaunch && last_http != 202)
@@ -469,6 +558,7 @@ static void gateway_worker(void *arg)
             }
             set_status(msg);
         } else if (last_http == 409) {
+            s_health_history.success();
             set_status("Gateway belegt oder Anfragekonflikt (HTTP 409).");
             set_gateway_state(GATEWAY_BUSY);
         } else if (last_http >= 400) {
@@ -509,7 +599,7 @@ void lora_stub_init(void)
     }
     ESP_LOGI(TAG, "Gateway fire worker ready");
     set_gateway_state((g_store.gatewayUrl[0] && g_store.gatewayToken[0])
-                          ? GATEWAY_UNREACHABLE : GATEWAY_NOT_CONFIGURED);
+                          ? GATEWAY_CHECKING : GATEWAY_NOT_CONFIGURED);
 }
 
 bool lora_test_enabled_machines(uint8_t confirmed_mask)
@@ -652,11 +742,6 @@ bool lora_gateway_check(void)
         set_status("Gateway request unavailable");
         return false;
     }
-    if (!cop_wifi_is_connected()) {
-        set_status("WiFi not connected");
-        set_gateway_state(GATEWAY_UNREACHABLE);
-        return false;
-    }
     if (!g_store.gatewayUrl[0] || !g_store.gatewayToken[0]) {
         set_status("Gateway not configured");
         set_gateway_state(GATEWAY_NOT_CONFIGURED);
@@ -676,8 +761,7 @@ bool lora_gateway_check(void)
     request.manual = true;
     request.machine = MASCHINE_A;
     copy_gateway_config(&request);
-    set_status("Checking gateway...");
-    set_gateway_state(GATEWAY_CHECKING);
+    // Do not replace last good feedback just because a check was requested.
     record_health_check(true, now);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false);

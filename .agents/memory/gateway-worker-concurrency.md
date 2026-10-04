@@ -27,3 +27,13 @@ at-most-once trap actuation, including lost responses and interrupted pairs.
 **How to apply:** Keep this constraint in gateway transport/auth changes and
 configuration restore work. Busy feedback must be explicit; it must not queue an
 unexpected later launch or be treated as a stale terminal counter.
+
+Health probes are diagnostic, not permission to fire. Preserve the last good
+status across isolated probe failures and let each FIRE make its own bounded
+transport attempt.
+
+**Why:** The user observed intermittent select/connect timeouts on a healthy
+gateway, followed by recovery on the next periodic check.
+
+**How to apply:** Keep probe failures separate from command admission and avoid
+changing the operator's displayed reachability after a single missed check.

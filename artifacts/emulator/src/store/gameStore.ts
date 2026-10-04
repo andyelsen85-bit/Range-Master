@@ -295,6 +295,7 @@ interface GameState extends Settings {
   serverVerkaeufe: VerkaufReportRow[];
   daySummary: DaySummary | null;
   daySummaryLaden: boolean;
+  daySummaryError: string | null;
   pendingPayments: PaymentEvent[];
   paidBillCache: Record<number, DaySummary['players'][number]>;
 
@@ -983,6 +984,7 @@ export const useGameStore = create<GameState>((set, get) => {
     serverVerkaeufe: savedVerkaufsReport.datum === todayStr() ? savedVerkaufsReport.rows : [],
     daySummary: loadDaySummary(),
     daySummaryLaden: false,
+    daySummaryError: null,
     pendingPayments: loadPendingPayments(),
     paidBillCache: loadPaidBillCache(todayStr()),
 
@@ -1835,8 +1837,12 @@ export const useGameStore = create<GameState>((set, get) => {
 
     ladeDaySummary: async () => {
       const state = get();
-      if (!state.apiUrl || !state.apiKey) return;
-      set({ daySummaryLaden: true });
+      if (!state.apiUrl || !state.apiKey) {
+        set({ daySummaryError: 'Portal nicht eingerichtet.' });
+        return;
+      }
+      if (state.daySummaryLaden) return;
+      set({ daySummaryLaden: true, daySummaryError: null });
       const datum = todayStr();
       try {
         const res = await fetch(`${state.apiUrl}/api/sync/bills/day-summary?datum=${datum}`, {
@@ -1849,9 +1855,11 @@ export const useGameStore = create<GameState>((set, get) => {
           saveDaySummary(data);
           set({ daySummary: data, daySummaryLaden: false });
         } else {
-          set({ daySummaryLaden: false });
+          set({ daySummaryLaden: false, daySummaryError: 'Portalantwort gehört nicht zum angeforderten Tag.' });
         }
-      } catch { set({ daySummaryLaden: false }); }
+      } catch (error) {
+        set({ daySummaryLaden: false, daySummaryError: error instanceof Error ? error.message : 'Verbindung fehlgeschlagen.' });
+      }
     },
 
     markBillPaid: (spielerId) => set((state) => {

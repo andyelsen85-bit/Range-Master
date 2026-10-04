@@ -41,6 +41,25 @@ static lv_obj_t *s_catering_pin;
 static lv_obj_t *s_catering_old_pin;
 static lv_obj_t *s_catering_status;
 static lv_obj_t *s_bill_day_summary;
+static lv_obj_t *s_day_values[6];
+static lv_obj_t *s_day_categories;
+static lv_obj_t *s_day_products;
+static lv_obj_t *s_day_warning;
+
+static void day_money(char *out, size_t size, int cents)
+{
+    int64_t amount = cents;
+    bool negative = amount < 0;
+    if (negative) amount = -amount;
+    snprintf(out, size, "%s%lld,%02lld EUR", negative ? "-" : "",
+             (long long)(amount / 100), (long long)(amount % 100));
+}
+
+static void day_table_cell(lv_obj_t *table, uint32_t row, uint32_t col, const char *text)
+{
+    const char *current = lv_table_get_cell_value(table, row, col);
+    if (!current || strcmp(current, text)) lv_table_set_cell_value(table, row, col, text);
+}
 
 static void set_label_text_if_changed(lv_obj_t *label, const char *text)
 {
@@ -60,53 +79,74 @@ static void refresh_bill_day_summary(void)
 {
     if (!s_bill_day_summary) return;
     const BillDaySummary *day = &g_store.billDay;
-    char text[1024];
+    char text[160];
     if (!day->datum[0]) {
-        snprintf(text, sizeof(text), "TAGESÜBERSICHT: NOCH KEINE PORTALDATEN");
+        set_label_text_if_changed(s_bill_day_summary, "Noch keine Tagesdaten. Bitte mit dem Portal synchronisieren.");
     } else {
         snprintf(text, sizeof(text),
-                 "TAGESÜBERSICHT %s%s\n"
-                 "SPIELER: %d  |  BEZAHLT: %d\n"
-                 "SPIELE: %d  |  ABGESCHLOSSEN: %d  |  BESTÄTIGTE TAUBEN: %d\n"
-                 "GESAMT: %d.%02d EUR",
-                 day->datum, day->authoritative ? "" : " (OFFLINE-CACHE)",
-                 day->uniquePlayers, day->paidPlayers, day->games,
-                 day->completedGames, day->confirmedClays,
-                 day->generalTotalCent / 100, abs(day->generalTotalCent % 100));
-        size_t used = strlen(text);
-        for (int i = 0; i < day->categoryCount && used < sizeof(text); ++i) {
-            int n = snprintf(text + used, sizeof(text) - used, "\n%s: %d.%02d EUR",
-                             day->categories[i].name,
-                             day->categories[i].totalCent / 100,
-                             abs(day->categories[i].totalCent % 100));
-            if (n < 0 || (size_t)n >= sizeof(text) - used) break;
-            used += (size_t)n;
-        }
-        for (int i = 0; i < day->productCount && used < sizeof(text); ++i) {
-            const BillLine *line = &day->products[i];
-            int n;
-            if (line->unitPriceCent == VERKAUF_UNIT_PRICE_UNKNOWN)
-                n = snprintf(text + used, sizeof(text) - used,
-                             "\nAUSSTEHEND %s: %d x PREIS UNBEKANNT (ABGLEICH)",
-                             line->produktName, line->quantity);
-            else
-                n = snprintf(text + used, sizeof(text) - used,
-                             "\n%s%s: %d x %d.%02d = %d.%02d EUR",
-                              line->localPending ? "AUSSTEHEND " : "",
-                             line->produktName, line->quantity,
-                             line->unitPriceCent / 100,
-                             abs(line->unitPriceCent % 100),
-                             line->lineTotalCent / 100,
-                             abs(line->lineTotalCent % 100));
-            if (n < 0 || (size_t)n >= sizeof(text) - used) break;
-            used += (size_t)n;
-        }
-        if (day->productOverflow && used < sizeof(text)) {
-            snprintf(text + used, sizeof(text) - used,
-                      "\nDETAIL-LIMIT ERREICHT - PORTALDETAILS PRÜFEN");
+                 "%.2s.%.2s.%.4s  |  %s",
+                 day->datum + 8, day->datum + 5, day->datum,
+                 day->authoritative ? "Portalstand mit lokalen Buchungen" : "Offline-Cache mit lokalen Buchungen");
+        set_label_text_if_changed(s_bill_day_summary, text);
+    }
+    const int counts[] = {day->uniquePlayers, day->games, day->completedGames,
+                          day->confirmedClays, day->paidPlayers};
+    for (int i = 0; i < 6; ++i) {
+        if (!day->datum[0]) snprintf(text, sizeof(text), "--");
+        else if (i == 0) day_money(text, sizeof(text), day->generalTotalCent);
+        else snprintf(text, sizeof(text), "%d", counts[i - 1]);
+        set_label_text_if_changed(s_day_values[i], text);
+    }
+    int categories = day->datum[0] ? day->categoryCount : 0;
+    int products = day->datum[0] ? day->productCount : 0;
+    if (categories > MAX_BILL_CATEGORIES) categories = MAX_BILL_CATEGORIES;
+    if (products > MAX_DAY_PRODUCTS) products = MAX_DAY_PRODUCTS;
+    if (categories < 0) categories = 0;
+    if (products < 0) products = 0;
+    uint32_t rows = (uint32_t)(categories ? categories + 1 : 2);
+    if (lv_table_get_row_cnt(s_day_categories) != rows) lv_table_set_row_cnt(s_day_categories, rows);
+    for (int i = 0; i < categories; ++i) {
+        day_table_cell(s_day_categories, i + 1, 0, day->categories[i].name);
+        day_money(text, sizeof(text), day->categories[i].totalCent);
+        day_table_cell(s_day_categories, i + 1, 1, text);
+    }
+    if (!categories) {
+        day_table_cell(s_day_categories, 1, 0, "Keine Umsätze");
+        day_table_cell(s_day_categories, 1, 1, "");
+    }
+    rows = (uint32_t)(products ? products + 1 : 2);
+    if (lv_table_get_row_cnt(s_day_products) != rows) lv_table_set_row_cnt(s_day_products, rows);
+    bool pending = false;
+    for (int i = 0; i < products; ++i) {
+        const BillLine *line = &day->products[i];
+        pending |= line->localPending;
+        snprintf(text, sizeof(text), "%s%.63s",
+                 line->localPending ? "Ausstehend:\n" : "", line->produktName);
+        day_table_cell(s_day_products, i + 1, 0, text);
+        if (line->unitPriceCent == VERKAUF_UNIT_PRICE_UNKNOWN) {
+            snprintf(text, sizeof(text), "%d x\nPreis unbekannt", line->quantity);
+            day_table_cell(s_day_products, i + 1, 1, text);
+            day_table_cell(s_day_products, i + 1, 2, "Abgleich");
+        } else {
+            char price[32];
+            day_money(price, sizeof(price), line->unitPriceCent);
+            snprintf(text, sizeof(text), "%d x\n%s", line->quantity, price);
+            day_table_cell(s_day_products, i + 1, 1, text);
+            day_money(text, sizeof(text), line->lineTotalCent);
+            day_table_cell(s_day_products, i + 1, 2, text);
         }
     }
-    set_label_text_if_changed(s_bill_day_summary, text);
+    if (!products) {
+        day_table_cell(s_day_products, 1, 0, "Keine Produkte verkauft");
+        day_table_cell(s_day_products, 1, 1, "");
+        day_table_cell(s_day_products, 1, 2, "");
+    }
+    set_label_text_if_changed(s_day_warning, day->productOverflow
+        ? "Detail-Limit erreicht. Vollständige Produktdetails im Portal prüfen."
+        : pending ? "Ausstehende Buchungen sind enthalten. Unbekannte Preise werden beim Abgleich geklärt."
+        : "Bestätigte Tauben zählen nur ACK-Auslösungen. Bei älteren Spielen fehlt diese Zählung möglicherweise.");
+    lv_obj_set_style_text_color(s_day_warning,
+        lv_color_hex(day->productOverflow || pending ? CLR_WARN : CLR_MUTED), 0);
 }
 
 static void catering_save_pin_cb(lv_event_t *)
@@ -425,18 +465,27 @@ static void machine_test_all_cb(lv_event_t *e)
         return;
     }
     s_machine_test_confirm = lv_msgbox_create(NULL);
-    lv_msgbox_add_title(s_machine_test_confirm, "Testauslösung Alle Maschinen");
+    lv_obj_t *title = lv_msgbox_add_title(s_machine_test_confirm, "Testauslösung Alle Maschinen");
+    lv_obj_set_style_text_font(title, UI_FONT_20, 0);
     char warning[320];
     snprintf(warning, sizeof(warning),
         "Aktive Maschinen: %s\n\n"
         "Jede aktive Maschine wird einmal nacheinander ausgelöst. "
+        "Dazwischen gibt es jeweils 2 Sekunden Pause nach der Gateway-Antwort.\n"
         "H erhält nur einen FIRE-Befehl.\n"
         "Alle Gefahrenbereiche müssen frei sein! Keine Spiel- oder Kreditbuchung.",
         machines);
-    lv_msgbox_add_text(s_machine_test_confirm, warning);
+    // The default msgbox theme font lacks German glyphs. Use the same
+    // accent-capable font chain as the rest of the terminal, also on buttons.
+    lv_obj_t *body = lv_msgbox_add_text(s_machine_test_confirm, warning);
+    lv_obj_set_style_text_font(body, UI_FONT_16, 0);
     lv_obj_t *cancel = lv_msgbox_add_footer_button(s_machine_test_confirm, "Abbrechen");
+    lv_obj_t *cancel_label = lv_obj_get_child(cancel, 0);
+    if (cancel_label) lv_obj_set_style_text_font(cancel_label, UI_FONT_16, 0);
     lv_obj_add_event_cb(cancel, machine_test_all_cancel_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *fire = lv_msgbox_add_footer_button(s_machine_test_confirm, "Jetzt auslösen");
+    lv_obj_t *fire_label = lv_obj_get_child(fire, 0);
+    if (fire_label) lv_obj_set_style_text_font(fire_label, UI_FONT_16, 0);
     lv_obj_add_event_cb(fire, machine_test_all_confirm_cb, LV_EVENT_CLICKED,
                        (void *)(uintptr_t)mask);
 }
@@ -1024,16 +1073,97 @@ static lv_obj_t *build_day_stats_tab(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 16, 0);
-    lv_obj_set_style_pad_row(parent, 8, 0);
+    lv_obj_set_style_pad_row(parent, 16, 0);
     lv_obj_t *heading = lv_label_create(parent);
-    lv_label_set_text(heading, "TAGESSTATISTIK");
-    lv_obj_set_style_text_font(heading, UI_FONT_16, 0);
-    lv_obj_set_style_text_color(heading, lv_color_hex(CLR_PRIMARY), 0);
+    lv_label_set_text(heading, "Tagesabrechnung");
+    lv_obj_set_style_text_font(heading, UI_FONT_28, 0);
+    lv_obj_set_style_text_color(heading, lv_color_hex(CLR_TEXT), 0);
     s_bill_day_summary = lv_label_create(parent);
-    lv_obj_set_style_text_font(s_bill_day_summary, UI_FONT_14, 0);
-    lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_set_style_text_font(s_bill_day_summary, UI_FONT_16, 0);
+    lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_MUTED), 0);
     lv_label_set_long_mode(s_bill_day_summary, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_bill_day_summary, LV_PCT(100));
+    const char *titles[] = {"Gesamtumsatz", "Spieler", "Spiele", "Abgeschlossen",
+                            "Tauben bestätigt", "Rechnungen bezahlt"};
+    const char *hints[] = {"Alle Produkte, inklusive offener Beträge", "Mit Aktivität an diesem Tag",
+                          "Alle gespeicherten Spiele", "Vollständig beendete Spiele",
+                          "Nur Auslösungen mit ACK", "Vollständig bezahlte Spieler"};
+    lv_obj_t *cards = lv_obj_create(parent);
+    lv_obj_set_size(cards, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(cards, 0, 0);
+    lv_obj_set_style_border_width(cards, 0, 0);
+    lv_obj_set_style_bg_opa(cards, LV_OPA_TRANSP, 0);
+    lv_obj_set_flex_flow(cards, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_pad_gap(cards, 12, 0);
+    lv_obj_clear_flag(cards, LV_OBJ_FLAG_SCROLLABLE);
+    for (int i = 0; i < 6; ++i) {
+        lv_obj_t *card = lv_obj_create(cards);
+        lv_obj_add_style(card, &g_style_card, 0);
+        lv_obj_set_size(card, LV_PCT(32), 140);
+        lv_obj_set_style_pad_all(card, 16, 0);
+        lv_obj_set_style_pad_row(card, 8, 0);
+        lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *title = lv_label_create(card);
+        lv_label_set_text(title, titles[i]);
+        lv_obj_set_style_text_font(title, UI_FONT_16, 0);
+        lv_obj_set_style_text_color(title, lv_color_hex(CLR_TEXT), 0);
+        s_day_values[i] = lv_label_create(card);
+        lv_label_set_text(s_day_values[i], "--");
+        lv_obj_set_width(s_day_values[i], LV_PCT(100));
+        lv_obj_set_style_text_font(s_day_values[i], i == 0 ? UI_FONT_28 : UI_FONT_36, 0);
+        lv_obj_set_style_text_color(s_day_values[i],
+            lv_color_hex(i == 0 || i == 4 ? CLR_PRIMARY : i == 5 ? CLR_SUCCESS : CLR_TEXT), 0);
+        lv_obj_t *hint = lv_label_create(card);
+        lv_label_set_text(hint, hints[i]);
+        lv_obj_set_width(hint, LV_PCT(100));
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(hint, UI_FONT_12, 0);
+        lv_obj_set_style_text_color(hint, lv_color_hex(CLR_MUTED), 0);
+    }
+    lv_obj_t *details = lv_obj_create(parent);
+    lv_obj_set_size(details, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(details, 0, 0);
+    lv_obj_set_style_border_width(details, 0, 0);
+    lv_obj_set_style_bg_opa(details, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_column(details, 12, 0);
+    lv_obj_set_flex_flow(details, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(details, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_clear_flag(details, LV_OBJ_FLAG_SCROLLABLE);
+    for (int i = 0; i < 2; ++i) {
+        lv_obj_t *panel = lv_obj_create(details);
+        lv_obj_add_style(panel, &g_style_card, 0);
+        lv_obj_set_size(panel, LV_PCT(49), LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_all(panel, 16, 0);
+        lv_obj_set_style_pad_row(panel, 12, 0);
+        lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+        lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *title = lv_label_create(panel);
+        lv_label_set_text(title, i == 0 ? "Umsatz nach Kategorie" : "Verkaufte Produkte");
+        lv_obj_set_style_text_font(title, UI_FONT_18, 0);
+        lv_obj_set_style_text_color(title, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_t *table = lv_table_create(panel);
+        lv_obj_set_style_text_font(table, UI_FONT_16, 0);
+        lv_obj_set_style_text_color(table, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_set_style_bg_color(table, lv_color_hex(CLR_CARD), 0);
+        lv_obj_set_style_border_color(table, lv_color_hex(CLR_BORDER), LV_PART_ITEMS);
+        lv_obj_set_width(table, LV_PCT(100));
+        lv_table_set_col_cnt(table, i == 0 ? 2 : 3);
+        lv_table_set_row_cnt(table, 1);
+        // Tab content is ~1000 px on the physical landscape display.
+        lv_table_set_col_width(table, 0, i == 0 ? 235 : 165);
+        lv_table_set_col_width(table, 1, i == 0 ? 170 : 135);
+        if (i == 1) lv_table_set_col_width(table, 2, 125);
+        lv_table_set_cell_value(table, 0, 0, i == 0 ? "Kategorie" : "Produkt");
+        lv_table_set_cell_value(table, 0, 1, i == 0 ? "Betrag" : "Menge / Preis");
+        if (i == 1) lv_table_set_cell_value(table, 0, 2, "Betrag");
+        if (i == 0) s_day_categories = table;
+        else s_day_products = table;
+    }
+    s_day_warning = lv_label_create(parent);
+    lv_obj_set_width(s_day_warning, LV_PCT(100));
+    lv_label_set_long_mode(s_day_warning, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(s_day_warning, UI_FONT_14, 0);
     refresh_bill_day_summary();
     return parent;
 }

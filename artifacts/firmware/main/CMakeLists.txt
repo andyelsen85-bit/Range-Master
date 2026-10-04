@@ -48,6 +48,7 @@ idf_component_register(
         lvgl
         driver
         esp_http_client
+        esp-tls
         esp_http_server
         mbedtls
         nvs_flash
