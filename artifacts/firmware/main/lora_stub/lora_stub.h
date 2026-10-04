@@ -52,6 +52,8 @@ bool lora_request_busy(void);
 
 /** Copy the latest user-visible result safely into caller-owned storage. */
 void lora_copy_status_text(char *out, size_t out_len);
+/** Atomically copy bulk-test progress/completion, independent of health status. */
+void lora_copy_machine_test_status(char *out, size_t out_len, bool *running);
 GatewayReachability lora_gateway_state(void);
 uint32_t lora_gateway_state_timestamp_ms(void);
 const char *lora_gateway_state_label(GatewayReachability state);

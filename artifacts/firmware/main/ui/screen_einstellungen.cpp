@@ -31,6 +31,7 @@ static bool s_portal_check_pending;
 static bool s_gateway_check_pending;
 static lv_obj_t *s_lbl_machine_test_status;
 static bool s_machine_test_pending;
+static bool s_machine_test_bulk;
 static lv_obj_t *s_machine_test_confirm;
 static lv_obj_t *s_auto_sync_switch;
 static lv_obj_t *s_auto_sync_seconds;
@@ -394,6 +395,37 @@ static void mach_sw_cb(lv_event_t *e)
     game_store_save();
 }
 
+static void refresh_machine_test_status(void)
+{
+    if (!s_machine_test_pending || !s_lbl_machine_test_status) return;
+    char status[256];
+    bool running;
+    if (s_machine_test_bulk) {
+        // Text and completion are one snapshot. Health checks cannot erase
+        // results, or let us stop polling before the final result is copied.
+        lora_copy_machine_test_status(status, sizeof(status), &running);
+    } else {
+        lora_copy_status_text(status, sizeof(status));
+        running = lora_request_busy();
+    }
+    uint32_t color = CLR_WARN;
+    if (strstr(status, "TEST MIT WARNUNG") || strstr(status, "FEHLER")) {
+        color = CLR_DANGER;
+    } else if (strstr(status, "TEST BEENDET") ||
+               strstr(status, "fired") || strstr(status, "sent")) {
+        color = CLR_SUCCESS;
+    } else if (strstr(status, "unreachable") || strstr(status, "rejected") ||
+               strstr(status, "invalid") || strstr(status, "unavailable")) {
+        color = CLR_DANGER;
+    }
+    const char *current = lv_label_get_text(s_lbl_machine_test_status);
+    if (!current || strcmp(current, status) != 0) {
+        lv_label_set_text(s_lbl_machine_test_status, status);
+        lv_obj_set_style_text_color(s_lbl_machine_test_status, lv_color_hex(color), 0);
+    }
+    if (!running) s_machine_test_pending = false;
+}
+
 static void machine_test_cb(lv_event_t *e)
 {
     int machine = (int)(intptr_t)lv_event_get_user_data(e);
@@ -401,6 +433,7 @@ static void machine_test_cb(lv_event_t *e)
 
     if (lora_fire_machine((Maschine)machine)) {
         s_machine_test_pending = true;
+        s_machine_test_bulk = false;
         if (s_lbl_machine_test_status) {
             char msg[64];
             snprintf(msg, sizeof(msg), "TEST MASCHINE %c GESENDET...",
@@ -426,6 +459,7 @@ static void machine_test_all_confirm_cb(lv_event_t *e)
         s_machine_test_confirm = NULL;
     }
     s_machine_test_pending = lora_test_enabled_machines(mask);
+    s_machine_test_bulk = s_machine_test_pending;
     char status[256];
     lora_copy_status_text(status, sizeof(status));
     if (s_lbl_machine_test_status) {
@@ -1591,13 +1625,9 @@ void screen_einstellungen_refresh(void)
     s_gateway_check_pending = false;
     s_portal_check_pending = false;
     if (s_lbl_api_status) lv_label_set_text(s_lbl_api_status, "");
-    s_machine_test_pending = false;
-    if (s_lbl_machine_test_status) {
-        lv_label_set_text(s_lbl_machine_test_status,
-                          "EIN AUSLÖSEBEFEHL JE GEWÄHLTER MASCHINE — KEIN SPIEL.");
-        lv_obj_set_style_text_color(s_lbl_machine_test_status,
-                                    lv_color_hex(CLR_MUTED), 0);
-    }
+    // Sync publication and screen navigation also call this refresh. Neither
+    // must cancel result polling or replace retained test feedback with a hint.
+    refresh_machine_test_status();
 }
 
 void screen_einstellungen_tick(void)
@@ -1627,25 +1657,5 @@ void screen_einstellungen_tick(void)
         if (!lora_request_busy()) s_gateway_check_pending = false;
     }
 
-    if (s_machine_test_pending && s_lbl_machine_test_status) {
-        char status[256];
-        lora_copy_status_text(status, sizeof(status));
-        uint32_t color = CLR_WARN;
-        if (strstr(status, "TEST MIT WARNUNG") || strstr(status, "FEHLER")) {
-            color = CLR_DANGER;
-        } else if (strstr(status, "TEST BEENDET") ||
-                   strstr(status, "fired") || strstr(status, "sent")) {
-            color = CLR_SUCCESS;
-        } else if (strstr(status, "unreachable") || strstr(status, "rejected") ||
-                   strstr(status, "invalid") || strstr(status, "unavailable")) {
-            color = CLR_DANGER;
-        }
-        const char *current = lv_label_get_text(s_lbl_machine_test_status);
-        if (!current || strcmp(current, status) != 0) {
-            lv_label_set_text(s_lbl_machine_test_status, status);
-            lv_obj_set_style_text_color(s_lbl_machine_test_status,
-                                        lv_color_hex(color), 0);
-        }
-        if (!lora_request_busy()) s_machine_test_pending = false;
-    }
+    refresh_machine_test_status();
 }

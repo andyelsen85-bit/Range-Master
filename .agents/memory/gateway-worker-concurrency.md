@@ -37,3 +37,14 @@ gateway, followed by recovery on the next periodic check.
 
 **How to apply:** Keep probe failures separate from command admission and avoid
 changing the operator's displayed reachability after a single missed check.
+
+Machine-test progress and final per-machine ACK feedback must survive sync-driven
+Settings refreshes and unrelated health checks, until another operator action
+replaces the displayed result.
+
+**Why:** The operator observed sync restore the default hint midway through an
+all-machine test, hiding ACKs and the final report despite continued firing.
+
+**How to apply:** Keep test results separate from general gateway status and read
+their completion flag with the same atomic snapshot. A screen/data refresh must
+not clear test polling or erase already displayed results.

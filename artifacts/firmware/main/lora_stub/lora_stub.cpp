@@ -28,6 +28,8 @@ static const char *TAG = "lora_stub";
 static QueueHandle_t s_gateway_queue;
 static SemaphoreHandle_t s_state_mutex;
 static char s_status[256] = "Gateway not configured";
+static char s_machine_test_status[256];
+static bool s_machine_test_running;
 static bool s_request_busy = false;
 static GatewayReachability s_gateway_state = GATEWAY_NOT_CONFIGURED;
 static uint32_t s_gateway_state_ms = 0;
@@ -66,6 +68,15 @@ static void set_status(const char *text)
     snprintf(log_text, sizeof(log_text), "%s", s_status);
     if (s_state_mutex) xSemaphoreGive(s_state_mutex);
     ESP_LOGI(TAG, "%s", log_text);
+}
+
+static void publish_machine_test_status(const char *text, bool running)
+{
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    snprintf(s_machine_test_status, sizeof(s_machine_test_status), "%s", text);
+    s_machine_test_running = running;
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+    set_status(text);
 }
 
 static void set_request_busy(bool busy)
@@ -455,12 +466,12 @@ static void perform_machine_test_batch(const GatewayRequest *batch)
         size_t used = strlen(results);
         snprintf(results + used, sizeof(results) - used, "%c:%s ",
                  (char)('A' + m), result);
-        set_status(results);
+        publish_machine_test_status(results, true);
     }
     char final_status[256];
     snprintf(final_status, sizeof(final_status), "%s: %.210s",
              warning ? "TEST MIT WARNUNG BEENDET" : "TEST BEENDET", results);
-    set_status(final_status);
+    publish_machine_test_status(final_status, false);
 }
 
 static void gateway_worker(void *arg)
@@ -630,10 +641,10 @@ bool lora_test_enabled_machines(uint8_t confirmed_mask)
         set_status("Gateway-Anfrage läuft bereits.");
         return false;
     }
-    set_status("TEST STARTET: aktive Maschinen werden nacheinander ausgelöst.");
+    publish_machine_test_status("TEST STARTET: aktive Maschinen werden nacheinander ausgelöst.", true);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false);
-        set_status("Gateway-Warteschlange nicht verfügbar.");
+        publish_machine_test_status("Gateway-Warteschlange nicht verfügbar.", false);
         return false;
     }
     return true;
@@ -784,6 +795,15 @@ void lora_copy_status_text(char *out, size_t out_len)
     if (!out || out_len == 0) return;
     if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     snprintf(out, out_len, "%s", s_status);
+    if (s_state_mutex) xSemaphoreGive(s_state_mutex);
+}
+
+void lora_copy_machine_test_status(char *out, size_t out_len, bool *running)
+{
+    if (!out || out_len == 0) return;
+    if (s_state_mutex) xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    snprintf(out, out_len, "%s", s_machine_test_status);
+    if (running) *running = s_machine_test_running;
     if (s_state_mutex) xSemaphoreGive(s_state_mutex);
 }
 

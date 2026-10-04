@@ -25,6 +25,7 @@ STUBS = r"""
 #include <string>
 #include <vector>
 #include <utility>
+#include <functional>
 #define MAX_URL_LEN 256
 #define MAX_KEY_LEN 256
 enum Maschine { MASCHINE_A, MASCHINE_B, MASCHINE_C, MASCHINE_D,
@@ -38,6 +39,8 @@ static bool s_request_busy = false;
 static void *s_state_mutex = nullptr;
 static void *s_gateway_queue = (void *)1;
 static std::string status;
+static char s_machine_test_status[256];
+static bool s_machine_test_running;
 static bool wifi = true, queueOK = true;
 static int saves = 0, queues = 0, state = 0;
 static std::vector<std::string> order;
@@ -56,8 +59,12 @@ struct Call { char machine; std::string nonce, key, url; };
 static std::vector<Call> calls;
 static unsigned elapsed_ms = 0;
 static std::vector<unsigned> start_times, finish_times, pauses;
+static std::function<void()> during_pause;
 #define pdMS_TO_TICKS(value) (value)
-void vTaskDelay(unsigned ms) { pauses.push_back(ms); elapsed_ms += ms; }
+void vTaskDelay(unsigned ms) {
+    pauses.push_back(ms); elapsed_ms += ms;
+    if (during_pause) during_pause();
+}
 static std::vector<int> replies;
 static Call auth;
 namespace tm_auth {
@@ -82,10 +89,13 @@ static lv_obj_t object, label;
 static lv_obj_t *s_machine_test_confirm = nullptr;
 static lv_obj_t *s_lbl_machine_test_status = &label;
 static bool s_machine_test_pending = false;
+static bool s_machine_test_bulk = false;
+static std::string displayed_text;
+static int displayed_color;
 static std::string dialog_text;
 static int opened = 0, closed = 0, font_assignments = 0;
 constexpr int UI_FONT_16 = 16, UI_FONT_20 = 20;
-constexpr int LV_EVENT_CLICKED = 1, CLR_WARN = 2, CLR_DANGER = 3;
+constexpr int LV_EVENT_CLICKED = 1, CLR_WARN = 2, CLR_DANGER = 3, CLR_SUCCESS = 4;
 void *lv_event_get_user_data(lv_event_t *event) { return event->user_data; }
 void lv_msgbox_close(lv_obj_t *) { ++closed; }
 lv_obj_t *lv_msgbox_create(void *) { ++opened; return &object; }
@@ -97,9 +107,10 @@ void lv_obj_set_style_text_font(lv_obj_t *, int font, int) {
     assert(font == UI_FONT_16 || font == UI_FONT_20); ++font_assignments;
 }
 void lv_obj_add_event_cb(lv_obj_t *, void (*)(lv_event_t *), int, void *) {}
-void lv_label_set_text(lv_obj_t *, const char *) {}
+void lv_label_set_text(lv_obj_t *, const char *text) { displayed_text = text; }
+const char *lv_label_get_text(lv_obj_t *) { return displayed_text.c_str(); }
 int lv_color_hex(int color) { return color; }
-void lv_obj_set_style_text_color(lv_obj_t *, int, int) {}
+void lv_obj_set_style_text_color(lv_obj_t *, int color, int) { displayed_color = color; }
 """
 
 MAIN = r"""
@@ -110,6 +121,8 @@ void reset() {
     wifi = queueOK = true; s_request_busy = false; saves = queues = 0;
     calls.clear(); replies.clear(); order.clear(); status.clear(); nonce_counter = 0;
     elapsed_ms = font_assignments = 0; start_times.clear(); finish_times.clear(); pauses.clear();
+    s_machine_test_status[0] = 0; s_machine_test_running = false;
+    s_machine_test_bulk = false; during_pause = {}; displayed_text.clear();
     s_machine_test_confirm = nullptr; s_machine_test_pending = false;
 }
 int main() {
@@ -185,11 +198,35 @@ int main() {
     g_store.maschinenAktiv[7] = false; // selection changed while confirmation was open
     machine_test_all_confirm_cb(&event);
     assert(!s_machine_test_pending && queues == 0);
+    reset(); machine_test_all_cb(&event); machine_test_all_confirm_cb(&event);
+    assert(s_machine_test_pending && s_machine_test_bulk);
+    refresh_machine_test_status();
+    assert(displayed_text.find("TEST STARTET") == 0);
+    during_pause = [] {
+        set_status("Gateway erreichbar - Schlüssel akzeptiert."); // unrelated periodic status
+        refresh_machine_test_status(); // used by sync-triggered Settings refresh
+        assert(s_machine_test_pending && displayed_text == "TEST: A:OK ");
+    };
+    perform_machine_test_batch(&queued);
+    set_status("Gateway erreichbar - Schlüssel akzeptiert."); // next health poll beats UI tick
+    refresh_machine_test_status();
+    assert(!s_machine_test_pending && displayed_text.find("TEST BEENDET: TEST: A:OK H:OK") == 0);
+    assert(displayed_color == CLR_SUCCESS);
+    const auto retained = displayed_text;
+    refresh_machine_test_status(); // later sync / return to Settings must not reset it
+    assert(displayed_text == retained);
+    reset(); machine_test_all_cb(&event); machine_test_all_confirm_cb(&event);
+    replies = {202, 200}; perform_machine_test_batch(&queued);
+    set_status("Checking gateway...");
+    refresh_machine_test_status();
+    assert(!s_machine_test_pending && displayed_text.find("A:OHNE ACK H:OK") != std::string::npos);
+    assert(displayed_color == CLR_DANGER);
     std::puts("PASS: enabled-only A-H selection; H once; fresh per-machine nonces; immutable credentials; no NVS writes");
     std::puts("PASS: rejection/no-machine/offline/busy/queue failure; stop on failure; per-machine ACK results");
     std::puts("PASS: confirmation never fires; cancel never fires; changed selection rejected");
     std::puts("PASS: full 2-second pause after each completed request, before next machine; no leading/trailing or post-error pause");
     std::puts("PASS: confirmation title, body and both button labels use accent-capable UI fonts");
+    std::puts("PASS: sync refresh retains in-progress ACKs; health cannot overwrite final success/warnings; completion and report are atomic");
 }
 """
 
@@ -213,12 +250,17 @@ int xQueueSend(void *, const GatewayRequest *request, int) {
 }
 """
     transport_functions = "\n".join(function(transport, signature) for signature in [
+        "static void publish_machine_test_status", "void lora_copy_machine_test_status",
         "static bool begin_request", "static bool copy_gateway_config",
         "static bool build_fire_url", "static void perform_machine_test_batch",
         "bool lora_test_enabled_machines"])
     ui_functions = "\n".join(function(ui, signature) for signature in [
+        "static void refresh_machine_test_status",
         "static void machine_test_all_confirm_cb",
         "static void machine_test_all_cancel_cb", "static void machine_test_all_cb"])
+    refresh = function(ui, "void screen_einstellungen_refresh")
+    assert "s_machine_test_pending = false" not in refresh
+    assert "EIN AUSLÖSEBEFEHL" not in refresh and "refresh_machine_test_status();" in refresh
     with tempfile.TemporaryDirectory(prefix="tm-machine-batch-") as directory:
         cpp = Path(directory) / "test.cpp"
         queue = queue.replace("static GatewayRequest queued;",
