@@ -36,3 +36,4 @@
 - [Player deactivation integrity](player-deactivation-integrity.md) — retain history, block inactive ledger writes at the DB boundary, and serialize purges with table locks
 - [Heltec S3 build toolchain](heltec-s3-build-toolchain.md) — the current all-board core exceeds quota; install only S3-required tools when building Wireless Stick V3 firmware
 - [Relay output polarity](relay-output-polarity.md) — SRD-05VDC-SL-C relay boards are active-HIGH; idle LOW keeps the coil off and NC contact closed
+- [All-machine test scope](machine-test-scope.md) — “all machines” tests include only enabled machines; sequential commands, not simultaneous launches.

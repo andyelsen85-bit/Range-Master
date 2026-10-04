@@ -64,6 +64,7 @@ export default function Admin() {
   const [purgeMode, setPurgeMode] = useState<"day" | "all" | null>(null);
   const [purgeDate, setPurgeDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [purgeConfirm, setPurgeConfirm] = useState("");
+  const [purgeTerminalsStopped, setPurgeTerminalsStopped] = useState(false);
   const [addForm, setAddForm] = useState<PlayerForm>(emptyForm);
   const [editForm, setEditForm] = useState<Omit<PlayerForm, "passwort">>({ name: "", email: "", mitgliedNr: "", portalAktiv: false, isAdmin: false });
   const [newPwd, setNewPwd] = useState("");
@@ -129,9 +130,10 @@ export default function Admin() {
       qc.invalidateQueries();
       setPurgeMode(null);
       setPurgeConfirm("");
+      setPurgeTerminalsStopped(false);
       const count = result.counts;
       toast({
-        title: result.mode === "day" ? "Tag bereinigt" : "Globale Daten bereinigt",
+        title: result.mode === "day" ? "Tag bereinigt" : "Statistik und Spieler zurückgesetzt",
         description: `${count.games} Spiele, ${count.credits} Kreditbuchungen, ${count.sales} Verkäufe und ${count.billPayments} Zahlungen entfernt${count.players ? `; ${count.players} Spieler gelöscht` : ""}.`,
       });
     },
@@ -166,7 +168,7 @@ export default function Admin() {
             onClick={() => { setPurgeMode("day"); setPurgeConfirm(""); }}
             className="flex items-center gap-2 px-4 py-2.5 border border-destructive/50 text-destructive hover:bg-destructive/10 text-sm font-bold rounded-lg transition-colors"
           >
-            <Database size={16} /> Daten bereinigen
+            <Database size={16} /> Tag bereinigen
           </button>
           <button
             onClick={() => setAddOpen(true)}
@@ -176,6 +178,24 @@ export default function Admin() {
           </button>
         </div>
       </header>
+
+      <section className="rounded-xl border border-destructive/40 bg-destructive/5 p-5 flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-bold text-destructive">Statistik und Spieler zurücksetzen</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Löscht alle Nicht-Admin-Spieler und sämtliche Spiel-, Statistik- und Abrechnungsdaten.
+            Administratorkonten bleiben erhalten; auch ihre Statistik wird geleert.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-testid="button-reset-statistics-players"
+          onClick={() => { setPurgeMode("all"); setPurgeConfirm(""); setPurgeTerminalsStopped(false); }}
+          className="shrink-0 flex items-center justify-center gap-2 px-4 py-2.5 border border-destructive/50 text-destructive hover:bg-destructive/10 text-sm font-bold rounded-lg transition-colors"
+        >
+          <Database size={16} /> Komplett zurücksetzen
+        </button>
+      </section>
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
       <div className="relative">
@@ -326,10 +346,10 @@ export default function Admin() {
       </Dialog>
 
       {/* ── Purge Dialog ──────────────────────────────────────────────────── */}
-      <Dialog open={purgeMode !== null} onOpenChange={(o) => { if (!o) { setPurgeMode(null); setPurgeConfirm(""); } }}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={purgeMode !== null} onOpenChange={(o) => { if (!o && !purgeMut.isPending) { setPurgeMode(null); setPurgeConfirm(""); setPurgeTerminalsStopped(false); } }}>
+        <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Daten bereinigen</DialogTitle>
+            <DialogTitle>{purgeMode === "all" ? "Statistik und Spieler zurücksetzen" : "Tag bereinigen"}</DialogTitle>
             <DialogDescription>
               Nur operative Spieler-, Spiel-, Kauf- und Abrechnungsdaten werden entfernt. Produkte, Preise, API-Schlüssel und Einstellungen bleiben unverändert.
             </DialogDescription>
@@ -338,7 +358,8 @@ export default function Admin() {
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={() => { setPurgeMode("day"); setPurgeConfirm(""); }}
+              disabled={purgeMut.isPending}
+              onClick={() => { setPurgeMode("day"); setPurgeConfirm(""); setPurgeTerminalsStopped(false); }}
               className={`rounded-lg border p-3 text-left transition-colors ${purgeMode === "day" ? "border-primary bg-primary/10" : "border-border hover:bg-secondary/30"}`}
             >
               <span className="block text-sm font-bold">Bestimmten Tag löschen</span>
@@ -346,11 +367,12 @@ export default function Admin() {
             </button>
             <button
               type="button"
-              onClick={() => { setPurgeMode("all"); setPurgeConfirm(""); }}
+              disabled={purgeMut.isPending}
+              onClick={() => { setPurgeMode("all"); setPurgeConfirm(""); setPurgeTerminalsStopped(false); }}
               className={`rounded-lg border p-3 text-left transition-colors ${purgeMode === "all" ? "border-destructive bg-destructive/10" : "border-border hover:bg-secondary/30"}`}
             >
-              <span className="block text-sm font-bold text-destructive">Alles global löschen</span>
-              <span className="block text-xs text-muted-foreground mt-1">Entfernt alle Aktivitäten und alle Nicht-Admin-Spieler.</span>
+              <span className="block text-sm font-bold text-destructive">Statistik und Spieler zurücksetzen</span>
+              <span className="block text-xs text-muted-foreground mt-1">Admin-Konten behalten, Statistik für alle leeren.</span>
             </button>
           </div>
 
@@ -370,26 +392,48 @@ export default function Admin() {
             <strong className="text-destructive">Unwiderruflich:</strong>{" "}
             {purgeMode === "day"
               ? `Alle Spiele, Käufe, Kreditbuchungen und Zahlungen vom ${purgeDate || "gewählten Tag"} werden endgültig entfernt.`
-              : "Alle Spiele, Käufe, Kreditbuchungen, Zahlungen und Nicht-Admin-Spieler werden endgültig entfernt. Administratorkonten bleiben bestehen."}
+              : "Alle Nicht-Admin-Spieler werden gelöscht – nicht nur als Demo verwendete Spieler. Alle Spiele, Ergebnisse, Statistiken, Käufe, Kreditbuchungen und Zahlungen werden für ALLE Konten entfernt, auch für Administratoren. Admin-Konten und ihre Zugangsdaten bleiben bestehen. Dieser Vorgang kann nicht rückgängig gemacht werden."}
           </div>
+
+          {purgeMode === "all" && (
+            <div className="rounded-lg border border-border p-3 text-sm">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid="checkbox-reset-terminals-stopped"
+                  checked={purgeTerminalsStopped}
+                  disabled={purgeMut.isPending}
+                  onChange={(e) => setPurgeTerminalsStopped(e.target.checked)}
+                  className="mt-1"
+                />
+                <span>Alle Terminals sind ausgeschaltet oder vom Portal getrennt.</span>
+              </label>
+              <p className="text-muted-foreground mt-2">
+                Vor dem nächsten Sync lokale Testdaten auf den Terminals entfernen,
+                damit sie nicht erneut hochgeladen werden.
+              </p>
+            </div>
+          )}
 
           <FormField label={`Zur Bestätigung „${purgeMode === "day" ? "TAG LÖSCHEN" : "ALLES LÖSCHEN"}“ eingeben`} id="purge-confirm">
             <input
               id="purge-confirm"
               value={purgeConfirm}
+              disabled={purgeMut.isPending}
               onChange={(e) => setPurgeConfirm(e.target.value)}
               className="w-full bg-background border border-destructive/50 rounded-lg px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-destructive/40"
             />
           </FormField>
 
           <DialogFooter>
-            <button onClick={() => { setPurgeMode(null); setPurgeConfirm(""); }} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Abbrechen</button>
+            <button disabled={purgeMut.isPending} onClick={() => { setPurgeMode(null); setPurgeConfirm(""); setPurgeTerminalsStopped(false); }} className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">Abbrechen</button>
             <button
               onClick={() => purgeMode && purgeMut.mutate({ mode: purgeMode, datum: purgeMode === "day" ? purgeDate : undefined })}
-              disabled={purgeMut.isPending || !purgeDate || purgeConfirm !== (purgeMode === "day" ? "TAG LÖSCHEN" : "ALLES LÖSCHEN")}
+              data-testid="button-confirm-reset"
+              disabled={purgeMut.isPending || (purgeMode === "day" ? !purgeDate : !purgeTerminalsStopped) || purgeConfirm !== (purgeMode === "day" ? "TAG LÖSCHEN" : "ALLES LÖSCHEN")}
               className="px-4 py-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground text-sm font-bold rounded-lg transition-colors disabled:opacity-40"
             >
-              {purgeMut.isPending ? "Wird bereinigt…" : purgeMode === "day" ? "Tag endgültig löschen" : "Alles endgültig löschen"}
+              {purgeMut.isPending ? "Wird bereinigt…" : purgeMode === "day" ? "Tag endgültig löschen" : "Statistik und Spieler endgültig zurücksetzen"}
             </button>
           </DialogFooter>
         </DialogContent>

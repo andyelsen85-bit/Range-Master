@@ -31,6 +31,7 @@ static bool s_portal_check_pending;
 static bool s_gateway_check_pending;
 static lv_obj_t *s_lbl_machine_test_status;
 static bool s_machine_test_pending;
+static lv_obj_t *s_machine_test_confirm;
 static lv_obj_t *s_auto_sync_switch;
 static lv_obj_t *s_auto_sync_seconds;
 static lv_obj_t *s_billing_sync_seconds;
@@ -377,6 +378,69 @@ static void machine_test_cb(lv_event_t *e)
     }
 }
 
+static void machine_test_all_confirm_cb(lv_event_t *e)
+{
+    uint8_t mask = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    if (s_machine_test_confirm) {
+        lv_msgbox_close(s_machine_test_confirm);
+        s_machine_test_confirm = NULL;
+    }
+    s_machine_test_pending = lora_test_enabled_machines(mask);
+    char status[256];
+    lora_copy_status_text(status, sizeof(status));
+    if (s_lbl_machine_test_status) {
+        lv_label_set_text(s_lbl_machine_test_status, status);
+        lv_obj_set_style_text_color(s_lbl_machine_test_status,
+            lv_color_hex(s_machine_test_pending ? CLR_WARN : CLR_DANGER), 0);
+    }
+}
+
+static void machine_test_all_cancel_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_machine_test_confirm) lv_msgbox_close(s_machine_test_confirm);
+    s_machine_test_confirm = NULL;
+}
+
+static void machine_test_all_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_machine_test_confirm) return;
+    if (lora_request_busy()) {
+        if (s_lbl_machine_test_status)
+            lv_label_set_text(s_lbl_machine_test_status, "Gateway-Anfrage läuft bereits.");
+        return;
+    }
+    uint8_t mask = 0;
+    char machines[32] = {};
+    size_t used = 0;
+    for (int m = MASCHINE_A; m < MASCHINE_COUNT; ++m) {
+        if (!g_store.maschinenAktiv[m]) continue;
+        mask |= (1u << m);
+        used += snprintf(machines + used, sizeof(machines) - used, "%c ", 'A' + m);
+    }
+    if (!mask) {
+        if (s_lbl_machine_test_status)
+            lv_label_set_text(s_lbl_machine_test_status, "Keine aktiven Maschinen ausgewählt.");
+        return;
+    }
+    s_machine_test_confirm = lv_msgbox_create(NULL);
+    lv_msgbox_add_title(s_machine_test_confirm, "Testauslösung Alle Maschinen");
+    char warning[320];
+    snprintf(warning, sizeof(warning),
+        "Aktive Maschinen: %s\n\n"
+        "Jede aktive Maschine wird einmal nacheinander ausgelöst. "
+        "H erhält nur einen FIRE-Befehl.\n"
+        "Alle Gefahrenbereiche müssen frei sein! Keine Spiel- oder Kreditbuchung.",
+        machines);
+    lv_msgbox_add_text(s_machine_test_confirm, warning);
+    lv_obj_t *cancel = lv_msgbox_add_footer_button(s_machine_test_confirm, "Abbrechen");
+    lv_obj_add_event_cb(cancel, machine_test_all_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *fire = lv_msgbox_add_footer_button(s_machine_test_confirm, "Jetzt auslösen");
+    lv_obj_add_event_cb(fire, machine_test_all_confirm_cb, LV_EVENT_CLICKED,
+                       (void *)(uintptr_t)mask);
+}
+
 static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 {
     static const char *labels[] = {
@@ -428,9 +492,20 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
                             (void*)(intptr_t)m);
     }
 
+    lv_obj_t *test_all = lv_btn_create(parent);
+    lv_obj_add_style(test_all, &g_style_btn_secondary, 0);
+    lv_obj_set_size(test_all, LV_PCT(100), 48);
+    lv_obj_add_event_cb(test_all, machine_test_all_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *all_label = lv_label_create(test_all);
+    lv_label_set_text(all_label, "Testauslösung Alle Maschinen");
+    lv_obj_set_style_text_font(all_label, UI_FONT_16, 0);
+    lv_obj_center(all_label);
+
     s_lbl_machine_test_status = lv_label_create(parent);
+    lv_obj_set_width(s_lbl_machine_test_status, LV_PCT(100));
+    lv_label_set_long_mode(s_lbl_machine_test_status, LV_LABEL_LONG_WRAP);
     lv_label_set_text(s_lbl_machine_test_status,
-                       "TESTAUSLÖSUNG STARTET GENAU EINEN SCHUSS — KEIN SPIEL.");
+                       "EIN AUSLÖSEBEFEHL JE GEWÄHLTER MASCHINE — KEIN SPIEL.");
     lv_obj_set_style_text_font(s_lbl_machine_test_status, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_machine_test_status, lv_color_hex(CLR_MUTED), 0);
     return parent;
@@ -1389,7 +1464,7 @@ void screen_einstellungen_refresh(void)
     s_machine_test_pending = false;
     if (s_lbl_machine_test_status) {
         lv_label_set_text(s_lbl_machine_test_status,
-                          "TESTAUSLÖSUNG STARTET GENAU EINEN SCHUSS — KEIN SPIEL.");
+                          "EIN AUSLÖSEBEFEHL JE GEWÄHLTER MASCHINE — KEIN SPIEL.");
         lv_obj_set_style_text_color(s_lbl_machine_test_status,
                                     lv_color_hex(CLR_MUTED), 0);
     }
@@ -1423,10 +1498,13 @@ void screen_einstellungen_tick(void)
     }
 
     if (s_machine_test_pending && s_lbl_machine_test_status) {
-        char status[96];
+        char status[256];
         lora_copy_status_text(status, sizeof(status));
         uint32_t color = CLR_WARN;
-        if (strstr(status, "fired") || strstr(status, "sent")) {
+        if (strstr(status, "TEST MIT WARNUNG") || strstr(status, "FEHLER")) {
+            color = CLR_DANGER;
+        } else if (strstr(status, "TEST BEENDET") ||
+                   strstr(status, "fired") || strstr(status, "sent")) {
             color = CLR_SUCCESS;
         } else if (strstr(status, "unreachable") || strstr(status, "rejected") ||
                    strstr(status, "invalid") || strstr(status, "unavailable")) {

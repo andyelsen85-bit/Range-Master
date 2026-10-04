@@ -40,6 +40,24 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 ## Project layout
 
+### All-machine test
+
+In **Einstellungen → Maschinen**, **Testauslösung Alle Maschinen** asks for
+confirmation and then sends one authenticated FIRE per enabled machine, in A–H
+order. Disabled machines are excluded; H receives one FIRE, not separate H1/H2
+commands. This is not a simultaneous radio broadcast and does not record a game,
+consume credits, or add game clay totals. Individual results distinguish ACK
+success, a sent command without ACK, and errors. An HTTP failure stops the
+remaining commands. Keep all trap danger areas clear before confirming.
+
+Host regression checks (mock HTTP/LVGL/NVS; no traps are actuated):
+
+```bash
+python artifacts/firmware/tests/test_machine_batch.py
+```
+
+### Source layout
+
 ```
 main/
   app_config.h          — pin map, display geometry, build constants

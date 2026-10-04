@@ -23,7 +23,7 @@
 static const char *TAG = "lora_stub";
 static QueueHandle_t s_gateway_queue;
 static SemaphoreHandle_t s_state_mutex;
-static char s_status[96] = "Gateway not configured";
+static char s_status[256] = "Gateway not configured";
 static bool s_request_busy = false;
 static GatewayReachability s_gateway_state = GATEWAY_NOT_CONFIGURED;
 static uint32_t s_gateway_state_ms = 0;
@@ -33,6 +33,7 @@ static TickType_t s_last_auto_health_tick = 0;
 typedef enum : uint8_t {
     GATEWAY_REQUEST_FIRE,
     GATEWAY_REQUEST_FIRE_PAIR,
+    GATEWAY_REQUEST_TEST_ALL,
     GATEWAY_REQUEST_HEALTH,
 } GatewayRequestKind;
 
@@ -44,6 +45,7 @@ typedef struct {
     uint32_t sequence;
     bool manual; // FIRE and operator-initiated health; autonomous health is false
     bool gameLaunch; // only live-game ACKs contribute to clay accounting
+    uint8_t machine_mask; // immutable operator-confirmed test selection
     char gateway_url[MAX_URL_LEN];
     char gateway_token[MAX_KEY_LEN];
 } GatewayRequest;
@@ -231,6 +233,56 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
     return success;
 }
 
+static void perform_machine_test_batch(const GatewayRequest *batch)
+{
+    char results[256] = "TEST: ";
+    uint32_t sequence = batch->sequence;
+    bool stopped = false;
+    bool warning = false;
+    for (int m = MASCHINE_A; m < MASCHINE_COUNT; ++m) {
+        if (!(batch->machine_mask & (1u << m))) continue;
+        const char *result = "NICHT GESENDET";
+        if (!stopped) {
+            GatewayRequest request = *batch;
+            request.kind = GATEWAY_REQUEST_FIRE;
+            request.machine = (Maschine)m;
+            request.sequence = sequence++;
+            request.gameLaunch = false;
+            char url[MAX_URL_LEN + 96];
+            uint8_t mac[tm_auth::MAC_LEN];
+            char mac_hex[tm_auth::MAC_HEX_LEN + 1];
+            int http_status = 0;
+            bool success = false;
+            if (build_fire_url(url, sizeof(url), &request) &&
+                tm_auth::make_request_mac((const uint8_t *)request.gateway_token,
+                    strlen(request.gateway_token), (uint8_t)('A' + m),
+                    request.sequence, mac)) {
+                tm_auth::mac_to_hex(mac, mac_hex);
+                success = perform_authenticated_get(url, mac_hex, &http_status, 7000, 3);
+            }
+            if (success) {
+                result = http_status == 202 ? "OHNE ACK" : "OK";
+                warning |= http_status == 202;
+                set_gateway_state(GATEWAY_REACHABLE);
+            } else {
+                result = "FEHLER";
+                warning = true;
+                stopped = true; // no later, unexpected shots after an HTTP failure
+                set_gateway_state((http_status == 401 || http_status == 403)
+                    ? GATEWAY_AUTH_FAILED : GATEWAY_FAILED);
+            }
+        }
+        size_t used = strlen(results);
+        snprintf(results + used, sizeof(results) - used, "%c:%s ",
+                 (char)('A' + m), result);
+        set_status(results);
+    }
+    char final_status[256];
+    snprintf(final_status, sizeof(final_status), "%s: %.210s",
+             warning ? "TEST MIT WARNUNG BEENDET" : "TEST BEENDET", results);
+    set_status(final_status);
+}
+
 static void gateway_worker(void *arg)
 {
     GatewayRequest request;
@@ -259,6 +311,12 @@ static void gateway_worker(void *arg)
             GatewayRequest queued;
             if (xQueueReceive(s_gateway_queue, &queued, 0) == pdTRUE)
                 request = queued;
+        }
+
+        if (request.kind == GATEWAY_REQUEST_TEST_ALL) {
+            perform_machine_test_batch(&request);
+            set_request_busy(false);
+            continue;
         }
 
         uint8_t mac[tm_auth::MAC_LEN];
@@ -388,6 +446,53 @@ void lora_stub_init(void)
     ESP_LOGI(TAG, "Gateway fire worker ready");
     set_gateway_state((g_store.gatewayUrl[0] && g_store.gatewayToken[0])
                           ? GATEWAY_UNREACHABLE : GATEWAY_NOT_CONFIGURED);
+}
+
+bool lora_test_enabled_machines(uint8_t confirmed_mask)
+{
+    static_assert(MASCHINE_COUNT <= 8, "Test mask must fit every machine");
+    uint8_t enabled_mask = 0;
+    uint32_t count = 0;
+    for (int m = MASCHINE_A; m < MASCHINE_COUNT; ++m) {
+        if (g_store.maschinenAktiv[m]) {
+            enabled_mask |= (1u << m);
+            ++count;
+        }
+    }
+    if (!confirmed_mask || confirmed_mask != enabled_mask) {
+        set_status("Keine aktiven Maschinen oder Auswahl geändert. Bitte neu bestätigen.");
+        return false;
+    }
+    if (!s_gateway_queue || !cop_wifi_is_connected()) {
+        set_status("Test nicht möglich: Gateway-Worker oder WLAN nicht verfügbar.");
+        return false;
+    }
+    GatewayRequest request = {};
+    request.kind = GATEWAY_REQUEST_TEST_ALL;
+    request.manual = true;
+    request.machine_mask = confirmed_mask;
+    copy_gateway_config(&request);
+    char url[MAX_URL_LEN + 96];
+    if (!build_fire_url(url, sizeof(url), &request)) return false;
+    if (!begin_request()) {
+        set_status("Gateway-Anfrage läuft bereits.");
+        return false;
+    }
+    if (g_store.gatewaySequence > UINT32_MAX - count) {
+        set_request_busy(false);
+        set_status("Gateway-Sequenz erschöpft.");
+        return false;
+    }
+    request.sequence = g_store.gatewaySequence + 1;
+    g_store.gatewaySequence += count;
+    game_store_save(); // reserve all sequences before any command can be sent
+    set_status("TEST STARTET: aktive Maschinen werden nacheinander ausgelöst.");
+    if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
+        set_request_busy(false);
+        set_status("Gateway-Warteschlange nicht verfügbar.");
+        return false;
+    }
+    return true;
 }
 
 bool lora_fire_machine(Maschine m)
