@@ -15,6 +15,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "cJSON.h"
 #include "lora_stub.h"
 #include "game_store.h"
 #include "coprocessor.h"
@@ -42,7 +43,8 @@ typedef struct {
     Maschine machine;
     Maschine second_machine;
     uint16_t delay_ms;
-    uint32_t sequence;
+    uint8_t nonce[tm_auth::NONCE_LEN];
+    char nonce_hex[tm_auth::NONCE_HEX_LEN + 1];
     bool manual; // FIRE and operator-initiated health; autonomous health is false
     bool gameLaunch; // only live-game ACKs contribute to clay accounting
     uint8_t machine_mask; // immutable operator-confirmed test selection
@@ -135,9 +137,9 @@ static bool build_fire_url(char *url, size_t url_len, const GatewayRequest *requ
     size_t len = strlen(base);
     const char *suffix = (len > 0 && base[len - 1] == '/')
                        ? "fire?machine=" : "/fire?machine=";
-    int written = snprintf(url, url_len, "%s%s%c&seq=%08lx", base, suffix,
+    int written = snprintf(url, url_len, "%s%s%c&nonce=%s", base, suffix,
                            (char)('A' + (int)request->machine),
-                           (unsigned long)request->sequence);
+                            request->nonce_hex);
     if (written < 0 || (size_t)written >= url_len) {
         set_status("Gateway URL is too long");
         return false;
@@ -163,11 +165,11 @@ static bool build_fire_pair_url(char *url, size_t url_len, const GatewayRequest 
     size_t len = strlen(base);
     const char *suffix = (len > 0 && base[len - 1] == '/')
                        ? "fire-pair?first=" : "/fire-pair?first=";
-    int written = snprintf(url, url_len, "%s%s%c&second=%c&delayMs=%u&seq=%08lx",
+    int written = snprintf(url, url_len, "%s%s%c&second=%c&delayMs=%u&nonce=%s",
                            base, suffix, (char)('A' + (int)request->machine),
                            (char)('A' + (int)request->second_machine),
                            (unsigned)request->delay_ms,
-                           (unsigned long)request->sequence);
+                            request->nonce_hex);
     if (written < 0 || (size_t)written >= url_len) {
         set_status("Gateway URL is too long");
         return false;
@@ -227,16 +229,99 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
         }
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        // Retry only transport failures, with this exact URL/MAC/nonce. Never
+        // acquire another nonce or retry a final busy/auth/storage rejection.
+        if (err == ESP_OK) break;
         if (!success && attempt + 1 < attempts)
             vTaskDelay(pdMS_TO_TICKS(100));
     }
     return success;
 }
 
+struct NonceResponse {
+    char body[128];
+    size_t length;
+    bool overflow;
+};
+
+static esp_err_t nonce_http_event(esp_http_client_event_t *event)
+{
+    if (event->event_id != HTTP_EVENT_ON_DATA || event->data_len <= 0) return ESP_OK;
+    NonceResponse *response = (NonceResponse *)event->user_data;
+    const size_t size = (size_t)event->data_len;
+    if (size >= sizeof(response->body) - response->length) {
+        response->overflow = true;
+    } else if (!response->overflow) {
+        memcpy(response->body + response->length, event->data, size);
+        response->length += size;
+        response->body[response->length] = '\0';
+    }
+    return ESP_OK;
+}
+
+static bool fetch_gateway_nonce(GatewayRequest *request, int *last_http)
+{
+    char url[MAX_URL_LEN + 96];
+    if (!build_health_url(url, sizeof(url), request)) return false;
+    const size_t length = strlen(request->gateway_url);
+    const char *suffix = request->gateway_url[length - 1] == '/' ? "nonce" : "/nonce";
+    snprintf(url, sizeof(url), "%s%s", request->gateway_url, suffix);
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        NonceResponse response = {};
+        esp_http_client_config_t cfg = {};
+        cfg.url = url;
+        cfg.timeout_ms = 2000;
+        cfg.disable_auto_redirect = true;
+        cfg.event_handler = nonce_http_event;
+        cfg.user_data = &response;
+        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        if (!client) { set_status("Gateway-Nonce-Client nicht verfügbar."); return false; }
+        esp_err_t err = esp_http_client_perform(client);
+        *last_http = esp_http_client_get_status_code(client);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        if (err == ESP_OK && *last_http == 200 && !response.overflow) {
+            cJSON *root = cJSON_Parse(response.body);
+            cJSON *nonce = root ? cJSON_GetObjectItemCaseSensitive(root, "nonce") : nullptr;
+            bool valid = cJSON_IsString(nonce) &&
+                         tm_auth::nonce_from_hex(nonce->valuestring, request->nonce);
+            if (valid) tm_auth::nonce_to_hex(request->nonce, request->nonce_hex);
+            if (root) cJSON_Delete(root);
+            if (!valid) set_status("Gateway hat eine ungültige Nonce geliefert.");
+            return valid;
+        }
+        if (err == ESP_OK && *last_http != 429) break;
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+    set_status("Gateway-Nonce nicht verfügbar. Keine Maschine ausgelöst.");
+    return false;
+}
+
+static bool prepare_fire_request(GatewayRequest *request, char *url, size_t url_len,
+                                 char *mac_hex, int *last_http)
+{
+    // One fresh nonce per operator action (and per selected batch machine).
+    // Once signed, retries use the same request and cannot produce a new shot.
+    if (!fetch_gateway_nonce(request, last_http)) return false;
+    uint8_t mac[tm_auth::MAC_LEN];
+    bool valid;
+    if (request->kind == GATEWAY_REQUEST_FIRE_PAIR) {
+        valid = build_fire_pair_url(url, url_len, request) &&
+                tm_auth::make_pair_request_mac((const uint8_t *)request->gateway_token,
+                    strlen(request->gateway_token), (uint8_t)('A' + request->machine),
+                    (uint8_t)('A' + request->second_machine), request->delay_ms, request->nonce, mac);
+    } else {
+        valid = build_fire_url(url, url_len, request) &&
+                tm_auth::make_request_mac((const uint8_t *)request->gateway_token,
+                    strlen(request->gateway_token), (uint8_t)('A' + request->machine), request->nonce, mac);
+    }
+    if (valid) tm_auth::mac_to_hex(mac, mac_hex);
+    return valid;
+}
+
 static void perform_machine_test_batch(const GatewayRequest *batch)
 {
     char results[256] = "TEST: ";
-    uint32_t sequence = batch->sequence;
     bool stopped = false;
     bool warning = false;
     for (int m = MASCHINE_A; m < MASCHINE_COUNT; ++m) {
@@ -246,18 +331,12 @@ static void perform_machine_test_batch(const GatewayRequest *batch)
             GatewayRequest request = *batch;
             request.kind = GATEWAY_REQUEST_FIRE;
             request.machine = (Maschine)m;
-            request.sequence = sequence++;
             request.gameLaunch = false;
             char url[MAX_URL_LEN + 96];
-            uint8_t mac[tm_auth::MAC_LEN];
             char mac_hex[tm_auth::MAC_HEX_LEN + 1];
             int http_status = 0;
             bool success = false;
-            if (build_fire_url(url, sizeof(url), &request) &&
-                tm_auth::make_request_mac((const uint8_t *)request.gateway_token,
-                    strlen(request.gateway_token), (uint8_t)('A' + m),
-                    request.sequence, mac)) {
-                tm_auth::mac_to_hex(mac, mac_hex);
+            if (prepare_fire_request(&request, url, sizeof(url), mac_hex, &http_status)) {
                 success = perform_authenticated_get(url, mac_hex, &http_status, 7000, 3);
             }
             if (success) {
@@ -265,11 +344,11 @@ static void perform_machine_test_batch(const GatewayRequest *batch)
                 warning |= http_status == 202;
                 set_gateway_state(GATEWAY_REACHABLE);
             } else {
-                result = "FEHLER";
+                result = http_status == 409 ? "BELEGT/KONFLIKT" : "FEHLER";
                 warning = true;
                 stopped = true; // no later, unexpected shots after an HTTP failure
-                set_gateway_state((http_status == 401 || http_status == 403)
-                    ? GATEWAY_AUTH_FAILED : GATEWAY_FAILED);
+                set_gateway_state(http_status == 409 ? GATEWAY_BUSY :
+                    (http_status == 401 || http_status == 403) ? GATEWAY_AUTH_FAILED : GATEWAY_FAILED);
             }
         }
         size_t used = strlen(results);
@@ -357,28 +436,10 @@ static void gateway_worker(void *arg)
         }
 
         bool request_ready = false;
-        if (request.kind == GATEWAY_REQUEST_FIRE_PAIR) {
-            if (build_fire_pair_url(url, sizeof(url), &request) &&
-                tm_auth::make_pair_request_mac(
-                    (const uint8_t *)request.gateway_token,
-                    strlen(request.gateway_token),
-                    (uint8_t)('A' + (int)request.machine),
-                    (uint8_t)('A' + (int)request.second_machine),
-                    request.delay_ms, request.sequence, mac)) {
-                request_ready = true;
-                tm_auth::mac_to_hex(mac, mac_hex);
-                success = perform_authenticated_get(url, mac_hex, &last_http, 20000, 3);
-            }
-        } else if (build_fire_url(url, sizeof(url), &request) &&
-                   tm_auth::make_request_mac((const uint8_t *)request.gateway_token,
-                                              strlen(request.gateway_token),
-                                              (uint8_t)('A' + (int)request.machine),
-                                              request.sequence, mac)) {
+        if (prepare_fire_request(&request, url, sizeof(url), mac_hex, &last_http)) {
             request_ready = true;
-            tm_auth::mac_to_hex(mac, mac_hex);
-            success = perform_authenticated_get(url, mac_hex, &last_http, 7000, 3);
-        } else if (request.gateway_token[0] && strlen(request.gateway_token) >= 16) {
-            set_status("Gateway auth key invalid");
+            success = perform_authenticated_get(url, mac_hex, &last_http,
+                request.kind == GATEWAY_REQUEST_FIRE_PAIR ? 20000 : 7000, 3);
         }
 
         if (success) {
@@ -407,6 +468,9 @@ static void gateway_worker(void *arg)
                          (char)('A' + (int)request.machine));
             }
             set_status(msg);
+        } else if (last_http == 409) {
+            set_status("Gateway belegt oder Anfragekonflikt (HTTP 409).");
+            set_gateway_state(GATEWAY_BUSY);
         } else if (last_http >= 400) {
             char msg[96];
             snprintf(msg, sizeof(msg), "Gateway rejected (HTTP %d)", last_http);
@@ -452,11 +516,9 @@ bool lora_test_enabled_machines(uint8_t confirmed_mask)
 {
     static_assert(MASCHINE_COUNT <= 8, "Test mask must fit every machine");
     uint8_t enabled_mask = 0;
-    uint32_t count = 0;
     for (int m = MASCHINE_A; m < MASCHINE_COUNT; ++m) {
         if (g_store.maschinenAktiv[m]) {
             enabled_mask |= (1u << m);
-            ++count;
         }
     }
     if (!confirmed_mask || confirmed_mask != enabled_mask) {
@@ -478,14 +540,6 @@ bool lora_test_enabled_machines(uint8_t confirmed_mask)
         set_status("Gateway-Anfrage läuft bereits.");
         return false;
     }
-    if (g_store.gatewaySequence > UINT32_MAX - count) {
-        set_request_busy(false);
-        set_status("Gateway-Sequenz erschöpft.");
-        return false;
-    }
-    request.sequence = g_store.gatewaySequence + 1;
-    g_store.gatewaySequence += count;
-    game_store_save(); // reserve all sequences before any command can be sent
     set_status("TEST STARTET: aktive Maschinen werden nacheinander ausgelöst.");
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false);
@@ -513,22 +567,10 @@ bool lora_fire_machine(Maschine m)
     char msg[96];
     snprintf(msg, sizeof(msg), "Sending machine %c...", (char)('A' + (int)m));
     set_status(msg);
-    // Persist before enqueueing: a reboot can skip a sequence, but it can
-    // never reuse a MAC-protected FIRE sequence.
-    if (g_store.gatewaySequence == UINT32_MAX) {
-        set_request_busy(false);
-        set_status("Gateway sequence exhausted");
-        return false;
-    }
-    // Save before the request enters the queue: a reboot can skip a sequence,
-    // but it can never reuse a MAC-protected command sequence.
-    g_store.gatewaySequence++;
-    game_store_save();
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE;
     request.manual = true;
     request.machine = m;
-    request.sequence = g_store.gatewaySequence;
     copy_gateway_config(&request);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false);
@@ -541,13 +583,12 @@ bool lora_fire_machine(Maschine m)
 bool lora_fire_machine_game(Maschine m)
 {
     // The queue request must be marked before the worker can consume it, so
-    // share the normal validation/sequence flow in a compact local copy.
+    // share the normal validation flow in a compact local copy.
     if (!s_gateway_queue || m < MASCHINE_A || m >= MASCHINE_COUNT || !cop_wifi_is_connected() ||
-        !begin_request() || g_store.gatewaySequence == UINT32_MAX) return false;
-    g_store.gatewaySequence++; game_store_save();
+        !begin_request()) return false;
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE; request.manual = true; request.gameLaunch = true;
-    request.machine = m; request.sequence = g_store.gatewaySequence; copy_gateway_config(&request);
+    request.machine = m; copy_gateway_config(&request);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false); set_status("Gateway queue unavailable"); return false;
     }
@@ -571,20 +612,12 @@ bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms)
         set_status("Gateway request already in progress");
         return false;
     }
-    if (g_store.gatewaySequence == UINT32_MAX) {
-        set_request_busy(false);
-        set_status("Gateway sequence exhausted");
-        return false;
-    }
-    g_store.gatewaySequence++;
-    game_store_save();
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE_PAIR;
     request.manual = true;
     request.machine = first;
     request.second_machine = second;
     request.delay_ms = delay_ms;
-    request.sequence = g_store.gatewaySequence;
     copy_gateway_config(&request);
     char msg[96];
     snprintf(msg, sizeof(msg), "Sending pair %c+%c...",
@@ -602,12 +635,11 @@ bool lora_fire_doublette_game(Maschine first, Maschine second, uint16_t delay_ms
 {
     if (!s_gateway_queue || first < MASCHINE_A || first > MASCHINE_G ||
         second < MASCHINE_A || second > MASCHINE_G || first == second || delay_ms > 10000 ||
-        !cop_wifi_is_connected() || !begin_request() || g_store.gatewaySequence == UINT32_MAX) return false;
-    g_store.gatewaySequence++; game_store_save();
+        !cop_wifi_is_connected() || !begin_request()) return false;
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE_PAIR; request.manual = true; request.gameLaunch = true;
     request.machine = first; request.second_machine = second; request.delay_ms = delay_ms;
-    request.sequence = g_store.gatewaySequence; copy_gateway_config(&request);
+    copy_gateway_config(&request);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false); set_status("Gateway queue unavailable"); return false;
     }
@@ -695,6 +727,7 @@ const char *lora_gateway_state_label(GatewayReachability state)
         case GATEWAY_REACHABLE: return "REACHABLE";
         case GATEWAY_UNREACHABLE: return "UNREACHABLE";
         case GATEWAY_AUTH_FAILED: return "AUTH FAILED";
+        case GATEWAY_BUSY: return "BELEGT / KONFLIKT";
         default: return "FAILED";
     }
 }

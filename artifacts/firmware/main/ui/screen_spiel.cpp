@@ -443,7 +443,7 @@ void screen_spiel_refresh(void)
                  lora_gateway_state_label(gateway));
         set_label_text_if_changed(s_lbl_fire_status, fire_status);
         uint32_t color = gateway == GATEWAY_REACHABLE ? CLR_SUCCESS :
-                         gateway == GATEWAY_CHECKING ? CLR_WARN :
+                         (gateway == GATEWAY_CHECKING || gateway == GATEWAY_BUSY) ? CLR_WARN :
                          gateway == GATEWAY_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
         lv_obj_set_style_text_color(s_lbl_fire_status, lv_color_hex(color), 0);
     }

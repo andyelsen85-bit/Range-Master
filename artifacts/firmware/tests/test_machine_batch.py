@@ -29,10 +29,9 @@ STUBS = r"""
 #define MAX_KEY_LEN 256
 enum Maschine { MASCHINE_A, MASCHINE_B, MASCHINE_C, MASCHINE_D,
     MASCHINE_E, MASCHINE_F, MASCHINE_G, MASCHINE_H, MASCHINE_COUNT };
-enum GatewayReachability { GATEWAY_REACHABLE, GATEWAY_AUTH_FAILED, GATEWAY_FAILED };
+enum GatewayReachability { GATEWAY_REACHABLE, GATEWAY_AUTH_FAILED, GATEWAY_FAILED, GATEWAY_BUSY };
 struct {
     bool maschinenAktiv[8];
-    uint32_t gatewaySequence;
     char gatewayUrl[256], gatewayToken[256];
 } g_store = {};
 static bool s_request_busy = false;
@@ -53,24 +52,19 @@ bool cop_wifi_is_connected() { return wifi; }
 void game_store_save() { ++saves; order.push_back("save"); }
 void lora_copy_status_text(char *out, size_t size) { snprintf(out, size, "%s", status.c_str()); }
 bool lora_request_busy() { return s_request_busy; }
-struct Call { char machine; uint32_t sequence; std::string key, url; };
+struct Call { char machine; std::string nonce, key, url; };
 static std::vector<Call> calls;
 static std::vector<int> replies;
 static Call auth;
 namespace tm_auth {
-    constexpr size_t MAC_LEN = 32, MAC_HEX_LEN = 64;
-    bool make_request_mac(const uint8_t *key, size_t size, uint8_t machine,
-                          uint32_t sequence, uint8_t *) {
-        auth = {(char)machine, sequence, std::string((const char *)key, size), ""};
-        return true;
-    }
-    void mac_to_hex(uint8_t *, char *hex) { strcpy(hex, "fake-mac"); }
+    constexpr size_t MAC_HEX_LEN = 64, NONCE_LEN = 16, NONCE_HEX_LEN = 32;
 }
 bool perform_authenticated_get(const char *url, const char *, int *http, int, int) {
     auth.url = url; calls.push_back(auth);
     *http = calls.size() <= replies.size() ? replies[calls.size()-1] : 200;
     return *http >= 200 && *http < 300;
 }
+static unsigned nonce_counter = 0;
 """
 
 UI_STUBS = r"""
@@ -98,47 +92,47 @@ void lv_obj_set_style_text_color(lv_obj_t *, int, int) {}
 MAIN = r"""
 void reset() {
     g_store = {}; g_store.maschinenAktiv[0] = g_store.maschinenAktiv[7] = true;
-    g_store.gatewaySequence = 10;
     strcpy(g_store.gatewayUrl, "http://original-gateway");
     strcpy(g_store.gatewayToken, "synthetic-auth-key");
     wifi = queueOK = true; s_request_busy = false; saves = queues = 0;
-    calls.clear(); replies.clear(); order.clear(); status.clear();
+    calls.clear(); replies.clear(); order.clear(); status.clear(); nonce_counter = 0;
     s_machine_test_confirm = nullptr; s_machine_test_pending = false;
 }
 int main() {
     reset();
     assert(lora_test_enabled_machines(0x81));
-    assert(s_request_busy && queues == 1 && saves == 1);
-    assert(g_store.gatewaySequence == 12 && queued.sequence == 11);
-    assert((order == std::vector<std::string>{"save", "queue"}));
+    assert(s_request_busy && queues == 1 && saves == 0);
+    assert((order == std::vector<std::string>{"queue"}));
     assert(queued.machine_mask == 0x81 && !queued.gameLaunch);
     strcpy(g_store.gatewayUrl, "http://changed-gateway");
     strcpy(g_store.gatewayToken, "changed-auth-key");
     perform_machine_test_batch(&queued);
     assert(calls.size() == 2 && calls[0].machine == 'A' && calls[1].machine == 'H');
-    assert(calls[0].sequence == 11 && calls[1].sequence == 12);
+    assert(calls[0].nonce != calls[1].nonce);
     for (const auto &call : calls) {
         assert(call.key == "synthetic-auth-key");
         assert(call.url.find("http://original-gateway/") == 0);
     }
     assert(status.find("A:OK H:OK") != std::string::npos);
-    assert(saves == 1); // worker never records games, credits, or further sequences
+    assert(saves == 0); // no fire counter, games, or credits persisted by tests
 
     reset(); assert(!lora_test_enabled_machines(0xff) && queues == 0 && saves == 0);
     reset(); assert(!lora_test_enabled_machines(0) && queues == 0);
     reset(); wifi = false; assert(!lora_test_enabled_machines(0x81) && queues == 0);
     reset(); s_request_busy = true; assert(!lora_test_enabled_machines(0x81) && saves == 0);
-    reset(); g_store.gatewaySequence = UINT32_MAX - 1;
-    assert(!lora_test_enabled_machines(0x81) && queues == 0 && saves == 0 && !s_request_busy);
     reset(); g_store.gatewayToken[0] = '\0';
     assert(!lora_test_enabled_machines(0x81) && queues == 0);
     reset(); queueOK = false;
-    assert(!lora_test_enabled_machines(0x81) && !s_request_busy && g_store.gatewaySequence == 12);
+    assert(!lora_test_enabled_machines(0x81) && !s_request_busy && saves == 0);
 
     reset(); assert(lora_test_enabled_machines(0x81)); replies = {403};
     perform_machine_test_batch(&queued);
     assert(calls.size() == 1 && status.find("A:FEHLER H:NICHT GESENDET") != std::string::npos);
     assert(state == GATEWAY_AUTH_FAILED);
+    reset(); assert(lora_test_enabled_machines(0x81)); replies = {409};
+    perform_machine_test_batch(&queued);
+    assert(calls.size() == 1 && status.find("A:BELEGT/KONFLIKT H:NICHT GESENDET") != std::string::npos);
+    assert(state == GATEWAY_BUSY);
     reset(); assert(lora_test_enabled_machines(0x81)); replies = {202, 200};
     perform_machine_test_batch(&queued);
     assert(calls.size() == 2 && status.find("A:OHNE ACK H:OK") != std::string::npos);
@@ -158,8 +152,8 @@ int main() {
     g_store.maschinenAktiv[7] = false; // selection changed while confirmation was open
     machine_test_all_confirm_cb(&event);
     assert(!s_machine_test_pending && queues == 0);
-    std::puts("PASS: enabled-only A-H selection; H once; unique persisted sequences; immutable credentials");
-    std::puts("PASS: rejection/no-machine/offline/busy/overflow/queue failure; stop on failure; per-machine ACK results");
+    std::puts("PASS: enabled-only A-H selection; H once; fresh per-machine nonces; immutable credentials; no NVS writes");
+    std::puts("PASS: rejection/no-machine/offline/busy/queue failure; stop on failure; per-machine ACK results");
     std::puts("PASS: confirmation never fires; cancel never fires; changed selection rejected");
 }
 """
@@ -172,6 +166,12 @@ if __name__ == "__main__":
                       transport.index("static void set_status")]
     queue = r"""
 static GatewayRequest queued;
+bool prepare_fire_request(GatewayRequest *request, char *url, size_t size, char *mac, int *) {
+    snprintf(request->nonce_hex, sizeof(request->nonce_hex), "%032x", ++nonce_counter);
+    auth = {(char)('A' + request->machine), request->nonce_hex, request->gateway_token, ""};
+    strcpy(mac, "fake-mac");
+    return build_fire_url(url, size, request);
+}
 int xQueueSend(void *, const GatewayRequest *request, int) {
     if (!queueOK) return 0;
     queued = *request; ++queues; order.push_back("queue"); return pdTRUE;
@@ -186,6 +186,8 @@ int xQueueSend(void *, const GatewayRequest *request, int) {
         "static void machine_test_all_cancel_cb", "static void machine_test_all_cb"])
     with tempfile.TemporaryDirectory(prefix="tm-machine-batch-") as directory:
         cpp = Path(directory) / "test.cpp"
+        queue = queue.replace("static GatewayRequest queued;",
+                              "static bool build_fire_url(char *, size_t, const GatewayRequest *);\nstatic GatewayRequest queued;")
         cpp.write_text(STUBS + types + queue + transport_functions +
                        UI_STUBS + ui_functions + MAIN)
         executable = Path(directory) / "test"

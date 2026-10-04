@@ -345,7 +345,6 @@ typedef struct {
     char    apiKey[MAX_KEY_LEN];
     char    gatewayUrl[MAX_URL_LEN]; // local TrapMaster gateway, e.g. http://192.168.1.50
     char    gatewayToken[MAX_KEY_LEN]; // private HMAC key for the local gateway
-    uint32_t gatewaySequence; // persisted, strictly increasing gateway command sequence
     // wifiSsid/wifiPass remain as a compatibility mirror of the preferred
     // network. New code should use knownWifiNetworks instead.
     char    wifiSsid[TM_MAX_SSID_LEN];

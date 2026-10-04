@@ -515,7 +515,7 @@ void screen_dashboard_refresh(void)
         set_label_text_if_changed(s_lbl_gateway, buf);
         if (gateway_state != s_rendered_gateway_state) {
             uint32_t color = gateway_state == GATEWAY_REACHABLE ? CLR_SUCCESS :
-                             gateway_state == GATEWAY_CHECKING ? CLR_WARN :
+                             (gateway_state == GATEWAY_CHECKING || gateway_state == GATEWAY_BUSY) ? CLR_WARN :
                              gateway_state == GATEWAY_NOT_CONFIGURED ? CLR_MUTED : CLR_DANGER;
             lv_obj_set_style_text_color(s_lbl_gateway, lv_color_hex(color), 0);
             s_rendered_gateway_state = gateway_state;

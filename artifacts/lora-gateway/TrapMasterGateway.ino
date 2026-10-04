@@ -11,6 +11,8 @@
 #include <Preferences.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include "esp_random.h"
+#include "nonce_registry.h"
 #include "LoRaWan_APP.h"
 #include "HT_SSD1306Wire.h"
 #if __has_include("TrapMasterGateway.local.h")
@@ -61,27 +63,26 @@ static bool bench_interlock_asserted()
 // does not expose it in every board-header variant. Use a uniquely named
 // gateway object so both the library and this sketch link cleanly.
 SSD1306Wire gatewayDisplay(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_64_32, RST_OLED);
-WebServer server(80);
+class GatewayWebServer : public WebServer {
+public:
+    using WebServer::WebServer;
+    WiFiClient detachClient() {
+        WiFiClient client = _currentClient;
+        _currentClient = WiFiClient();
+        return client;
+    }
+};
+GatewayWebServer server(80);
 WiFiManager wifiManager;
 Preferences preferences;
 RadioEvents_t radioEvents;
 
 static uint32_t nextCounter = 0;
-enum RequestState : uint8_t {
-    REQUEST_NONE = 0,
-    REQUEST_UNKNOWN = 1,
-    REQUEST_COMPLETE = 2,
-    REQUEST_PAIR_FIRST_COMPLETE = 3,
-};
-enum RequestKind : uint8_t { REQUEST_SINGLE = 0, REQUEST_PAIR = 1 };
-static uint32_t lastSequence = 0;
-static RequestKind lastRequestKind = REQUEST_SINGLE;
-static char lastRequestMachine = 0;
-static char lastRequestSecondMachine = 0;
-static uint32_t lastRequestDelayMs = 0;
-static RequestState lastRequestState = REQUEST_NONE;
-static bool lastRequestAck = false;
-static bool lastRequestSecondAck = false;
+static tm_gateway::NonceRegistry nonces;
+static tm_gateway::Entry *pendingFire = nullptr;
+// Copies share ownership of the socket; WebServer can accept other requests
+// after the handler returns while this original awaits its radio result.
+static WiFiClient pendingClient;
 static uint32_t expectedAckCounter = 0;
 static char expectedAckMachine = 0;
 static volatile bool txDone = false;
@@ -214,39 +215,26 @@ static void applyNetworkSettings()
                   staticAddressText, staticGatewayText);
 }
 
-static bool parse_sequence(uint32_t *sequence)
-{
-    if (!sequence || !server.hasArg("seq")) return false;
-    String text = server.arg("seq");
-    if (text.length() != 8) return false;
-    for (size_t i = 0; i < 8; ++i)
-        if (!isxdigit((unsigned char)text[i])) return false;
-    unsigned long value = strtoul(text.c_str(), nullptr, 16);
-    if (value == 0) return false;
-    *sequence = (uint32_t)value;
-    return true;
-}
-
-static bool request_is_authentic(char machine, uint32_t sequence)
+static bool request_is_authentic(char machine, const uint8_t *nonce)
 {
     if (!server.hasHeader("X-TrapMaster-Auth")) return false;
     uint8_t expected[tm_auth::MAC_LEN];
     if (!tm_auth::make_request_mac((const uint8_t *)GATEWAY_AUTH_KEY,
                                    sizeof(GATEWAY_AUTH_KEY) - 1,
-                                   machine, sequence, expected)) {
+                                   machine, nonce, expected)) {
         return false;
     }
     return tm_auth::mac_matches_hex(expected, server.header("X-TrapMaster-Auth").c_str());
 }
 
 static bool pair_request_is_authentic(char first, char second,
-                                      uint32_t delay_ms, uint32_t sequence)
+                                      uint32_t delay_ms, const uint8_t *nonce)
 {
     if (!server.hasHeader("X-TrapMaster-Auth")) return false;
     uint8_t expected[tm_auth::MAC_LEN];
     if (!tm_auth::make_pair_request_mac((const uint8_t *)GATEWAY_AUTH_KEY,
                                         sizeof(GATEWAY_AUTH_KEY) - 1,
-                                        first, second, delay_ms, sequence, expected)) {
+                                        first, second, delay_ms, nonce, expected)) {
         return false;
     }
     return tm_auth::mac_matches_hex(expected, server.header("X-TrapMaster-Auth").c_str());
@@ -263,32 +251,51 @@ static bool health_request_is_authentic()
     return tm_auth::mac_matches_hex(expected, server.header("X-TrapMaster-Auth").c_str());
 }
 
-static bool persist_request(uint32_t sequence, RequestKind kind, char machine,
-                            char second_machine, uint32_t delay_ms,
-                            RequestState state, bool ack, bool second_ack)
+static void handleNonce()
 {
-    // Store the sequence before radio TX. A reset part-way through the
-    // following writes still has a nonzero sequence and therefore fails closed.
-    if (preferences.putULong("req_seq", sequence) != sizeof(uint32_t) ||
-        preferences.putUChar("req_kind", (uint8_t)kind) != sizeof(uint8_t) ||
-        preferences.putChar("req_machine", machine) != sizeof(char) ||
-        preferences.putChar("req_second", second_machine) != sizeof(char) ||
-        preferences.putULong("req_delay", delay_ms) != sizeof(uint32_t) ||
-        preferences.putUChar("req_state", (uint8_t)state) != sizeof(uint8_t) ||
-        preferences.putBool("req_ack", ack) != sizeof(bool) ||
-        preferences.putBool("req_ack2", second_ack) != sizeof(bool)) {
-        lastResult = "NVS request save failed";
-        return false;
+    uint8_t bytes[tm_auth::NONCE_LEN];
+    char hex[tm_auth::NONCE_HEX_LEN + 1];
+    esp_fill_random(bytes, sizeof(bytes)); // hardware entropy with WiFi active
+    tm_auth::nonce_to_hex(bytes, hex);
+    server.sendHeader("Cache-Control", "no-store");
+    if (!nonces.issue(hex, millis())) {
+        server.sendHeader("Retry-After", "1");
+        server.send(429, "application/json",
+                    "{\"ok\":false,\"error\":\"nonce rate or capacity limit\"}");
+        return;
     }
-    lastSequence = sequence;
-    lastRequestKind = kind;
-    lastRequestMachine = machine;
-    lastRequestSecondMachine = second_machine;
-    lastRequestDelayMs = delay_ms;
-    lastRequestState = state;
-    lastRequestAck = ack;
-    lastRequestSecondAck = second_ack;
-    return true;
+    char body[96];
+    snprintf(body, sizeof(body), "{\"nonce\":\"%s\",\"expiresInMs\":10000}", hex);
+    server.send(200, "application/json", body);
+}
+
+static void admitFire(const uint8_t *nonce, bool pair, char first, char second,
+                      uint32_t delayMs)
+{
+    char hex[tm_auth::NONCE_HEX_LEN + 1];
+    tm_auth::nonce_to_hex(nonce, hex);
+    tm_gateway::Entry *entry = nullptr;
+    auto admission = nonces.admit(hex, pair, first, second, delayMs,
+                                 pendingFire != nullptr || radioBusy, millis(), &entry);
+    server.sendHeader("Cache-Control", "no-store");
+    switch (admission) {
+    case tm_gateway::Admission::Unauthorized:
+        server.send(401, "application/json", "{\"ok\":false,\"error\":\"unknown or expired nonce\"}");
+        return;
+    case tm_gateway::Admission::Conflict:
+        server.send(409, "application/json", "{\"ok\":false,\"error\":\"conflicting request\"}");
+        return;
+    case tm_gateway::Admission::Busy:
+        server.send(409, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+        return;
+    case tm_gateway::Admission::Cached:
+        server.send(entry->status, "application/json", entry->response);
+        return;
+    case tm_gateway::Admission::Start:
+        pendingFire = entry;
+        pendingClient = server.detachClient();
+        return; // execution is outside the handler, never nested inside it
+    }
 }
 
 static void renderStatus()
@@ -355,6 +362,7 @@ static bool waitForFlag(volatile bool &flag, uint32_t timeoutMs)
 {
     uint32_t started = millis();
     while (!flag && millis() - started < timeoutMs) {
+        if (pendingFire) server.handleClient();
         Radio.IrqProcess();
         delay(1);
     }
@@ -434,7 +442,7 @@ static void handleBenchFire()
         return;
     }
     char machine = (char)toupper(server.arg("machine")[0]);
-    if (!tm_protocol::valid_machine(machine) || radioBusy) {
+    if (!tm_protocol::valid_machine(machine) || radioBusy || pendingFire) {
         server.send(400, "application/json", "{\"error\":\"invalid request\"}");
         return;
     }
@@ -464,53 +472,16 @@ static void handleFire()
         server.send(400, "application/json", "{\"error\":\"machine must be A-H\"}");
         return;
     }
-    uint32_t sequence = 0;
-    if (!parse_sequence(&sequence)) {
-        server.send(400, "application/json", "{\"error\":\"seq must be 8 hex characters\"}");
+    uint8_t nonce[tm_auth::NONCE_LEN];
+    if (!tm_auth::nonce_from_hex(server.arg("nonce").c_str(), nonce)) {
+        server.send(401, "application/json", "{\"ok\":false,\"error\":\"invalid nonce\"}");
         return;
     }
-    if (!request_is_authentic(machine, sequence)) {
+    if (!request_is_authentic(machine, nonce)) {
         server.send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
         return;
     }
-    if (sequence < lastSequence) {
-        server.send(409, "application/json", "{\"ok\":false,\"error\":\"stale sequence\"}");
-        return;
-    }
-    if (sequence == lastSequence) {
-        if (lastRequestKind != REQUEST_SINGLE || machine != lastRequestMachine) {
-            server.send(409, "application/json", "{\"ok\":false,\"error\":\"request conflicts with another machine\"}");
-        } else if (lastRequestState == REQUEST_COMPLETE) {
-            String body = "{\"ok\":true,\"machine\":\"" + String(machine) +
-                          "\",\"ack\":" + String(lastRequestAck ? "true" : "false") +
-                          ",\"cached\":true}";
-            server.send(lastRequestAck ? 200 : 202, "application/json", body);
-        } else {
-            server.send(409, "application/json",
-                        "{\"ok\":false,\"error\":\"previous request outcome is unknown\"}");
-        }
-        return;
-    }
-    if (!persist_request(sequence, REQUEST_SINGLE, machine, 0, 0,
-                         REQUEST_UNKNOWN, false, false)) {
-        server.send(503, "application/json", "{\"ok\":false,\"error\":\"gateway storage unavailable\"}");
-        return;
-    }
-    bool ack = false;
-    if (!sendFire(machine, &ack, true)) {
-        server.send(radioBusy ? 503 : 502, "application/json",
-                    "{\"ok\":false,\"error\":\"LoRa send failed\"}");
-        return;
-    }
-    if (!persist_request(sequence, REQUEST_SINGLE, machine, 0, 0,
-                         REQUEST_COMPLETE, ack, false)) {
-        server.send(503, "application/json",
-                    "{\"ok\":false,\"error\":\"fire result could not be saved; do not retry\"}");
-        return;
-    }
-    String body = "{\"ok\":true,\"machine\":\"" + String(machine) +
-                  "\",\"ack\":" + String(ack ? "true" : "false") + "}";
-    server.send(ack ? 200 : 202, "application/json", body);
+    admitFire(nonce, false, machine, 0, 0);
 }
 
 static bool parse_pair_machine(const char *name, char *machine)
@@ -542,7 +513,7 @@ static void handleFirePair()
     char first = 0;
     char second = 0;
     uint32_t delay_ms = 0;
-    uint32_t sequence = 0;
+    uint8_t nonce[tm_auth::NONCE_LEN];
     if (!parse_pair_machine("first", &first) ||
         !parse_pair_machine("second", &second) || first == second) {
         server.send(400, "application/json",
@@ -554,103 +525,85 @@ static void handleFirePair()
                     "{\"error\":\"delayMs must be 0-10000 milliseconds\"}");
         return;
     }
-    if (!parse_sequence(&sequence)) {
-        server.send(400, "application/json", "{\"error\":\"seq must be 8 hex characters\"}");
+    if (!tm_auth::nonce_from_hex(server.arg("nonce").c_str(), nonce)) {
+        server.send(401, "application/json", "{\"ok\":false,\"error\":\"invalid nonce\"}");
         return;
     }
-    if (!pair_request_is_authentic(first, second, delay_ms, sequence)) {
+    if (!pair_request_is_authentic(first, second, delay_ms, nonce)) {
         server.send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
         return;
     }
-    if (sequence < lastSequence) {
-        server.send(409, "application/json", "{\"ok\":false,\"error\":\"stale sequence\"}");
-        return;
-    }
-    if (sequence == lastSequence) {
-        bool same_pair = lastRequestKind == REQUEST_PAIR &&
-                         first == lastRequestMachine &&
-                         second == lastRequestSecondMachine &&
-                         delay_ms == lastRequestDelayMs;
-        if (!same_pair) {
-            server.send(409, "application/json",
-                        "{\"ok\":false,\"error\":\"request conflicts with another pair\"}");
-        } else if (lastRequestState == REQUEST_COMPLETE) {
-            String body = "{\"ok\":true,\"first\":\"" + String(first) +
-                          "\",\"second\":\"" + String(second) +
-                          "\",\"firstAck\":" + String(lastRequestAck ? "true" : "false") +
-                           ",\"firstAckWaited\":" + String(delay_ms > 0 ? "true" : "false") +
-                          ",\"secondAck\":" + String(lastRequestSecondAck ? "true" : "false") +
-                          ",\"cached\":true}";
-            // A zero-delay pair deliberately skips the first ACK wait, so
-            // the second ACK alone determines whether this completed reply
-            // can be acknowledged as successful.
-            server.send(lastRequestSecondAck ? 200 : 202,
-                        "application/json", body);
-        } else {
-            // The gateway records before each physical action. A reboot or
-            // storage error between the two commands is deliberately fail-closed.
-            server.send(409, "application/json",
-                        "{\"ok\":false,\"error\":\"pair outcome is unknown; do not retry\"}");
-        }
-        return;
-    }
-    if (!persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
-                         REQUEST_UNKNOWN, false, false)) {
-        server.send(503, "application/json",
-                    "{\"ok\":false,\"error\":\"gateway storage unavailable\"}");
-        return;
-    }
+    admitFire(nonce, true, first, second, delay_ms);
+}
 
+static void finishPendingFire(int status, const char *body)
+{
+    // Cache even failures before writing the socket. A lost HTTP response must
+    // never permit a second transmission; these results use preallocated RAM.
+    nonces.finish(pendingFire, status, body, millis());
+    pendingClient.printf("HTTP/1.1 %d Result\r\nContent-Type: application/json\r\n"
+                         "Content-Length: %u\r\nConnection: close\r\n"
+                         "Cache-Control: no-store\r\n\r\n%s",
+                         status, (unsigned)strlen(pendingFire->response),
+                         pendingFire->response);
+    pendingClient.stop();
+    pendingClient = WiFiClient();
+    pendingFire = nullptr;
+}
+
+static void runPendingFire()
+{
+    if (!pendingFire) return;
+    const char first = pendingFire->first, second = pendingFire->second;
+    const uint32_t delay_ms = pendingFire->delay;
+    if (!pendingFire->pair) {
+        bool ack = false;
+        if (!sendFire(first, &ack, true)) {
+            finishPendingFire(lastResult == "Counter save failed" ? 503 : 502,
+                              "{\"ok\":false,\"error\":\"LoRa send failed; do not retry as new fire\"}");
+            return;
+        }
+        char body[128];
+        snprintf(body, sizeof(body), "{\"ok\":true,\"machine\":\"%c\",\"ack\":%s}",
+                 first, ack ? "true" : "false");
+        finishPendingFire(ack ? 200 : 202, body);
+        return;
+    }
     bool first_ack = false;
     // Zero means launch both machines back-to-back. We wait only for the
     // first radio transmission to complete, not its ACK, so a valid 0-second
     // doublette cannot be delayed by the ACK timeout.
     bool wait_for_first_ack = delay_ms > 0;
     if (!sendFire(first, &first_ack, wait_for_first_ack)) {
-        server.send(502, "application/json",
+        finishPendingFire(lastResult == "Counter save failed" ? 503 : 502,
                     "{\"ok\":false,\"error\":\"first machine send failed; do not retry\"}");
         return;
     }
     if (wait_for_first_ack && !first_ack) {
-        persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
-                        REQUEST_COMPLETE, false, false);
-        server.send(202, "application/json",
+        finishPendingFire(202,
                     "{\"ok\":false,\"partial\":true,\"firstAck\":false,\"secondSent\":false}");
         return;
     }
-    if (!persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
-                         REQUEST_PAIR_FIRST_COMPLETE, first_ack, false)) {
-        server.send(503, "application/json",
-                    "{\"ok\":false,\"error\":\"pair progress could not be saved; do not retry\"}");
-        return;
+    uint32_t started = millis();
+    while (millis() - started < delay_ms) {
+        server.handleClient(); // answer busy throughout the pair delay
+        Radio.IrqProcess();
+        delay(1);
     }
-
-    if (delay_ms > 0) delay(delay_ms);
-
     bool second_ack = false;
+    char body[tm_gateway::RESPONSE_BYTES];
     if (!sendFire(second, &second_ack, true)) {
-        persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
-                        REQUEST_COMPLETE, first_ack, false);
-        server.send(502, "application/json",
-                    String("{\"ok\":false,\"partial\":true,\"firstAck\":") +
-                    String(first_ack ? "true" : "false") +
-                    ",\"firstAckWaited\":" + String(wait_for_first_ack ? "true" : "false") +
-                    ",\"secondSent\":false}");
+        snprintf(body, sizeof(body), "{\"ok\":false,\"partial\":true,\"firstAck\":%s,"
+                 "\"firstAckWaited\":%s,\"secondSent\":false}",
+                 first_ack ? "true" : "false", wait_for_first_ack ? "true" : "false");
+        finishPendingFire(lastResult == "Counter save failed" ? 503 : 502, body);
         return;
     }
-    if (!persist_request(sequence, REQUEST_PAIR, first, second, delay_ms,
-                         REQUEST_COMPLETE, first_ack, second_ack)) {
-        server.send(503, "application/json",
-                    "{\"ok\":false,\"error\":\"pair result could not be saved; do not retry\"}");
-        return;
-    }
-    String body = "{\"ok\":true,\"first\":\"" + String(first) +
-                  "\",\"second\":\"" + String(second) +
-                   "\",\"firstAck\":" + String(first_ack ? "true" : "false") +
-                   ",\"firstAckWaited\":" + String(wait_for_first_ack ? "true" : "false") +
-                   ",\"secondAck\":" +
-                  String(second_ack ? "true" : "false") + "}";
-    server.send(second_ack ? 200 : 202, "application/json", body);
+    snprintf(body, sizeof(body), "{\"ok\":true,\"first\":\"%c\",\"second\":\"%c\","
+             "\"firstAck\":%s,\"firstAckWaited\":%s,\"secondAck\":%s}", first, second,
+             first_ack ? "true" : "false", wait_for_first_ack ? "true" : "false",
+             second_ack ? "true" : "false");
+    finishPendingFire(second_ack ? 200 : 202, body);
 }
 
 static void handleStatus()
@@ -678,7 +631,9 @@ static void handleHealth()
         return;
     }
     String body = "{\"ok\":true,\"auth\":true,\"ip\":\"" + WiFi.localIP().toString() +
-                  "\",\"uptimeMs\":" + String(millis()) + "}";
+                  "\",\"uptimeMs\":" + String(millis()) +
+                  ",\"fireAuth\":\"nonce-v1\",\"nonceTtlMs\":10000,\"resultTtlMs\":30000,"
+                  "\"busy\":" + String(pendingFire ? "true" : "false") + "}";
     server.send(200, "application/json", body);
 }
 
@@ -731,17 +686,10 @@ void setup()
     }
 
     nextCounter = preferences.getULong("counter", 0);
-    lastSequence = preferences.getULong("req_seq", 0);
-    lastRequestKind = (RequestKind)preferences.getUChar("req_kind", REQUEST_SINGLE);
-    lastRequestMachine = preferences.getChar("req_machine", 0);
-    lastRequestSecondMachine = preferences.getChar("req_second", 0);
-    lastRequestDelayMs = preferences.getULong("req_delay", 0);
-    lastRequestState = (RequestState)preferences.getUChar("req_state", REQUEST_NONE);
-    lastRequestAck = preferences.getBool("req_ack", false);
-    lastRequestSecondAck = preferences.getBool("req_ack2", false);
     initRadio();
     const char *headerKeys[] = { "X-TrapMaster-Auth" };
     server.collectHeaders(headerKeys, 1);
+    server.on("/nonce", HTTP_GET, handleNonce);
     server.on("/fire", HTTP_GET, handleFire);
     server.on("/fire-pair", HTTP_GET, handleFirePair);
     server.on("/health", HTTP_GET, handleHealth);
@@ -757,5 +705,6 @@ void setup()
 void loop()
 {
     server.handleClient();
+    runPendingFire();
     Radio.IrqProcess();
 }

@@ -12,6 +12,7 @@ typedef enum {
     GATEWAY_UNREACHABLE,
     GATEWAY_AUTH_FAILED,
     GATEWAY_FAILED,
+    GATEWAY_BUSY, // Last command received HTTP 409: busy or conflicting request
 } GatewayReachability;
 
 /** Create the persistent fire worker. Must be called once at boot. */
@@ -27,7 +28,7 @@ bool lora_fire_machine(Maschine m);
 bool lora_fire_machine_game(Maschine m);
 
 /** Test every enabled machine once, using the mask confirmed by the operator.
- * Reserves/persists unique sequences before queueing. No game/credit accounting.
+ * Fetches a fresh gateway nonce per machine on the worker. No game/credit accounting.
  * Rejects a changed enabled-machine selection; executes on the HTTP worker.
  */
 bool lora_test_enabled_machines(uint8_t confirmed_mask);

@@ -2,7 +2,7 @@
 // Shared terminal-to-gateway request authentication.
 //
 // The secret is never sent over HTTP. Each request authenticates the target
-// machine and a strictly increasing terminal sequence with HMAC-SHA-256.
+// machine and a gateway-issued one-time nonce with HMAC-SHA-256.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -12,6 +12,8 @@ namespace tm_auth {
 
 constexpr size_t MAC_LEN = 32;
 constexpr size_t MAC_HEX_LEN = MAC_LEN * 2;
+constexpr size_t NONCE_LEN = 16;
+constexpr size_t NONCE_HEX_LEN = NONCE_LEN * 2;
 
 inline void write_u32_le(uint8_t *dst, uint32_t value)
 {
@@ -22,18 +24,15 @@ inline void write_u32_le(uint8_t *dst, uint32_t value)
 }
 
 inline bool make_request_mac(const uint8_t *key, size_t key_len,
-                             uint8_t machine, uint32_t sequence,
+                             uint8_t machine, const uint8_t nonce[NONCE_LEN],
                              uint8_t out[MAC_LEN])
 {
     if (!key || key_len < 16 || !out || machine < 'A' || machine > 'H' ||
-        sequence == 0) {
+        !nonce) {
         return false;
     }
-    const uint8_t payload[8] = {
-        'T', 'M', 0x01, machine,
-        (uint8_t)sequence, (uint8_t)(sequence >> 8),
-        (uint8_t)(sequence >> 16), (uint8_t)(sequence >> 24),
-    };
+    uint8_t payload[4 + NONCE_LEN] = {'T', 'M', 0x01, machine};
+    for (size_t i = 0; i < NONCE_LEN; ++i) payload[4 + i] = nonce[i];
     const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     return info && mbedtls_md_hmac(info, key, key_len, payload, sizeof(payload), out) == 0;
 }
@@ -43,32 +42,33 @@ inline bool make_request_mac(const uint8_t *key, size_t key_len,
 // with a different timing.
 inline bool make_pair_request_mac(const uint8_t *key, size_t key_len,
                                   uint8_t first_machine, uint8_t second_machine,
-                                  uint32_t delay_ms, uint32_t sequence,
+                                  uint32_t delay_ms, const uint8_t nonce[NONCE_LEN],
                                   uint8_t out[MAC_LEN])
 {
     if (!key || key_len < 16 || !out ||
         first_machine < 'A' || first_machine > 'G' ||
         second_machine < 'A' || second_machine > 'G' ||
         first_machine == second_machine || delay_ms > 10000 ||
-        sequence == 0) {
+        !nonce) {
         return false;
     }
-    const uint8_t payload[17] = {
+    uint8_t payload[10 + NONCE_LEN + 3] = {
         'T', 'M', 0x01, 'P',
         first_machine, second_machine,
         (uint8_t)delay_ms, (uint8_t)(delay_ms >> 8),
-        (uint8_t)(delay_ms >> 16), (uint8_t)(delay_ms >> 24),
-        (uint8_t)sequence, (uint8_t)(sequence >> 8),
-        (uint8_t)(sequence >> 16), (uint8_t)(sequence >> 24),
-        'D', 'O', 'U'
+        (uint8_t)(delay_ms >> 16), (uint8_t)(delay_ms >> 24)
     };
+    for (size_t i = 0; i < NONCE_LEN; ++i) payload[10 + i] = nonce[i];
+    payload[10 + NONCE_LEN] = 'D';
+    payload[11 + NONCE_LEN] = 'O';
+    payload[12 + NONCE_LEN] = 'U';
     const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     return info && mbedtls_md_hmac(info, key, key_len, payload, sizeof(payload), out) == 0;
 }
 
 // Authenticates a non-actuating terminal-to-gateway health check. This uses a
 // separate domain string from FIRE commands, so it cannot be replayed as a
-// machine command or consume a command sequence.
+// machine command or consume a fire nonce.
 inline bool make_health_mac(const uint8_t *key, size_t key_len,
                             uint8_t out[MAC_LEN])
 {
@@ -98,6 +98,29 @@ inline int hex_value(char value)
     if (value >= 'a' && value <= 'f') return value - 'a' + 10;
     if (value >= 'A' && value <= 'F') return value - 'A' + 10;
     return -1;
+}
+
+inline bool nonce_from_hex(const char *hex, uint8_t out[NONCE_LEN])
+{
+    if (!hex || !out) return false;
+    size_t length = 0;
+    while (length <= NONCE_HEX_LEN && hex[length]) ++length;
+    if (length != NONCE_HEX_LEN) return false;
+    for (size_t i = 0; i < NONCE_LEN; ++i) {
+        int high = hex_value(hex[2 * i]), low = hex_value(hex[2 * i + 1]);
+        if (high < 0 || low < 0) return false;
+        out[i] = (uint8_t)((high << 4) | low);
+    }
+    return true;
+}
+
+inline void nonce_to_hex(const uint8_t nonce[NONCE_LEN], char out[NONCE_HEX_LEN + 1])
+{
+    for (size_t i = 0; i < NONCE_LEN; ++i) {
+        out[2 * i] = hex_digit(nonce[i] >> 4);
+        out[2 * i + 1] = hex_digit(nonce[i] & 15);
+    }
+    out[NONCE_HEX_LEN] = '\0';
 }
 
 inline bool mac_matches_hex(const uint8_t mac[MAC_LEN], const char *hex)
