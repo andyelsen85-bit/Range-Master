@@ -115,7 +115,7 @@ export const GetSpielerErgebnisseResponse = zod.object({
   "wiederholt": zod.boolean(),
   "spiel": zod.object({
   "datum": zod.coerce.date(),
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4'])
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4'])
 })
 }))
 })
@@ -146,7 +146,7 @@ export const GetMyPurchasesResponse = zod.object({
  * @summary Get leaderboard
  */
 export const GetRanglisteQueryParams = zod.object({
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']).optional(),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']).optional(),
   "jahr": zod.coerce.number().int().optional()
 })
 
@@ -194,7 +194,7 @@ export const GetStatistikModusBreakdownParams = zod.object({
 
 export const GetStatistikModusBreakdownResponse = zod.object({
   "breakdown": zod.array(zod.object({
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
   "anzahlSpiele": zod.number().int(),
   "durchschnitt": zod.number().describe('Raw average points per game'),
   "durchschnittProzent": zod.number().describe('Normalized average as % of max possible score (same method as leaderboard)')
@@ -219,7 +219,7 @@ export const GetStatistikVerlaufResponse = zod.object({
   "verlauf": zod.array(zod.object({
   "datum": zod.coerce.date(),
   "punkte": zod.number().int(),
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
   "maxPunkte": zod.number().int()
 }))
 })
@@ -292,7 +292,7 @@ export const PostSyncSpieleBody = zod.object({
   "spiele": zod.array(zod.object({
   "externalId": zod.string().uuid(),
   "datum": zod.coerce.date(),
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
   "lauf": zod.number().int().min(1).max(postSyncSpieleBodySpieleItemLaufMax),
   "abgeschlossen": zod.boolean(),
   "confirmedLaunches": zod.number().int().min(postSyncSpieleBodySpieleItemConfirmedLaunchesMin).optional(),
@@ -693,7 +693,7 @@ export const GetSyncBillDaySummaryResponse = zod.object({
   "confirmedClays": zod.number().int(),
   "unconfirmedClays": zod.number().int(),
   "gameBreakdown": zod.array(zod.object({
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
   "games": zod.number().int(),
   "completedGames": zod.number().int(),
   "playerParticipations": zod.number().int(),
@@ -750,7 +750,7 @@ export const GetAdminBillDaySummaryResponse = zod.object({
   "confirmedClays": zod.number().int(),
   "unconfirmedClays": zod.number().int(),
   "gameBreakdown": zod.array(zod.object({
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
   "games": zod.number().int(),
   "completedGames": zod.number().int(),
   "playerParticipations": zod.number().int(),
@@ -826,7 +826,7 @@ export const GetAdminBillPeriodSummaryResponse = zod.object({
   "confirmedClays": zod.number().int(),
   "unconfirmedClays": zod.number().int(),
   "gameBreakdown": zod.array(zod.object({
-  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']),
   "games": zod.number().int(),
   "completedGames": zod.number().int(),
   "playerParticipations": zod.number().int(),

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 const MODUS_LABEL: Record<Modus, string> = {
   NORMAL:   'Normal',
   HARAKIRI: 'Harakiri',
+  HARAKIRI_CUSTOM: 'Harakiri Custom',
   CUSTOM_1: 'Custom 1',
   CUSTOM_2: 'Custom 2',
   CUSTOM_3: 'Custom 3',
@@ -16,6 +17,7 @@ const MODUS_LABEL: Record<Modus, string> = {
 const MODUS_COLOR: Record<Modus, string> = {
   NORMAL:   'bg-primary/15 text-primary border-primary/40',
   HARAKIRI: 'bg-red-500/15 text-red-400 border-red-500/40',
+  HARAKIRI_CUSTOM: 'bg-red-500/15 text-red-400 border-red-500/40',
   CUSTOM_1: 'bg-purple-500/15 text-purple-400 border-purple-500/40',
   CUSTOM_2: 'bg-purple-500/15 text-purple-400 border-purple-500/40',
   CUSTOM_3: 'bg-purple-500/15 text-purple-400 border-purple-500/40',

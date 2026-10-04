@@ -103,6 +103,10 @@ lv_obj_t *screen_resultate_create(void)
     lv_table_set_col_width(s_table, 4, 110); // TOTAL
     lv_obj_set_style_text_font(s_table, UI_FONT_16, 0);
     lv_obj_set_style_text_color(s_table, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_set_style_text_color(s_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(s_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(s_table, lv_color_hex(CLR_CARD), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(s_table, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_bg_color(s_table, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_color(s_table, lv_color_hex(CLR_BORDER), 0);
 
@@ -124,7 +128,7 @@ void screen_resultate_refresh(void)
     int n = fg->spieler_count;
 
     // Meta line
-    char buf[80];
+    char buf[128];
     snprintf(buf, sizeof(buf), "%s   |   %s   |   %d TAUBEN/LAUF",
              fg->finishedAt,
              modus_label(fg->base.modus),
@@ -139,7 +143,7 @@ void screen_resultate_refresh(void)
         rows[i].name = fg->spielerNamen[i];
         for (int j = 0; j < fg->base.ergebnisse_count; j++) {
             const Ergebnis *e = &fg->base.ergebnisse[j];
-            if (e->spielerId != rows[i].id) continue;
+            if (e->spielerId != rows[i].id || e->wiederholt) continue;
             if (e->lauf == 1) rows[i].lauf1 += e->punkte;
             else              rows[i].lauf2 += e->punkte;
         }
@@ -155,7 +159,7 @@ void screen_resultate_refresh(void)
         snprintf(buf, sizeof(buf), "SIEGER: %s  (%d PUNKTE)",
                  rows[0].name, rows[0].total);
         lv_label_set_text(s_lbl_winner, buf);
-        int maxScore = fg->base.taubenProLauf * 2 * 2;
+        int maxScore = fg->base.taubenProLauf * 2 * fg->base.lauf;
         snprintf(buf, sizeof(buf), "MAX %d PKT", maxScore);
         lv_label_set_text(s_lbl_max, buf);
     }

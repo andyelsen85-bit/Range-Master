@@ -16,7 +16,7 @@ const wifiNetworkSchema = z.object({
 });
 
 export const terminalConfigurationSchema = z.object({
-  modus: z.number().int().min(0).max(5),
+  modus: z.number().int().min(0).max(6),
   maschinenAktiv: z.array(z.boolean()).length(8),
   apiUrl: boundedString(255),
   gatewayUrl: boundedString(255),
@@ -34,9 +34,16 @@ export const terminalConfigurationSchema = z.object({
     isDoublette: z.boolean(),
     partner: z.number().int().min(0).max(7),
     delayMs: z.number().int().min(0).max(10000),
-  })).max(16)).length(4),
-  customLaeufe: z.array(z.number().int().min(1).max(2)).length(4),
+  })).max(16)).min(4).max(5),
+  customLaeufe: z.array(z.number().int().min(1).max(2)).min(4).max(5),
 }).superRefine((configuration, ctx) => {
+  if (configuration.customSequenzen.length !== configuration.customLaeufe.length)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Custom sequence and round slots must match" });
+  const harakiriPair = configuration.customSequenzen[4];
+  if (harakiriPair && (harakiriPair.length > 1 || harakiriPair.some(pair =>
+    !pair.isDoublette || pair.maschine >= 7 || pair.partner >= 7 || pair.maschine === pair.partner)))
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["customSequenzen", 4],
+      message: "Harakiri Custom requires one A-G doublette or an empty unconfigured slot" });
   const networks = configuration.wifiNetworks;
   const preferred = configuration.wifiPreferredIndex;
   if (networks === undefined && preferred === undefined) return;

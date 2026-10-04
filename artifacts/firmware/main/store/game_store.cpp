@@ -1506,7 +1506,7 @@ const char *maschine_label(Maschine m)
 const char *modus_label(Modus m)
 {
     static const char *labels[] = {
-        "Normal","Harakiri","Custom 1","Custom 2","Custom 3","Custom 4"
+        "Normal","Harakiri","Custom 1","Custom 2","Custom 3","Custom 4","Harakiri Custom"
     };
     if (m < MODUS_COUNT) return labels[m];
     return "?";
@@ -1551,17 +1551,27 @@ static int generate_sequenz(SequenzEintrag *out, Modus modus,
         if (aktiv[MASCHINE_H]) {
             append_pair(out, &idx, MASCHINE_H, MASCHINE_H, 0);
         }
-    } else if (modus == MODUS_HARAKIRI) {
+    } else if (modus == MODUS_HARAKIRI || modus == MODUS_HARAKIRI_CUSTOM) {
+        const bool custom_h = modus == MODUS_HARAKIRI_CUSTOM;
+        if (custom_h && (clen != 1 || !custom || !custom[0].isDoublette ||
+            custom[0].maschine < MASCHINE_A || custom[0].partner < MASCHINE_A ||
+            custom[0].maschine >= MASCHINE_H || custom[0].partner >= MASCHINE_H ||
+            custom[0].maschine == custom[0].partner || custom[0].delayMs > 10000 ||
+            !aktiv[custom[0].maschine] || !aktiv[custom[0].partner])) return 0;
         // Shuffle logical launch units, including the H doublette unit.
         Maschine pool[MASCHINE_COUNT]; int pcnt = 0;
         for (Maschine m = MASCHINE_A; m <= MASCHINE_G; m = (Maschine)((int)m + 1)) {
             if (aktiv[m]) pool[pcnt++] = m;
         }
-        if (aktiv[MASCHINE_H]) pool[pcnt++] = MASCHINE_H;
+        if (custom_h || aktiv[MASCHINE_H]) pool[pcnt++] = MASCHINE_H;
         shuffle(pool, pcnt);
         for (int i = 0; i < pcnt; i++) {
-            if (pool[i] == MASCHINE_H)
-                append_pair(out, &idx, MASCHINE_H, MASCHINE_H, 0);
+            if (pool[i] == MASCHINE_H) {
+                if (custom_h)
+                    append_pair(out, &idx, custom[0].maschine, custom[0].partner, custom[0].delayMs);
+                else
+                    append_pair(out, &idx, MASCHINE_H, MASCHINE_H, 0);
+            }
             else
                 append_single(out, &idx, pool[i]);
         }
@@ -2091,6 +2101,18 @@ bool store_start_spiel(void)
 {
     GameStore *s = &g_store;
     if (s->operatingMode == TERMINAL_MODE_CATERING) return false;
+    if (s->modus == MODUS_HARAKIRI_CUSTOM) {
+        const CustomSequenzEintrag *pair = &s->customSequenzen[4][0];
+        if (s->customSequenzLen[4] != 1 || !pair->isDoublette ||
+            pair->maschine < MASCHINE_A || pair->maschine >= MASCHINE_H ||
+            pair->partner < MASCHINE_A || pair->partner >= MASCHINE_H ||
+            pair->partner == pair->maschine || pair->delayMs > 10000 ||
+            !s->maschinenAktiv[pair->maschine] || !s->maschinenAktiv[pair->partner]) {
+            snprintf(s->lineupWarning, sizeof(s->lineupWarning),
+                     "Harakiri Custom: Doublette festlegen und beide Maschinen aktivieren.");
+            return false; // before touching the lineup or charging any credits
+        }
+    }
     s->activeAcknowledgedClays = 0;
     if (!credit_day_is_current()) {
         snprintf(s->lineupWarning, sizeof(s->lineupWarning),
@@ -2314,6 +2336,9 @@ void store_eintragen(int punkte)
     if (s->taubeIndex >= s->sequenzLen) return;
 
     SequenzEintrag *se = &s->sequenz[s->taubeIndex];
+    // Every doublette clay is one hit/miss decision worth 2/0 points.
+    // Enforce below the UI as well, including H and replayed callers.
+    if (se->isPair && punkte != 0 && punkte != 2) return;
     Spieler *sp = &s->spieler[s->spielerIndex];
 
     // Classify current entry
@@ -2337,8 +2362,8 @@ void store_eintragen(int punkte)
     e.wiederholt = false;
 
     // Scoring rules
-    if (se->maschine == MASCHINE_H && se->isPair) {
-        e.schuss1 = (punkte >= 1);
+    if (se->isPair) {
+        e.schuss1 = (punkte == 2);
         e.schuss2 = false;
     } else {
         e.schuss1 = (punkte == 2);
@@ -3246,11 +3271,15 @@ void game_store_save(void)
     nvs_set_str(s_nvs, "cfg_backup_at", g_store.lastConfigBackupAt);
     nvs_set_str(s_nvs, "cfg_backup_st", g_store.configBackupStatus);
     nvs_set_blob(s_nvs, "custom_seq", g_store.customSequenzen,
-                 sizeof(g_store.customSequenzen));
+                 sizeof(g_store.customSequenzen[0]) * 4);
     nvs_set_blob(s_nvs, "custom_len", g_store.customSequenzLen,
-                 sizeof(g_store.customSequenzLen));
+                 sizeof(g_store.customSequenzLen[0]) * 4);
     nvs_set_blob(s_nvs, "custom_run", g_store.customLaeufe,
-                 sizeof(g_store.customLaeufe));
+                 sizeof(g_store.customLaeufe[0]) * 4);
+    nvs_set_i32(s_nvs, "hc_len", g_store.customSequenzLen[4]);
+    nvs_set_i32(s_nvs, "hc_run", g_store.customLaeufe[4]);
+    nvs_set_blob(s_nvs, "hc_pair", &g_store.customSequenzen[4][0],
+                 sizeof(CustomSequenzEintrag));
     if (set_counted_blob("sales", g_store.pendingVerkaufEvents,
                          g_store.pendingVerkaufEventCount,
                          sizeof(g_store.pendingVerkaufEvents[0])) == ESP_OK)
@@ -3302,7 +3331,7 @@ void game_store_init(void)
     snprintf(g_store.apiKey, MAX_KEY_LEN, "%s", DEFAULT_API_KEY);
     for (int m = 0; m < MASCHINE_COUNT; m++) g_store.maschinenAktiv[m] = true;
     g_store.customLaeufe[0] = g_store.customLaeufe[1] =
-    g_store.customLaeufe[2] = g_store.customLaeufe[3] = 2;
+    g_store.customLaeufe[2] = g_store.customLaeufe[3] = g_store.customLaeufe[4] = 2;
     set_default_custom_sequences();
     g_store.screen = SCREEN_DASHBOARD;
     g_store.autoSyncEnabled = true;
@@ -3491,17 +3520,28 @@ void game_store_init(void)
     // erase a valid persisted lineup merely because NVS no longer stores the
     // portal snapshot.
 
-    size_t custom_seq_size = sizeof(g_store.customSequenzen);
-    size_t custom_len_size = sizeof(g_store.customSequenzLen);
-    size_t custom_run_size = sizeof(g_store.customLaeufe);
+    size_t custom_seq_size = sizeof(g_store.customSequenzen[0]) * 4;
+    size_t custom_len_size = sizeof(g_store.customSequenzLen[0]) * 4;
+    size_t custom_run_size = sizeof(g_store.customLaeufe[0]) * 4;
     bool custom_loaded =
         nvs_get_blob(s_nvs, "custom_seq", g_store.customSequenzen, &custom_seq_size) == ESP_OK &&
-        custom_seq_size == sizeof(g_store.customSequenzen) &&
+        custom_seq_size == sizeof(g_store.customSequenzen[0]) * 4 &&
         nvs_get_blob(s_nvs, "custom_len", g_store.customSequenzLen, &custom_len_size) == ESP_OK &&
-        custom_len_size == sizeof(g_store.customSequenzLen) &&
+        custom_len_size == sizeof(g_store.customSequenzLen[0]) * 4 &&
         nvs_get_blob(s_nvs, "custom_run", g_store.customLaeufe, &custom_run_size) == ESP_OK &&
-        custom_run_size == sizeof(g_store.customLaeufe);
+        custom_run_size == sizeof(g_store.customLaeufe[0]) * 4;
     if (!custom_loaded) set_default_custom_sequences();
+    int32_t hc_len = 0, hc_run = 2;
+    size_t hc_size = sizeof(CustomSequenzEintrag);
+    nvs_get_i32(s_nvs, "hc_len", &hc_len);
+    nvs_get_i32(s_nvs, "hc_run", &hc_run);
+    CustomSequenzEintrag *hc = &g_store.customSequenzen[4][0];
+    if (hc_len == 1 && nvs_get_blob(s_nvs, "hc_pair", hc, &hc_size) == ESP_OK &&
+        hc_size == sizeof(*hc) && hc->isDoublette &&
+        hc->maschine >= MASCHINE_A && hc->maschine < MASCHINE_H &&
+        hc->partner >= MASCHINE_A && hc->partner < MASCHINE_H && hc->delayMs <= 10000)
+        g_store.customSequenzLen[4] = 1;
+    g_store.customLaeufe[4] = hc_run == 1 ? 1 : 2;
     sanitize_custom_sequences();
     if (!load_counted_blob_compat("products", "prod_count", g_store.produkte,
                                   MAX_PRODUKTE, sizeof(g_store.produkte[0]),

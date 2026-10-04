@@ -282,7 +282,7 @@ export function SpielScreen() {
 
         {/* ── Score Entry Buttons — flex so they stretch to full remaining height ── */}
         <div className="flex-1 p-5 flex gap-5">
-          {istHDoublette ? (
+          {istHDoublette || istCustomPair ? (
             /* ── H doublette: hit = 2 pts, miss = 0 pts — no 2nd shot ── */
             <>
               <TouchButton

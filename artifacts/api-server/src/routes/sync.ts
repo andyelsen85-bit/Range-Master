@@ -170,7 +170,7 @@ async function nextMitgliedNr(): Promise<string> {
 }
 
 const maschineValues = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
-const modusValues = ["NORMAL", "HARAKIRI", "CUSTOM_1", "CUSTOM_2", "CUSTOM_3", "CUSTOM_4"] as const;
+const modusValues = ["NORMAL", "HARAKIRI", "HARAKIRI_CUSTOM", "CUSTOM_1", "CUSTOM_2", "CUSTOM_3", "CUSTOM_4"] as const;
 
 const ErgebnisSchema = z.object({
   spielerId: z.number().int(),
@@ -180,7 +180,7 @@ const ErgebnisSchema = z.object({
   posten: z.number().int().min(1).max(6),
   schuss1: z.boolean(),
   schuss2: z.boolean(),
-  punkte: z.number().int().min(0).max(4),  // per-taube max is always 2 (or 4 for H? no — still 2 per clay)
+  punkte: z.number().int().min(0).max(2),  // each clay is at most 2; a doublette is two separate clay results
   wiederholt: z.boolean().default(false),
 });
 

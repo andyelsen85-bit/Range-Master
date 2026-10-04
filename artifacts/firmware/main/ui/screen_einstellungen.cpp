@@ -599,19 +599,19 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
 // doublettes require a first machine, a partner, and a seconds delay; H is a
 // special one-relay H1/H2 doublette with no partner selector.
 // Mirrors the emulator's CustomSequenzEditor component.
-static const char *CUSTOM_NAMES[] = {"CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4"};
+static const char *CUSTOM_NAMES[] = {"CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4","HARAKIRI CUSTOM"};
 static const char *MACH_LBL[]     = {"A","B","C","D","E","F","G","H"};
 #define CUSTOM_SEQ_MAX 16
 
 // Per-mode widget references — rebuilt on each add/remove
-static lv_obj_t *s_custom_seq_cont[4];
-static lv_obj_t *s_stat_tauben[4];
-static lv_obj_t *s_stat_pkt_lauf[4];
-static lv_obj_t *s_stat_pkt_spiel[4];
-static lv_obj_t *s_lauf_btn[4][2];
-static lv_obj_t *s_pair_delay_ta[4];
-static lv_obj_t *s_pair_status[4];
-static int s_pending_pair_first[4] = {-1, -1, -1, -1};
+static lv_obj_t *s_custom_seq_cont[5];
+static lv_obj_t *s_stat_tauben[5];
+static lv_obj_t *s_stat_pkt_lauf[5];
+static lv_obj_t *s_stat_pkt_spiel[5];
+static lv_obj_t *s_lauf_btn[5][2];
+static lv_obj_t *s_pair_delay_ta[5];
+static lv_obj_t *s_pair_status[5];
+static int s_pending_pair_first[5] = {-1, -1, -1, -1, -1};
 
 // ── Helpers ───────────────────────────────────────────────────
 static void refresh_custom_stats(int ci)
@@ -621,6 +621,10 @@ static void refresh_custom_stats(int ci)
     for (int i = 0; i < g_store.customSequenzLen[ci]; i++) {
         CustomSequenzEintrag *entry = &g_store.customSequenzen[ci][i];
         tauben += (entry->maschine == MASCHINE_H || entry->isDoublette) ? 2 : 1;
+    }
+    if (ci == 4 && tauben) {
+        for (int m = MASCHINE_A; m < MASCHINE_H; ++m)
+            if (g_store.maschinenAktiv[m]) tauben++;
     }
     int pktLauf  = tauben * 2;
     int pktSpiel = pktLauf * g_store.customLaeufe[ci];
@@ -709,6 +713,11 @@ static void set_pair_status(int ci, const char *text)
 
 static void add_custom_entry(int ci, CustomSequenzEintrag entry)
 {
+    if (ci == 4) {
+        if (!entry.isDoublette || entry.maschine >= MASCHINE_H ||
+            entry.partner >= MASCHINE_H || entry.partner == entry.maschine) return;
+        g_store.customSequenzLen[ci] = 0; // exactly one configured pair; replace it
+    }
     if (g_store.customSequenzLen[ci] >= CUSTOM_SEQ_MAX) {
         set_pair_status(ci, "MAXIMAL 16 EINTRÄGE");
         return;
@@ -731,7 +740,9 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
     lv_obj_set_style_text_font(section, UI_FONT_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
-    for (int ci = 0; ci < 4; ci++) {
+    const int customization_order[] = {4, 0, 1, 2, 3};
+    for (int order = 0; order < 5; order++) {
+        int ci = customization_order[order];
 
         // ── Card ──────────────────────────────────────────────
         lv_obj_t *card = lv_obj_create(parent);
@@ -779,7 +790,9 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
 
         // ── Section label: SEQUENZ ────────────────────────────
         lv_obj_t *seq_hdr = lv_label_create(card);
-        lv_label_set_text(seq_hdr, "SEQUENZ  (WURF ANTIPPEN ZUM LÖSCHEN)");
+        lv_label_set_text(seq_hdr, ci == 4
+            ? "A-G ZUFÄLLIG + DIESE DOUBLETTE STATT H (ANTIPPEN ZUM LÖSCHEN)"
+            : "SEQUENZ  (WURF ANTIPPEN ZUM LÖSCHEN)");
         lv_obj_set_style_text_font(seq_hdr, UI_FONT_12, 0);
         lv_obj_set_style_text_color(seq_hdr, lv_color_hex(CLR_MUTED), 0);
 
@@ -817,6 +830,10 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         lv_obj_set_style_pad_column(add_row, 6, 0);
         lv_obj_set_flex_flow(add_row, LV_FLEX_FLOW_ROW);
         lv_obj_clear_flag(add_row, LV_OBJ_FLAG_SCROLLABLE);
+        if (ci == 4) {
+            lv_obj_add_flag(add_hdr, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(add_row, LV_OBJ_FLAG_HIDDEN);
+        }
 
         for (int mi = 0; mi < (int)MASCHINE_H; mi++) {
             lv_obj_t *ab = lv_btn_create(add_row);
@@ -920,6 +937,7 @@ static lv_obj_t *build_custom_tab(lv_obj_t *parent)
         }
 
         lv_obj_t *h_pair = lv_btn_create(pair_row);
+        if (ci == 4) lv_obj_add_flag(h_pair, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_size(h_pair, 120, 48);
         lv_obj_set_style_radius(h_pair, 8, 0);
         lv_obj_set_style_bg_color(h_pair, lv_color_hex(0x78350F), 0);
@@ -1536,7 +1554,7 @@ lv_obj_t *screen_einstellungen_create(void)
         lv_keyboard_set_textarea(s_kb, s_ta_gateway_token);
         lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     }, LV_EVENT_FOCUSED, NULL);
-    for (int ci = 0; ci < 4; ++ci) {
+    for (int ci = 0; ci < 5; ++ci) {
         if (!s_pair_delay_ta[ci]) continue;
         lv_obj_add_event_cb(s_pair_delay_ta[ci], [](lv_event_t *e) {
             lv_keyboard_set_textarea(s_kb, (lv_obj_t *)lv_event_get_target(e));

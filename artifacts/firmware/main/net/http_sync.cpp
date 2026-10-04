@@ -234,9 +234,9 @@ typedef struct {
     uint32_t autoSyncSeconds;
     uint32_t billingSyncSeconds;
     bool clickSoundEnabled;
-    CustomSequenzEintrag customSequenzen[4][CUSTOM_SEQ_MAX];
-    int customSequenzLen[4];
-    int customLaeufe[4];
+    CustomSequenzEintrag customSequenzen[5][CUSTOM_SEQ_MAX];
+    int customSequenzLen[5];
+    int customLaeufe[5];
 } TerminalConfigSnapshot;
 
 static void set_http_error(const char *operation, const char *path,
@@ -298,7 +298,7 @@ static cJSON *config_snapshot_to_json(void)
     cJSON_AddNumberToObject(cfg, "billingSyncSeconds", g_store.billingSyncSeconds);
     cJSON_AddBoolToObject(cfg, "clickSoundEnabled", g_store.clickSoundEnabled);
     cJSON *all_custom = cJSON_AddArrayToObject(cfg, "customSequenzen");
-    for (int c = 0; c < 4; ++c) {
+    for (int c = 0; c < 5; ++c) {
         cJSON *sequence = cJSON_CreateArray();
         cJSON_AddItemToArray(all_custom, sequence);
         for (int i = 0; i < g_store.customSequenzLen[c]; ++i) {
@@ -312,7 +312,7 @@ static cJSON *config_snapshot_to_json(void)
         }
     }
     cJSON *runs = cJSON_AddArrayToObject(cfg, "customLaeufe");
-    for (int c = 0; c < 4; ++c)
+    for (int c = 0; c < 5; ++c)
         cJSON_AddItemToArray(runs, cJSON_CreateNumber(g_store.customLaeufe[c]));
     return cfg;
 }
@@ -405,8 +405,9 @@ static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
          billing_seconds->valuedouble < BILLING_SYNC_MIN_SECONDS ||
          billing_seconds->valuedouble > BILLING_SYNC_MAX_SECONDS)) ||
         !cJSON_IsBool(sound) || !cJSON_IsArray(sequences) ||
-        cJSON_GetArraySize(sequences) != 4 || !cJSON_IsArray(runs) ||
-        cJSON_GetArraySize(runs) != 4) return false;
+        cJSON_GetArraySize(sequences) < 4 || cJSON_GetArraySize(sequences) > 5 ||
+        !cJSON_IsArray(runs) ||
+        cJSON_GetArraySize(runs) != cJSON_GetArraySize(sequences)) return false;
     if (!json_string_into(cfg, "apiUrl", out->apiUrl, sizeof(out->apiUrl)) ||
         !json_string_into(cfg, "gatewayUrl", out->gatewayUrl, sizeof(out->gatewayUrl)) ||
         !json_string_into(cfg, "gatewayToken", out->gatewayToken, sizeof(out->gatewayToken)) ||
@@ -461,11 +462,12 @@ static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
         if (!cJSON_IsBool(active)) return false;
         out->maschinenAktiv[i] = cJSON_IsTrue(active);
     }
-    for (int c = 0; c < 4; ++c) {
+    out->customLaeufe[4] = 2; // old four-slot backups leave the new mode unconfigured
+    for (int c = 0; c < cJSON_GetArraySize(sequences); ++c) {
         cJSON *sequence = cJSON_GetArrayItem(sequences, c);
         cJSON *run = cJSON_GetArrayItem(runs, c);
         int len = cJSON_IsArray(sequence) ? cJSON_GetArraySize(sequence) : -1;
-        if (len < 0 || len > CUSTOM_SEQ_MAX || !cJSON_IsNumber(run) ||
+        if (len < 0 || len > (c == 4 ? 1 : CUSTOM_SEQ_MAX) || !cJSON_IsNumber(run) ||
             run->valueint < 1 || run->valueint > 2) return false;
         out->customSequenzLen[c] = len;
         out->customLaeufe[c] = run->valueint;
@@ -487,6 +489,9 @@ static bool parse_config_snapshot(cJSON *cfg, TerminalConfigSnapshot *out)
                 .isDoublette = cJSON_IsTrue(is_double) != 0,
                 .delayMs = (uint16_t)delay->valueint,
             };
+            if (c == 4 && (!cJSON_IsTrue(is_double) ||
+                machine->valueint >= MASCHINE_H || partner->valueint >= MASCHINE_H ||
+                machine->valueint == partner->valueint)) return false;
         }
     }
     return true;
@@ -948,6 +953,8 @@ static const char *modus_api_str(Modus m)
 {
     switch (m) {
         case MODUS_NORMAL:   return "NORMAL";
+        case MODUS_HARAKIRI: return "HARAKIRI";
+        case MODUS_HARAKIRI_CUSTOM: return "HARAKIRI_CUSTOM";
         case MODUS_CUSTOM_1: return "CUSTOM_1";
         case MODUS_CUSTOM_2: return "CUSTOM_2";
         case MODUS_CUSTOM_3: return "CUSTOM_3";
@@ -1213,6 +1220,7 @@ esp_err_t http_fetch_spielhistorie(void)
             const char *ms = jmodus->valuestring;
             if      (strcmp(ms, "NORMAL")   == 0) fg->base.modus = MODUS_NORMAL;
             else if (strcmp(ms, "HARAKIRI") == 0) fg->base.modus = MODUS_HARAKIRI;
+            else if (strcmp(ms, "HARAKIRI_CUSTOM") == 0) fg->base.modus = MODUS_HARAKIRI_CUSTOM;
             else if (strcmp(ms, "CUSTOM_1") == 0) fg->base.modus = MODUS_CUSTOM_1;
             else if (strcmp(ms, "CUSTOM_2") == 0) fg->base.modus = MODUS_CUSTOM_2;
             else if (strcmp(ms, "CUSTOM_3") == 0) fg->base.modus = MODUS_CUSTOM_3;

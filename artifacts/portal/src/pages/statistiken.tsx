@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 const MODUS_LABEL: Record<string, string> = {
   NORMAL: "Normal",
   HARAKIRI: "Harakiri",
+  HARAKIRI_CUSTOM: "Harakiri Custom",
   HARAKIRI_DELAYED: "Harakiri Delayed",
   HARAKIRI_FULL: "Harakiri Full",
   CUSTOM_1: "Custom 1",

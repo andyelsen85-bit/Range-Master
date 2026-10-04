@@ -12,6 +12,7 @@ export type Modus = typeof Modus[keyof typeof Modus];
 export const Modus = {
   NORMAL: 'NORMAL',
   HARAKIRI: 'HARAKIRI',
+  HARAKIRI_CUSTOM: 'HARAKIRI_CUSTOM',
   HARAKIRI_DELAYED: 'HARAKIRI_DELAYED',
   HARAKIRI_FULL: 'HARAKIRI_FULL',
   CUSTOM_1: 'CUSTOM_1',

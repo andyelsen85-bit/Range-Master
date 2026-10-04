@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 
 export type Maschine = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
-export type Modus = 'NORMAL' | 'HARAKIRI' | 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4';
+export type Modus = 'NORMAL' | 'HARAKIRI' | 'HARAKIRI_CUSTOM' | 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4';
+export type CustomModus = Exclude<Modus, 'NORMAL' | 'HARAKIRI'>;
 export type Screen = 'dashboard' | 'start' | 'spiel' | 'einstellungen' | 'resultate' | 'geschichte' | 'kredite' | 'spillerverwaltung';
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 export const AUTO_SYNC_DEFAULT_SECONDS = 300;
@@ -227,8 +228,8 @@ interface Settings {
   maschinenAktiv: Record<Maschine, boolean>;
   apiUrl: string;
   apiKey: string;
-  customSequenzen: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', CustomSequenz>;
-  customLaeufe: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', 1 | 2>;
+  customSequenzen: Record<CustomModus, CustomSequenz>;
+  customLaeufe: Record<CustomModus, 1 | 2>;
   produkte: Produkt[];
   kioskMode: 'GAME' | 'CATERING';
   kioskPinHash: string | null;
@@ -311,8 +312,8 @@ interface GameState extends Settings {
   updateSpielerName: (id: number, name: string) => void;
   setModus: (modus: Modus) => void;
   toggleMaschineAktiv: (m: Maschine) => void;
-  setCustomSequenz: (modus: 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', seq: CustomSequenz) => void;
-  setCustomLaeufe: (modus: 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', laeufe: 1 | 2) => void;
+  setCustomSequenz: (modus: CustomModus, seq: CustomSequenz) => void;
+  setCustomLaeufe: (modus: CustomModus, laeufe: 1 | 2) => void;
   startSpiel: () => void;
   eintragenErgebnis: (schuss1: boolean, schuss2: boolean) => void;
   wiederholenTaube: () => void;
@@ -393,14 +394,16 @@ const DEFAULT_MASCHINEN_AKTIV: Record<Maschine, boolean> = {
 const normalEntry = (maschine: Maschine): CustomSequenzEintrag =>
   maschine === 'H' ? { maschine, isDoublette: true } : { maschine };
 
-const DEFAULT_CUSTOM: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', CustomSequenz> = {
+const DEFAULT_CUSTOM: Record<CustomModus, CustomSequenz> = {
+  HARAKIRI_CUSTOM: [],
   CUSTOM_1: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(normalEntry),
   CUSTOM_2: ['A', 'C', 'E', 'G', 'B', 'D', 'F', 'H'].map(normalEntry),
   CUSTOM_3: ['H', 'G', 'F', 'E', 'D', 'C', 'B', 'A'].map(normalEntry),
   CUSTOM_4: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(normalEntry),
 };
 
-const DEFAULT_CUSTOM_LAEUFE: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', 1 | 2> = {
+const DEFAULT_CUSTOM_LAEUFE: Record<CustomModus, 1 | 2> = {
+  HARAKIRI_CUSTOM: 2,
   CUSTOM_1: 2,
   CUSTOM_2: 2,
   CUSTOM_3: 2,
@@ -419,7 +422,7 @@ function shuffleArray<T>(arr: T[]): T[] {
 function generateSequenz(
   modus: Modus,
   maschinenAktiv: Record<Maschine, boolean>,
-  customSequenzen: Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', CustomSequenz>,
+  customSequenzen: Record<CustomModus, CustomSequenz>,
 ): SequenzEintrag[] {
   const single = (['A', 'B', 'C', 'D', 'E', 'F', 'G'] as Maschine[]).filter(m => maschinenAktiv[m]);
   const hAktiv = maschinenAktiv['H'];
@@ -428,6 +431,13 @@ function generateSequenz(
 
   if (modus === 'NORMAL') {
     order = [...single.map(normalEntry), ...(hAktiv ? [normalEntry('H')] : [])];
+  } else if (modus === 'HARAKIRI_CUSTOM') {
+    const configured = customSequenzen.HARAKIRI_CUSTOM;
+    const pair = configured?.[0];
+    if (configured?.length !== 1 || !pair?.isDoublette || pair.maschine === 'H' ||
+        !pair.partner || pair.partner === 'H' || pair.partner === pair.maschine ||
+        !maschinenAktiv[pair.maschine] || !maschinenAktiv[pair.partner]) return [];
+    order = shuffleArray([...single.map(normalEntry), pair]);
   } else if (modus === 'HARAKIRI') {
     // H is shuffled as one logical H1/H2 unit, not appended at the end.
     const units = [...single, ...(hAktiv ? (['H'] as Maschine[]) : [])];
@@ -491,6 +501,8 @@ export function countH2Before(sequenz: SequenzEintrag[], before: number): number
 
 /** True for all three Harakiri variants — in those modes each post faces a different machine */
 export function isHarakiriModus(modus: Modus): boolean {
+  // Harakiri Custom uses the terminal's shuffled, shared launch units,
+  // including an interleaved pair. Do not offset its second clay by stand.
   return modus === 'HARAKIRI';
 }
 
@@ -864,7 +876,7 @@ function normalizeCustomEntry(value: unknown): CustomSequenzEintrag | null {
 
 function normalizeCustomSequenzen(
   raw: Partial<Settings>['customSequenzen'],
-): Record<'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4', CustomSequenz> {
+): Record<CustomModus, CustomSequenz> {
   const result = { ...DEFAULT_CUSTOM };
   for (const key of Object.keys(DEFAULT_CUSTOM) as Array<keyof typeof DEFAULT_CUSTOM>) {
     const source = raw?.[key];
@@ -873,6 +885,9 @@ function normalizeCustomSequenzen(
       .map(normalizeCustomEntry)
       .filter((entry): entry is CustomSequenzEintrag => entry !== null)
       .slice(0, 16);
+    if (key === 'HARAKIRI_CUSTOM')
+      result[key] = result[key].filter(entry => entry.isDoublette && entry.maschine !== 'H' &&
+        entry.partner && entry.partner !== 'H' && entry.partner !== entry.maschine).slice(0, 1);
   }
   return result;
 }
@@ -900,7 +915,7 @@ export const useGameStore = create<GameState>((set, get) => {
   const apiUrl: string = saved.apiUrl ?? '';
   const apiKey: string = saved.apiKey ?? '';
   const customSequenzen = normalizeCustomSequenzen(saved.customSequenzen);
-  const customLaeufe = saved.customLaeufe ?? { ...DEFAULT_CUSTOM_LAEUFE };
+  const customLaeufe = { ...DEFAULT_CUSTOM_LAEUFE, ...saved.customLaeufe };
   const produkte = normalizeProdukte(saved.produkte);
   const kioskMode = saved.kioskMode ?? 'GAME';
   const kioskPinHash = saved.kioskPinHash ?? null;
@@ -1108,6 +1123,9 @@ export const useGameStore = create<GameState>((set, get) => {
     },
 
     startSpiel: () => set((state) => {
+      if (state.modus === 'HARAKIRI_CUSTOM' &&
+          !generateSequenz(state.modus, state.maschinenAktiv, state.customSequenzen).length)
+        return { lineupWarning: 'Harakiri Custom: Doublette festlegen und beide Maschinen aktivieren.' };
       const portalNames = new Map(state.portalSpieler.map(p => [p.id, p.name]));
       const seenPosts = new Set<number>();
       const seenIds = new Set<number>();
@@ -1190,7 +1208,7 @@ export const useGameStore = create<GameState>((set, get) => {
     }),
 
     eintragenErgebnis: (schuss1, schuss2) => set((state) => {
-      const pts = schuss1 ? 2 : schuss2 ? 1 : 0;
+      let pts = schuss1 ? 2 : schuss2 ? 1 : 0;
       const currentSpieler = state.spieler[state.spielerIndex];
       if (!currentSpieler) return state;
 
@@ -1210,6 +1228,10 @@ export const useGameStore = create<GameState>((set, get) => {
       const posten = getCurrentPosten(currentSpieler, effectiveTaubeIdx - h2Offset, state.spieler.length);
 
       if (!eintrag) return state;
+      if (eintrag.pairKind) {
+        if (schuss2) return state;
+        pts = schuss1 ? 2 : 0;
+      }
 
       const neuesErgebnis: Ergebnis = {
         spielerId: currentSpieler.id,
@@ -1256,7 +1278,7 @@ export const useGameStore = create<GameState>((set, get) => {
       // Lauf complete
       const nextLauf = state.lauf + 1;
       const maxLaeufe: number =
-        (state.modus === 'CUSTOM_1' || state.modus === 'CUSTOM_2' || state.modus === 'CUSTOM_3' || state.modus === 'CUSTOM_4')
+        (state.modus === 'HARAKIRI_CUSTOM' || state.modus === 'CUSTOM_1' || state.modus === 'CUSTOM_2' || state.modus === 'CUSTOM_3' || state.modus === 'CUSTOM_4')
           ? state.customLaeufe[state.modus]
           : 2;
       if (nextLauf > maxLaeufe) {

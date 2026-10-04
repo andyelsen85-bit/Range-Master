@@ -335,7 +335,9 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_text_font(modus_hdr, UI_FONT_16, 0);
     lv_obj_set_style_text_color(modus_hdr, lv_color_hex(CLR_TEXT), 0);
 
-    static const char *MODUS_NAMES[] = {"NORMAL","HARAKIRI","CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4"};
+    static const char *MODUS_NAMES[] = {"NORMAL","HARAKIRI","CUSTOM 1","CUSTOM 2","CUSTOM 3","CUSTOM 4","HARAKIRI CUSTOM"};
+    static const Modus mode_order[] = {MODUS_NORMAL, MODUS_HARAKIRI, MODUS_HARAKIRI_CUSTOM,
+                                      MODUS_CUSTOM_1, MODUS_CUSTOM_2, MODUS_CUSTOM_3, MODUS_CUSTOM_4};
     lv_obj_t *modus_grid = lv_obj_create(right);
     lv_obj_set_size(modus_grid, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(modus_grid, LV_OPA_0, 0);
@@ -345,9 +347,10 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_pad_row(modus_grid, 8, 0);
     lv_obj_set_style_pad_column(modus_grid, 8, 0);
 
-    for (int m = 0; m < MODUS_COUNT; m++) {
+    for (int order = 0; order < MODUS_COUNT; order++) {
+        int m = mode_order[order];
         lv_obj_t *mb = lv_btn_create(modus_grid);
-        lv_obj_set_size(mb, 130, 44);
+        lv_obj_set_size(mb, m == MODUS_HARAKIRI_CUSTOM ? 160 : 130, 44);
         lv_obj_set_style_bg_color(mb,
             (m == (int)g_store.modus) ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
         lv_obj_set_style_bg_opa(mb, LV_OPA_COVER, 0);

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 const MODUS_LABEL: Record<Modus, string> = {
   NORMAL: 'Normal',
   HARAKIRI: 'Harakiri',
+  HARAKIRI_CUSTOM: 'Harakiri Custom',
   CUSTOM_1: 'Custom 1',
   CUSTOM_2: 'Custom 2',
   CUSTOM_3: 'Custom 3',

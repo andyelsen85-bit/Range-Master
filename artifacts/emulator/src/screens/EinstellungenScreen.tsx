@@ -20,7 +20,7 @@ function CustomSequenzEditor({
   modus,
   label,
 }: {
-  modus: 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4';
+  modus: 'HARAKIRI_CUSTOM' | 'CUSTOM_1' | 'CUSTOM_2' | 'CUSTOM_3' | 'CUSTOM_4';
   label: string;
 }) {
   const store = useGameStore();
@@ -33,6 +33,11 @@ function CustomSequenzEditor({
   useEffect(() => { setDraft(store.customSequenzen[modus]); }, [modus]);
 
   const addEntry = (entry: CustomSequenzEintrag) => {
+    if (modus === 'HARAKIRI_CUSTOM') {
+      if (entry.isDoublette && entry.maschine !== 'H' && entry.partner && entry.partner !== entry.maschine)
+        setDraft([entry]);
+      return;
+    }
     if (draft.length >= MAX_CUSTOM_MASCHINEN) return;
     setDraft([...draft, entry]);
   };
@@ -121,7 +126,7 @@ function CustomSequenzEditor({
       </div>
 
       {/* Machine picker — tap to add */}
-      <div>
+      <div hidden={modus === 'HARAKIRI_CUSTOM'}>
         <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
           Eenzel Schanz dobäisetzen
         </div>
@@ -182,6 +187,7 @@ function CustomSequenzEditor({
         <div className="flex items-center gap-3">
           <button
             onClick={addHDoublette}
+            hidden={modus === 'HARAKIRI_CUSTOM'}
             disabled={draft.length >= MAX_CUSTOM_MASCHINEN}
             className={cn(
               "h-11 px-4 rounded-lg border-2 border-amber-500/60 bg-amber-500/15 text-amber-400 font-bold hover:bg-amber-500/30 active:scale-95",
@@ -504,6 +510,8 @@ export function EinstellungenScreen() {
               Definéiert d'Reihenfolg vun de Schanzen fir Custom Modi.
               H = Doublette (gëtt als 2 Tauben gezielt).
             </p>
+            <p className="text-sm text-muted-foreground">Harakiri Custom: A–G zufällig und eine eigene Doublette anstelle von H. Jede Doubletten-Taube: Treffer 2, verfehlt 0 Punkte.</p>
+            <CustomSequenzEditor modus="HARAKIRI_CUSTOM" label="Harakiri Custom" />
             <CustomSequenzEditor modus="CUSTOM_1" label="Custom 1" />
             <CustomSequenzEditor modus="CUSTOM_2" label="Custom 2" />
             <CustomSequenzEditor modus="CUSTOM_3" label="Custom 3" />

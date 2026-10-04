@@ -55,6 +55,7 @@ export default function Rangliste() {
               <SelectItem value="ALL">All Modi</SelectItem>
               <SelectItem value="NORMAL">Normal</SelectItem>
               <SelectItem value="HARAKIRI">Harakiri</SelectItem>
+              <SelectItem value="HARAKIRI_CUSTOM">Harakiri Custom</SelectItem>
               <SelectItem value="HARAKIRI_DELAYED">Harakiri Delayed</SelectItem>
               <SelectItem value="HARAKIRI_FULL">Harakiri Full</SelectItem>
               <SelectItem value="CUSTOM_1">Custom 1</SelectItem>

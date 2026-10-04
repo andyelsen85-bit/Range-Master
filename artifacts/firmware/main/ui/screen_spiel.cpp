@@ -536,10 +536,10 @@ void screen_spiel_refresh(void)
             lv_obj_add_state(s_btn_fire, LV_STATE_DISABLED);
         }
     }
-    // H1/H2 have one score per clay (hit or miss), never a second-shot point.
+    // All doublettes: each clay is hit (2) or miss (0).
     for (int i = 0; i < 3; ++i) {
         if (!s_btn_score[i]) continue;
-        if (isHMaschine && i == 1) lv_obj_add_state(s_btn_score[i], LV_STATE_DISABLED);
+        if (isPair && i == 1) lv_obj_add_state(s_btn_score[i], LV_STATE_DISABLED);
         else lv_obj_clear_state(s_btn_score[i], LV_STATE_DISABLED);
     }
 

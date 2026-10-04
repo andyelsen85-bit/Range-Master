@@ -21,7 +21,7 @@ STUBS = r"""
 #include "ui_time_fmt.h"
 GameStore g_store = {};
 const char *modus_label(Modus mode) {
-    const char *labels[]={"Normal","Harakiri","Custom 1","Custom 2","Custom 3","Custom 4"};
+    const char *labels[]={"Normal","Harakiri","Custom 1","Custom 2","Custom 3","Custom 4","Harakiri Custom"};
     return labels[mode];
 }
 struct lv_draw_dsc_base_t { int part; uint32_t id1,id2; };

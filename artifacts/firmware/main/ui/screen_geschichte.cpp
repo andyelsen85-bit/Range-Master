@@ -336,6 +336,8 @@ lv_obj_t *screen_geschichte_create(void)
     lv_obj_set_width(s_detail_table, LV_SIZE_CONTENT);
     lv_obj_set_style_text_font(s_detail_table, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_detail_table, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_set_style_text_color(s_detail_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(s_detail_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(s_detail_table, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_color(s_detail_table, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_align(s_detail_table, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);

@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils';
 
 const MODI = [
   { value: 'NORMAL' as const,   label: 'Normal',   desc: 'A→G→H der Rei no' },
-  { value: 'HARAKIRI' as const, label: 'Harakiri', desc: 'A–G gemëscht, H um Enn' },
+  { value: 'HARAKIRI' as const, label: 'Harakiri', desc: 'A–G und H-Doublette zufällig' },
+  { value: 'HARAKIRI_CUSTOM' as const, label: 'Harakiri Custom', desc: 'A–G und eigene Doublette zufällig' },
   { value: 'CUSTOM_1' as const, label: 'Custom 1', desc: 'Benotzer-definéiert' },
   { value: 'CUSTOM_2' as const, label: 'Custom 2', desc: 'Benotzer-definéiert' },
   { value: 'CUSTOM_3' as const, label: 'Custom 3', desc: 'Benotzer-definéiert' },

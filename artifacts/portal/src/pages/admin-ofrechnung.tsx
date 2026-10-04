@@ -75,7 +75,7 @@ interface DaySummaryProductTotal {
 }
 
 interface GameClayBreakdown {
-  modus: "NORMAL" | "HARAKIRI" | "CUSTOM_1" | "CUSTOM_2" | "CUSTOM_3" | "CUSTOM_4";
+  modus: "NORMAL" | "HARAKIRI" | "HARAKIRI_CUSTOM" | "CUSTOM_1" | "CUSTOM_2" | "CUSTOM_3" | "CUSTOM_4";
   games: number;
   completedGames: number;
   playerParticipations: number;
@@ -130,6 +130,7 @@ function periodLabel(from: string, to: string): string {
 function modusLabel(modus: GameClayBreakdown["modus"]): string {
   if (modus === "NORMAL") return "Normal";
   if (modus === "HARAKIRI") return "Harakiri";
+  if (modus === "HARAKIRI_CUSTOM") return "Harakiri Custom";
   return `Custom ${modus.slice(-1)}`;
 }
 

@@ -64,6 +64,7 @@ typedef enum {
     MODUS_CUSTOM_2,
     MODUS_CUSTOM_3,
     MODUS_CUSTOM_4,
+    MODUS_HARAKIRI_CUSTOM, // appended: keep persisted Custom 1-4 numeric IDs stable
     MODUS_COUNT
 } Modus;
 
@@ -355,9 +356,9 @@ typedef struct {
     bool    autoSyncEnabled;
     uint32_t autoSyncSeconds;
     uint32_t billingSyncSeconds;
-    CustomSequenzEintrag customSequenzen[4][CUSTOM_SEQ_MAX];
-    int      customSequenzLen[4];
-    int      customLaeufe[4];        // 1 or 2
+    CustomSequenzEintrag customSequenzen[5][CUSTOM_SEQ_MAX];
+    int      customSequenzLen[5];    // slot 4: one Harakiri Custom doublette
+    int      customLaeufe[5];        // 1 or 2
 
     // Active screen
     Screen  screen;

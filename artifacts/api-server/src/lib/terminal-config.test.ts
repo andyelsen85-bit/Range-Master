@@ -49,6 +49,28 @@ test("tampered configuration is rejected before restore", () => {
   }));
 });
 
+test("Harakiri Custom backup round-trips its pair without changing the four legacy slots", () => {
+  const updated = terminalConfigurationSchema.parse({
+    ...configuration, modus: 6,
+    customSequenzen: [...configuration.customSequenzen,
+      [{ maschine: 0, isDoublette: true, partner: 5, delayMs: 1250 }]],
+    customLaeufe: [...configuration.customLaeufe, 2],
+  });
+  assert.deepEqual(updated.customSequenzen.slice(0, 4), configuration.customSequenzen);
+  assert.deepEqual(decryptTerminalConfiguration(encryptTerminalConfiguration(updated)), updated);
+  assert.equal(terminalConfigurationSchema.safeParse({
+    ...updated, customSequenzen: [...configuration.customSequenzen,
+      [{ maschine: 0, isDoublette: false, partner: 5, delayMs: 0 }]],
+  }).success, false);
+  assert.equal(terminalConfigurationSchema.safeParse({
+    ...updated, customSequenzen: [...configuration.customSequenzen,
+      [{ maschine: 0, isDoublette: true, partner: 0, delayMs: 0 }]],
+  }).success, false);
+  assert.equal(terminalConfigurationSchema.safeParse({
+    ...updated, customLaeufe: configuration.customLaeufe,
+  }).success, false);
+});
+
 test("restore codes are fixed-length and only persisted as hashes", () => {
   const code = createRestoreCode();
   assert.match(code, /^[A-F0-9]{12}$/);

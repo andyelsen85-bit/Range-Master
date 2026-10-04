@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 export const modusEnum = pgEnum("modus", [
   "NORMAL",
   "HARAKIRI",
+  "HARAKIRI_CUSTOM",
   "CUSTOM_1",
   "CUSTOM_2",
   "CUSTOM_3",
