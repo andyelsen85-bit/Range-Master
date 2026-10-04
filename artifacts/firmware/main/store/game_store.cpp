@@ -165,6 +165,7 @@ static void nvs_reopen_after_failure(void)
 }
 
 static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anzahl);
+static int find_kredit_slot(const GameStore *s, int spieler_id);
 static bool save_kredit_state_unlocked(void);
 static esp_err_t set_counted_blob(const char *key, const void *data,
                                   int count, size_t item_size);

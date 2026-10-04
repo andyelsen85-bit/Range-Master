@@ -19,3 +19,14 @@ silently change where their existing OTA images and persisted cache data live.
 **How to apply:** Preserve global performance optimization for display/DMA hot
 paths. Apply size optimization to non-hot-path modules through build options
 that also take effect with an existing sdkconfig; do not require deleting it.
+
+Host tests that extract production functions must preserve helper declaration
+order or explicitly check forward declarations. Avoid supplying early mock
+definitions for real helpers whose placement matters to C++ compilation.
+
+**Why:** A host mock defined a helper before its callers and masked a missing
+production declaration, so regression tests passed while the native build failed.
+
+**How to apply:** Compile the real helper where practical, keeping its
+declaration and definition in production order. Host regression success does
+not replace a complete native firmware build.

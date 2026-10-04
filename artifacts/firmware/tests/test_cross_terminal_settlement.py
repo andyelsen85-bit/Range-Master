@@ -63,10 +63,6 @@ void reconcile_lineup_with_credits_unlocked() {
         if(!funded) id=0;
     }
 }
-int find_kredit_slot(const GameStore *s,int id) {
-    for(int k=0;k<MAX_PORTAL_SPIELER;++k) if(s->kreditPlayerIds[k]==id)return k;
-    return -1;
-}
 void store_rebuild_bill_projection() { g_store.billDay=g_store.billDayBaseline; }
 static bool persistence_ok=true;
 bool save_payment_state_unlocked() { return persistence_ok; }
@@ -190,11 +186,16 @@ int main() {
 if __name__ == "__main__":
     source = (ROOT / "main/store/game_store.cpp").read_text()
     network = (ROOT / "main/net/http_sync.cpp").read_text()
-    functions = "\n".join(fixture.function(source, name) for name in [
+    credit_slot_declaration = "static int find_kredit_slot(const GameStore *s, int spieler_id);"
+    assert source.index(credit_slot_declaration) < source.index("bool store_has_unapplied_paid_sessions")
+    # Preserve production's declaration-before-call and later definition.
+    # Defining this helper in the mocks previously hid the native build error.
+    functions = credit_slot_declaration + "\n" + "\n".join(fixture.function(source, name) for name in [
         "static void prepare_payment_receipts", "static int payment_receipt_slot",
         "static bool has_pending_day_activity", "static void reset_munition_for_player",
         "static bool bill_is_authoritatively_paid", "static bool finish_payment_sync_internal",
         "bool store_has_unapplied_paid_sessions", "void store_cache_bill_day",
+        "static int find_kredit_slot(const GameStore *s, int spieler_id)\n{",
         "void store_apply_portal_kredit"])
     save = fixture.function(source, "void game_store_save")
     init = fixture.function(source, "void game_store_init")
