@@ -77,8 +77,37 @@ static bool extract_field(const char *body, const char *key,
     return true;
 }
 
+// Escape dynamic HTML values without ever sending an empty HTTP chunk:
+// esp_http_server interprets a zero-length chunk as the end of the response.
+static esp_err_t send_html_value(httpd_req_t *req, const char *value)
+{
+    char buffer[128];
+    size_t used = 0;
+    for (const char *p = value; *p; ++p) {
+        const char *entity = NULL;
+        switch (*p) {
+            case '&': entity = "&amp;"; break;
+            case '\'': entity = "&#39;"; break;
+            case '"': entity = "&quot;"; break;
+            case '<': entity = "&lt;"; break;
+            case '>': entity = "&gt;"; break;
+            default: break;
+        }
+        size_t length = entity ? strlen(entity) : 1;
+        if (used + length > sizeof(buffer)) {
+            esp_err_t err = httpd_resp_send_chunk(req, buffer, used);
+            if (err != ESP_OK) return err;
+            used = 0;
+        }
+        if (entity) memcpy(buffer + used, entity, length);
+        else buffer[used] = *p;
+        used += length;
+    }
+    return used ? httpd_resp_send_chunk(req, buffer, used) : ESP_OK;
+}
+
 // ── HTML ──────────────────────────────────────────────────────
-// Sent in three chunks so CSS percentages don't need escaping.
+// Sent in chunks so CSS percentages don't need escaping.
 
 static const char HTML_HEAD[] =
     "<!DOCTYPE html><html><head>"
@@ -126,14 +155,16 @@ static const char HTML_FORM_MID[] =
 static const char HTML_FORM_GATEWAY[] =
     "'>"
     "<label>TrapMaster Gateway URL</label>"
-    "<input name=gatewayUrl type=text value='"
+    "<input name=gatewayUrl type=text value='";
+
+static const char HTML_FORM_GATEWAY_KEY[] =
     "' placeholder='http://192.168.1.50'>"
     "<label>TrapMaster Gateway Key</label>"
     "<input name=gatewayKey type=password value='";
 
 static const char HTML_FORM_END[] =
     "'>"
-    "<button>&#128190;&nbsp; Speichern</button>"
+    "<button type=submit>&#128190;&nbsp; Speichern</button>"
     "</form>"
     "<hr>"
     "<form method=POST action=/backup><button class=secondary>Konfiguration jetzt sichern</button></form>"
@@ -159,18 +190,19 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     if (banner) httpd_resp_sendstr_chunk(req, banner);
 
     httpd_resp_sendstr_chunk(req, HTML_FORM_START);
-    httpd_resp_sendstr_chunk(req, g_store.apiUrl);
+    send_html_value(req, g_store.apiUrl);
     httpd_resp_sendstr_chunk(req, HTML_FORM_MID);
-    httpd_resp_sendstr_chunk(req, g_store.apiKey);
+    send_html_value(req, g_store.apiKey);
     httpd_resp_sendstr_chunk(req, HTML_FORM_GATEWAY);
-    httpd_resp_sendstr_chunk(req, g_store.gatewayUrl);
-    httpd_resp_sendstr_chunk(req, g_store.gatewayToken);
+    send_html_value(req, g_store.gatewayUrl);
+    httpd_resp_sendstr_chunk(req, HTML_FORM_GATEWAY_KEY);
+    send_html_value(req, g_store.gatewayToken);
     httpd_resp_sendstr_chunk(req, HTML_FORM_END);
-    httpd_resp_sendstr_chunk(req, g_store.configBackupStatus[0]
+    send_html_value(req, g_store.configBackupStatus[0]
         ? g_store.configBackupStatus : "Noch kein Backup-Status.");
     if (g_store.lastConfigBackupAt[0]) {
         httpd_resp_sendstr_chunk(req, "<br>Letztes Backup: ");
-        httpd_resp_sendstr_chunk(req, g_store.lastConfigBackupAt);
+        send_html_value(req, g_store.lastConfigBackupAt);
     }
     httpd_resp_sendstr_chunk(req, HTML_TAIL);
 
