@@ -176,6 +176,8 @@ static bool fetch_manifest(SyncManifest *manifest)
 
 static bool manifest_changed(const SyncManifest *manifest, OfflineCacheSection section)
 {
+    // A token must never suppress rebuilding an unavailable/failed disk cache.
+    if (!g_store.offlineCacheHealthy) return true;
     if (section >= OFFLINE_CACHE_CREDITS) {
         time_t now = time(NULL); struct tm tm; char date[11];
         localtime_r(&now, &tm); strftime(date, sizeof(date), "%Y-%m-%d", &tm);
@@ -189,7 +191,15 @@ static void commit_manifest_token(const SyncManifest *manifest, OfflineCacheSect
 {
     if (manifest && manifest->available &&
         !offline_cache_set_manifest_token(section, manifest->token[section]))
-        ESP_LOGW(TAG, "Snapshot cached but manifest token could not be committed");
+        ESP_LOGW(TAG, "Manifest token not persisted; cache unavailable, server data remains applied");
+}
+
+static void cache_pulled_section(OfflineCacheSection section)
+{
+    if (!offline_cache_save(section))
+        ESP_LOGW(TAG, "Cache unavailable for pulled section %d; "
+                     "server data retained in RAM, sync remains successful",
+                 (int)section);
 }
 
 static void redact_query(const char *path, char *out, size_t out_size)
@@ -1208,10 +1218,8 @@ esp_err_t http_fetch_spielhistorie(void)
     g_store.historyCount = count;
     sync_commit_end("history", commit_started);
     heap_caps_free(staged);
-    if (!offline_cache_save(OFFLINE_CACHE_HISTORY)) {
-        ESP_LOGE(TAG, "History pull rejected: FAT cache was not durable");
-        return ESP_FAIL;
-    }
+    game_store_save();
+    cache_pulled_section(OFFLINE_CACHE_HISTORY);
     ESP_LOGI(TAG, "Fetched %d games from portal into history", count);
     return ESP_OK;
 }
@@ -1700,7 +1708,8 @@ esp_err_t http_fetch_bill_day_summary(void)
             } else {
                 store_cache_bill_day(parsed);
                 sync_commit_end("bills", commit_started);
-                if (!offline_cache_save(OFFLINE_CACHE_BILLS)) err = ESP_FAIL;
+                game_store_save();
+                cache_pulled_section(OFFLINE_CACHE_BILLS);
             }
         }
         if (parsed) heap_caps_free(parsed);
@@ -1754,7 +1763,8 @@ esp_err_t http_pull_kredite(void)
         ESP_LOGI(TAG, "Pulled credits for %s", datum);
     }
     cJSON_Delete(root);
-    if (!offline_cache_save(OFFLINE_CACHE_CREDITS)) return ESP_FAIL;
+    game_store_save();
+    cache_pulled_section(OFFLINE_CACHE_CREDITS);
     return ESP_OK;
 }
 
@@ -1797,7 +1807,8 @@ esp_err_t http_fetch_produkte(void)
         }
     }
     // An empty array is an authoritative catalog replacement, not "no update".
-    // Persist it before success so its manifest token cannot hide stale items.
+    // Apply authoritative RAM and operational NVS state even if the optional
+    // FAT snapshot fails. Failed sections cannot advance their disk token.
     TickType_t commit_started;
     if (!sync_commit_begin("products", &commit_started)) {
         cJSON_Delete(root);
@@ -1806,10 +1817,7 @@ esp_err_t http_fetch_produkte(void)
     store_replace_produkte(products, count);
     sync_commit_end("products", commit_started);
     game_store_save();
-    if (!offline_cache_save(OFFLINE_CACHE_PRODUCTS)) {
-        cJSON_Delete(root);
-        return ESP_FAIL;
-    }
+    cache_pulled_section(OFFLINE_CACHE_PRODUCTS);
     cJSON_Delete(root);
     return ESP_OK;
 }
@@ -1910,7 +1918,7 @@ esp_err_t http_pull_verkaeufe(void)
     }
     sync_commit_end("sales", commit_started);
     cJSON_Delete(root); game_store_save();
-    if (!offline_cache_save(OFFLINE_CACHE_SALES)) return ESP_FAIL;
+    cache_pulled_section(OFFLINE_CACHE_SALES);
     return ESP_OK;
 }
 
@@ -1948,9 +1956,10 @@ static esp_err_t http_sync_billing_impl(void)
         if (!sync_commit_begin("billing-sync-metadata", &commit_started))
             return ESP_ERR_TIMEOUT;
         g_store.lastSuccessfulSyncAt = time(NULL);
-        g_store.offlineCacheHealthy = true;
         sync_commit_end("billing-sync-metadata", commit_started);
-        (void)offline_cache_save_metadata();
+        game_store_save();
+        if (!offline_cache_save_metadata())
+            ESP_LOGW(TAG, "Billing sync succeeded; cache metadata unavailable");
     }
     ESP_LOGI(TAG, "Billing sync complete (%s)",
              overall == ESP_OK ? "success" : "partial failure");
@@ -2065,12 +2074,8 @@ static esp_err_t http_sync_all_impl(void)
             store_apply_portal_roster(buf, count);
             sync_commit_end("roster", commit_started);
             game_store_save();
-            if (offline_cache_save(OFFLINE_CACHE_ROSTER))
-                commit_manifest_token(&manifest, OFFLINE_CACHE_ROSTER);
-            else {
-                ESP_LOGE(TAG, "Roster pull rejected: FAT cache was not durable");
-                err = ESP_FAIL;
-            }
+            cache_pulled_section(OFFLINE_CACHE_ROSTER);
+            commit_manifest_token(&manifest, OFFLINE_CACHE_ROSTER);
         }
     }
     free(buf);
@@ -2087,9 +2092,10 @@ static esp_err_t http_sync_all_impl(void)
         if (!sync_commit_begin("sync-metadata", &commit_started))
             return ESP_ERR_TIMEOUT;
         g_store.lastSuccessfulSyncAt = time(NULL);
-        g_store.offlineCacheHealthy = true;
         sync_commit_end("sync-metadata", commit_started);
-        (void)offline_cache_save_metadata();
+        game_store_save();
+        if (!offline_cache_save_metadata())
+            ESP_LOGW(TAG, "Full sync succeeded; cache metadata unavailable");
     }
     ESP_LOGI(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
     return overall;

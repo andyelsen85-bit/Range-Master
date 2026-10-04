@@ -56,6 +56,36 @@ Host regression checks (mock HTTP/LVGL/NVS; no traps are actuated):
 python artifacts/firmware/tests/test_machine_batch.py
 ```
 
+### Offline-cache recovery
+
+The `storage` FAT partition starts at **0x680000** and has size **0x980000**
+(9.5 MiB). The cache uses **4096-byte allocation units**, with a default
+4096-byte wear-levelling sector. The firmware also checks the actual WL sector
+size at mount time; 4096-byte clusters are compatible with either 512-byte or
+4096-byte WL sectors.
+
+After mounting, logs show total/free bytes and a 16-byte self-test, with separate
+return values and immediately captured `errno` for open, write, fsync and close.
+A zero/tiny capacity or a failed probe on a fresh/empty cache triggers one
+explicitly logged **unmount → config-preserving format → remount** fallback.
+This erases only the rebuildable FAT snapshots; NVS settings and operational
+outboxes are not erased. An established cache with normal capacity is not
+automatically reformatted merely because its probe fails. Failed initialization
+is latched until reboot to avoid mount/format loops.
+
+Cache failures do not invalidate successful server pulls. The terminal keeps
+the pulled data in RAM, performs its existing NVS operational saves, and reports
+successful sync with the small **CACHE NICHT VERFÜGBAR** warning. Failed
+snapshots cannot advance their durable manifest tokens; degraded caches are
+retried by subsequent pulls. Large portal snapshots are not moved into the
+small NVS partition as a fallback.
+
+Fault-injected host regression checks (no real flash, server or NVS):
+
+```bash
+python artifacts/firmware/tests/test_offline_cache.py
+```
+
 ### Source layout
 
 ```

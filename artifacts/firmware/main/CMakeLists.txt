@@ -59,6 +59,7 @@ idf_component_register(
         spi_flash
         fatfs
         wear_levelling
+        esp_partition
         esp_system
         esp_psram
         esp_mm

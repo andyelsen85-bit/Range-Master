@@ -484,9 +484,12 @@ void screen_dashboard_refresh(void)
     // Pending games
     snprintf(buf, sizeof(buf), "%d AKTIONEN | %s | LETZTER SYNC: %lld",
              store_pending_action_count(),
-              g_store.offlineCacheLoaded ? "OFFLINE-CACHE" : "KEIN CACHE",
+             !g_store.offlineCacheHealthy ? "CACHE NICHT VERFÜGBAR" :
+             g_store.offlineCacheLoaded ? "OFFLINE-CACHE" : "KEIN CACHE",
              (long long)g_store.lastSuccessfulSyncAt);
     set_label_text_if_changed(s_lbl_pending, buf);
+    lv_obj_set_style_text_color(s_lbl_pending,
+        lv_color_hex(g_store.offlineCacheHealthy ? CLR_TEXT : CLR_WARN), 0);
 
     // WiFi
     CopWifiState wifi_state = cop_wifi_state();

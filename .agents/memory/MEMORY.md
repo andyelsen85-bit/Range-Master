@@ -26,7 +26,7 @@
 - [Daily bill settlement](daily-bill-settlement.md) — derive bills from immutable ledgers; Paid is an idempotent closure event, and active players leave only after portal acceptance
 - [WiFi reconnect backoff](wifi-reconnect-backoff.md) — disconnect events wake the supervisor only to enter backoff; manual connection requests may retry immediately
 - [NVS capacity for runtime caches](nvs-runtime-cache-capacity.md) — 24 KiB NVS cannot hold BillDaySummary; keep large rebuildable caches in RAM and compact persisted outboxes
-- [FAT cache mount safety](fat-cache-mount-safety.md) — initialize the reserved FAT partition once; latch mount failures and avoid cache writes from generic store saves
+- [FAT cache mount safety](fat-cache-mount-safety.md) — validate mounts, log cache-only rebuilds, latch failures; FAT snapshots are optional and must not fail successful syncs.
 - [Sync manifest token sizing](sync-manifest-token-sizing.md) — revision tokens include the hash algorithm prefix; firmware buffers must treat them as opaque strings
 - [MIPI DSI PSRAM underruns](mipi-dsi-psram-underruns.md) — full-screen cyan flashes during FAT writes are DSI framebuffer underruns, not LVGL redraw tearing
 - [Non-blocking sync publication](nonblocking-sync-publication.md) — HTTP and persistence must never pause the UI; only acknowledged, bounded RAM swaps may briefly gate touch
