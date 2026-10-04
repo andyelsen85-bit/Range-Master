@@ -39,7 +39,7 @@
 #endif
 
 #ifndef TM_RELAY_ACTIVE_LEVEL
-#define TM_RELAY_ACTIVE_LEVEL LOW
+#define TM_RELAY_ACTIVE_LEVEL HIGH // SRD-05VDC-SL-C boards: HIGH energizes the coil
 #endif
 
 #ifndef TM_RELAY_PULSE_MS
@@ -64,6 +64,15 @@ static char configApSsid[32] = {};
 static uint32_t lastAcceptedCounter = 0;
 static volatile bool firePending = false;
 static uint32_t pendingCounter = 0;
+
+static_assert(TM_RELAY_ACTIVE_LEVEL == HIGH,
+              "SRD-05VDC-SL-C relay boards must be driven active-HIGH");
+
+static void relay_force_inactive()
+{
+    // LOW de-energizes the coil and leaves the normally-closed contact pair closed.
+    digitalWrite(TM_RELAY_GPIO, LOW);
+}
 
 static bool validMachineId(char value)
 {
@@ -192,11 +201,13 @@ static void startConfigPortal()
 
 static void onTxDone()
 {
+    relay_force_inactive();
     Radio.Rx(0);
 }
 
 static void onTxTimeout()
 {
+    relay_force_inactive();
     Radio.Rx(0);
 }
 
@@ -204,10 +215,12 @@ static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     if (!validMachineId(machineId)) {
         Serial.println("Rejected packet: machine ID is not configured");
+        relay_force_inactive();
         Radio.Rx(0);
         return;
     }
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
+    // LOW asserts the input interlock; the output pulse still uses active HIGH.
     if (digitalRead(TM_BENCH_INTERLOCK_GPIO) == LOW &&
         size == 3 && payload[0] == 'T' && payload[1] == 'B' &&
         payload[2] == machineId) {
@@ -220,6 +233,7 @@ static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
     tm_protocol::DecodedPacket decoded = {};
     if (!tm_protocol::decrypt(payload, size, &decoded)) {
         Serial.println("Rejected unauthenticated packet");
+        relay_force_inactive();
         Radio.Rx(0);
         return;
     }
@@ -227,6 +241,7 @@ static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
         decoded.machine != machineId ||
         decoded.counter <= lastAcceptedCounter) {
         Serial.println("Rejected wrong-address or replayed packet");
+        relay_force_inactive();
         Radio.Rx(0);
         return;
     }
@@ -260,12 +275,14 @@ static void initRadio()
 static void fireRelayAndAck(uint32_t counter)
 {
     if (!validMachineId(machineId)) {
+        relay_force_inactive();
         Radio.Rx(0);
         return;
     }
     if (counter != 0) {
         if (preferences.putULong("last_counter", counter) != sizeof(uint32_t)) {
             Serial.println("Rejected FIRE: replay counter persistence failed");
+            relay_force_inactive();
             Radio.Rx(0);
             return;
         }
@@ -274,7 +291,7 @@ static void fireRelayAndAck(uint32_t counter)
 
     digitalWrite(TM_RELAY_GPIO, TM_RELAY_ACTIVE_LEVEL);
     delay(TM_RELAY_PULSE_MS);
-    digitalWrite(TM_RELAY_GPIO, !TM_RELAY_ACTIVE_LEVEL);
+    relay_force_inactive();
 
     uint8_t frame[tm_protocol::FRAME_LEN];
     if (tm_protocol::encrypt(machineId, tm_protocol::CMD_ACK, counter, frame)) {
@@ -286,20 +303,22 @@ static void fireRelayAndAck(uint32_t counter)
 
 void setup()
 {
+    // Set coil off / NC contact closed as the first boot operation.
+    pinMode(TM_RELAY_GPIO, OUTPUT);
+    relay_force_inactive();
     Serial.begin(115200);
     pinMode(Vext, OUTPUT);
     digitalWrite(Vext, LOW);
     delay(100);
     relayDisplay.init();
 
-    pinMode(TM_RELAY_GPIO, OUTPUT);
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
     pinMode(TM_BENCH_INTERLOCK_GPIO, INPUT_PULLUP);
 #endif
-    digitalWrite(TM_RELAY_GPIO, !TM_RELAY_ACTIVE_LEVEL);
 
     if (!preferences.begin("trapmaster", false)) {
         Serial.println("Relay NVS unavailable; refusing to start");
+        relay_force_inactive();
         renderMachineId();
         while (true) delay(1000);
     }

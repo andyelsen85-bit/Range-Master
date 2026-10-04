@@ -87,11 +87,13 @@ static void renderMachineId()
 
 static void onTxDone()
 {
+    relay_force_inactive();
     Radio.Rx(0);
 }
 
 static void onTxTimeout()
 {
+    relay_force_inactive();
     Radio.Rx(0);
 }
 
@@ -100,6 +102,7 @@ static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
     // Radio-link bench mode only. It is excluded from normal builds and must
     // never be flashed onto a relay connected to a physical trap.
+    // LOW asserts the input interlock; the output pulse still uses active HIGH.
     if (digitalRead(TM_BENCH_INTERLOCK_GPIO) == LOW &&
         size == 3 && payload[0] == 'T' && payload[1] == 'B' &&
         payload[2] == TM_MACHINE_ID) {
@@ -183,6 +186,9 @@ static void fireRelayAndAck(uint32_t counter)
 
 void setup()
 {
+    // Set coil off / NC contact closed as the first boot operation.
+    pinMode(TM_RELAY_GPIO, OUTPUT);
+    relay_force_inactive();
     Serial.begin(115200);
     pinMode(Vext, OUTPUT);
     digitalWrite(Vext, LOW); // OLED rail on (official Heltec behavior)
@@ -190,11 +196,6 @@ void setup()
     relayDisplay.init();
     renderMachineId();
 
-    // Preload LOW before enabling the output, then force it LOW before any
-    // radio initialization or other operation that could eventually fire.
-    digitalWrite(TM_RELAY_GPIO, LOW);
-    pinMode(TM_RELAY_GPIO, OUTPUT);
-    relay_force_inactive();
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
     pinMode(TM_BENCH_INTERLOCK_GPIO, INPUT_PULLUP);
 #endif

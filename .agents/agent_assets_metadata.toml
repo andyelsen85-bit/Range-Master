@@ -14,3 +14,17 @@ mtime_ms = 1788617127465
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/4ec6bebd-7efd-44b5-ac62-b6f20d504e81/95e69982-78d2-41ba-a81a-c94a8ae2f1fe"
 storage_version_token = "1788617146999181"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "GzaWA316oaktSKt9Tn30c"
+uri = "file://artifacts/lora-relay/TrapMasterRelayGeneric/release/TrapMasterRelayGeneric-WirelessStickV3-active-high.zip"
+type = "unspecified"
+title = "Generic Receiver — Active-HIGH Firmware"
+description = "Rebuilt Wireless Stick V3 firmware: LOW idle, HIGH fire pulse. Includes app-only update instructions to preserve NVS and replay state. Replaces the earlier active-LOW package."
+logical_id = "3fd80e64-24da-48b3-b111-1804af0367d0"
+content_hash = "sha256:276f568125f27f3321b01d97e3b73845cf67b817390192c5ac3a141433f0ba7b"
+size = 1327630
+mtime_ms = 1791108497162
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/3fd80e64-24da-48b3-b111-1804af0367d0/7aa256d3-4cbd-42e9-8c85-b2cbe8ca174b"
+storage_version_token = "1791108519225780"
+content_type = "application/octet-stream"

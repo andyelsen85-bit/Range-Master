@@ -14,4 +14,5 @@
 // The fixed TrapMasterRelayA–H wrapper projects define the machine ID.
 // Do not define TM_MACHINE_ID in this shared configuration file.
 #define TM_RELAY_GPIO 4
+// LOW = coil off / NC contact closed; HIGH = coil on / NC contact open.
 #define TM_RELAY_ACTIVE_LEVEL HIGH

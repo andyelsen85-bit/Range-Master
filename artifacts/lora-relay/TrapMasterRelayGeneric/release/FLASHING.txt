@@ -1,10 +1,22 @@
 TrapMaster Generic Relay - Heltec Wireless Stick V3
 
-Recommended single-file flash:
+Relay polarity: active-HIGH for the SRD-05VDC-SL-C boards with an NPN driver.
+Idle GPIO LOW: coil off, normally-closed (COM/NC) contact closed.
+Fire GPIO HIGH for the configured pulse duration: coil on, COM/NC contact opens,
+then GPIO returns LOW. This package replaces the previous active-LOW build.
+Do not use older copies of the firmware package with these relay boards.
+
+Update an existing receiver while preserving NVS/replay state (same key group):
+  esptool --chip esp32s3 --port YOUR_SERIAL_PORT --baud 921600 write-flash 0x10000 TrapMasterRelayGeneric-WirelessStickV3-app.bin
+
+Do NOT erase flash for a polarity update. Do NOT use the full image on an already
+provisioned receiver: it overwrites NVS, including the replay counter and machine ID.
+
+Full-image flash for a fresh/unprovisioned board only:
   esptool --chip esp32s3 --port YOUR_SERIAL_PORT --baud 921600 write-flash 0x0 TrapMasterRelayGeneric-WirelessStickV3-full.bin
 
-Erase before the first installation if this board contains unrelated firmware:
-  esptool --chip esp32s3 --port YOUR_SERIAL_PORT erase-flash
+If replay state must be erased on a provisioned board, disconnect the traps and
+re-key the gateway and all receivers together first. Do not reuse the old key.
 
 After boot:
 1. Connect to the open WiFi hotspot named TrapMaster-Relay-xxxxxx.

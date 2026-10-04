@@ -76,10 +76,10 @@ relay sketch was uploaded.
 1. Confirm `TM_RELAY_GPIO` against the actual wiring before energizing a relay.
    The current configuration uses GPIO4.
 2. Keep `TM_RELAY_ACTIVE_LEVEL` set to `HIGH` for these relay boards.
-4. Confirm relay supply voltage under load with a multimeter. Do not assume the board's
+3. Confirm relay supply voltage under load with a multimeter. Do not assume the board's
    5V pin can power the module; use a separate verified 5V supply or a 3.3V-compatible
    relay when appropriate, with grounds tied together.
-5. Define `TM_PROTOCOL_KEY_BYTES` as the same private 16-byte key used by the gateway.
+4. Define `TM_PROTOCOL_KEY_BYTES` as the same private 16-byte key used by the gateway.
    Normal builds deliberately fail without it. `TM_ALLOW_INSECURE_BENCH_KEY` is only
    permitted for a disconnected radio bench test.
 
@@ -103,7 +103,7 @@ Example private compile-time settings:
   does not make a captured command replayable.
 - Machines A–G accept a packet, pulse for 300 ms by default, then send an
   authenticated ACK back to the gateway.
-- Machine H accepts exactly one authenticated packet and closes its dry contact
+- Machine H accepts exactly one authenticated packet and opens its normally-closed contact
   once. The connected H machine is responsible for launching H2 after H1; the
   relay never adds an H2 pulse or timing of its own.
 
@@ -123,3 +123,12 @@ test-enable switch/jumper that pulls this input low only during the bench test. 
 rejects plaintext bench packets unless that physical interlock is asserted. Rebuild
 without the switch and without `TM_ENABLE_UNENCRYPTED_BENCH_TEST` before field use.
 Normal builds do not include this endpoint or accept this packet type.
+
+## Relay logic regression checks
+
+Run `python artifacts/lora-relay/tests/test_relay_polarity.py` from the repository
+root (requires `g++`). The test compiles the actual fixed/generic radio handlers
+with mocked GPIO, NVS, and radio operations. It verifies LOW idle, HIGH fire pulses,
+the unchanged pulse duration, rejection paths, the bench interlock, and counter
+persistence before firing. It does not verify real encryption, radio reception,
+or electrical contact behavior.
