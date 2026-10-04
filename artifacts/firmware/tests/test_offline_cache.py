@@ -149,6 +149,7 @@ int tm_rename(const char *old, const char *name) {
 }
 int tm_mkdir(const char *, int) { return 0; }
 void store_rebuild_bill_projection() {}
+bool store_has_unapplied_paid_sessions() { return false; }
 void store_reconcile_lineup_after_cache_load() {}
 void game_store_save() { ++nvs_saves; }
 void store_apply_portal_roster(const PortalSpieler *players, int count) {

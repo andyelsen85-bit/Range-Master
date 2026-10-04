@@ -1731,10 +1731,11 @@ esp_err_t http_pull_kredite(void)
     char path[64];
     snprintf(path, sizeof(path), "/api/sync/kredite?datum=%s", datum);
 
-    char *resp = (char *)malloc(8192);
+    const size_t credit_capacity = MAX_PORTAL_SPIELER * 96u + 128u;
+    char *resp = (char *)malloc(credit_capacity);
     if (!resp) return ESP_ERR_NO_MEM;
 
-    esp_err_t err = http_get_json(path, resp, 8192);
+    esp_err_t err = http_get_json(path, resp, credit_capacity);
     if (err != ESP_OK) { free(resp); return err; }
 
     cJSON *root = cJSON_Parse(resp);
@@ -1742,13 +1743,52 @@ esp_err_t http_pull_kredite(void)
     if (!root) return ESP_ERR_INVALID_RESPONSE;
 
     cJSON *arr = cJSON_GetObjectItem(root, "kredite");
-    if (arr && cJSON_IsArray(arr)) {
+    cJSON *response_date = cJSON_GetObjectItemCaseSensitive(root, "datum");
+    if (!cJSON_IsArray(arr) || !cJSON_IsString(response_date) ||
+        strcmp(response_date->valuestring, datum) ||
+        cJSON_GetArraySize(arr) > MAX_PORTAL_SPIELER) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    // Validate the complete baseline before publishing any destructive resets.
+    cJSON *row;
+    cJSON_ArrayForEach(row, arr) {
+        cJSON *sid = cJSON_GetObjectItemCaseSensitive(row, "spielerId");
+        cJSON *granted = cJSON_GetObjectItemCaseSensitive(row, "gewaehrt");
+        cJSON *used = cJSON_GetObjectItemCaseSensitive(row, "verbraucht");
+        if (!cJSON_IsNumber(sid) || sid->valuedouble <= 0 ||
+            !cJSON_IsNumber(granted) || !cJSON_IsNumber(used) ||
+            sid->valuedouble != sid->valueint ||
+            granted->valuedouble != granted->valueint ||
+            used->valuedouble != used->valueint || used->valueint < 0) {
+            cJSON_Delete(root);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+    {
         TickType_t commit_started;
         if (!sync_commit_begin("credits", &commit_started)) {
             cJSON_Delete(root);
             return ESP_ERR_TIMEOUT;
         }
         cJSON *item;
+        // This endpoint is a FULL current-day baseline. Omitted players have
+        // zero portal credits, not their old terminal balance. Reconciliation
+        // reapplies queued local events, including in-flight corrections.
+        for (int k = 0; k < MAX_PORTAL_SPIELER; ++k) {
+            int sid = g_store.kreditPlayerIds[k];
+            if (!sid) continue;
+            bool present = false;
+            cJSON_ArrayForEach(item, arr) {
+                if (cJSON_GetObjectItemCaseSensitive(item, "spielerId")->valueint == sid) {
+                    present = true;
+                    break;
+                }
+            }
+            // Do not transiently zero a returned player's balance: that would
+            // remove valid lineup positions before their real row is applied.
+            if (!present) store_apply_portal_kredit(sid, 0, 0);
+        }
         cJSON_ArrayForEach(item, arr) {
             cJSON *jsid = cJSON_GetObjectItem(item, "spielerId");
             cJSON *jgew = cJSON_GetObjectItem(item, "gewaehrt");
@@ -2028,7 +2068,8 @@ static esp_err_t http_sync_all_impl(void)
     if (ppe != ESP_OK) ESP_LOGW(TAG, "Payment events not fully accepted — retained");
     bool pull_bills = pve == ESP_OK && pke == ESP_OK && ppe == ESP_OK &&
                       (manifest_changed(&manifest, OFFLINE_CACHE_BILLS) ||
-                       had_sales || had_credits || had_payments);
+                       had_sales || had_credits || had_payments ||
+                       store_has_unapplied_paid_sessions());
     esp_err_t pbs = pull_bills ? http_fetch_bill_day_summary() : ESP_OK;
     if (pull_bills && pbs == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_BILLS);
     if (pbs != ESP_OK && overall == ESP_OK) overall = pbs;

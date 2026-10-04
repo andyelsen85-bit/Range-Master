@@ -14,3 +14,9 @@ Period reports may sum full historical activity across dates, but they must deri
 **Why:** Payments close one player's activity for one specific date. Netting status across dates can hide an unpaid day behind a correction on another day.
 
 **How to apply:** Treat multi-day views as reporting only. Mark the combined period OPEN when any included player/day is open; allow payment changes only after the operator selects one exact date.
+
+Session closure must be tracked independently of the cached PAID bill. A terminal receiving another terminal's payment needs to apply that closure once; a later explicit re-add must survive receipt replay and reboot. Keep closure receipts compact and durable alongside the operational roster, not exclusively in optional FAT bill caches.
+
+**Why:** A PAID audit snapshot does not say whether its session closure has already been applied locally. Treating it as a permanent removal instruction deletes fresh sessions; treating a cached snapshot as proof of applied closure leaves stale sessions after an upgrade.
+
+**How to apply:** Reconcile full current-day credit responses as complete baselines, including zero for omitted players, then preserve today's queued local events. Never temporarily zero players who do have a returned balance: lineup reconciliation would remove funded positions before the real balance is applied.

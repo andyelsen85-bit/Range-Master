@@ -22,10 +22,32 @@
 #include "cJSON.h"
 
 #include "game_store.h"
+#include "payment_receipts.h"
 #include "http_sync.h"
 #include "coprocessor.h"
 #include "app_config.h"
 #include "offline_cache.h"
+
+static EXT_RAM_BSS_ATTR PaymentReceipt s_payment_receipts[MAX_PORTAL_SPIELER];
+static int s_payment_receipt_count;
+static char s_payment_receipt_date[11];
+
+static void prepare_payment_receipts(const char *date)
+{
+    if (!strcmp(s_payment_receipt_date, date)) return;
+    s_payment_receipt_count = 0;
+    snprintf(s_payment_receipt_date, sizeof(s_payment_receipt_date), "%.10s", date);
+}
+
+static int payment_receipt_slot(int player_id)
+{
+    for (int i = 0; i < s_payment_receipt_count; ++i)
+        if (s_payment_receipts[i].spielerId == player_id) return i;
+    if (s_payment_receipt_count >= MAX_PORTAL_SPIELER) return -1;
+    int slot = s_payment_receipt_count++;
+    s_payment_receipts[slot] = {player_id, 0};
+    return slot;
+}
 
 static const char *TAG = "game_store";
 static_assert(AUTO_SYNC_MIN_SECONDS <= AUTO_SYNC_DEFAULT_SECONDS &&
@@ -168,6 +190,9 @@ static bool save_payment_state_unlocked(void)
         err = nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds,
                            sizeof(g_store.lineupIds));
     if (err == ESP_OK) err = set_ammo_blob_unlocked();
+    if (err == ESP_OK) err = set_counted_blob("paid_seen", s_payment_receipts,
+        s_payment_receipt_count, sizeof(PaymentReceipt));
+    if (err == ESP_OK) err = nvs_set_str(s_nvs, "paid_seen_day", s_payment_receipt_date);
     if (err == ESP_OK) err = nvs_commit(s_nvs);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Could not persist payment state: %s", esp_err_to_name(err));
@@ -586,6 +611,11 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
     memcpy(prior_credits, g_store.kredite, sizeof(prior_credits));
     memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
     memcpy(prior_lineup, g_store.lineupIds, sizeof(prior_lineup));
+    static EXT_RAM_BSS_ATTR PaymentReceipt prior_receipts[MAX_PORTAL_SPIELER];
+    memcpy(prior_receipts, s_payment_receipts, sizeof(prior_receipts));
+    int prior_receipt_count = s_payment_receipt_count;
+    char prior_receipt_date[11];
+    memcpy(prior_receipt_date, s_payment_receipt_date, sizeof(prior_receipt_date));
     for (int n = 0; n < count; ++n) {
         bool accepted = false;
         for (int a = 0; a < acceptedCount; ++a)
@@ -600,6 +630,13 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
                 // operational session; immutable sales/history remain intact.
                 time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
                 char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+                if (!strcmp(event->datum, today)) {
+                    prepare_payment_receipts(today);
+                    int receipt = payment_receipt_slot(event->spielerId);
+                    if (receipt >= 0)
+                        s_payment_receipts[receipt].token =
+                            payment_receipt_token(event->datum, event->externalId);
+                }
                 for (int k = 0; k < MAX_PORTAL_SPIELER; ++k) {
                     if (strcmp(event->datum, today) == 0 &&
                         g_store.kreditPlayerIds[k] == event->spielerId) {
@@ -627,6 +664,9 @@ static bool finish_payment_sync_internal(const PaymentEvent *snapshot, int count
         }
     }
     if (persist && !save_payment_state_unlocked()) {
+        memcpy(s_payment_receipts, prior_receipts, sizeof(prior_receipts));
+        s_payment_receipt_count = prior_receipt_count;
+        memcpy(s_payment_receipt_date, prior_receipt_date, sizeof(prior_receipt_date));
         memcpy(g_store.pendingPaymentEvents, prior_events, sizeof(prior_events));
         g_store.pendingPaymentEventCount = prior_count;
         memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
@@ -656,6 +696,27 @@ bool store_finish_payment_sync_commit(const PaymentEvent *snapshot, int count,
                                         error, false);
 }
 
+bool store_has_unapplied_paid_sessions(void)
+{
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    const BillDaySummary *summary = &g_store.billDayBaseline;
+    if (!summary->authoritative || strcmp(summary->datum, today)) return false;
+    for (int i = 0; i < summary->playerCount; ++i) {
+        const PlayerBill *bill = &summary->players[i];
+        if (bill->state != BILL_PAID || !bill->paymentExternalId[0] ||
+            find_kredit_slot(&g_store, bill->spielerId) < 0) continue;
+        uint64_t token = payment_receipt_token(today, bill->paymentExternalId);
+        bool applied = false;
+        if (!strcmp(s_payment_receipt_date, today))
+            for (int p = 0; p < s_payment_receipt_count; ++p)
+                if (s_payment_receipts[p].spielerId == bill->spielerId &&
+                    s_payment_receipts[p].token == token) { applied = true; break; }
+        if (!applied) return true;
+    }
+    return false;
+}
+
 void store_cache_bill_day(const BillDaySummary *summary)
 {
     if (!summary || summary->playerCount < 0 || summary->playerCount > MAX_DAY_BILLS ||
@@ -668,6 +729,36 @@ void store_cache_bill_day(const BillDaySummary *summary)
             summary->players[i].categoryCount < 0 ||
             summary->players[i].categoryCount > MAX_BILL_CATEGORIES)
             return;
+    // A remote payment is also a session-closure event. Apply each receipt
+    // once, independently of cached bill state, including after reboot.
+    time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
+    char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
+    if (summary->authoritative && !strcmp(summary->datum, today)) {
+        payment_state_lock();
+        prepare_payment_receipts(today);
+        for (int i = 0; i < summary->playerCount; ++i) {
+            const PlayerBill *bill = &summary->players[i];
+            if (bill->state != BILL_PAID || !bill->paymentExternalId[0] ||
+                has_pending_day_activity(bill->spielerId, today)) continue;
+            int receipt = payment_receipt_slot(bill->spielerId);
+            uint64_t token = payment_receipt_token(today, bill->paymentExternalId);
+            if (receipt < 0) {
+                ESP_LOGE(TAG, "Payment receipt journal full; session retained");
+                continue;
+            }
+            if (s_payment_receipts[receipt].token == token) continue;
+            for (int k = 0; k < MAX_PORTAL_SPIELER; ++k)
+                if (g_store.kreditPlayerIds[k] == bill->spielerId) {
+                    g_store.kreditPlayerIds[k] = 0;
+                    g_store.kredite[k] = (KreditStand){};
+                }
+            for (int p = 0; p < MAX_SPIELER; ++p)
+                if (g_store.lineupIds[p] == bill->spielerId) g_store.lineupIds[p] = 0;
+            reset_munition_for_player(bill->spielerId);
+            s_payment_receipts[receipt].token = token;
+        }
+        payment_state_unlock();
+    }
     // Keep an unmodified portal snapshot.  The visible copy is reconstructed
     // below, rather than patched in place, so a later cache refresh cannot
     // count a still-pending idempotent event twice.
@@ -1778,6 +1869,8 @@ void store_apply_portal_roster(const PortalSpieler *spieler, int count)
 void store_remap_spieler_id(int old_id, int new_id)
 {
     if (old_id == new_id || old_id == 0 || new_id == 0) return;
+    for (int i = 0; i < s_payment_receipt_count; ++i)
+        if (s_payment_receipts[i].spielerId == old_id) s_payment_receipts[i].spielerId = new_id;
     for (int i = 0; i < g_store.portalSpielerCount; ++i)
         if (g_store.portalSpieler[i].id == old_id) {
             g_store.portalSpieler[i].id = new_id; g_store.portalSpieler[i].lokal = false;
@@ -2775,7 +2868,8 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
     int kreditSlot = find_kredit_slot(&g_store, spieler_id);
     time_t now = time(NULL); struct tm tm; localtime_r(&now, &tm);
     char today[11]; strftime(today, sizeof(today), "%Y-%m-%d", &tm);
-    if (bill_is_authoritatively_paid(spieler_id, today) &&
+    if (kreditSlot < 0 && gewaehrt == 0 && verbraucht == 0 &&
+        bill_is_authoritatively_paid(spieler_id, today) &&
         !has_pending_day_activity(spieler_id, today)) {
         // Payment acceptance already retired the local session atomically.
         // Do not repeatedly mutate a player explicitly re-added afterwards.
@@ -2798,7 +2892,7 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
         // was in-flight, so a pull never hides the locally restored credit.
         for (int i = 0; i < g_store.pendingKreditEventCount; i++) {
             const KreditEvent *event = &g_store.pendingKreditEvents[i];
-            if (event->spielerId != spieler_id) continue;
+            if (event->spielerId != spieler_id || strcmp(event->datum, today)) continue;
             if (strcmp(event->typ, "GRANT") == 0) {
                 gewaehrt += event->anzahl;
             } else if (strcmp(event->typ, "USE") == 0) {
@@ -3168,6 +3262,12 @@ void game_store_save(void)
                          g_store.pendingPaymentEventCount,
                          sizeof(g_store.pendingPaymentEvents[0])) == ESP_OK)
         nvs_set_i32(s_nvs, "payment_cnt", g_store.pendingPaymentEventCount);
+    esp_err_t receipts_err = set_counted_blob("paid_seen", s_payment_receipts,
+        s_payment_receipt_count, sizeof(PaymentReceipt));
+    if (receipts_err == ESP_OK)
+        receipts_err = nvs_set_str(s_nvs, "paid_seen_day", s_payment_receipt_date);
+    if (receipts_err != ESP_OK)
+        ESP_LOGE(TAG, "Payment receipt persistence failed: %s", esp_err_to_name(receipts_err));
     nvs_set_blob(s_nvs, "lineup_ids", g_store.lineupIds, sizeof(g_store.lineupIds));
     nvs_set_str(s_nvs, "credit_date", g_store.kreditDatum);
     nvs_set_blob(s_nvs, "credit_ids", g_store.kreditPlayerIds, sizeof(g_store.kreditPlayerIds));
@@ -3211,6 +3311,16 @@ void game_store_init(void)
     strftime(g_store.kreditDatum, sizeof(g_store.kreditDatum), "%Y-%m-%d", &credit_tm);
 
     // Load persisted values
+    s_payment_receipt_count = 0;
+    s_payment_receipt_date[0] = '\0';
+    size_t receipt_bytes = sizeof(s_payment_receipts);
+    if (nvs_get_blob(s_nvs, "paid_seen", s_payment_receipts, &receipt_bytes) == ESP_OK &&
+        receipt_bytes <= sizeof(s_payment_receipts) &&
+        receipt_bytes % sizeof(PaymentReceipt) == 0) {
+        size_t date_bytes = sizeof(s_payment_receipt_date);
+        if (nvs_get_str(s_nvs, "paid_seen_day", s_payment_receipt_date, &date_bytes) == ESP_OK)
+            s_payment_receipt_count = (int)(receipt_bytes / sizeof(PaymentReceipt));
+    }
     nvs_load_str("api_url",   g_store.apiUrl,   MAX_URL_LEN);
     nvs_load_str("api_key",   g_store.apiKey,   MAX_KEY_LEN);
     nvs_load_str("gateway_url", g_store.gatewayUrl, MAX_URL_LEN);

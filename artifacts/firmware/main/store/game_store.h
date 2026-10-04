@@ -587,6 +587,7 @@ bool store_finish_payment_sync_commit(const PaymentEvent *snapshot, int count,
                                       const char *const *acceptedIds, int acceptedCount,
                                       const char *error);
 void store_cache_bill_day(const BillDaySummary *summary);
+bool store_has_unapplied_paid_sessions(void);
 /** Rebuild the display-only bill projection from the cached portal baseline. */
 void store_rebuild_bill_projection(void);
 
