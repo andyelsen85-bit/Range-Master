@@ -26,12 +26,18 @@ gateway/relay group. The HMAC value can be read from the local gateway file and
 entered into the terminal's physical settings screen.
 
 For the current test setup, every relay is configured with the same planned output
-mapping. Confirm the physical wiring before field use:
+mapping. The SRD-05VDC-SL-C relay boards driven by a single NPN transistor are
+active-HIGH:
 
 ```cpp
 #define TM_RELAY_GPIO 4
-#define TM_RELAY_ACTIVE_LEVEL LOW
+#define TM_RELAY_ACTIVE_LEVEL HIGH
 ```
+
+The output is LOW while idle: the coil is off and the normally-closed contact pair
+is closed. A fire command drives the output HIGH for the configured pulse duration
+(300 ms by default), energizing the coil and opening that contact pair; the output
+then returns LOW. Do not change this polarity back to active-LOW.
 
 Open the matching fixed Arduino project and upload it to that relay. The fixed
 project overrides any legacy `TM_MACHINE_ID` in the private file, so no machine
@@ -67,11 +73,9 @@ After boot, the Wireless Stick V3 OLED shows the selected machine letter
 fixed wrapper project, so it is also a quick visual check that the correct
 relay sketch was uploaded.
 
-1. Define `TM_RELAY_GPIO` to the **verified** output pin used by your relay board.
-   There is no default deliberately: the Wireless Stick V3 pinout and actual wiring
-   must be checked against Heltec's official diagram before energizing a relay.
-3. Confirm whether the relay is low-level or high-level triggered. The default
-   `TM_RELAY_ACTIVE_LEVEL` is `LOW` for common low-level trigger modules.
+1. Confirm `TM_RELAY_GPIO` against the actual wiring before energizing a relay.
+   The current configuration uses GPIO4.
+2. Keep `TM_RELAY_ACTIVE_LEVEL` set to `HIGH` for these relay boards.
 4. Confirm relay supply voltage under load with a multimeter. Do not assume the board's
    5V pin can power the module; use a separate verified 5V supply or a 3.3V-compatible
    relay when appropriate, with grounds tied together.
@@ -88,6 +92,9 @@ Example private compile-time settings:
 ## Safety behavior
 
 - Relay output starts inactive at boot.
+- Idle GPIO LOW means the coil is off and the normally-closed contact pair is closed.
+- A fire command drives GPIO HIGH for the pulse duration, energizing the coil and
+  opening the normally-closed contact pair, then returns GPIO to LOW.
 - Only a valid AES-128-GCM packet addressed to this relay can schedule a pulse.
 - Counters must strictly increase; replayed frames are rejected before any GPIO change.
 - Invalid authentication, wrong machine ID, malformed packets, and old counters never

@@ -38,7 +38,7 @@ cat > "$relay_config" <<EOF
 // The fixed TrapMasterRelayA-H Arduino projects define the machine ID in their
 // wrapper sketch. Do not add TM_MACHINE_ID to this shared configuration file.
 #define TM_RELAY_GPIO 4
-#define TM_RELAY_ACTIVE_LEVEL LOW
+#define TM_RELAY_ACTIVE_LEVEL HIGH
 EOF
 
 cat > "$gateway_config" <<EOF

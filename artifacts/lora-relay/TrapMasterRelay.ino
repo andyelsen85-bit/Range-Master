@@ -45,7 +45,7 @@
 #endif
 
 #ifndef TM_RELAY_ACTIVE_LEVEL
-#define TM_RELAY_ACTIVE_LEVEL LOW // verified active-low relay modules
+#define TM_RELAY_ACTIVE_LEVEL HIGH // SRD-05VDC-SL-C boards: HIGH energizes the coil
 #endif
 
 #ifndef TM_RELAY_PULSE_MS
@@ -60,6 +60,8 @@
 
 static_assert(TM_MACHINE_ID >= 'A' && TM_MACHINE_ID <= 'H',
               "TM_MACHINE_ID must be an ASCII letter A through H");
+static_assert(TM_RELAY_ACTIVE_LEVEL == HIGH,
+              "SRD-05VDC-SL-C relay boards must be driven active-HIGH");
 
 RadioEvents_t radioEvents;
 Preferences preferences;
@@ -67,6 +69,12 @@ static uint32_t lastAcceptedCounter = 0;
 static volatile bool firePending = false;
 static uint32_t pendingCounter = 0;
 SSD1306Wire relayDisplay(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_64_32, RST_OLED);
+
+static void relay_force_inactive()
+{
+    // LOW de-energizes the coil and leaves the normally-closed contact pair closed.
+    digitalWrite(TM_RELAY_GPIO, LOW);
+}
 
 static void renderMachineId()
 {
@@ -104,6 +112,7 @@ static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
     tm_protocol::DecodedPacket decoded = {};
     if (!tm_protocol::decrypt(payload, size, &decoded)) {
         Serial.println("Rejected unauthenticated packet");
+        relay_force_inactive();
         Radio.Rx(0);
         return;
     }
@@ -111,6 +120,7 @@ static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
         decoded.machine != TM_MACHINE_ID ||
         decoded.counter <= lastAcceptedCounter) {
         Serial.println("Rejected wrong-address or replayed packet");
+        relay_force_inactive();
         Radio.Rx(0);
         return;
     }
@@ -150,6 +160,7 @@ static void fireRelayAndAck(uint32_t counter)
     if (counter != 0) {
         if (preferences.putULong("last_counter", counter) != sizeof(uint32_t)) {
             Serial.println("Rejected FIRE: replay counter persistence failed");
+            relay_force_inactive();
             Radio.Rx(0);
             return;
         }
@@ -158,7 +169,7 @@ static void fireRelayAndAck(uint32_t counter)
 
     digitalWrite(TM_RELAY_GPIO, TM_RELAY_ACTIVE_LEVEL);
     delay(TM_RELAY_PULSE_MS);
-    digitalWrite(TM_RELAY_GPIO, !TM_RELAY_ACTIVE_LEVEL);
+    relay_force_inactive();
 
     // H is one physical relay. The connected H machine starts its own H2
     // sequence after receiving this single dry-contact pulse.
@@ -179,14 +190,17 @@ void setup()
     relayDisplay.init();
     renderMachineId();
 
+    // Preload LOW before enabling the output, then force it LOW before any
+    // radio initialization or other operation that could eventually fire.
+    digitalWrite(TM_RELAY_GPIO, LOW);
     pinMode(TM_RELAY_GPIO, OUTPUT);
+    relay_force_inactive();
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
     pinMode(TM_BENCH_INTERLOCK_GPIO, INPUT_PULLUP);
 #endif
-    // Keep the dry contact inactive during every boot and radio initialization step.
-    digitalWrite(TM_RELAY_GPIO, !TM_RELAY_ACTIVE_LEVEL);
     if (!preferences.begin("trapmaster", false)) {
         Serial.println("Relay NVS unavailable; refusing to start");
+        relay_force_inactive();
         while (true) delay(1000);
     }
     lastAcceptedCounter = preferences.getULong("last_counter", 0);

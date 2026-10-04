@@ -14,6 +14,7 @@
 // The machine identity is selected by the fixed Arduino project wrapper.
 // Do not define TM_MACHINE_ID in this shared configuration file.
 
-// Current planned test wiring for all machines. Verify before field use.
+// SRD-05VDC-SL-C boards with a single NPN driver are active-HIGH:
+// LOW = coil off / normally-closed contacts closed; HIGH = coil on / contacts open.
 #define TM_RELAY_GPIO 4
-#define TM_RELAY_ACTIVE_LEVEL LOW
+#define TM_RELAY_ACTIVE_LEVEL HIGH
