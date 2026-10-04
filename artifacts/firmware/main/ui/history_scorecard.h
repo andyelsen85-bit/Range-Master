@@ -53,6 +53,29 @@ static inline void history_scorecard_heading(const FinishedGame *game, int run,
     snprintf(text, capacity, "-");
 }
 
+static inline bool history_scorecard_pair_at(const FinishedGame *game, int run, int first_clay)
+{
+    if (first_clay < 1 || first_clay >= MAX_SEQUENZ) return false;
+    // Each player's two pair results share one physical stand. Singles
+    // advance the stand, including consecutive single H targets. Inspect the
+    // saved ledger, never today's mode/configuration or machine letters alone.
+    for (int i = 0; i < game->base.ergebnisse_count && i < MAX_ERGEBNISSE; ++i) {
+        const Ergebnis *candidate = &game->base.ergebnisse[i];
+        if (candidate->lauf != run || candidate->taube != first_clay) continue;
+        const Ergebnis *first = history_scorecard_result(game, candidate->spielerId, run, first_clay);
+        const Ergebnis *second = history_scorecard_result(game, candidate->spielerId, run, first_clay + 1);
+        if (first && second && first->posten >= 1 && first->posten <= 6 &&
+            first->posten == second->posten) return true;
+    }
+    return false;
+}
+
+static inline bool history_scorecard_doublette(const FinishedGame *game, int run, int clay)
+{
+    return history_scorecard_pair_at(game, run, clay - 1) ||
+           history_scorecard_pair_at(game, run, clay);
+}
+
 static inline int history_scorecard_total(const FinishedGame *game, int player)
 {
     for (int i = 0; i < game->base.teilnahmen_count && i < MAX_SPIELER; ++i)

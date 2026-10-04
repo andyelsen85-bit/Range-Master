@@ -24,7 +24,14 @@ const char *modus_label(Modus mode) {
     const char *labels[]={"Normal","Harakiri","Custom 1","Custom 2","Custom 3","Custom 4"};
     return labels[mode];
 }
-struct lv_event_t { void *data; };
+struct lv_draw_dsc_base_t { int part; uint32_t id1,id2; };
+struct lv_draw_fill_dsc_t { int color,opa; };
+struct lv_draw_task_t { lv_draw_dsc_base_t base; lv_draw_fill_dsc_t *fill; };
+struct lv_event_t { void *data; lv_draw_task_t *task=nullptr; };
+constexpr int LV_PART_ITEMS=1;
+lv_draw_task_t *lv_event_get_draw_task(lv_event_t *e) { return e->task; }
+void *lv_draw_task_get_draw_dsc(lv_draw_task_t *task) { return &task->base; }
+lv_draw_fill_dsc_t *lv_draw_task_get_fill_dsc(lv_draw_task_t *task) { return task->fill; }
 struct lv_obj_t {
     std::string label; std::vector<std::vector<std::string>> rows;
     std::vector<int> widths; std::vector<lv_obj_t*> children;
@@ -65,6 +72,7 @@ cJSON *shot(bool repeated=false) {
 static FinishedGame s_selected_game;
 static bool s_has_selected_game, s_history_built;
 static uint32_t s_history_signature;
+static bool s_doublette_columns[MAX_ERGEBNISSE+2];
 static lv_obj_t *s_list, *s_lbl_empty, *s_detail_card, *s_detail_hdr, *s_detail_date, *s_detail_table;
 int table_writes=0, list_rebuilds=0;
 void lv_label_set_text(lv_obj_t *o,const char *text) { o->label=text; }
@@ -122,6 +130,8 @@ FinishedGame game(Modus mode,int clays,int runs) {
         e.spielerId=fg.spielerIds[player];e.lauf=run;e.taube=clay;
         e.maschine=(Maschine)((clay-1)%MASCHINE_COUNT);
         if(clays==9 && clay==9)e.maschine=MASCHINE_H;
+        int position=clay-1-(clays==9 && clay==9 ? 1 : 0);
+        e.posten=(position+player)%5+1;
         e.punkte=clays==9 && runs==2 && player==0 ? photo[(run-1)*clays+clay-1] : (clay+player)%3;
         fg.base.teilnahmen[player].punkte+=e.punkte;
     }
@@ -140,6 +150,23 @@ int main() {
     const char *headings[]={"A","B","C","D","E","F","G","H","H","A","B","C","D","E","F","G","H","H"};
     for(int col=0;col<18;++col)assert(table.rows[0][col+1]==headings[col]);
     assert(table.rows[0][19]=="GESAMT");
+    for(int col=0;col<20;++col)
+        assert(s_doublette_columns[col]==(col==8 || col==9 || col==17 || col==18));
+    // Actual draw callback: shade both headers and player cells, but never
+    // names, totals, singles, labels/borders or unrelated drawing parts.
+    for(int row=0;row<3;++row)for(int col=0;col<20;++col) {
+        lv_draw_fill_dsc_t fill{CLR_CARD,17};
+        lv_draw_task_t task{{LV_PART_ITEMS,(uint32_t)row,(uint32_t)col},&fill};
+        lv_event_t event{nullptr,&task};scorecard_draw_cb(&event);
+        assert(fill.color==(s_doublette_columns[col] ? 0x1C2B40 : CLR_CARD));
+        assert(fill.opa==(s_doublette_columns[col] ? LV_OPA_COVER : 17));
+    }
+    lv_draw_fill_dsc_t ignored_fill{CLR_CARD,17};
+    lv_draw_task_t other_part{{0,0,8},&ignored_fill};lv_event_t other_event{nullptr,&other_part};
+    scorecard_draw_cb(&other_event);assert(ignored_fill.color==CLR_CARD);
+    other_part.base.part=LV_PART_ITEMS;other_part.fill=nullptr;scorecard_draw_cb(&other_event);
+    other_part.fill=&ignored_fill;other_part.base.id2=MAX_ERGEBNISSE+2;
+    scorecard_draw_cb(&other_event);assert(ignored_fill.color==CLR_CARD);
     int width=0;for(int w:table.widths)width+=w;assert(width<=892); // normal scorecard fits detail viewport
     int writes=table_writes,rebuilds=list_rebuilds;
     list.scroll_y=149;viewport.scroll_x=60;viewport.scroll_y=18;
@@ -150,6 +177,8 @@ int main() {
     g_store.historyCount=2;screen_geschichte_refresh();
     assert(table_writes==writes && table.rows[1][19]=="23" && !(card.flags&LV_OBJ_FLAG_HIDDEN));
     assert(list.scroll_y==149 && viewport.scroll_x==60 && viewport.scroll_y==18);
+    for(int col=0;col<20;++col)
+        assert(s_doublette_columns[col]==(col==8 || col==9 || col==17 || col==18));
     // Even eviction from the 20-game cache or an empty response cannot hide the open card.
     g_store.historyCount=0;screen_geschichte_refresh();
     assert(table.rows[1][19]=="23" && !(card.flags&LV_OBJ_FLAG_HIDDEN));
@@ -175,7 +204,41 @@ int main() {
         g_store.history[0]=game((Modus)mode,clays,runs);g_store.historyCount=1;
         show_detail(0);assert(table.cols==clays*runs+2 && table.rows.size()==3);
         assert(table.rows[1].back()==std::to_string(g_store.history[0].base.teilnahmen[0].punkte));
+        for(int col=1;col<=clays*runs;++col) {
+            int clay=(col-1)%clays+1;
+            assert(s_doublette_columns[col]==(clays==9 && (clay==8 || clay==9)));
+        }
     }
+    // Custom A/B and E/F pairs, with C/D singles, in both recorded rounds.
+    for(int mode=MODUS_CUSTOM_1;mode<=MODUS_CUSTOM_4;++mode) {
+        auto custom=game((Modus)mode,6,2);
+        const int stands[]={1,1,2,3,4,4};
+        for(int i=0;i<custom.base.ergebnisse_count;++i) {
+            auto &e=custom.base.ergebnisse[i];
+            e.posten=(stands[e.taube-1]-1+(e.spielerId==22 ? 1 : 0)+4*(e.lauf-1))%5+1;
+        }
+        g_store.history[0]=custom;show_detail(0);
+        for(int col=1;col<=12;++col) {
+            int clay=(col-1)%6+1;
+            assert(s_doublette_columns[col]==(clay==1 || clay==2 || clay==5 || clay==6));
+        }
+        assert(!s_doublette_columns[0] && !s_doublette_columns[13]);
+        // Evidence from another player still marks the whole pair if one
+        // player's individual result is missing.
+        for(int i=0;i<custom.base.ergebnisse_count;++i)
+            if(custom.base.ergebnisse[i].spielerId==11 && custom.base.ergebnisse[i].taube==2)
+                custom.base.ergebnisse[i].wiederholt=true;
+        assert(history_scorecard_doublette(&custom,1,1) && history_scorecard_doublette(&custom,1,2));
+    }
+    auto singles=game(MODUS_CUSTOM_4,2,2);
+    for(int i=0;i<singles.base.ergebnisse_count;++i)singles.base.ergebnisse[i].maschine=MASCHINE_H;
+    g_store.history[0]=singles;show_detail(0);
+    for(bool marked:s_doublette_columns)assert(!marked); // H/H singles are not a doublette
+    auto boundary=game(MODUS_CUSTOM_1,1,2);
+    assert(!history_scorecard_doublette(&boundary,1,1) && !history_scorecard_doublette(&boundary,2,1));
+    auto unknown=game(MODUS_CUSTOM_2,2,1);
+    for(int i=0;i<unknown.base.ergebnisse_count;++i)unknown.base.ergebnisse[i].posten=0;
+    assert(!history_scorecard_doublette(&unknown,1,1)); // unknown stand is not pair evidence
     auto fg=game(MODUS_CUSTOM_2,3,2);
     // Array order is irrelevant; identify results by player + run + clay.
     std::swap(fg.base.ergebnisse[0],fg.base.ergebnisse[11]);
@@ -221,18 +284,22 @@ int main() {
     puts("PASS: zero versus missing results; repeated attempts excluded; unordered results mapped; totals and metadata fallback");
     puts("PASS: sync/no-change/reorder/eviction retains open results and scroll; deliberate game selection replaces the scorecard");
     puts("PASS: downloaded clay results retain machine/round/player/shots/repetition; malformed and oversized data rejected before publication");
+    puts("PASS: normal H/H and all Custom A-G doublettes shade both columns across rounds; singles/unknown data/boundaries stay plain");
+    puts("PASS: real draw callback shades headers and player cells only; switching games resets shading; sync keeps the saved pair mask");
 }
 """
 
 if __name__ == "__main__":
     source = (ROOT / "main/ui/screen_geschichte.cpp").read_text()
     functions = "\n".join(fixture.function(source, name) for name in [
-        "static void render_selected_detail", "static void show_detail",
+        "static void scorecard_draw_cb", "static void render_selected_detail", "static void show_detail",
         "static uint32_t history_rows_signature", "static void build_history_rows",
         "static void refresh_selected_history_results",
         "void screen_geschichte_refresh"
     ])
     network = (ROOT / "main/net/http_sync.cpp").read_text()
+    assert "scorecard_draw_cb, LV_EVENT_DRAW_TASK_ADDED" in source
+    assert "LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS" in source
     assert 'strcmp(ms, "HARAKIRI")' in fixture.function(network, "esp_err_t http_fetch_spielhistorie")
     assert "parse_history_results(" in fixture.function(network, "esp_err_t http_fetch_spielhistorie")
     parser = fixture.function(network, "static bool parse_history_results")

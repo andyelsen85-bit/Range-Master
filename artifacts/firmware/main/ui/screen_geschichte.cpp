@@ -25,9 +25,26 @@ static EXT_RAM_BSS_ATTR FinishedGame s_selected_game;
 static bool s_has_selected_game;
 static bool s_history_built;
 static uint32_t s_history_signature;
+static bool s_doublette_columns[MAX_ERGEBNISSE + 2];
 
 #define LIST_W   300
 #define DETAIL_W (DISPLAY_LOGICAL_W - 40 - LIST_W - 16)
+
+static void scorecard_draw_cb(lv_event_t *event)
+{
+    lv_draw_task_t *task = lv_event_get_draw_task(event);
+    if (!task) return;
+    lv_draw_dsc_base_t *base = (lv_draw_dsc_base_t *)lv_draw_task_get_draw_dsc(task);
+    if (!base || base->part != LV_PART_ITEMS || base->id2 >= MAX_ERGEBNISSE + 2 ||
+        !s_doublette_columns[base->id2]) return;
+    lv_draw_fill_dsc_t *fill = lv_draw_task_get_fill_dsc(task);
+    if (fill) {
+        // Muted blue, only slightly lighter than the regular dark cell.
+        // Tint the header and every player's result in both pair columns.
+        fill->color = lv_color_hex(0x1C2B40);
+        fill->opa = LV_OPA_COVER;
+    }
+}
 
 // ── Populate detail panel for game at history index i ────────
 static void render_selected_detail(void)
@@ -39,6 +56,7 @@ static void render_selected_detail(void)
     if (players < 0) players = 0;
     if (players > MAX_SPIELER) players = MAX_SPIELER;
     int result_columns = shape.runs * shape.clays;
+    memset(s_doublette_columns, 0, sizeof(s_doublette_columns));
 
     char hdr[96];
     snprintf(hdr, sizeof(hdr), "%s | %d Spieler | %d %s",
@@ -59,6 +77,8 @@ static void render_selected_detail(void)
         char heading[32];
         history_scorecard_heading(fg, col / shape.clays + 1,
                                   col % shape.clays + 1, heading, sizeof(heading));
+        s_doublette_columns[col + 1] = history_scorecard_doublette(
+            fg, col / shape.clays + 1, col % shape.clays + 1);
         lv_table_set_col_width(s_detail_table, col + 1, 34);
         lv_table_set_cell_value(s_detail_table, 0, col + 1, heading);
     }
@@ -297,7 +317,7 @@ lv_obj_t *screen_geschichte_create(void)
     lv_obj_set_style_border_width(div, 0, 0);
 
     lv_obj_t *legend = lv_label_create(s_detail_card);
-    lv_label_set_text(legend, "Spalten: Maschinen. '-' = nicht gespeichert.\n"
+    lv_label_set_text(legend, "Doubletten blau hinterlegt. '-' = nicht gespeichert.\n"
                               "Lange Folgen seitlich verschieben.");
     lv_obj_set_style_text_font(legend, UI_FONT_12, 0);
     lv_obj_set_style_text_color(legend, lv_color_hex(CLR_MUTED), 0);
@@ -321,6 +341,10 @@ lv_obj_t *screen_geschichte_create(void)
     lv_obj_set_style_text_align(s_detail_table, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);
     lv_obj_set_style_pad_hor(s_detail_table, 2, LV_PART_ITEMS);
     lv_obj_set_style_pad_ver(s_detail_table, 10, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(s_detail_table, lv_color_hex(CLR_CARD), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(s_detail_table, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_add_event_cb(s_detail_table, scorecard_draw_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
+    lv_obj_add_flag(s_detail_table, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
 
     return s_scr;
 }
