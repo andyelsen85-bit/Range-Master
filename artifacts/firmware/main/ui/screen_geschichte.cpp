@@ -297,7 +297,7 @@ lv_obj_t *screen_geschichte_create(void)
     lv_obj_set_style_border_width(div, 0, 0);
 
     lv_obj_t *legend = lv_label_create(s_detail_card);
-    lv_label_set_text(legend, "Spalten: Lauf:Maschine. '-' = nicht gespeichert.\n"
+    lv_label_set_text(legend, "Spalten: Maschinen. '-' = nicht gespeichert.\n"
                               "Lange Folgen seitlich verschieben.");
     lv_obj_set_style_text_font(legend, UI_FONT_12, 0);
     lv_obj_set_style_text_color(legend, lv_color_hex(CLR_MUTED), 0);

@@ -45,12 +45,12 @@ static inline void history_scorecard_heading(const FinishedGame *game, int run,
         const Ergebnis *result = &game->base.ergebnisse[i];
         if (result->lauf == run && result->taube == clay &&
             result->maschine >= MASCHINE_A && result->maschine <= MASCHINE_H) {
-            snprintf(text, capacity, "%d:%c", run, 'A' + result->maschine);
+            snprintf(text, capacity, "%c", 'A' + result->maschine);
             return;
         }
     }
     // Missing records must not invent a machine from today's configuration.
-    snprintf(text, capacity, "%d:%d", run, clay);
+    snprintf(text, capacity, "-");
 }
 
 static inline int history_scorecard_total(const FinishedGame *game, int player)

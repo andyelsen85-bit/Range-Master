@@ -137,7 +137,9 @@ int main() {
     assert(table.rows.size()==3 && table.cols==20 && !(card.flags&LV_OBJ_FLAG_HIDDEN));
     assert(table.rows[1][0]=="Andy" && table.rows[2][0]=="Ben");
     assert(table.rows[1][1]=="1" && table.rows[1][2]=="0" && table.rows[1][19]=="23");
-    assert(table.rows[0][8]=="1:H" && table.rows[0][9]=="1:H" && table.rows[0][19]=="GESAMT");
+    const char *headings[]={"A","B","C","D","E","F","G","H","H","A","B","C","D","E","F","G","H","H"};
+    for(int col=0;col<18;++col)assert(table.rows[0][col+1]==headings[col]);
+    assert(table.rows[0][19]=="GESAMT");
     int width=0;for(int w:table.widths)width+=w;assert(width<=892); // normal scorecard fits detail viewport
     int writes=table_writes,rebuilds=list_rebuilds;
     list.scroll_y=149;viewport.scroll_x=60;viewport.scroll_y=18;
@@ -197,6 +199,9 @@ int main() {
     shape=history_scorecard_shape(&fg);assert(shape.clays*shape.runs<=MAX_ERGEBNISSE);
     g_store.history[0]={};g_store.history[0].spieler_count=1;g_store.historyCount=1;
     show_detail(0);assert(table.cols==2);
+    char unknown_heading[8];
+    history_scorecard_heading(&g_store.history[0],1,1,unknown_heading,sizeof(unknown_heading));
+    assert(std::string(unknown_heading)=="-");
     FinishedGame downloaded={};cJSON results;results.type=1;
     results.elements={shot(),shot(true)};
     assert(parse_history_results(&results,&downloaded) && downloaded.base.ergebnisse_count==2);
