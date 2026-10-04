@@ -20,6 +20,9 @@
 #include "offline_cache.h"
 
 static const char *TAG = "http_sync";
+// One live history read after boot upgrades old caches that stored totals
+// but discarded clay records, without changing/erasing the FAT layout.
+static bool s_history_results_loaded;
 
 #define HTTP_BUF_SIZE  (32 * 1024)
 static portMUX_TYPE s_error_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -1123,16 +1126,60 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
 }
 
 // ── http_fetch_spielhistorie ───────────────────────────────────
+static bool parse_history_results(cJSON *results, FinishedGame *game)
+{
+    // Older/imported games may legitimately have totals only.
+    if (!results) return true;
+    if (!cJSON_IsArray(results) || cJSON_GetArraySize(results) > MAX_ERGEBNISSE) return false;
+    game->base.ergebnisse_count = 0;
+    cJSON *item;
+    cJSON_ArrayForEach(item, results) {
+        cJSON *sid = cJSON_GetObjectItemCaseSensitive(item, "spielerId");
+        cJSON *run = cJSON_GetObjectItemCaseSensitive(item, "lauf");
+        cJSON *clay = cJSON_GetObjectItemCaseSensitive(item, "taube");
+        cJSON *machine = cJSON_GetObjectItemCaseSensitive(item, "maschine");
+        cJSON *points = cJSON_GetObjectItemCaseSensitive(item, "punkte");
+        cJSON *post = cJSON_GetObjectItemCaseSensitive(item, "posten");
+        cJSON *shot1 = cJSON_GetObjectItemCaseSensitive(item, "schuss1");
+        cJSON *shot2 = cJSON_GetObjectItemCaseSensitive(item, "schuss2");
+        cJSON *repeated = cJSON_GetObjectItemCaseSensitive(item, "wiederholt");
+        cJSON *numbers[] = {sid, run, clay, points, post};
+        for (cJSON *number : numbers)
+            if (!cJSON_IsNumber(number) || number->valuedouble != number->valueint) return false;
+        if (!sid->valueint || run->valueint < 1 || run->valueint > MAX_ERGEBNISSE ||
+            clay->valueint < 1 || clay->valueint > MAX_SEQUENZ ||
+            points->valueint < 0 || points->valueint > 4 ||
+            !cJSON_IsString(machine) || !machine->valuestring[0] || machine->valuestring[1] ||
+            machine->valuestring[0] < 'A' || machine->valuestring[0] > 'H' ||
+            !cJSON_IsBool(shot1) || !cJSON_IsBool(shot2) ||
+            (repeated && !cJSON_IsBool(repeated))) return false;
+        Ergebnis *result = &game->base.ergebnisse[game->base.ergebnisse_count++];
+        result->spielerId = sid->valueint;
+        result->lauf = run->valueint;
+        result->taube = clay->valueint;
+        result->maschine = (Maschine)(machine->valuestring[0] - 'A');
+        result->posten = post->valueint;
+        result->schuss1 = cJSON_IsTrue(shot1);
+        result->schuss2 = cJSON_IsTrue(shot2);
+        result->punkte = points->valueint;
+        result->wiederholt = repeated && cJSON_IsTrue(repeated);
+    }
+    return true;
+}
+
 esp_err_t http_fetch_spielhistorie(void)
 {
-    char *resp = (char *)malloc(HTTP_BUF_SIZE);
+    // Up to 20 games × 200 clay records exceed the general 32 KiB buffer.
+    // Keep the bounded large response in PSRAM, outside the UI commit window.
+    const size_t response_capacity = 1024 * 1024;
+    char *resp = (char *)heap_caps_malloc(response_capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!resp) return ESP_ERR_NO_MEM;
 
-    esp_err_t err = http_get_json("/api/sync/spiele?limit=20", resp, HTTP_BUF_SIZE);
-    if (err != ESP_OK) { free(resp); return err; }
+    esp_err_t err = http_get_json("/api/sync/spiele?limit=20", resp, response_capacity);
+    if (err != ESP_OK) { heap_caps_free(resp); return err; }
 
     cJSON *root = cJSON_Parse(resp);
-    free(resp);
+    heap_caps_free(resp);
     if (!root) return ESP_ERR_INVALID_RESPONSE;
 
     cJSON *arr = cJSON_GetObjectItem(root, "spiele");
@@ -1165,6 +1212,7 @@ esp_err_t http_fetch_spielhistorie(void)
         if (jmodus && cJSON_IsString(jmodus)) {
             const char *ms = jmodus->valuestring;
             if      (strcmp(ms, "NORMAL")   == 0) fg->base.modus = MODUS_NORMAL;
+            else if (strcmp(ms, "HARAKIRI") == 0) fg->base.modus = MODUS_HARAKIRI;
             else if (strcmp(ms, "CUSTOM_1") == 0) fg->base.modus = MODUS_CUSTOM_1;
             else if (strcmp(ms, "CUSTOM_2") == 0) fg->base.modus = MODUS_CUSTOM_2;
             else if (strcmp(ms, "CUSTOM_3") == 0) fg->base.modus = MODUS_CUSTOM_3;
@@ -1205,6 +1253,12 @@ esp_err_t http_fetch_spielhistorie(void)
             }
         }
 
+        if (!parse_history_results(cJSON_GetObjectItemCaseSensitive(item, "ergebnisse"), fg)) {
+            cJSON_Delete(root);
+            heap_caps_free(staged);
+            set_http_error("GET", "/api/sync/spiele", "Ungültige Einzelergebnisse im Spielverlauf");
+            return ESP_ERR_INVALID_RESPONSE;
+        }
         count++;
     }
 
@@ -2079,9 +2133,13 @@ static esp_err_t http_sync_all_impl(void)
     esp_err_t err = http_push_pending_games();
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
-    bool pull_history = manifest_changed(&manifest, OFFLINE_CACHE_HISTORY) || (had_games && err == ESP_OK);
+    bool pull_history = !s_history_results_loaded ||
+                        manifest_changed(&manifest, OFFLINE_CACHE_HISTORY) || (had_games && err == ESP_OK);
     err = pull_history ? http_fetch_spielhistorie() : ESP_OK;
-    if (pull_history && err == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_HISTORY);
+    if (pull_history && err == ESP_OK) {
+        s_history_results_loaded = true;
+        commit_manifest_token(&manifest, OFFLINE_CACHE_HISTORY);
+    }
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
     // Pull today's credit totals (non-critical — portal grants appear on terminal)

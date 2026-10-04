@@ -3,12 +3,14 @@
 // ============================================================
 #include <stdio.h>
 #include <string.h>
+#include "esp_attr.h"
 #include "lvgl.h"
 #include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_geschichte.h"
 #include "ui_time_fmt.h"
+#include "history_scorecard.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_list;
@@ -19,19 +21,29 @@ static lv_obj_t *s_detail_card;
 static lv_obj_t *s_detail_hdr;    // "Game N - Mode"
 static lv_obj_t *s_detail_date;
 static lv_obj_t *s_detail_table;  // player results table
+static EXT_RAM_BSS_ATTR FinishedGame s_selected_game;
+static bool s_has_selected_game;
+static bool s_history_built;
+static uint32_t s_history_signature;
 
-#define LIST_W   740
+#define LIST_W   300
 #define DETAIL_W (DISPLAY_LOGICAL_W - 40 - LIST_W - 16)
 
 // ── Populate detail panel for game at history index i ────────
-static void show_detail(int idx)
+static void render_selected_detail(void)
 {
-    if (idx < 0 || idx >= g_store.historyCount) return;
-    const FinishedGame *fg = &g_store.history[idx];
+    if (!s_has_selected_game) return;
+    const FinishedGame *fg = &s_selected_game;
+    HistoryScorecardShape shape = history_scorecard_shape(fg);
+    int players = fg->spieler_count;
+    if (players < 0) players = 0;
+    if (players > MAX_SPIELER) players = MAX_SPIELER;
+    int result_columns = shape.runs * shape.clays;
 
-    char hdr[64];
-    snprintf(hdr, sizeof(hdr), "%s  |  %d SPIELER",
-             modus_label(fg->base.modus), fg->spieler_count);
+    char hdr[96];
+    snprintf(hdr, sizeof(hdr), "%s | %d Spieler | %d %s",
+             modus_label(fg->base.modus), players, shape.runs,
+             shape.runs == 1 ? "Lauf" : "Läufe");
     lv_label_set_text(s_detail_hdr, hdr);
     {   // UTC → local time (CET/CEST), formatted as "DD.MM.YYYY HH:MM"
         char ts_disp[24];
@@ -39,34 +51,64 @@ static void show_detail(int idx)
         lv_label_set_text(s_detail_date, ts_disp[0] ? ts_disp : "-");
     }
 
-    // Fill player table (row 0 = header)
-    lv_table_set_row_cnt(s_detail_table, fg->spieler_count + 1);
+    lv_table_set_col_cnt(s_detail_table, result_columns + 2);
+    lv_table_set_row_cnt(s_detail_table, players + 1);
+    lv_table_set_col_width(s_detail_table, 0, 150);
     lv_table_set_cell_value(s_detail_table, 0, 0, "SPIELER");
-    lv_table_set_cell_value(s_detail_table, 0, 1, "STAND");
-    lv_table_set_cell_value(s_detail_table, 0, 2, "PKT");
+    for (int col = 0; col < result_columns; ++col) {
+        char heading[32];
+        history_scorecard_heading(fg, col / shape.clays + 1,
+                                  col % shape.clays + 1, heading, sizeof(heading));
+        lv_table_set_col_width(s_detail_table, col + 1, 34);
+        lv_table_set_cell_value(s_detail_table, 0, col + 1, heading);
+    }
+    int total_col = result_columns + 1;
+    lv_table_set_col_width(s_detail_table, total_col, 76);
+    lv_table_set_cell_value(s_detail_table, 0, total_col, "GESAMT");
 
-    // Build per-player totals from teilnahmen
-    for (int p = 0; p < fg->spieler_count; p++) {
+    for (int p = 0; p < players; p++) {
         int sid = fg->spielerIds[p];
-        int pts = 0, posten = 0;
-        for (int t = 0; t < fg->base.teilnahmen_count; t++) {
-            if (fg->base.teilnahmen[t].spielerId == sid) {
-                pts    = fg->base.teilnahmen[t].punkte;
-                posten = fg->base.teilnahmen[t].startPosten;
-                break;
-            }
-        }
-        char pp[8], ps[8];
-        snprintf(pp, sizeof(pp), "P%d", posten);
-        snprintf(ps, sizeof(ps), "%d", pts);
         lv_table_set_cell_value(s_detail_table, p + 1, 0, fg->spielerNamen[p]);
         lv_table_set_cell_ctrl(s_detail_table, p + 1, 0,
                                LV_TABLE_CELL_CTRL_TEXT_CROP);
-        lv_table_set_cell_value(s_detail_table, p + 1, 1, pp);
-        lv_table_set_cell_value(s_detail_table, p + 1, 2, ps);
+        for (int col = 0; col < result_columns; ++col) {
+            const Ergebnis *result = history_scorecard_result(
+                fg, sid, col / shape.clays + 1, col % shape.clays + 1);
+            char score[16];
+            if (result) snprintf(score, sizeof(score), "%d", result->punkte);
+            else snprintf(score, sizeof(score), "-");
+            lv_table_set_cell_value(s_detail_table, p + 1, col + 1, score);
+        }
+        char total[16];
+        snprintf(total, sizeof(total), "%d", history_scorecard_total(fg, sid));
+        lv_table_set_cell_value(s_detail_table, p + 1, total_col, total);
     }
 
     lv_obj_clear_flag(s_detail_card, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_detail(int idx)
+{
+    if (idx < 0 || idx >= g_store.historyCount) return;
+    // Immutable, player-named snapshot: never retain an index/pointer into the
+    // cache that sync can reorder, replace or evict while this card is open.
+    s_selected_game = g_store.history[idx];
+    s_has_selected_game = true;
+    lv_obj_scroll_to_x(lv_obj_get_parent(s_detail_table), 0, LV_ANIM_OFF);
+    lv_obj_scroll_to_y(lv_obj_get_parent(s_detail_table), 0, LV_ANIM_OFF);
+    render_selected_detail();
+}
+
+static uint32_t history_rows_signature(void)
+{
+    uint32_t hash = 2166136261u;
+    int count = g_store.historyCount;
+    if (count < 0) count = 0;
+    if (count > MAX_HISTORY) count = MAX_HISTORY;
+    const unsigned char *bytes = (const unsigned char *)g_store.history;
+    for (size_t i = 0; i < (size_t)count * sizeof(FinishedGame); ++i)
+        hash = (hash ^ bytes[i]) * 16777619u;
+    return hash ^ (uint32_t)count;
 }
 
 // ── Build list rows ───────────────────────────────────────────
@@ -74,10 +116,10 @@ static void build_history_rows(void)
 {
     lv_obj_clean(s_list);
     lv_obj_add_flag(s_lbl_empty, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_detail_card, LV_OBJ_FLAG_HIDDEN);
+    if (!s_has_selected_game) lv_obj_add_flag(s_detail_card, LV_OBJ_FLAG_HIDDEN);
 
     if (g_store.historyCount == 0) {
-        lv_obj_clear_flag(s_lbl_empty, LV_OBJ_FLAG_HIDDEN);
+        if (!s_has_selected_game) lv_obj_clear_flag(s_lbl_empty, LV_OBJ_FLAG_HIDDEN);
         return;
     }
 
@@ -112,7 +154,7 @@ static void build_history_rows(void)
 
         // Row button — clicking opens detail panel
         lv_obj_t *btn = lv_list_add_btn(s_list, NULL, "");
-        lv_obj_set_height(btn, 60);
+        lv_obj_set_height(btn, 92);
         lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_CARD), 0);
         lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
         lv_obj_set_style_border_color(btn, lv_color_hex(CLR_BORDER), 0);
@@ -123,9 +165,9 @@ static void build_history_rows(void)
 
         // Remove default label LVGL adds - use our own layout
         lv_obj_clean(btn);
-        lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
         lv_obj_t *ts_lbl = lv_label_create(btn);
         {   // UTC → local time (CET/CEST), formatted as "DD.MM.YYYY HH:MM"
@@ -135,13 +177,16 @@ static void build_history_rows(void)
         }
         lv_obj_set_style_text_font(ts_lbl, UI_FONT_12, 0);
         lv_obj_set_style_text_color(ts_lbl, lv_color_hex(CLR_MUTED), 0);
-        lv_obj_set_width(ts_lbl, 170);
+        lv_obj_set_width(ts_lbl, LIST_W - 32);
 
         lv_obj_t *mode_lbl = lv_label_create(btn);
-        lv_label_set_text(mode_lbl, modus_label(fg->base.modus));
+        char mode_text[64];
+        snprintf(mode_text, sizeof(mode_text), "%s | %d Spieler",
+                 modus_label(fg->base.modus), fg->spieler_count);
+        lv_label_set_text(mode_lbl, mode_text);
         lv_obj_set_style_text_font(mode_lbl, UI_FONT_16, 0);
         lv_obj_set_style_text_color(mode_lbl, lv_color_hex(CLR_PRIMARY), 0);
-        lv_obj_set_width(mode_lbl, 110);
+        lv_obj_set_width(mode_lbl, LIST_W - 32);
 
         char w_buf[80];
         snprintf(w_buf, sizeof(w_buf), LV_SYMBOL_CHARGE " %s  %dPKT",
@@ -151,15 +196,7 @@ static void build_history_rows(void)
         lv_obj_set_style_text_font(win_lbl, UI_FONT_14, 0);
         lv_obj_set_style_text_color(win_lbl, lv_color_hex(CLR_TEXT), 0);
         lv_label_set_long_mode(win_lbl, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(win_lbl, 0);
-        lv_obj_set_flex_grow(win_lbl, 1);
-
-        char p_buf[16];
-        snprintf(p_buf, sizeof(p_buf), "%d " LV_SYMBOL_LIST, fg->spieler_count);
-        lv_obj_t *p_lbl = lv_label_create(btn);
-        lv_label_set_text(p_lbl, p_buf);
-        lv_obj_set_style_text_font(p_lbl, UI_FONT_14, 0);
-        lv_obj_set_style_text_color(p_lbl, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_width(win_lbl, LIST_W - 32);
 
         // Click handler — pass absolute history index so show_detail() finds the right game
         lv_obj_add_event_cb(btn, [](lv_event_t *ev) {
@@ -171,6 +208,7 @@ static void build_history_rows(void)
 
 lv_obj_t *screen_geschichte_create(void)
 {
+    s_history_built = false;
     s_scr = lv_obj_create(NULL);
     lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
     screen_base_init(s_scr);   // dark bg, opaque, non-scrollable
@@ -258,23 +296,66 @@ lv_obj_t *screen_geschichte_create(void)
     lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(div, 0, 0);
 
-    // Player results table
-    s_detail_table = lv_table_create(s_detail_card);
-    lv_obj_set_width(s_detail_table, LV_PCT(100));
-    lv_table_set_col_cnt(s_detail_table, 3);
-    lv_table_set_col_width(s_detail_table, 0, DETAIL_W - 32 - 60 - 60);
-    lv_table_set_col_width(s_detail_table, 1, 60);
-    lv_table_set_col_width(s_detail_table, 2, 60);
+    lv_obj_t *legend = lv_label_create(s_detail_card);
+    lv_label_set_text(legend, "Spalten: Lauf:Maschine. '-' = nicht gespeichert.\n"
+                              "Lange Folgen seitlich verschieben.");
+    lv_obj_set_style_text_font(legend, UI_FONT_12, 0);
+    lv_obj_set_style_text_color(legend, lv_color_hex(CLR_MUTED), 0);
+    lv_obj_set_width(legend, LV_PCT(100));
+
+    // Independent scrolling surface: sync never recreates this table or
+    // changes its horizontal/vertical position.
+    lv_obj_t *score_view = lv_obj_create(s_detail_card);
+    lv_obj_set_width(score_view, LV_PCT(100));
+    lv_obj_set_flex_grow(score_view, 1);
+    lv_obj_set_style_pad_all(score_view, 0, 0);
+    lv_obj_set_style_bg_color(score_view, lv_color_hex(CLR_CARD), 0);
+    lv_obj_set_style_border_width(score_view, 0, 0);
+    lv_obj_set_scroll_dir(score_view, LV_DIR_ALL);
+    s_detail_table = lv_table_create(score_view);
+    lv_obj_set_width(s_detail_table, LV_SIZE_CONTENT);
     lv_obj_set_style_text_font(s_detail_table, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_detail_table, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_bg_color(s_detail_table, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_color(s_detail_table, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_text_align(s_detail_table, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);
+    lv_obj_set_style_pad_hor(s_detail_table, 2, LV_PART_ITEMS);
+    lv_obj_set_style_pad_ver(s_detail_table, 10, LV_PART_ITEMS);
 
     return s_scr;
+}
+
+static void refresh_selected_history_results(void)
+{
+    if (!s_has_selected_game || !s_selected_game.base.externalId[0] ||
+        s_selected_game.base.ergebnisse_count != 0) return;
+    for (int i = 0; i < g_store.historyCount && i < MAX_HISTORY; ++i) {
+        const FinishedGame *game = &g_store.history[i];
+        if (strcmp(game->base.externalId, s_selected_game.base.externalId) ||
+            game->base.ergebnisse_count <= s_selected_game.base.ergebnisse_count) continue;
+        // Enrich an old totals-only cache, never downgrade an open scorecard
+        // or replace its player rows because the portal's name map reordered.
+        memcpy(s_selected_game.base.ergebnisse, game->base.ergebnisse,
+               sizeof(s_selected_game.base.ergebnisse));
+        s_selected_game.base.ergebnisse_count = game->base.ergebnisse_count;
+        s_selected_game.base.lauf = game->base.lauf;
+        s_selected_game.base.taubenProLauf = game->base.taubenProLauf;
+        s_selected_game.base.modus = game->base.modus;
+        render_selected_detail();
+        return;
+    }
 }
 
 void screen_geschichte_refresh(void)
 {
     if (!s_list) return;
+    uint32_t signature = history_rows_signature();
+    if (s_history_built && signature == s_history_signature) return;
+    refresh_selected_history_results();
+    int32_t scroll_y = lv_obj_get_scroll_y(s_list);
+    if (!s_history_built && s_has_selected_game) render_selected_detail();
     build_history_rows();
+    lv_obj_scroll_to_y(s_list, scroll_y, LV_ANIM_OFF);
+    s_history_signature = signature;
+    s_history_built = true;
 }

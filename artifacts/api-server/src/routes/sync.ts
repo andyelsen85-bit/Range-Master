@@ -285,8 +285,8 @@ router.post("/spieler", requireApiKey, async (req, res) => {
   return res.json({ synced, mappings });
 });
 
-async function recentGamesPayload(limit: number) {
-  const recentSpiele = await db
+export async function recentGamesPayload(limit: number, database = db) {
+  const recentSpiele = await database
     .select({
       id: spieleTable.id,
       externalId: spieleTable.externalId,
@@ -305,7 +305,7 @@ async function recentGamesPayload(limit: number) {
 
   const spielIds = recentSpiele.map(s => s.id);
 
-  const teilnahmenRows = await db
+  const teilnahmenRows = await database
     .select()
     .from(spielTeilnahmenTable)
     .where(inArray(spielTeilnahmenTable.spielId, spielIds))
@@ -313,9 +313,25 @@ async function recentGamesPayload(limit: number) {
 
   const spielerIds = [...new Set(teilnahmenRows.map(t => t.spielerId))];
   const spielerRows = spielerIds.length > 0
-    ? await db.select({ id: spielerTable.id, name: spielerTable.name }).from(spielerTable).where(inArray(spielerTable.id, spielerIds))
+    ? await database.select({ id: spielerTable.id, name: spielerTable.name }).from(spielerTable).where(inArray(spielerTable.id, spielerIds))
     : [];
   const spielerMap = new Map(spielerRows.map(s => [s.id, s.name]));
+
+  // Bulk-load the immutable clay ledger, not today's configured sequence.
+  // This same payload also feeds the manifest, so result changes invalidate it.
+  const resultRows = await database.select({
+    spielId: ergebnisseTable.spielId, spielerId: ergebnisseTable.spielerId,
+    lauf: ergebnisseTable.lauf, taube: ergebnisseTable.taube,
+    maschine: ergebnisseTable.maschine, posten: ergebnisseTable.posten,
+    schuss1: ergebnisseTable.schuss1, schuss2: ergebnisseTable.schuss2,
+    punkte: ergebnisseTable.punkte, wiederholt: ergebnisseTable.wiederholt,
+  }).from(ergebnisseTable).where(inArray(ergebnisseTable.spielId, spielIds))
+    .orderBy(ergebnisseTable.spielId, ergebnisseTable.id);
+  const resultsByGame = new Map<number, typeof resultRows>();
+  for (const result of resultRows) {
+    if (!resultsByGame.has(result.spielId)) resultsByGame.set(result.spielId, []);
+    resultsByGame.get(result.spielId)!.push(result);
+  }
 
   const teilnahmenBySpiel = new Map<number, typeof teilnahmenRows>();
   for (const t of teilnahmenRows) {
@@ -337,6 +353,7 @@ async function recentGamesPayload(limit: number) {
       confirmedLaunches: s.confirmedLaunches,
       teilnahmen: teilnahmen.map(t => ({ spielerId: t.spielerId, startPosten: t.startPosten, punkte: t.punkte, lauf: t.lauf })),
       spielerNamen,
+      ergebnisse: (resultsByGame.get(s.id) ?? []).map(({ spielId: _spielId, ...result }) => result),
     };
   });
 

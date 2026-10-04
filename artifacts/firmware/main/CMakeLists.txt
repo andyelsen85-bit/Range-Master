@@ -72,12 +72,14 @@ idf_component_register(
 )
 
 # Keep the existing 0x220000 app slots and storage offsets. These control/UI
-# modules are not display/DMA hot paths; use size optimization here rather than
+# and network modules are not display/DMA hot paths; use size optimization rather than
 # moving partitions or changing the project's performance optimization globally.
 # Per-source options are emitted after the sdkconfig-selected -O2, so this also
 # applies to existing builds without deleting sdkconfig or terminal data.
 set_source_files_properties(
     "ui/screen_einstellungen.cpp"
+    "ui/screen_geschichte.cpp"
+    "net/http_sync.cpp"
     "lora_stub/lora_stub.cpp"
     PROPERTIES COMPILE_OPTIONS "-Os"
 )
