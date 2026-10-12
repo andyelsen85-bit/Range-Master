@@ -682,6 +682,70 @@ paths:
         "409": { description: External payment identifier conflicts }
 
 # ── COMPONENTS ────────────────────────────────────────────────────────────
+  /sync/inventory/state:
+    get:
+      operationId: getInventoryState
+      parameters:
+        - { in: query, name: datum, required: true, schema: { type: string, format: date } }
+      responses:
+        "200": { description: Club inventory and day responsibility, content: { application/json: { schema: { $ref: "#/components/schemas/InventoryState" } } } }
+  /sync/inventory/opening:
+    post:
+      operationId: postInventoryOpening
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/InventoryInput" } } } }
+      responses: { "200": { description: Immutable event accepted or replayed } }
+  /sync/inventory/closing:
+    post:
+      operationId: postInventoryClosing
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/InventoryInput" } } } }
+      responses: { "200": { description: Immutable event accepted or replayed } }
+  /sync/gameday:
+    post:
+      operationId: postGameday
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/GamedayInput" } } } }
+      responses: { "200": { description: Responsibility set replaced } }
+  /admin/daily-report:
+    get:
+      operationId: getDailyReportSettings
+      responses:
+        "200": { description: Settings and sent history, content: { application/json: { schema: { $ref: "#/components/schemas/DailyReportSettings" } } } }
+    put:
+      operationId: updateDailyReportSettings
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DailyReportInput" } } } }
+      responses: { "200": { description: Settings saved } }
+  /admin/daily-report/test:
+    post:
+      operationId: sendTestDailyReport
+      responses: { "200": { description: Latest real report sent with TEST subject } }
+  /admin/daily-report/resend:
+    post:
+      operationId: resendDailyReport
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ReportDateInput" } } } }
+      responses: { "200": { description: Past report resent } }
+  /admin/public-page:
+    get:
+      operationId: getPublicPageSettings
+      responses:
+        "200": { description: Privacy settings, content: { application/json: { schema: { $ref: "#/components/schemas/PublicPageSettings" } } } }
+    put:
+      operationId: updatePublicPageSettings
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PublicPageSettings" } } } }
+      responses:
+        "200": { description: Privacy settings saved, content: { application/json: { schema: { $ref: "#/components/schemas/PublicPageSettings" } } } }
+  /public/last-game:
+    get:
+      operationId: getPublicLastGame
+      responses:
+        "200": { description: Most recently completed scorecard or null, content: { application/json: { schema: { $ref: "#/components/schemas/SharedScorecard" } } } }
+        "404": { description: Public page disabled }
+        "429": { description: Rate limited }
+  /spiele/{id}/scorecard:
+    get:
+      operationId: getSharedScorecard
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: Stored ledger scorecard, content: { application/json: { schema: { $ref: "#/components/schemas/SharedScorecard" } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -694,6 +758,93 @@ components:
       name: x-api-key
 
   schemas:
+    ReportDateInput:
+      type: object
+      required: [datum]
+      properties: { datum: { type: string, format: date } }
+    PublicPageSettings:
+      type: object
+      required: [enabled, nameMode]
+      properties: { enabled: { type: boolean }, nameMode: { type: string, enum: [FULL, INITIAL] } }
+    DailyReportRecipient:
+      type: object
+      required: [email, active]
+      properties: { id: { type: integer }, email: { type: string, format: email }, active: { type: boolean } }
+    DailyReportInput:
+      type: object
+      required: [enabled, recipients]
+      properties:
+        enabled: { type: boolean }
+        recipients: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/DailyReportRecipient" } }
+    DailyReportSettings:
+      allOf:
+        - { $ref: "#/components/schemas/DailyReportInput" }
+        - type: object
+          required: [history]
+          properties:
+            history:
+              type: array
+              items:
+                type: object
+                required: [datum, status, attempts, changed]
+                properties:
+                  datum: { type: string }
+                  status: { type: string }
+                  attempts: { type: integer }
+                  sentAt: { type: [string, "null"] }
+                  error: { type: [string, "null"] }
+                  changed: { type: boolean }
+    InventoryInput:
+      type: object
+      required: [externalId, terminalId, datum, c12, c20]
+      properties:
+        externalId: { type: string }
+        terminalId: { type: string }
+        datum: { type: string, format: date }
+        c12: { type: integer, minimum: 0, maximum: 1000000 }
+        c20: { type: integer, minimum: 0, maximum: 1000000 }
+        takenOver: { type: boolean }
+        note: { type: string, maxLength: 240 }
+    GamedayInput:
+      type: object
+      required: [externalId, terminalId, datum, maitreIds]
+      properties:
+        externalId: { type: string }
+        terminalId: { type: string }
+        datum: { type: string, format: date }
+        maitreIds: { type: array, minItems: 1, maxItems: 4, items: { type: integer } }
+    InventoryState:
+      type: object
+      additionalProperties: true
+    SharedScorecard:
+      type: object
+      required: [date, completedAt, mode, runs, claysPerRun, columns, players]
+      properties:
+        date: { type: string, format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        mode: { type: string }
+        runs: { type: integer }
+        claysPerRun: { type: integer }
+        columns:
+          type: array
+          items:
+            type: object
+            required: [run, clay, machine, pair]
+            properties:
+              run: { type: integer }
+              clay: { type: integer }
+              machine: { type: string }
+              pair: { type: [string, "null"], enum: [start, end, null] }
+        players:
+          type: array
+          items:
+            type: object
+            required: [name, total, runTotals, cells]
+            properties:
+              name: { type: string }
+              total: { type: integer }
+              runTotals: { type: array, items: { type: integer } }
+              cells: { type: array, items: { type: [integer, "null"] } }
     ProductCategory:
       type: string
       enum: [GAME_CREDIT, AMMO_CAL12, AMMO_CAL20, FOOD, DRINK]
@@ -865,6 +1016,27 @@ components:
       type: object
       required: [datum, players, categorySubtotals, productTotals, generalTotalCents, uniquePlayers, paidPlayers, games, completedGames, theoreticalClays, confirmedClays, unconfirmedClays, gameBreakdown]
       properties:
+        ammunition:
+          type: array
+          items:
+            type: object
+            required: [caliber, unit, sold, opening, closing, difference]
+            properties:
+              caliber: { type: integer }
+              unit: { type: string }
+              sold: { type: integer }
+              opening: { type: [integer, "null"] }
+              closing: { type: [integer, "null"] }
+              difference: { type: [integer, "null"] }
+        maitres:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties: { id: { type: integer }, name: { type: string } }
+        openTotalCents: { type: integer }
+        exists: { type: boolean }
+        dataHash: { type: string }
         datum: { type: string, format: date }
         players: { type: array, items: { type: object } }
         categorySubtotals: { type: object, additionalProperties: { type: integer } }
@@ -1088,6 +1260,8 @@ components:
         portalAktiv:
           type: boolean
         isAdmin:
+          type: boolean
+        isMaitreDeTir:
           type: boolean
         createdAt:
           type: string

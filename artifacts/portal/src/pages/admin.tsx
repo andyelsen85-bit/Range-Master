@@ -19,6 +19,7 @@ interface AdminPlayer {
   aktiv: boolean;
   portalAktiv: boolean;
   isAdmin: boolean;
+  isMaitreDeTir?: boolean;
   createdAt: string;
   anzahlSpiele: number;
   durchschnitt: number;
@@ -47,7 +48,7 @@ function useAdminFetch() {
 
 // ─── Form defaults ────────────────────────────────────────────────────────────
 
-const emptyForm = { name: "", email: "", mitgliedNr: "", portalAktiv: false, isAdmin: false, passwort: "" };
+const emptyForm = { name: "", email: "", mitgliedNr: "", portalAktiv: false, isAdmin: false, isMaitreDeTir: false, passwort: "" };
 type PlayerForm = typeof emptyForm;
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -66,7 +67,7 @@ export default function Admin() {
   const [purgeConfirm, setPurgeConfirm] = useState("");
   const [purgeTerminalsStopped, setPurgeTerminalsStopped] = useState(false);
   const [addForm, setAddForm] = useState<PlayerForm>(emptyForm);
-  const [editForm, setEditForm] = useState<Omit<PlayerForm, "passwort">>({ name: "", email: "", mitgliedNr: "", portalAktiv: false, isAdmin: false });
+  const [editForm, setEditForm] = useState<Omit<PlayerForm, "passwort">>({ name: "", email: "", mitgliedNr: "", portalAktiv: false, isAdmin: false, isMaitreDeTir: false });
   const [newPwd, setNewPwd] = useState("");
   const [search, setSearch] = useState("");
 
@@ -101,7 +102,7 @@ export default function Admin() {
 
   const updateMut = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Omit<PlayerForm, "passwort"> }) =>
-      apiFetch(`/api/admin/spieler/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+      apiFetch(`/api/admin/spieler/${id}`, { method: "PUT", body: JSON.stringify({...body,email:body.email.trim()||null,mitgliedNr:body.mitgliedNr.trim()||null}) }),
     onSuccess: () => { invalidate(); setEditPlayer(null); toast({ title: "Spieler aktualisiert" }); },
     onError: (e: Error) => toast({ title: "Fehler", description: e.message, variant: "destructive" }),
   });
@@ -150,7 +151,7 @@ export default function Admin() {
   // ── Open edit dialog ──────────────────────────────────────────────────────
 
   const openEdit = (p: AdminPlayer) => {
-    setEditForm({ name: p.name, email: p.email ?? "", mitgliedNr: p.mitgliedNr ?? "", portalAktiv: p.portalAktiv, isAdmin: p.isAdmin });
+    setEditForm({ name: p.name, email: p.email ?? "", mitgliedNr: p.mitgliedNr ?? "", portalAktiv: p.portalAktiv, isAdmin: p.isAdmin, isMaitreDeTir: !!p.isMaitreDeTir });
     setEditPlayer(p);
   };
 
@@ -255,7 +256,11 @@ export default function Admin() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-center">
-                      {p.isAdmin ? <Shield size={16} className="text-primary mx-auto" /> : <span className="text-muted-foreground/30">–</span>}
+                      <div className="flex items-center justify-center gap-1.5">
+                        {p.isAdmin && <Shield size={16} className="text-primary" aria-label="Admin" />}
+                        {p.isMaitreDeTir && <Badge variant="outline" className="text-amber-400 border-amber-500/30 bg-amber-500/10 text-[10px] font-bold px-1.5" data-testid={`badge-maitre-${p.id}`}>Maître</Badge>}
+                        {!p.isAdmin && !p.isMaitreDeTir && <span className="text-muted-foreground/30">–</span>}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">{p.anzahlSpiele}</TableCell>
                     <TableCell className="text-right font-mono font-bold">{p.durchschnitt.toFixed(1)}</TableCell>
@@ -531,6 +536,7 @@ function PlayerFormFields({
       <div className="flex gap-6 pt-1">
         <Toggle label="Portal aktiv" checked={form.portalAktiv} onToggle={(v) => set("portalAktiv", v)} />
         <Toggle label="Admin" checked={form.isAdmin} onToggle={(v) => set("isAdmin", v)} />
+        <Toggle label="Maître de Tir" checked={!!form.isMaitreDeTir} onToggle={(v) => set("isMaitreDeTir", v)} />
       </div>
     </div>
   );

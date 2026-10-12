@@ -99,6 +99,20 @@ interface DaySummary {
   gameBreakdown: GameClayBreakdown[];
   productTotals: Record<string, DaySummaryProductTotal>;
   players: DaySummaryPlayerBill[];
+  ammunition?: AmmoRow[];
+  maitres?: { id: number; name: string }[];
+  openTotalCents?: number;
+  exists?: boolean;
+  dataHash?: string;
+}
+
+interface AmmoRow {
+  caliber: string | number;
+  unit?: string | null;
+  sold: number | null;
+  opening: number | null;
+  closing: number | null;
+  difference: number | null;
 }
 
 interface ActivityDays {
@@ -296,7 +310,7 @@ export default function AdminOfrechnung() {
     return true;
   });
 
-  const summary = data ?? { generalTotalCents: 0, uniquePlayers: 0, paidPlayers: 0, games: 0, completedGames: 0, theoreticalClays: 0, confirmedClays: 0, unconfirmedClays: 0, gameBreakdown: [], productTotals: {}, players: [] };
+  const summary: DaySummary = data ?? { generalTotalCents: 0, uniquePlayers: 0, paidPlayers: 0, games: 0, completedGames: 0, theoreticalClays: 0, confirmedClays: 0, unconfirmedClays: 0, gameBreakdown: [], productTotals: {}, players: [] };
   const products = Object.values(summary.productTotals || {}) as DaySummaryProductTotal[];
   const selectedDayLines = isSingleDay ? selectedBill?.dayLines ?? selectedBill?.lines ?? [] : selectedBill?.lines ?? [];
   const selectedDayCategories = isSingleDay ? selectedBill?.dayCategorySubtotals ?? selectedBill?.categorySubtotals ?? {} : selectedBill?.categorySubtotals ?? {};
@@ -428,6 +442,59 @@ export default function AdminOfrechnung() {
          <StatCard label="Differenz" value={summary.unconfirmedClays} sub="Ohne bestätigten ACK" icon={CircleDashed} />
          <StatCard label={isSingleDay ? "Rechnungen" : "Spieler"} value={summary.uniquePlayers} sub={`${summary.paidPlayers} vollständig bezahlt`} icon={Receipt} />
       </div>
+
+      {isSingleDay && !isLoading && !error && (
+        <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-5" data-testid="section-munition">
+          <div className="bg-card border border-border/50 rounded-xl overflow-hidden shadow-sm">
+            <div className="px-5 py-4 border-b border-border/40">
+              <h2 className="text-xl font-bold tracking-tight">Munition</h2>
+              <p className="text-xs text-muted-foreground mt-1">Verkauf und Inventar je Kaliber für diesen Tag.</p>
+            </div>
+            <Table>
+              <TableHeader className="bg-secondary/20">
+                <TableRow className="border-border/50 hover:bg-transparent">
+                  <TableHead className="text-xs uppercase tracking-widest font-bold">Kaliber</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Verkauft</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Tagesbeginn</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Tagesschluss</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-widest font-bold">Differenz</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(summary.ammunition && summary.ammunition.length > 0
+                  ? summary.ammunition
+                  : [{ caliber: 12, sold: null, opening: null, closing: null, difference: null }, { caliber: 20, sold: null, opening: null, closing: null, difference: null }] as AmmoRow[]
+                ).map((a) => (
+                  <TableRow key={String(a.caliber)} className="border-border/30 hover:bg-secondary/10" data-testid={`row-ammo-${a.caliber}`}>
+                    <TableCell className="font-bold text-sm">Kal. {a.caliber}{a.unit ? <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">({a.unit})</span> : null}</TableCell>
+                    <TableCell className="text-right"><AmmoValue v={a.sold} /></TableCell>
+                    <TableCell className="text-right"><AmmoValue v={a.opening} /></TableCell>
+                    <TableCell className="text-right"><AmmoValue v={a.closing} /></TableCell>
+                    <TableCell className="text-right"><AmmoValue v={a.difference} signed /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <p className="px-5 py-3 text-[11px] text-muted-foreground border-t border-border/30">
+              Differenz = Tagesbeginn − Verkauf − Tagesschluss. Eine Abweichung ist nur ein Hinweis zum Nachzählen, keine Fehlermeldung.
+            </p>
+          </div>
+          <div className="bg-card border border-border/50 rounded-xl p-5 shadow-sm">
+            <p className="text-xs uppercase tracking-widest font-bold text-muted-foreground">Maître de Tir</p>
+            {summary.maitres && summary.maitres.length > 0 ? (
+              <ul className="mt-3 space-y-2" data-testid="list-maitres">
+                {summary.maitres.map((m) => (
+                  <li key={m.id} className="flex items-center gap-2 text-sm font-bold">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />{m.name}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm italic text-muted-foreground">nicht erfasst</p>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="space-y-4">
         <div>
@@ -787,4 +854,9 @@ export default function AdminOfrechnung() {
       </Dialog>
     </div>
   );
+}
+function AmmoValue({ v, signed }: { v: number | null | undefined; signed?: boolean }) {
+  if (v === null || v === undefined) return <span className="text-xs italic text-muted-foreground/70">nicht erfasst</span>;
+  const text = signed && v > 0 ? `+${v}` : String(v);
+  return <span className={cn("font-mono font-bold", signed && v !== 0 ? "text-foreground/80" : signed ? "text-muted-foreground" : "")}>{text}</span>;
 }

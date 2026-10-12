@@ -16,6 +16,8 @@
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_dashboard.h"
+#include "screen_inventory.h"
+#include "day_inventory.h"
 #include "coprocessor.h"
 #include "lora_stub.h"
 
@@ -31,6 +33,8 @@ static lv_obj_t *s_history_list;
 static lv_obj_t *s_shutdown_modal;
 static lv_obj_t *s_shutdown_message;
 static bool s_shutdown_sync_pending;
+static bool s_skip_inventory;
+static lv_obj_t *s_inventory_warning;
 static uint32_t s_history_signature = UINT32_MAX;
 static CopWifiState s_rendered_wifi_state = (CopWifiState)-1;
 static GatewayReachability s_rendered_gateway_state = (GatewayReachability)-1;
@@ -189,6 +193,10 @@ static void shutdown_confirm_cb(lv_event_t *e)
 static void shutdown_open_cb(lv_event_t *e)
 {
     if (s_shutdown_modal) return;
+    if(!day_inventory_closed_today()&&!s_skip_inventory){
+        screen_inventory_open(true,true);return;
+    }
+    s_skip_inventory=false;
 
     s_shutdown_modal = lv_obj_create(s_scr);
     lv_obj_set_size(s_shutdown_modal, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
@@ -392,6 +400,14 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_font(hist_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(hist_lbl, lv_color_hex(CLR_MUTED), 0);
 
+    lv_obj_t *inventory=lv_button_create(sidebar);
+    lv_obj_add_style(inventory,&g_style_btn_secondary,0);lv_obj_set_size(inventory,SIDEBAR_W-32,54);
+    lv_obj_t *inventory_label=lv_label_create(inventory);lv_label_set_text(inventory_label,"INVENTAR & TAG");
+    lv_obj_set_style_text_font(inventory_label,UI_FONT_14,0);lv_obj_center(inventory_label);
+    lv_obj_add_event_cb(inventory,[](lv_event_t*){screen_inventory_open(false);},LV_EVENT_CLICKED,NULL);
+    s_inventory_warning=lv_label_create(sidebar);lv_label_set_text(s_inventory_warning,"Inventar fehlt");
+    lv_obj_set_style_text_color(s_inventory_warning,lv_color_hex(CLR_WARN),0);
+    lv_obj_set_style_text_font(s_inventory_warning,UI_FONT_14,0);
     // 5. Graceful shutdown: sync first, then put the ESP32 into deep sleep.
     lv_obj_t *shutdown_btn = lv_btn_create(sidebar);
     lv_obj_add_style(shutdown_btn, &g_style_btn_danger, 0);
@@ -623,8 +639,24 @@ void screen_dashboard_refresh(void)
     }
 }
 
+void screen_dashboard_shutdown_without_inventory()
+{
+    s_skip_inventory=true;
+    ui_manager_show(SCREEN_DASHBOARD);
+    shutdown_open_cb(NULL);
+}
+void screen_dashboard_continue_shutdown()
+{
+    ui_manager_show(SCREEN_DASHBOARD);
+    shutdown_open_cb(NULL);
+}
+
 void screen_dashboard_tick(void)
 {
+    if(s_inventory_warning){DayInventory day;day_inventory_snapshot(&day);
+        if(day.hasOpening)lv_obj_add_flag(s_inventory_warning,LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_clear_flag(s_inventory_warning,LV_OBJ_FLAG_HIDDEN);
+    }
     SyncUiState sync_state = {};
     store_get_sync_ui_state(&sync_state);
     if (s_shutdown_sync_pending) {

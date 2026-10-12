@@ -68,7 +68,7 @@ async function gameClaySummary(from: string, to: string) {
     WITH scoped_games AS (
       SELECT id, modus, abgeschlossen, confirmed_launches
       FROM spiele
-      WHERE (datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+      WHERE (datum AT TIME ZONE 'Europe/Luxembourg')::date BETWEEN ${from} AND ${to}
     ), participants AS (
       SELECT st.spiel_id, COUNT(DISTINCT st.spieler_id)::int player_participations
       FROM spiel_teilnahmen st
@@ -132,7 +132,7 @@ export async function dayBillSummary(datum: string) {
       SELECT spieler_id FROM sale_events WHERE datum = ${datum}
       UNION SELECT spieler_id FROM kredit_events WHERE datum = ${datum}
       UNION SELECT st.spieler_id FROM spiel_teilnahmen st
-        JOIN spiele g ON g.id = st.spiel_id WHERE (g.datum AT TIME ZONE 'UTC')::date = ${datum}
+        JOIN spiele g ON g.id = st.spiel_id WHERE (g.datum AT TIME ZONE 'Europe/Luxembourg')::date = ${datum}
       UNION SELECT spieler_id FROM bill_payments WHERE datum = ${datum}
     ), billable_events AS (
       SELECT s.spieler_id, s.product_id, s.product_name, s.product_category AS category,
@@ -170,7 +170,7 @@ export async function dayBillSummary(datum: string) {
       SELECT st.spieler_id, COUNT(DISTINCT g.id)::int games,
         COUNT(DISTINCT g.id) FILTER (WHERE g.abgeschlossen)::int completed_games
       FROM spiel_teilnahmen st JOIN spiele g ON g.id = st.spiel_id
-      WHERE (g.datum AT TIME ZONE 'UTC')::date = ${datum} GROUP BY st.spieler_id
+      WHERE (g.datum AT TIME ZONE 'Europe/Luxembourg')::date = ${datum} GROUP BY st.spieler_id
     )
     SELECT a.spieler_id, sp.name spieler_name, sp.mitglied_nr,
       COALESCE((SELECT jsonb_agg(jsonb_build_object(
@@ -253,9 +253,9 @@ export async function activityDays(from: string, to: string) {
       FROM kredit_events
       WHERE datum BETWEEN ${from} AND ${to}
       UNION
-      SELECT (datum AT TIME ZONE 'UTC')::date AS activity_date
+      SELECT (datum AT TIME ZONE 'Europe/Luxembourg')::date AS activity_date
       FROM spiele
-      WHERE (datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+      WHERE (datum AT TIME ZONE 'Europe/Luxembourg')::date BETWEEN ${from} AND ${to}
       UNION
       SELECT datum AS activity_date
       FROM bill_payments
@@ -279,7 +279,7 @@ export async function periodBillSummary(from: string, to: string) {
       UNION SELECT spieler_id FROM kredit_events WHERE datum BETWEEN ${from} AND ${to}
       UNION SELECT st.spieler_id FROM spiel_teilnahmen st
         JOIN spiele g ON g.id = st.spiel_id
-        WHERE (g.datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+        WHERE (g.datum AT TIME ZONE 'Europe/Luxembourg')::date BETWEEN ${from} AND ${to}
       UNION SELECT spieler_id FROM bill_payments WHERE datum BETWEEN ${from} AND ${to}
     ), billable_events AS (
       SELECT s.spieler_id, s.datum, s.product_id, s.product_name, s.product_category AS category,
@@ -333,7 +333,7 @@ export async function periodBillSummary(from: string, to: string) {
       SELECT st.spieler_id, COUNT(DISTINCT g.id)::int games,
         COUNT(DISTINCT g.id) FILTER (WHERE g.abgeschlossen)::int completed_games
       FROM spiel_teilnahmen st JOIN spiele g ON g.id = st.spiel_id
-      WHERE (g.datum AT TIME ZONE 'UTC')::date BETWEEN ${from} AND ${to}
+      WHERE (g.datum AT TIME ZONE 'Europe/Luxembourg')::date BETWEEN ${from} AND ${to}
       GROUP BY st.spieler_id
     )
     SELECT a.spieler_id, sp.name spieler_name, sp.mitglied_nr,

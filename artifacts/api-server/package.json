@@ -8,9 +8,10 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx/esm --test src/routes/rangliste-compute.test.ts src/routes/spieler.test.ts src/routes/admin-purge.test.ts src/routes/sync-history.test.ts src/lib/bills.test.ts src/lib/immutable-events.test.ts src/lib/sync-manifest.test.ts src/lib/terminal-config.test.ts"
+    "test": "node --import tsx/esm --test src/routes/rangliste-compute.test.ts src/routes/spieler.test.ts src/routes/admin-purge.test.ts src/routes/sync-history.test.ts src/lib/bills.test.ts src/lib/immutable-events.test.ts src/lib/sync-manifest.test.ts src/lib/terminal-config.test.ts src/lib/gameday.test.ts"
   },
   "dependencies": {
+    "@workspace/scorecard": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "bcryptjs": "^3.0.3",

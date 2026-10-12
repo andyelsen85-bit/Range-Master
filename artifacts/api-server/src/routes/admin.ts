@@ -9,6 +9,7 @@ import { z } from "zod";
 import { catalogue, daySalesReport, ensureSystemProducts } from "../lib/products";
 import { createRestoreCode, hashRestoreCode } from "../lib/terminal-config";
 import { activityDays, billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSettlement, periodBillSummary } from "../lib/bills";
+import { buildDailyReport } from "../lib/daily-report";
 
 const router = Router();
 
@@ -109,6 +110,7 @@ router.get("/spieler", async (_req, res) => {
       aktiv: spielerTable.aktiv,
       portalAktiv: spielerTable.portalAktiv,
       isAdmin: spielerTable.isAdmin,
+      isMaitreDeTir: spielerTable.isMaitreDeTir,
       createdAt: spielerTable.createdAt,
     })
     .from(spielerTable)
@@ -153,6 +155,7 @@ router.post("/spieler", async (req, res) => {
     email: z.string().email().optional().or(z.literal("")).transform((v) => v || null),
     portalAktiv: z.boolean().default(false),
     isAdmin: z.boolean().default(false),
+    isMaitreDeTir: z.boolean().default(false),
     passwort: z.string().min(6).optional(),
   });
   const body = schema.parse(req.body);
@@ -180,6 +183,7 @@ router.post("/spieler", async (req, res) => {
       mitgliedNr,
       portalAktiv: body.passwort ? true : body.portalAktiv,
       isAdmin: body.isAdmin,
+      isMaitreDeTir: body.isMaitreDeTir,
       passwortHash,
     })
     .returning();
@@ -191,22 +195,24 @@ router.post("/spieler", async (req, res) => {
 router.put("/spieler/:id", async (req, res) => {
   const id = Number(req.params.id);
   const schema = z.object({
-    name: z.string().min(1),
+    name: z.string().min(1).optional(),
     email: z.string().email().nullable().optional(),
     mitgliedNr: z.string().nullable().optional(),
-    portalAktiv: z.boolean(),
-    isAdmin: z.boolean(),
-  });
+    portalAktiv: z.boolean().optional(),
+    isAdmin: z.boolean().optional(),
+    isMaitreDeTir: z.boolean().optional(),
+  }).refine(body=>Object.values(body).some(value=>value!==undefined),"Mindestens ein Feld muss angegeben werden");
   const body = schema.parse(req.body);
 
   const [updated] = await db
     .update(spielerTable)
     .set({
       name: body.name,
-      email: body.email ?? null,
-      mitgliedNr: body.mitgliedNr ?? null,
+      email: body.email,
+      mitgliedNr: body.mitgliedNr,
       portalAktiv: body.portalAktiv,
       isAdmin: body.isAdmin,
+      isMaitreDeTir: body.isMaitreDeTir,
     })
     .where(eq(spielerTable.id, id))
     .returning();
@@ -717,7 +723,7 @@ router.get("/sales", async (req, res): Promise<void> => {
 router.get("/bills/day-summary", async (req, res) => {
   const datum = day.safeParse(req.query.datum);
   if (!datum.success) return res.status(400).json({ error: "datum must be YYYY-MM-DD" });
-  return res.json(await dayBillSummary(datum.data));
+  return res.json(await buildDailyReport(datum.data));
 });
 
 router.get("/bills/activity-days", async (req, res) => {

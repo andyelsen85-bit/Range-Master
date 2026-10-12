@@ -26,12 +26,16 @@ const char *modus_label(Modus mode) {
 }
 struct lv_draw_dsc_base_t { int part; uint32_t id1,id2; };
 struct lv_draw_fill_dsc_t { int color,opa; };
+using lv_border_side_t=int;
+constexpr int LV_BORDER_SIDE_LEFT=1,LV_BORDER_SIDE_RIGHT=2,LV_STATE_PRESSED=1;
+struct lv_draw_border_dsc_t { int side; };
 struct lv_draw_task_t { lv_draw_dsc_base_t base; lv_draw_fill_dsc_t *fill; };
 struct lv_event_t { void *data; lv_draw_task_t *task=nullptr; };
 constexpr int LV_PART_ITEMS=1;
 lv_draw_task_t *lv_event_get_draw_task(lv_event_t *e) { return e->task; }
 void *lv_draw_task_get_draw_dsc(lv_draw_task_t *task) { return &task->base; }
 lv_draw_fill_dsc_t *lv_draw_task_get_fill_dsc(lv_draw_task_t *task) { return task->fill; }
+lv_draw_border_dsc_t *lv_draw_task_get_border_dsc(lv_draw_task_t *) { return nullptr; }
 struct lv_obj_t {
     std::string label; std::vector<std::vector<std::string>> rows;
     std::vector<int> widths; std::vector<lv_obj_t*> children;
@@ -72,7 +76,7 @@ cJSON *shot(bool repeated=false) {
 static FinishedGame s_selected_game;
 static bool s_has_selected_game, s_history_built;
 static uint32_t s_history_signature;
-static bool s_doublette_columns[MAX_ERGEBNISSE+2];
+void lv_obj_set_style_text_color(lv_obj_t*,int,int){}
 static lv_obj_t *s_list, *s_lbl_empty, *s_detail_card, *s_detail_hdr, *s_detail_date, *s_detail_table;
 int table_writes=0, list_rebuilds=0;
 void lv_label_set_text(lv_obj_t *o,const char *text) { o->label=text; }
@@ -151,15 +155,15 @@ int main() {
     for(int col=0;col<18;++col)assert(table.rows[0][col+1]==headings[col]);
     assert(table.rows[0][19]=="GESAMT");
     for(int col=0;col<20;++col)
-        assert(s_doublette_columns[col]==(col==8 || col==9 || col==17 || col==18));
+        assert((s_scorecard_state.pair[col]!=0)==(col==8 || col==9 || col==17 || col==18));
     // Actual draw callback: shade both headers and player cells, but never
     // names, totals, singles, labels/borders or unrelated drawing parts.
     for(int row=0;row<3;++row)for(int col=0;col<20;++col) {
         lv_draw_fill_dsc_t fill{CLR_CARD,17};
         lv_draw_task_t task{{LV_PART_ITEMS,(uint32_t)row,(uint32_t)col},&fill};
         lv_event_t event{nullptr,&task};scorecard_draw_cb(&event);
-        assert(fill.color==(s_doublette_columns[col] ? 0x1C2B40 : CLR_CARD));
-        assert(fill.opa==(s_doublette_columns[col] ? LV_OPA_COVER : 17));
+        assert(fill.color==(s_scorecard_state.pair[col] ? 0x343C49 : CLR_CARD));
+        assert(fill.opa==(s_scorecard_state.pair[col] ? LV_OPA_COVER : 17));
     }
     lv_draw_fill_dsc_t ignored_fill{CLR_CARD,17};
     lv_draw_task_t other_part{{0,0,8},&ignored_fill};lv_event_t other_event{nullptr,&other_part};
@@ -178,7 +182,7 @@ int main() {
     assert(table_writes==writes && table.rows[1][19]=="23" && !(card.flags&LV_OBJ_FLAG_HIDDEN));
     assert(list.scroll_y==149 && viewport.scroll_x==60 && viewport.scroll_y==18);
     for(int col=0;col<20;++col)
-        assert(s_doublette_columns[col]==(col==8 || col==9 || col==17 || col==18));
+        assert((s_scorecard_state.pair[col]!=0)==(col==8 || col==9 || col==17 || col==18));
     // Even eviction from the 20-game cache or an empty response cannot hide the open card.
     g_store.historyCount=0;screen_geschichte_refresh();
     assert(table.rows[1][19]=="23" && !(card.flags&LV_OBJ_FLAG_HIDDEN));
@@ -206,7 +210,7 @@ int main() {
         assert(table.rows[1].back()==std::to_string(g_store.history[0].base.teilnahmen[0].punkte));
         for(int col=1;col<=clays*runs;++col) {
             int clay=(col-1)%clays+1;
-            assert(s_doublette_columns[col]==(clays==9 && (clay==8 || clay==9)));
+            assert((s_scorecard_state.pair[col]!=0)==(clays==9 && (clay==8 || clay==9)));
         }
     }
     // Custom A/B and E/F pairs, with C/D singles, in both recorded rounds.
@@ -220,9 +224,9 @@ int main() {
         g_store.history[0]=custom;show_detail(0);
         for(int col=1;col<=12;++col) {
             int clay=(col-1)%6+1;
-            assert(s_doublette_columns[col]==(clay==1 || clay==2 || clay==5 || clay==6));
+            assert((s_scorecard_state.pair[col]!=0)==(clay==1 || clay==2 || clay==5 || clay==6));
         }
-        assert(!s_doublette_columns[0] && !s_doublette_columns[13]);
+        assert(!s_scorecard_state.pair[0] && !s_scorecard_state.pair[13]);
         // Evidence from another player still marks the whole pair if one
         // player's individual result is missing.
         for(int i=0;i<custom.base.ergebnisse_count;++i)
@@ -233,7 +237,7 @@ int main() {
     auto singles=game(MODUS_CUSTOM_4,2,2);
     for(int i=0;i<singles.base.ergebnisse_count;++i)singles.base.ergebnisse[i].maschine=MASCHINE_H;
     g_store.history[0]=singles;show_detail(0);
-    for(bool marked:s_doublette_columns)assert(!marked); // H/H singles are not a doublette
+    for(uint8_t marked:s_scorecard_state.pair)assert(!marked); // H/H singles are not a doublette
     auto boundary=game(MODUS_CUSTOM_1,1,2);
     assert(!history_scorecard_doublette(&boundary,1,1) && !history_scorecard_doublette(&boundary,2,1));
     auto unknown=game(MODUS_CUSTOM_2,2,1);
@@ -305,8 +309,10 @@ if __name__ == "__main__":
     parser = fixture.function(network, "static bool parse_history_results")
     with tempfile.TemporaryDirectory(prefix="tm-history-scorecard-") as directory:
         path = Path(directory)
-        (path / "test.cpp").write_text(STUBS + STYLES + parser + functions + MAIN)
+        (path / "test.cpp").write_text(STUBS + STYLES + '#include "scorecard_render.h"\nstatic ScorecardRenderState s_scorecard_state;\n' + parser + functions + MAIN)
+        (path / "lvgl.h").write_text("#pragma once\n")
         subprocess.run(["g++", "-std=c++17", "-Os", "-Wall", "-Wextra", "-Werror",
+                        "-I", str(path),
                         "-I", str(ROOT / "main/ui"), "-I", str(ROOT / "main/store"),
                         str(path / "test.cpp"), "-o", str(path / "test")], check=True)
         subprocess.run([str(path / "test")], check=True)

@@ -22,6 +22,7 @@
 #include "cJSON.h"
 
 #include "game_store.h"
+#include "day_inventory.h"
 #include "payment_receipts.h"
 #include "http_sync.h"
 #include "coprocessor.h"
@@ -84,7 +85,7 @@ static const char *s_catering_error = "";
 #define CATERING_PIN_MAX_FAILURES 5
 #define CATERING_PIN_LOCK_SECONDS 30
 #define VALID_UNIX_TIME 1704067200LL /* 2024-01-01 */
-#define NVS_LAYOUT_VERSION 4
+#define NVS_LAYOUT_VERSION 5
 
 static bool valid_iso_day(const char *value)
 {
@@ -1294,6 +1295,7 @@ void store_remap_verkauf_spieler(int old_id, int new_id)
 static void nvs_open(void)
 {
     ESP_ERROR_CHECK(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &s_nvs));
+    day_inventory_init(s_nvs);
 }
 
 static void set_default_custom_sequences(void)
@@ -3591,6 +3593,10 @@ void game_store_init(void)
     int32_t nvs_layout = 0;
     nvs_get_i32(s_nvs, "nvs_layout", &nvs_layout);
     if (nvs_layout < NVS_LAYOUT_VERSION) {
+        if(nvs_layout<5)for(int i=0;i<g_store.portalSpielerCount;i++){
+            g_store.portalSpieler[i].isMaitreDeTir=false;
+            g_store.portalSpieler[i].aktiv=true;
+        }
         // Never erase a legacy rebuildable cache until its FAT replacement is
         // durable. A failed migration intentionally leaves the old blobs for
         // the next boot rather than sacrificing offline operation.

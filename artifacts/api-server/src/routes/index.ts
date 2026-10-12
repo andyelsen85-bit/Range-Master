@@ -6,10 +6,12 @@ import ranglisteRouter from "./rangliste";
 import statistikRouter from "./statistik";
 import syncRouter from "./sync";
 import adminRouter from "./admin";
+import gamedayRouter from "./gameday";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(gamedayRouter);
 router.use("/auth", authRouter);
 router.use("/spieler", spielerRouter);
 router.use("/rangliste", ranglisteRouter);

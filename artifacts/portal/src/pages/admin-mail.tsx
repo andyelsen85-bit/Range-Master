@@ -4,6 +4,8 @@ import { useAuthStore } from "@/store/use-auth-store";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Mail, Send, Save, ShieldAlert } from "lucide-react";
+import { DailyReportSettingsCard } from "@/components/daily-report-settings";
+import { PublicPageSettingsCard } from "@/components/public-page-settings";
 
 interface SmtpSettings {
   host: string;
@@ -174,6 +176,10 @@ export default function AdminMail() {
         </div>
         <p className="text-xs text-muted-foreground">Speichern Sie die Einstellungen zuerst – der Test verwendet die gespeicherte Konfiguration.</p>
       </div>
+
+      <DailyReportSettingsCard inputCls={inputCls} />
+
+      <PublicPageSettingsCard />
     </div>
   );
 }

@@ -17,6 +17,7 @@ interface AdminPlayer {
   mitgliedNr: string | null;
   portalAktiv: boolean;
   isAdmin: boolean;
+  isMaitreDeTir?: boolean;
   createdAt: string;
   anzahlSpiele: number;
   durchschnitt: number;
@@ -34,6 +35,7 @@ export default function AdminSpielrProfil() {
   const [editing, setEditing] = useState(false);
   const [editEmail, setEditEmail] = useState("");
   const [editAktiv, setEditAktiv] = useState(false);
+  const [editMaitre, setEditMaitre] = useState(false);
 
   const apiFetch = async (path: string, options?: RequestInit) => {
     const res = await fetch(path, {
@@ -57,15 +59,16 @@ export default function AdminSpielrProfil() {
   const player = data?.spieler.find((p) => p.id === spielerId);
 
   const updateMut = useMutation({
-    mutationFn: (body: { email: string; portalAktiv: boolean }) =>
+    mutationFn: (body: { email: string; portalAktiv: boolean; isMaitreDeTir: boolean }) =>
       apiFetch(`/api/admin/spieler/${spielerId}`, {
         method: "PUT",
         body: JSON.stringify({
           name: player?.name ?? "",
-          email: body.email,
-          mitgliedNr: player?.mitgliedNr ?? "",
+          email: body.email.trim()||null,
+          mitgliedNr: player?.mitgliedNr ?? null,
           portalAktiv: body.portalAktiv,
           isAdmin: player?.isAdmin ?? false,
+          isMaitreDeTir: body.isMaitreDeTir,
         }),
       }),
     onSuccess: () => {
@@ -80,13 +83,14 @@ export default function AdminSpielrProfil() {
   const openEdit = () => {
     setEditEmail(player?.email ?? "");
     setEditAktiv(player?.portalAktiv ?? false);
+    setEditMaitre(!!player?.isMaitreDeTir);
     setEditing(true);
   };
 
   const cancelEdit = () => setEditing(false);
 
   const saveEdit = () => {
-    updateMut.mutate({ email: editEmail, portalAktiv: editAktiv });
+    updateMut.mutate({ email: editEmail, portalAktiv: editAktiv, isMaitreDeTir: editMaitre });
   };
 
   return (
@@ -113,7 +117,11 @@ export default function AdminSpielrProfil() {
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
             <div className="flex-1 space-y-4">
               <div>
-                <h1 className="text-3xl font-bold tracking-tight">{player.name}</h1>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-3xl font-bold tracking-tight">{player.name}</h1>
+                  {player.isAdmin && <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-primary/15 text-primary">Admin</span>}
+                  {player.isMaitreDeTir && <span data-testid="badge-maitre" className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-amber-500/15 text-amber-400">Maître de Tir</span>}
+                </div>
                 {player.mitgliedNr && (
                   <p className="text-xs font-mono font-bold text-muted-foreground uppercase tracking-widest mt-1">
                     ID: {player.mitgliedNr}
@@ -138,7 +146,7 @@ export default function AdminSpielrProfil() {
                     />
                   </div>
 
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <button
                       type="button"
                       onClick={() => setEditAktiv(!editAktiv)}
@@ -156,6 +164,18 @@ export default function AdminSpielrProfil() {
                         />
                       </div>
                       Portal aktiv
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="toggle-maitre"
+                      onClick={() => setEditMaitre(!editMaitre)}
+                      className="flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <span className={`w-4 h-4 rounded border flex items-center justify-center ${editMaitre ? "bg-primary border-primary text-primary-foreground" : "border-border/80"}`}>
+                        {editMaitre && <Check size={12} />}
+                      </span>
+                      Maître de Tir
+                      {player.isAdmin && <span className="text-[10px] uppercase tracking-widest text-primary/80">+ Admin</span>}
                     </button>
 
                     <div className="flex gap-2">

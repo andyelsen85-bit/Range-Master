@@ -4,9 +4,8 @@ import {
   useGetSpieler, getGetSpielerQueryKey,
   useGetStatistik, useGetStatistikVerlauf,
   getGetStatistikQueryKey, getGetStatistikVerlaufQueryKey,
-  useGetSpielerErgebnisse, getGetSpielerErgebnisseQueryKey,
 } from "@workspace/api-client-react";
-import type { ErgebnisWithSpiel } from "@workspace/api-client-react";
+import Resultater from "./resultater";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +48,9 @@ export default function AdminSpieler() {
               {spieler.mitgliedNr}
             </span>
           )}
+          {(spieler as any)?.isMaitreDeTir && (
+            <Badge variant="secondary" className="text-amber-400 border-amber-500/30 bg-amber-500/10 font-bold text-xs">Maître de Tir</Badge>
+          )}
           {spieler?.isAdmin && (
             <Badge variant="secondary" className="text-primary border-primary/30 bg-primary/10 font-bold text-xs">
               Admin
@@ -79,7 +81,7 @@ export default function AdminSpieler() {
       </div>
 
       {tab === "dashboard" && <DashboardTab spielerId={spielerId} />}
-      {tab === "resultater" && <ResultaterTab spielerId={spielerId} />}
+      {tab === "resultater" && <Resultater spielerId={spielerId} />}
       {tab === "statistiken" && <StatistikenTab spielerId={spielerId} />}
     </div>
   );
@@ -179,94 +181,6 @@ function DashboardTab({ spielerId }: { spielerId: number }) {
           </CardContent>
         </Card>
       </div>
-    </div>
-  );
-}
-
-// ─── Resultater Tab ───────────────────────────────────────────────────────────
-
-function ResultaterTab({ spielerId }: { spielerId: number }) {
-  const { data, isLoading } = useGetSpielerErgebnisse(spielerId, {
-    query: { enabled: !!spielerId, queryKey: getGetSpielerErgebnisseQueryKey(spielerId) },
-  });
-
-  const grouped: Record<number, ErgebnisWithSpiel[]> = {};
-  if (data?.ergebnisse) {
-    data.ergebnisse.forEach((e) => {
-      if (!grouped[e.spielId]) grouped[e.spielId] = [];
-      grouped[e.spielId].push(e);
-    });
-  }
-
-  const sortedGroups = Object.values(grouped).sort((a, b) =>
-    new Date(b[0].spiel.datum).getTime() - new Date(a[0].spiel.datum).getTime(),
-  );
-
-  if (isLoading) {
-    return <div className="space-y-4">{[1,2,3].map(i => <Skeleton key={i} className="h-48 rounded-xl bg-card border border-border/50" />)}</div>;
-  }
-
-  if (sortedGroups.length === 0) {
-    return <EmptyState text="Keine Ergebnisse gefunden." />;
-  }
-
-  return (
-    <div className="space-y-4">
-      {sortedGroups.map((group) => {
-        const spiel = group[0].spiel;
-        const lauf1 = group.filter((e) => e.lauf === 1);
-        const lauf2 = group.filter((e) => e.lauf === 2);
-        const totalPunkte = group.reduce((s, e) => s + e.punkte, 0);
-        const maxPunkte = group.length * 2; // each taube = max 2 pts
-        const pct = maxPunkte > 0 ? Math.round((totalPunkte / maxPunkte) * 100) : 0;
-
-        return (
-          <div key={group[0].spielId} className="bg-card border border-border/50 rounded-xl overflow-hidden">
-            <div className="px-5 py-3 bg-secondary/20 border-b border-border/50 flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-foreground">
-                  {new Date(spiel.datum).toLocaleDateString("lb-LU", { day: "2-digit", month: "long", year: "numeric" })}
-                </span>
-                <Badge variant="outline" className="text-xs font-bold tracking-widest">{spiel.modus}</Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className={cn(
-                  "text-lg font-black font-mono tracking-tight",
-                  pct >= 80 ? "text-green-400" : pct >= 60 ? "text-primary" : "text-muted-foreground"
-                )}>
-                  {totalPunkte} <span className="text-muted-foreground/50 text-sm font-bold">/ {maxPunkte}</span>
-                </div>
-              </div>
-            </div>
-            <div className="p-5 grid md:grid-cols-2 gap-6">
-              {[{ label: "Durchgang 1", ergebnisse: lauf1 }, { label: "Durchgang 2", ergebnisse: lauf2 }].map(({ label, ergebnisse }) => (
-                ergebnisse.length > 0 && (
-                  <div key={label}>
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-3">{label} — {ergebnisse.reduce((s, e) => s + e.punkte, 0)} Punkte</p>
-                    <div className="grid grid-cols-9 gap-1">
-                      {ergebnisse
-                        .slice()
-                        .sort((a, b) => a.taube - b.taube)
-                        .map((e) => (
-                          <div key={`${e.lauf}-${e.taube}`}
-                            className={cn(
-                              "flex flex-col items-center justify-center rounded-lg p-2 border text-center",
-                              e.punkte === 2 ? "bg-primary/10 border-primary/30 text-primary" :
-                              e.punkte === 1 ? "bg-amber-500/10 border-amber-500/30 text-amber-400" :
-                              "bg-secondary/30 border-border/30 text-muted-foreground/50"
-                            )}>
-                            <span className="text-[10px] font-black">{e.maschine}</span>
-                            <span className="text-xs font-black mt-0.5">{e.punkte}</span>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                )
-              ))}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }

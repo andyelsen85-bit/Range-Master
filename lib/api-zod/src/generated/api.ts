@@ -38,6 +38,7 @@ export const LoginResponse = zod.object({
   "aktiv": zod.boolean(),
   "portalAktiv": zod.boolean(),
   "isAdmin": zod.boolean(),
+  "isMaitreDeTir": zod.boolean().optional(),
   "createdAt": zod.coerce.date()
 })
 })
@@ -54,6 +55,7 @@ export const GetMeResponse = zod.object({
   "aktiv": zod.boolean(),
   "portalAktiv": zod.boolean(),
   "isAdmin": zod.boolean(),
+  "isMaitreDeTir": zod.boolean().optional(),
   "createdAt": zod.coerce.date()
 })
 
@@ -70,6 +72,7 @@ export const ListSpielerResponse = zod.object({
   "aktiv": zod.boolean(),
   "portalAktiv": zod.boolean(),
   "isAdmin": zod.boolean(),
+  "isMaitreDeTir": zod.boolean().optional(),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -90,6 +93,7 @@ export const GetSpielerResponse = zod.object({
   "aktiv": zod.boolean(),
   "portalAktiv": zod.boolean(),
   "isAdmin": zod.boolean(),
+  "isMaitreDeTir": zod.boolean().optional(),
   "createdAt": zod.coerce.date()
 })
 
@@ -670,6 +674,21 @@ export const GetSyncBillDaySummaryQueryParams = zod.object({
 })
 
 export const GetSyncBillDaySummaryResponse = zod.object({
+  "ammunition": zod.array(zod.object({
+  "caliber": zod.number().int(),
+  "unit": zod.string(),
+  "sold": zod.number().int(),
+  "opening": zod.number().int().nullable(),
+  "closing": zod.number().int().nullable(),
+  "difference": zod.number().int().nullable()
+})).optional(),
+  "maitres": zod.array(zod.object({
+  "id": zod.number().int(),
+  "name": zod.string()
+})).optional(),
+  "openTotalCents": zod.number().int().optional(),
+  "exists": zod.boolean().optional(),
+  "dataHash": zod.string().optional(),
   "datum": zod.coerce.date(),
   "players": zod.array(zod.object({
 
@@ -727,6 +746,21 @@ export const GetAdminBillDaySummaryQueryParams = zod.object({
 })
 
 export const GetAdminBillDaySummaryResponse = zod.object({
+  "ammunition": zod.array(zod.object({
+  "caliber": zod.number().int(),
+  "unit": zod.string(),
+  "sold": zod.number().int(),
+  "opening": zod.number().int().nullable(),
+  "closing": zod.number().int().nullable(),
+  "difference": zod.number().int().nullable()
+})).optional(),
+  "maitres": zod.array(zod.object({
+  "id": zod.number().int(),
+  "name": zod.string()
+})).optional(),
+  "openTotalCents": zod.number().int().optional(),
+  "exists": zod.boolean().optional(),
+  "dataHash": zod.string().optional(),
   "datum": zod.coerce.date(),
   "players": zod.array(zod.object({
 
@@ -847,5 +881,184 @@ export const MarkAdminBillPaidBody = zod.object({
 })
 
 export const MarkAdminBillPaidResponse = zod.unknown()
+
+
+export const GetInventoryStateQueryParams = zod.object({
+  "datum": zod.date()
+})
+
+export const GetInventoryStateResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const postInventoryOpeningBodyC12Min = 0;
+export const postInventoryOpeningBodyC12Max = 1000000;
+
+export const postInventoryOpeningBodyC20Min = 0;
+export const postInventoryOpeningBodyC20Max = 1000000;
+
+export const postInventoryOpeningBodyNoteMax = 240;
+
+
+
+export const PostInventoryOpeningBody = zod.object({
+  "externalId": zod.string(),
+  "terminalId": zod.string(),
+  "datum": zod.coerce.date(),
+  "c12": zod.number().int().min(postInventoryOpeningBodyC12Min).max(postInventoryOpeningBodyC12Max),
+  "c20": zod.number().int().min(postInventoryOpeningBodyC20Min).max(postInventoryOpeningBodyC20Max),
+  "takenOver": zod.boolean().optional(),
+  "note": zod.string().max(postInventoryOpeningBodyNoteMax).optional()
+})
+
+export const PostInventoryOpeningResponse = zod.unknown()
+
+
+export const postInventoryClosingBodyC12Min = 0;
+export const postInventoryClosingBodyC12Max = 1000000;
+
+export const postInventoryClosingBodyC20Min = 0;
+export const postInventoryClosingBodyC20Max = 1000000;
+
+export const postInventoryClosingBodyNoteMax = 240;
+
+
+
+export const PostInventoryClosingBody = zod.object({
+  "externalId": zod.string(),
+  "terminalId": zod.string(),
+  "datum": zod.coerce.date(),
+  "c12": zod.number().int().min(postInventoryClosingBodyC12Min).max(postInventoryClosingBodyC12Max),
+  "c20": zod.number().int().min(postInventoryClosingBodyC20Min).max(postInventoryClosingBodyC20Max),
+  "takenOver": zod.boolean().optional(),
+  "note": zod.string().max(postInventoryClosingBodyNoteMax).optional()
+})
+
+export const PostInventoryClosingResponse = zod.unknown()
+
+
+export const postGamedayBodyMaitreIdsMax = 4;
+
+
+
+export const PostGamedayBody = zod.object({
+  "externalId": zod.string(),
+  "terminalId": zod.string(),
+  "datum": zod.coerce.date(),
+  "maitreIds": zod.array(zod.number().int()).min(1).max(postGamedayBodyMaitreIdsMax)
+})
+
+export const PostGamedayResponse = zod.unknown()
+
+
+export const getDailyReportSettingsResponseOneRecipientsMax = 20;
+
+
+
+export const GetDailyReportSettingsResponse = zod.object({
+  "enabled": zod.boolean(),
+  "recipients": zod.array(zod.object({
+  "id": zod.number().int().optional(),
+  "email": zod.string().email(),
+  "active": zod.boolean()
+})).max(getDailyReportSettingsResponseOneRecipientsMax)
+}).and(zod.object({
+  "history": zod.array(zod.object({
+  "datum": zod.string(),
+  "status": zod.string(),
+  "attempts": zod.number().int(),
+  "sentAt": zod.string().nullish(),
+  "error": zod.string().nullish(),
+  "changed": zod.boolean()
+}))
+}))
+
+
+export const updateDailyReportSettingsBodyRecipientsMax = 20;
+
+
+
+export const UpdateDailyReportSettingsBody = zod.object({
+  "enabled": zod.boolean(),
+  "recipients": zod.array(zod.object({
+  "id": zod.number().int().optional(),
+  "email": zod.string().email(),
+  "active": zod.boolean()
+})).max(updateDailyReportSettingsBodyRecipientsMax)
+})
+
+export const UpdateDailyReportSettingsResponse = zod.unknown()
+
+
+export const SendTestDailyReportResponse = zod.unknown()
+
+
+export const ResendDailyReportBody = zod.object({
+  "datum": zod.coerce.date()
+})
+
+export const ResendDailyReportResponse = zod.unknown()
+
+
+export const GetPublicPageSettingsResponse = zod.object({
+  "enabled": zod.boolean(),
+  "nameMode": zod.enum(['FULL', 'INITIAL'])
+})
+
+
+export const UpdatePublicPageSettingsBody = zod.object({
+  "enabled": zod.boolean(),
+  "nameMode": zod.enum(['FULL', 'INITIAL'])
+})
+
+export const UpdatePublicPageSettingsResponse = zod.object({
+  "enabled": zod.boolean(),
+  "nameMode": zod.enum(['FULL', 'INITIAL'])
+})
+
+
+export const GetPublicLastGameResponse = zod.object({
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable(),
+  "mode": zod.string(),
+  "runs": zod.number().int(),
+  "claysPerRun": zod.number().int(),
+  "columns": zod.array(zod.object({
+  "run": zod.number().int(),
+  "clay": zod.number().int(),
+  "machine": zod.string(),
+  "pair": zod.union([zod.literal('start'),zod.literal('end'),zod.literal(null)]).nullable()
+})),
+  "players": zod.array(zod.object({
+  "name": zod.string(),
+  "total": zod.number().int(),
+  "runTotals": zod.array(zod.number().int()),
+  "cells": zod.array(zod.number().int().nullable())
+}))
+})
+
+
+export const GetSharedScorecardParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const GetSharedScorecardResponse = zod.object({
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable(),
+  "mode": zod.string(),
+  "runs": zod.number().int(),
+  "claysPerRun": zod.number().int(),
+  "columns": zod.array(zod.object({
+  "run": zod.number().int(),
+  "clay": zod.number().int(),
+  "machine": zod.string(),
+  "pair": zod.union([zod.literal('start'),zod.literal('end'),zod.literal(null)]).nullable()
+})),
+  "players": zod.array(zod.object({
+  "name": zod.string(),
+  "total": zod.number().int(),
+  "runTotals": zod.array(zod.number().int()),
+  "cells": zod.array(zod.number().int().nullable())
+}))
+})
 
 

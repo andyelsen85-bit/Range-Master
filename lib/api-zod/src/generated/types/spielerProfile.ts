@@ -14,5 +14,6 @@ export interface SpielerProfile {
   aktiv: boolean;
   portalAktiv: boolean;
   isAdmin: boolean;
+  isMaitreDeTir?: boolean;
   createdAt: Date;
 }

@@ -23,6 +23,7 @@
 #include "screen_spiller.h"
 #include "screen_wifi.h"
 #include "screen_catering.h"
+#include "screen_inventory.h"
 
 static const char *TAG = "ui_manager";
 
@@ -135,6 +136,7 @@ static void refresh_screen(Screen s)
         case SCREEN_EINSTELLUNGEN:screen_einstellungen_refresh();break;
         case SCREEN_WIFI:         screen_wifi_refresh();         break;
         case SCREEN_CATERING:     screen_catering_refresh();     break;
+        case SCREEN_INVENTORY:    screen_inventory_refresh();    break;
         default: break;
     }
 }
@@ -270,6 +272,7 @@ void ui_manager_init(void)
     s_screens[SCREEN_EINSTELLUNGEN]= screen_einstellungen_create();vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_WIFI]         = screen_wifi_create();         vTaskDelay(pdMS_TO_TICKS(5));
     s_screens[SCREEN_CATERING]     = screen_catering_create();
+    s_screens[SCREEN_INVENTORY]    = screen_inventory_create();
 
     // Transparent top-layer guard is used only for an acknowledged dataset
     // commit. The status pill remains visible during the full network sync,
@@ -386,6 +389,7 @@ void ui_manager_tick(void)
         case SCREEN_SPILLER:    screen_spiller_tick();    break;
         case SCREEN_WIFI:       screen_wifi_tick();       break;
         case SCREEN_CATERING:   screen_catering_tick();   break;
+        case SCREEN_INVENTORY:  screen_inventory_tick();  break;
         default: break;
     }
 }

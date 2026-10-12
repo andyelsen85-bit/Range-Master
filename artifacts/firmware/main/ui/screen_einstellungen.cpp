@@ -51,6 +51,7 @@ static lv_obj_t *s_catering_pin;
 static lv_obj_t *s_catering_old_pin;
 static lv_obj_t *s_catering_status;
 static lv_obj_t *s_bill_day_summary;
+static lv_obj_t *s_bill_inventory_summary;
 static lv_obj_t *s_day_values[6];
 static lv_obj_t *s_day_categories;
 static lv_obj_t *s_day_products;
@@ -89,6 +90,26 @@ static void refresh_bill_day_summary(void)
 {
     if (!s_bill_day_summary) return;
     const BillDaySummary *day = &g_store.billDay;
+    if(s_bill_inventory_summary){
+        const BillDaySummary *server=&g_store.billDayBaseline;
+        char inventory[640]="Munition (Verkaufseinheiten)\n";size_t used=strlen(inventory);
+        for(int i=0;i<2;i++){
+            char opening[24],closing[24],difference[24];
+            if(server->ammoHasOpening[i])snprintf(opening,sizeof(opening),"%d",server->ammoOpening[i]);else snprintf(opening,sizeof(opening),"nicht erfasst");
+            if(server->ammoHasClosing[i])snprintf(closing,sizeof(closing),"%d",server->ammoClosing[i]);else snprintf(closing,sizeof(closing),"nicht erfasst");
+            if(server->ammoHasOpening[i]&&server->ammoHasClosing[i])snprintf(difference,sizeof(difference),"%d",server->ammoDifference[i]);else snprintf(difference,sizeof(difference),"nicht erfasst");
+            int written=snprintf(inventory+used,sizeof(inventory)-used,"Kal. %d: verkauft %d | Anfang %s | Schluss %s | Differenz %s\n",i==0?12:20,server->ammoSold[i],opening,closing,difference);
+            if(written>0)used+=(size_t)written<sizeof(inventory)-used?(size_t)written:sizeof(inventory)-used-1;
+        }
+        int written=snprintf(inventory+used,sizeof(inventory)-used,"Maître de Tir: ");
+        if(written>0)used+=(size_t)written<sizeof(inventory)-used?(size_t)written:sizeof(inventory)-used-1;
+        for(int m=0;m<server->maitreCount&&m<4;m++){
+            written=snprintf(inventory+used,sizeof(inventory)-used,"%s%.47s",m?", ":"",server->maitreNames[m]);
+            if(written>0)used+=(size_t)written<sizeof(inventory)-used?(size_t)written:sizeof(inventory)-used-1;
+        }
+        if(!server->maitreCount)snprintf(inventory+used,sizeof(inventory)-used,"nicht erfasst");
+        set_label_text_if_changed(s_bill_inventory_summary,inventory);
+    }
     char text[160];
     if (!day->datum[0]) {
         set_label_text_if_changed(s_bill_day_summary, "Noch keine Tagesdaten. Bitte mit dem Portal synchronisieren.");
@@ -1155,6 +1176,10 @@ static lv_obj_t *build_day_stats_tab(lv_obj_t *parent)
     lv_obj_set_style_text_color(s_bill_day_summary, lv_color_hex(CLR_MUTED), 0);
     lv_label_set_long_mode(s_bill_day_summary, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_bill_day_summary, LV_PCT(100));
+    s_bill_inventory_summary=lv_label_create(parent);
+    lv_obj_set_width(s_bill_inventory_summary,LV_PCT(100));lv_label_set_long_mode(s_bill_inventory_summary,LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(s_bill_inventory_summary,UI_FONT_16,0);
+    lv_obj_set_style_text_color(s_bill_inventory_summary,lv_color_hex(CLR_TEXT),0);
     const char *titles[] = {"Gesamtumsatz", "Spieler", "Spiele", "Abgeschlossen",
                             "Tauben bestätigt", "Rechnungen bezahlt"};
     const char *hints[] = {"Alle Produkte, inklusive offener Beträge", "Mit Aktivität an diesem Tag",

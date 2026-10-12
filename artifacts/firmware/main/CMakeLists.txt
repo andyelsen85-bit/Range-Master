@@ -5,6 +5,8 @@ idf_component_register(
         "display/jd9365_panel.cpp"
         "display/gsl3680_touch.cpp"
         "store/game_store.cpp"
+        "store/day_inventory.cpp"
+        "ui/screen_inventory.cpp"
         "store/offline_cache.cpp"
         "net/coprocessor.cpp"
         "net/http_sync.cpp"

@@ -24,6 +24,7 @@ import AdminTerminalConfig from '@/pages/admin-terminal-config';
 import Profil from '@/pages/profil';
 import Kaef from '@/pages/kaef';
 import NotFound from '@/pages/not-found';
+import Live from '@/pages/live';
 
 const queryClient = new QueryClient();
 
@@ -66,6 +67,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
+      <Route path="/live" component={Live} />
       <Route>
         <Layout>
           <Switch>

@@ -1,4 +1,5 @@
-import { index, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { date, index, integer, pgTable, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { apiKeysTable } from "./api-keys";
 import { spielerTable } from "./spieler";
 
@@ -9,6 +10,7 @@ import { spielerTable } from "./spieler";
 export const terminalConfigBackupsTable = pgTable("terminal_config_backups", {
   id: serial("id").primaryKey(),
   terminalId: text("terminal_id").notNull(),
+  backupDate: date("backup_date", { mode: "string" }).notNull().default(sql`(now() AT TIME ZONE 'Europe/Luxembourg')::date`),
   apiKeyId: integer("api_key_id").references(() => apiKeysTable.id, { onDelete: "set null" }),
   schemaVersion: integer("schema_version").notNull(),
   firmwareVersion: text("firmware_version"),
@@ -22,6 +24,7 @@ export const terminalConfigBackupsTable = pgTable("terminal_config_backups", {
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
 }, (t) => [
   index("terminal_config_backups_terminal_idx").on(t.terminalId, t.updatedAt),
+  uniqueIndex("terminal_config_backups_daily_unique").on(t.terminalId, t.backupDate).where(sql`${t.revokedAt} IS NULL`),
 ]);
 
 /** A short-lived, one-time approval created by an authenticated administrator. */

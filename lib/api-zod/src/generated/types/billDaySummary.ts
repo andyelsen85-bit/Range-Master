@@ -5,12 +5,19 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+import type { BillDaySummaryAmmunitionItem } from './billDaySummaryAmmunitionItem';
 import type { BillDaySummaryCategorySubtotals } from './billDaySummaryCategorySubtotals';
+import type { BillDaySummaryMaitresItem } from './billDaySummaryMaitresItem';
 import type { BillDaySummaryPlayersItem } from './billDaySummaryPlayersItem';
 import type { BillDaySummaryProductTotals } from './billDaySummaryProductTotals';
 import type { BillGameBreakdown } from './billGameBreakdown';
 
 export interface BillDaySummary {
+  ammunition?: BillDaySummaryAmmunitionItem[];
+  maitres?: BillDaySummaryMaitresItem[];
+  openTotalCents?: number;
+  exists?: boolean;
+  dataHash?: string;
   datum: Date;
   players: BillDaySummaryPlayersItem[];
   categorySubtotals: BillDaySummaryCategorySubtotals;

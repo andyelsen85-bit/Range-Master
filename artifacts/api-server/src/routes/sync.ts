@@ -7,6 +7,8 @@ import { z } from "zod";
 import { getSmtpSettings, sendMail, generatePassword, invitationEmail, resetEmail } from "../lib/mailer";
 import { catalogue, unsettledDaySalesReport } from "../lib/products";
 import { billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSettlement } from "../lib/bills";
+import { buildDailyReport } from "../lib/daily-report";
+import { localDay } from "../lib/local-day";
 import { sameImmutableChildren } from "../lib/immutable-events";
 import { revisionToken, SYNC_MANIFEST_SCHEMA_VERSION } from "../lib/sync-manifest";
 import {
@@ -39,49 +41,29 @@ router.post("/config-backup", requireApiKey, async (req, res) => {
     });
   }
 
-  const [latest] = await db.select().from(terminalConfigBackupsTable)
-    .where(and(
-      eq(terminalConfigBackupsTable.terminalId, body.data.terminalId),
-      isNull(terminalConfigBackupsTable.revokedAt),
-    ))
-    .orderBy(desc(terminalConfigBackupsTable.updatedAt))
-    .limit(1);
-  if (latest) {
-    try {
-      const previous = decryptTerminalConfiguration(latest);
-      if (JSON.stringify(previous) === JSON.stringify(body.data.configuration)) {
-        const [backup] = await db.update(terminalConfigBackupsTable)
-          .set({ updatedAt: new Date(), firmwareVersion: body.data.firmwareVersion ?? latest.firmwareVersion })
-          .where(eq(terminalConfigBackupsTable.id, latest.id))
-          .returning({
-            id: terminalConfigBackupsTable.id,
-            terminalId: terminalConfigBackupsTable.terminalId,
-            schemaVersion: terminalConfigBackupsTable.schemaVersion,
-            updatedAt: terminalConfigBackupsTable.updatedAt,
-          });
-        return res.json({ success: true, unchanged: true, backup });
-      }
-    } catch {
-      // Preserve an unreadable snapshot for audit/revocation and create a fresh
-      // validated version instead of overwriting potentially recoverable data.
+  const backupDate = localDay();
+  const result = await db.transaction(async tx => {
+    // Same lock order as approvals: the row lock serializes approval/upload.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`backup:${body.data.terminalId}:${backupDate}`},0))`);
+    const [existing] = (await tx.execute(sql`SELECT id FROM terminal_config_backups
+      WHERE terminal_id=${body.data.terminalId} AND backup_date=${backupDate} AND revoked_at IS NULL FOR UPDATE`)).rows as { id: number }[];
+    if (existing) {
+      const protectedRows = (await tx.execute(sql`SELECT 1 FROM terminal_restore_authorizations WHERE backup_id=${existing.id}
+        AND revoked_at IS NULL AND (used_at IS NULL OR expires_at>now()) LIMIT 1`)).rows;
+      if (protectedRows.length) return null;
     }
-  }
-
-  const encrypted = encryptTerminalConfiguration(body.data.configuration);
-  const [backup] = await db.insert(terminalConfigBackupsTable).values({
-    terminalId: body.data.terminalId,
-    apiKeyId: (req as any).apiKeyId ?? null,
-    schemaVersion: body.data.schemaVersion,
-    firmwareVersion: body.data.firmwareVersion ?? null,
-    ...encrypted,
-  }).returning({
-    id: terminalConfigBackupsTable.id,
-    terminalId: terminalConfigBackupsTable.terminalId,
-    schemaVersion: terminalConfigBackupsTable.schemaVersion,
-    updatedAt: terminalConfigBackupsTable.updatedAt,
+    const values = { terminalId: body.data.terminalId, backupDate,
+      apiKeyId: (req as any).apiKeyId ?? null, schemaVersion: body.data.schemaVersion,
+      firmwareVersion: body.data.firmwareVersion ?? null,
+      ...encryptTerminalConfiguration(body.data.configuration), updatedAt: new Date() };
+    const rows = existing ? await tx.update(terminalConfigBackupsTable).set(values)
+      .where(eq(terminalConfigBackupsTable.id, existing.id)).returning()
+      : await tx.insert(terminalConfigBackupsTable).values(values).returning();
+    const b = rows[0]!;
+    return { id: b.id, terminalId: b.terminalId, backupDate: b.backupDate, schemaVersion: b.schemaVersion, updatedAt: b.updatedAt };
   });
-
-  return res.status(201).json({ success: true, backup });
+  if (!result) return res.status(409).json({ error: "Tagesbackup ist durch Wiederherstellung geschützt", code: "BACKUP_RESTORE_PROTECTED" });
+  return res.json({ success: true, backup: result });
 });
 
 // GET /api/sync/config-restore?code=... — consume a one-time admin approval
@@ -221,6 +203,8 @@ async function rosterPayload() {
       mitgliedNr: spielerTable.mitgliedNr,
       email: spielerTable.email,
       portalAktiv: spielerTable.portalAktiv,
+      isMaitreDeTir: spielerTable.isMaitreDeTir,
+      aktiv: spielerTable.aktiv,
     })
     .from(spielerTable)
     .where(eq(spielerTable.aktiv, true))
@@ -395,6 +379,7 @@ router.post("/spiele", requireApiKey, async (req, res) => {
       const inserted = await tx.insert(spieleTable).values({
         externalId: s.externalId, datum: new Date(s.datum), modus: s.modus, lauf: s.lauf,
         taubenProLauf: s.taubenProLauf, abgeschlossen: s.abgeschlossen,
+        completedAt: s.abgeschlossen ? new Date(s.datum) : null,
         confirmedLaunches: s.confirmedLaunches, syncedAt: new Date(),
       }).onConflictDoNothing({ target: spieleTable.externalId }).returning({ id: spieleTable.id });
       if (inserted[0]) {
@@ -431,7 +416,7 @@ const PaymentEventSchema = z.object({
 router.get("/bills/day-summary", requireApiKey, async (req, res) => {
   const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(req.query.datum);
   if (!datum.success) return res.status(400).json({ error: "datum must be YYYY-MM-DD" });
-  return res.json(await dayBillSummary(datum.data));
+  return res.json(await buildDailyReport(datum.data));
 });
 
 // POST /api/sync/payments — atomic validation with explicit idempotency outcomes.
@@ -678,7 +663,7 @@ router.get("/manifest", requireApiKey, async (req, res): Promise<void> => {
     recentGamesPayload(gameHistoryLimit),
     unsettledDayCreditsPayload(datum),
     unsettledDaySalesReport(datum),
-    dayBillSummary(datum),
+    buildDailyReport(datum),
   ]);
   const timestamp = new Date().toISOString();
 

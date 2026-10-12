@@ -92,6 +92,7 @@ typedef enum {
     SCREEN_EINSTELLUNGEN,
     SCREEN_WIFI,
     SCREEN_CATERING,
+    SCREEN_INVENTORY,
     SCREEN_COUNT
 } Screen;
 
@@ -160,6 +161,8 @@ typedef struct {
     char  email[MAX_EMAIL_LEN];   // populated from portal sync
     bool  lokal;                  // created on terminal, not yet pushed
     bool  portalAktiv;
+    bool  isMaitreDeTir;
+    bool  aktiv;
 } PortalSpieler;
 
 typedef enum {
@@ -301,6 +304,10 @@ typedef struct {
     int completedGames;
     int confirmedClays;
     bool authoritative;
+    int ammoSold[2],ammoOpening[2],ammoClosing[2],ammoDifference[2];
+    bool ammoHasOpening[2],ammoHasClosing[2];
+    char maitreNames[4][MAX_NAME_LEN];
+    int maitreCount,openTotalCent;
 } BillDaySummary;
 
 typedef struct {

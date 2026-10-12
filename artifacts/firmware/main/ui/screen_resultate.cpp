@@ -9,12 +9,14 @@
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_resultate.h"
+#include "scorecard_render.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_winner;
 static lv_obj_t *s_lbl_meta;
 static lv_obj_t *s_table;
 static lv_obj_t *s_lbl_max;
+static ScorecardRenderState s_scorecard_state;
 
 lv_obj_t *screen_resultate_create(void)
 {
@@ -92,6 +94,8 @@ lv_obj_t *screen_resultate_create(void)
 
     // Ranking table
     s_table = lv_table_create(s_scr);
+    lv_obj_add_flag(s_table,LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+    lv_obj_add_event_cb(s_table,[](lv_event_t *e){scorecard_render_draw(e,&s_scorecard_state);},LV_EVENT_DRAW_TASK_ADDED,NULL);
     lv_obj_set_size(s_table, DISPLAY_LOGICAL_W - 40,
                     DISPLAY_LOGICAL_H - 80 - 106 - 20);
     lv_obj_align(s_table, LV_ALIGN_TOP_MID, 0, 80 + 106);
@@ -135,48 +139,20 @@ void screen_resultate_refresh(void)
              fg->base.taubenProLauf);
     lv_label_set_text(s_lbl_meta, buf);
 
-    // Compute per-player lauf1/lauf2 totals (sort descending by total)
-    typedef struct { int id; const char *name; int lauf1; int lauf2; int total; } Row;
-    Row rows[MAX_SPIELER] = {};
-    for (int i = 0; i < n; i++) {
-        rows[i].id   = fg->spielerIds[i];
-        rows[i].name = fg->spielerNamen[i];
-        for (int j = 0; j < fg->base.ergebnisse_count; j++) {
-            const Ergebnis *e = &fg->base.ergebnisse[j];
-            if (e->spielerId != rows[i].id || e->wiederholt) continue;
-            if (e->lauf == 1) rows[i].lauf1 += e->punkte;
-            else              rows[i].lauf2 += e->punkte;
-        }
-        rows[i].total = rows[i].lauf1 + rows[i].lauf2;
-    }
-    // Bubble sort descending
-    for (int i = 0; i < n - 1; i++)
-        for (int j = i + 1; j < n; j++)
-            if (rows[j].total > rows[i].total) { Row t=rows[i]; rows[i]=rows[j]; rows[j]=t; }
+    if(n<0)n=0;
+    if(n>MAX_SPIELER)n=MAX_SPIELER;
+    int winner=0,total=0;
+    for(int i=0;i<n;i++){int points=history_scorecard_total(fg,fg->spielerIds[i]);if(i==0||points>total){winner=i;total=points;}}
 
     // Winner banner
     if (n > 0) {
         snprintf(buf, sizeof(buf), "SIEGER: %s  (%d PUNKTE)",
-                 rows[0].name, rows[0].total);
+                 fg->spielerNamen[winner], total);
         lv_label_set_text(s_lbl_winner, buf);
         int maxScore = fg->base.taubenProLauf * 2 * fg->base.lauf;
         snprintf(buf, sizeof(buf), "MAX %d PKT", maxScore);
         lv_label_set_text(s_lbl_max, buf);
     }
 
-    // Table rows
-    lv_table_set_row_cnt(s_table, n + 1);
-    for (int i = 0; i < n; i++) {
-        char cell[16];
-        snprintf(cell, sizeof(cell), "%d", i + 1);
-        lv_table_set_cell_value(s_table, i+1, 0, cell);
-        lv_table_set_cell_value(s_table, i+1, 1, rows[i].name);
-        lv_table_set_cell_ctrl(s_table, i+1, 1, LV_TABLE_CELL_CTRL_TEXT_CROP);
-        snprintf(cell, sizeof(cell), "%d", rows[i].lauf1);
-        lv_table_set_cell_value(s_table, i+1, 2, cell);
-        snprintf(cell, sizeof(cell), "%d", rows[i].lauf2);
-        lv_table_set_cell_value(s_table, i+1, 3, cell);
-        snprintf(cell, sizeof(cell), "%d", rows[i].total);
-        lv_table_set_cell_value(s_table, i+1, 4, cell);
-    }
+    scorecard_render(s_table,fg,&s_scorecard_state);
 }

@@ -29,9 +29,11 @@ struct Day {
     char datum[11]; int uniquePlayers, paidPlayers, games, completedGames, confirmedClays, generalTotalCent;
     bool authoritative, productOverflow; int categoryCount, productCount;
     Category categories[MAX_BILL_CATEGORIES]; BillLine products[MAX_DAY_PRODUCTS];
+    int ammoSold[2],ammoOpening[2],ammoClosing[2],ammoDifference[2],maitreCount;
+    bool ammoHasOpening[2],ammoHasClosing[2];char maitreNames[4][64];
 };
 using BillDaySummary = Day;
-struct { Day billDay; } g_store;
+struct { Day billDay,billDayBaseline; } g_store;
 static unsigned table_writes = 0;
 const char *lv_label_get_text(lv_obj_t *label) { return label->label.c_str(); }
 void lv_label_set_text(lv_obj_t *label, const char *text) { label->label = text; }
@@ -45,12 +47,14 @@ uint32_t lv_table_get_row_cnt(lv_obj_t *obj) { return obj->rows.size(); }
 void lv_table_set_row_cnt(lv_obj_t *obj, uint32_t rows) { obj->rows.resize(rows); }
 int lv_color_hex(int color) { return color; }
 void lv_obj_set_style_text_color(lv_obj_t *, int, int) {}
-static lv_obj_t *s_bill_day_summary, *s_day_values[6], *s_day_categories, *s_day_products, *s_day_warning;
+static lv_obj_t *s_bill_day_summary, *s_day_values[6], *s_day_categories, *s_day_products, *s_day_warning,*s_bill_inventory_summary;
 """
 
 MAIN = r"""
 int main() {
-    lv_obj_t summary, values[6], categories, products, warning;
+    lv_obj_t summary, values[6], categories, products, warning,inventory;
+    s_bill_inventory_summary=&inventory;
+    g_store.billDayBaseline.authoritative=true;g_store.billDayBaseline.ammoSold[0]=3;
     s_bill_day_summary = &summary; s_day_categories = &categories;
     s_day_products = &products; s_day_warning = &warning;
     for (int i = 0; i < 6; ++i) s_day_values[i] = &values[i];

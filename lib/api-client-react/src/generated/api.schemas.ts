@@ -5,6 +5,119 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+export interface ReportDateInput {
+  datum: string;
+}
+
+export type PublicPageSettingsNameMode = typeof PublicPageSettingsNameMode[keyof typeof PublicPageSettingsNameMode];
+
+
+export const PublicPageSettingsNameMode = {
+  FULL: 'FULL',
+  INITIAL: 'INITIAL',
+} as const;
+
+export interface PublicPageSettings {
+  enabled: boolean;
+  nameMode: PublicPageSettingsNameMode;
+}
+
+export interface DailyReportRecipient {
+  id?: number;
+  email: string;
+  active: boolean;
+}
+
+export interface DailyReportInput {
+  enabled: boolean;
+  /** @maxItems 20 */
+  recipients: DailyReportRecipient[];
+}
+
+export type DailyReportSettingsHistoryItem = {
+  datum: string;
+  status: string;
+  attempts: number;
+  /** @nullable */
+  sentAt?: string | null;
+  /** @nullable */
+  error?: string | null;
+  changed: boolean;
+};
+
+export type DailyReportSettings = DailyReportInput & {
+  history: DailyReportSettingsHistoryItem[];
+};
+
+export interface InventoryInput {
+  externalId: string;
+  terminalId: string;
+  datum: string;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  c12: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  c20: number;
+  takenOver?: boolean;
+  /** @maxLength 240 */
+  note?: string;
+}
+
+export interface GamedayInput {
+  externalId: string;
+  terminalId: string;
+  datum: string;
+  /**
+     * @minItems 1
+     * @maxItems 4
+     */
+  maitreIds: number[];
+}
+
+export interface InventoryState { [key: string]: unknown }
+
+/**
+ * @nullable
+ */
+export type SharedScorecardColumnsItemPair = typeof SharedScorecardColumnsItemPair[keyof typeof SharedScorecardColumnsItemPair] | null;
+
+
+export const SharedScorecardColumnsItemPair = {
+  start: 'start',
+  end: 'end',
+} as const;
+
+export type SharedScorecardColumnsItem = {
+  run: number;
+  clay: number;
+  machine: string;
+  /** @nullable */
+  pair: SharedScorecardColumnsItemPair;
+};
+
+export type SharedScorecardPlayersItem = {
+  name: string;
+  total: number;
+  runTotals: number[];
+  cells: (number | null)[];
+};
+
+export interface SharedScorecard {
+  date: string;
+  /** @nullable */
+  completedAt: string | null;
+  mode: string;
+  runs: number;
+  claysPerRun: number;
+  columns: SharedScorecardColumnsItem[];
+  players: SharedScorecardPlayersItem[];
+}
+
 export type ProductCategory = typeof ProductCategory[keyof typeof ProductCategory];
 
 
@@ -250,6 +363,23 @@ export interface PlayerPurchase {
   totalCents: number;
 }
 
+export type BillDaySummaryAmmunitionItem = {
+  caliber: number;
+  unit: string;
+  sold: number;
+  /** @nullable */
+  opening: number | null;
+  /** @nullable */
+  closing: number | null;
+  /** @nullable */
+  difference: number | null;
+};
+
+export type BillDaySummaryMaitresItem = {
+  id: number;
+  name: string;
+};
+
 export type BillDaySummaryPlayersItem = { [key: string]: unknown };
 
 export type BillDaySummaryCategorySubtotals = {[key: string]: number};
@@ -292,6 +422,11 @@ export interface BillGameBreakdown {
 }
 
 export interface BillDaySummary {
+  ammunition?: BillDaySummaryAmmunitionItem[];
+  maitres?: BillDaySummaryMaitresItem[];
+  openTotalCents?: number;
+  exists?: boolean;
+  dataHash?: string;
   datum: string;
   players: BillDaySummaryPlayersItem[];
   categorySubtotals: BillDaySummaryCategorySubtotals;
@@ -458,6 +593,7 @@ export interface SpielerProfile {
   aktiv: boolean;
   portalAktiv: boolean;
   isAdmin: boolean;
+  isMaitreDeTir?: boolean;
   createdAt: string;
 }
 
@@ -714,5 +850,9 @@ to: string;
 export type MarkAdminBillPaidBody = {
   datum: string;
   externalId?: string;
+};
+
+export type GetInventoryStateParams = {
+datum: string;
 };
 

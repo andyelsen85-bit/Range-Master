@@ -11,6 +11,7 @@
 #include "screen_geschichte.h"
 #include "ui_time_fmt.h"
 #include "history_scorecard.h"
+#include "scorecard_render.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_list;
@@ -25,25 +26,14 @@ static EXT_RAM_BSS_ATTR FinishedGame s_selected_game;
 static bool s_has_selected_game;
 static bool s_history_built;
 static uint32_t s_history_signature;
-static bool s_doublette_columns[MAX_ERGEBNISSE + 2];
+static ScorecardRenderState s_scorecard_state;
 
 #define LIST_W   300
 #define DETAIL_W (DISPLAY_LOGICAL_W - 40 - LIST_W - 16)
 
 static void scorecard_draw_cb(lv_event_t *event)
 {
-    lv_draw_task_t *task = lv_event_get_draw_task(event);
-    if (!task) return;
-    lv_draw_dsc_base_t *base = (lv_draw_dsc_base_t *)lv_draw_task_get_draw_dsc(task);
-    if (!base || base->part != LV_PART_ITEMS || base->id2 >= MAX_ERGEBNISSE + 2 ||
-        !s_doublette_columns[base->id2]) return;
-    lv_draw_fill_dsc_t *fill = lv_draw_task_get_fill_dsc(task);
-    if (fill) {
-        // Muted blue, only slightly lighter than the regular dark cell.
-        // Tint the header and every player's result in both pair columns.
-        fill->color = lv_color_hex(0x1C2B40);
-        fill->opa = LV_OPA_COVER;
-    }
+    scorecard_render_draw(event,&s_scorecard_state);
 }
 
 // ── Populate detail panel for game at history index i ────────
@@ -55,8 +45,6 @@ static void render_selected_detail(void)
     int players = fg->spieler_count;
     if (players < 0) players = 0;
     if (players > MAX_SPIELER) players = MAX_SPIELER;
-    int result_columns = shape.runs * shape.clays;
-    memset(s_doublette_columns, 0, sizeof(s_doublette_columns));
 
     char hdr[96];
     snprintf(hdr, sizeof(hdr), "%s | %d Spieler | %d %s",
@@ -69,40 +57,7 @@ static void render_selected_detail(void)
         lv_label_set_text(s_detail_date, ts_disp[0] ? ts_disp : "-");
     }
 
-    lv_table_set_col_cnt(s_detail_table, result_columns + 2);
-    lv_table_set_row_cnt(s_detail_table, players + 1);
-    lv_table_set_col_width(s_detail_table, 0, 150);
-    lv_table_set_cell_value(s_detail_table, 0, 0, "SPIELER");
-    for (int col = 0; col < result_columns; ++col) {
-        char heading[32];
-        history_scorecard_heading(fg, col / shape.clays + 1,
-                                  col % shape.clays + 1, heading, sizeof(heading));
-        s_doublette_columns[col + 1] = history_scorecard_doublette(
-            fg, col / shape.clays + 1, col % shape.clays + 1);
-        lv_table_set_col_width(s_detail_table, col + 1, 34);
-        lv_table_set_cell_value(s_detail_table, 0, col + 1, heading);
-    }
-    int total_col = result_columns + 1;
-    lv_table_set_col_width(s_detail_table, total_col, 76);
-    lv_table_set_cell_value(s_detail_table, 0, total_col, "GESAMT");
-
-    for (int p = 0; p < players; p++) {
-        int sid = fg->spielerIds[p];
-        lv_table_set_cell_value(s_detail_table, p + 1, 0, fg->spielerNamen[p]);
-        lv_table_set_cell_ctrl(s_detail_table, p + 1, 0,
-                               LV_TABLE_CELL_CTRL_TEXT_CROP);
-        for (int col = 0; col < result_columns; ++col) {
-            const Ergebnis *result = history_scorecard_result(
-                fg, sid, col / shape.clays + 1, col % shape.clays + 1);
-            char score[16];
-            if (result) snprintf(score, sizeof(score), "%d", result->punkte);
-            else snprintf(score, sizeof(score), "-");
-            lv_table_set_cell_value(s_detail_table, p + 1, col + 1, score);
-        }
-        char total[16];
-        snprintf(total, sizeof(total), "%d", history_scorecard_total(fg, sid));
-        lv_table_set_cell_value(s_detail_table, p + 1, total_col, total);
-    }
+    scorecard_render(s_detail_table,fg,&s_scorecard_state);
 
     lv_obj_clear_flag(s_detail_card, LV_OBJ_FLAG_HIDDEN);
 }

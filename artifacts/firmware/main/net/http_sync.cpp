@@ -15,6 +15,7 @@
 
 #include "http_sync.h"
 #include "game_store.h"
+#include "day_inventory.h"
 #include "app_config.h"
 #include "coprocessor.h"
 #include "offline_cache.h"
@@ -367,6 +368,9 @@ static esp_err_t http_backup_config_impl(bool sync_publication)
     cJSON *created = backup ? cJSON_GetObjectItem(backup, "updatedAt") : NULL;
     const char *updated_at = cJSON_IsString(created) ? created->valuestring : NULL;
     bool published = publish_backup_state(sync_publication, "BACKUP ERFOLLEGRÄICH", updated_at);
+    cJSON *saved_day=backup?cJSON_GetObjectItem(backup,"backupDate"):NULL;
+    if(published&&cJSON_IsString(saved_day)&&strlen(saved_day->valuestring)==10&&!day_inventory_mark_backup(saved_day->valuestring))
+        ESP_LOGW(TAG,"Backup date could not be persisted; retry remains safe");
     if (response_root) cJSON_Delete(response_root);
     return published ? ESP_OK : ESP_ERR_TIMEOUT;
 }
@@ -1113,6 +1117,9 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
         cJSON *jnr    = cJSON_GetObjectItem(item, "mitgliedNr");
         cJSON *jaktiv = cJSON_GetObjectItem(item, "portalAktiv");
         cJSON *jemail = cJSON_GetObjectItem(item, "email");
+        ps->isMaitreDeTir=cJSON_IsTrue(cJSON_GetObjectItem(item,"isMaitreDeTir"));
+        cJSON *active=cJSON_GetObjectItem(item,"aktiv");
+        ps->aktiv=!cJSON_IsBool(active)||cJSON_IsTrue(active);
 
         if (jid   && cJSON_IsNumber(jid))   ps->id = (int)jid->valuedouble;
         if (jname && cJSON_IsString(jname)) {
@@ -1651,6 +1658,19 @@ static bool parse_bill_day_summary(cJSON *root, const char *requested,
     summary->games = json_int(root, "games");
     summary->completedGames = json_int(root, "completedGames");
     summary->confirmedClays = json_int(root, "confirmedClays");
+    summary->openTotalCent=json_int(root,"openTotalCents");
+    cJSON *ammo;
+    cJSON_ArrayForEach(ammo,cJSON_GetObjectItem(root,"ammunition")) {
+        int caliber=json_int(ammo,"caliber"),i=caliber==12?0:caliber==20?1:-1;if(i<0)continue;
+        summary->ammoSold[i]=json_int(ammo,"sold");
+        cJSON *opening=cJSON_GetObjectItem(ammo,"opening"),*closing=cJSON_GetObjectItem(ammo,"closing");
+        summary->ammoHasOpening[i]=cJSON_IsNumber(opening);summary->ammoHasClosing[i]=cJSON_IsNumber(closing);
+        summary->ammoOpening[i]=json_int(ammo,"opening");summary->ammoClosing[i]=json_int(ammo,"closing");summary->ammoDifference[i]=json_int(ammo,"difference");
+    }
+    cJSON *maitre;cJSON_ArrayForEach(maitre,cJSON_GetObjectItem(root,"maitres")) {
+        cJSON *name=cJSON_GetObjectItem(maitre,"name");
+        if(summary->maitreCount<4&&cJSON_IsString(name))utf8_to_display(summary->maitreNames[summary->maitreCount++],name->valuestring,MAX_NAME_LEN);
+    }
     cJSON *day_categories = cJSON_GetObjectItemCaseSensitive(root, "categorySubtotals");
     if (cJSON_IsObject(day_categories)) {
         if (cJSON_GetArraySize(day_categories) > MAX_BILL_CATEGORIES) return false;
@@ -2069,6 +2089,48 @@ static esp_err_t http_sync_billing_impl(void)
 }
 
 // ── http_sync_all ─────────────────────────────────────────────
+static esp_err_t http_sync_inventory()
+{
+    DayEvent event;
+    while(day_inventory_peek(&event)) {
+        cJSON *body=cJSON_CreateObject();
+        cJSON_AddStringToObject(body,"externalId",event.externalId);
+        cJSON_AddStringToObject(body,"datum",event.datum);
+        char id[64];terminal_id(id,sizeof(id));
+        cJSON_AddStringToObject(body,"terminalId",id);
+        const char *path;
+        if(event.kind==DAY_MAITRES) {
+            cJSON *ids=cJSON_AddArrayToObject(body,"maitreIds");
+            for(int i=0;i<event.maitreCount;i++)cJSON_AddItemToArray(ids,cJSON_CreateNumber(event.maitreIds[i]));
+            path="/api/sync/gameday";
+        } else {
+            cJSON_AddNumberToObject(body,"c12",event.c12);cJSON_AddNumberToObject(body,"c20",event.c20);
+            cJSON_AddBoolToObject(body,"takenOver",event.takenOver);cJSON_AddStringToObject(body,"note",event.note);
+            path=event.kind==DAY_OPENING?"/api/sync/inventory/opening":"/api/sync/inventory/closing";
+        }
+        char *json=cJSON_PrintUnformatted(body);cJSON_Delete(body);
+        if(!json)return ESP_ERR_NO_MEM;
+        char response[512];esp_err_t err=http_post_json(path,json,response,sizeof(response));cJSON_free(json);
+        if(err!=ESP_OK)return err;
+        cJSON *ack=cJSON_Parse(response);bool accepted=ack&&cJSON_IsTrue(cJSON_GetObjectItem(ack,"success"));if(ack)cJSON_Delete(ack);
+        if(!accepted)return ESP_ERR_INVALID_RESPONSE;
+        // Exact immutable event acknowledgement only; a failed NVS removal
+        // deliberately retains it for an idempotent retry after reboot.
+        if(!day_inventory_ack(event.externalId))return ESP_FAIL;
+    }
+    char today[11];if(!day_inventory_today(today,sizeof(today)))return ESP_ERR_INVALID_STATE;
+    char url[80];snprintf(url,sizeof(url),"/api/sync/inventory/state?datum=%s",today);
+    char *response=(char*)malloc(32768);if(!response)return ESP_ERR_NO_MEM;
+    esp_err_t err=http_get_json(url,response,32768);
+    cJSON *root=err==ESP_OK?cJSON_Parse(response):NULL;free(response);
+    if(!root)return err==ESP_OK?ESP_ERR_INVALID_RESPONSE:err;
+    TickType_t started;
+    if(!sync_commit_begin("inventory",&started)){cJSON_Delete(root);return ESP_ERR_TIMEOUT;}
+    bool ok=day_inventory_apply(root,today);
+    sync_commit_end("inventory",started);cJSON_Delete(root);
+    if(!ok)return ESP_ERR_INVALID_RESPONSE;
+    return day_inventory_persist()?ESP_OK:ESP_FAIL;
+}
 static esp_err_t http_sync_all_impl(void)
 {
     portENTER_CRITICAL(&s_error_lock);
@@ -2102,6 +2164,7 @@ static esp_err_t http_sync_all_impl(void)
     const bool had_sales = g_store.pendingVerkaufEventCount > 0;
     const bool had_credits = g_store.pendingKreditEventCount > 0;
     const bool had_payments = g_store.pendingPaymentEventCount > 0;
+    const bool had_inventory=day_inventory_peek(NULL);
     const bool had_games = g_store.pendingGamesCount > 0;
     esp_err_t pue = http_push_spieler_updates();
     if (pue != ESP_OK) overall = pue;
@@ -2128,9 +2191,11 @@ static esp_err_t http_sync_all_impl(void)
     esp_err_t ppe = http_push_payment_events();
     if (ppe != ESP_OK && overall == ESP_OK) overall = ppe;
     if (ppe != ESP_OK) ESP_LOGW(TAG, "Payment events not fully accepted — retained");
+    esp_err_t inventory_err=http_sync_inventory();
+    if(inventory_err!=ESP_OK&&overall==ESP_OK)overall=inventory_err;
     bool pull_bills = pve == ESP_OK && pke == ESP_OK && ppe == ESP_OK &&
                       (manifest_changed(&manifest, OFFLINE_CACHE_BILLS) ||
-                       had_sales || had_credits || had_payments ||
+                       had_sales || had_credits || had_payments || had_inventory ||
                        store_has_unapplied_paid_sessions());
     esp_err_t pbs = pull_bills ? http_fetch_bill_day_summary() : ESP_OK;
     if (pull_bills && pbs == ESP_OK) commit_manifest_token(&manifest, OFFLINE_CACHE_BILLS);
@@ -2190,9 +2255,13 @@ static esp_err_t http_sync_all_impl(void)
 
     // A configuration backup is deliberately last: operational outboxes are
     // processed first, and backup failure must never undo successful sync work.
-    esp_err_t backup_err = http_backup_config_impl(true);
-    if (backup_err != ESP_OK)
-        ESP_LOGW(TAG, "Configuration backup failed — operational sync remains valid");
+    // Only the first successful operational sync uploads a daily snapshot.
+    DayInventory day;day_inventory_snapshot(&day);
+    char today[11];
+    if(overall==ESP_OK&&day_inventory_today(today,sizeof(today))&&strcmp(day.backupDate,today)) {
+        esp_err_t backup_err=http_backup_config_impl(true);
+        if(backup_err!=ESP_OK) ESP_LOGW(TAG,"Configuration backup failed — operational sync remains valid");
+    }
 
     if (overall == ESP_OK) {
         TickType_t commit_started;

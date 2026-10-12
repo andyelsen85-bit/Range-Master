@@ -189,6 +189,12 @@ int http_push_kredit_events() { return server_error; }
 int http_push_payment_events() { return ESP_OK; }
 int http_push_pending_games() { return ESP_OK; }
 int http_backup_config_impl(bool) { return ESP_OK; }
+struct DayInventory { char backupDate[11]; };
+bool day_inventory_peek(void*) {return false;}
+int http_sync_inventory(){return ESP_OK;}
+void day_inventory_snapshot(DayInventory *d){memset(d,0,sizeof(*d));strcpy(d->backupDate,"2026-04-24");}
+bool day_inventory_today(char *out,size_t n){snprintf(out,n,"%s","2026-04-24");return true;}
+bool day_inventory_mark_backup(const char*){return true;}
 int http_fetch_spieler(PortalSpieler *out, int, int *count) {
     *count = 1; out[0] = {}; out[0].id = 123; return ESP_OK;
 }

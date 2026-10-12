@@ -114,3 +114,24 @@
     @apply font-sans antialiased bg-background text-foreground;
   }
 }
+
+/* ── Paper slip scorecard ─────────────────────────────────────────────── */
+.scorecard-paper {
+  --slip-paper: 40 33% 96%;
+  --slip-ink: 220 20% 14%;
+  --slip-muted: 220 8% 42%;
+  --slip-shade: 40 8% 80%;
+  --slip-two: 356 62% 44%;
+  --slip-one: 210 48% 38%;
+  background: hsl(var(--slip-paper));
+  color: hsl(var(--slip-ink));
+  border: 1px solid hsl(var(--slip-ink) / 0.6);
+}
+.scorecard-paper .slip-cell { border: 1px solid hsl(var(--slip-ink) / 0.55); }
+.scorecard-paper .slip-sticky { position: sticky; left: 0; z-index: 2; background: hsl(var(--slip-paper)); box-shadow: 2px 0 0 hsl(var(--slip-ink) / 0.55); }
+.scorecard-paper .slip-pair { background: hsl(var(--slip-shade)); }
+.scorecard-paper .slip-pair-start { border-right-color: hsl(var(--slip-shade)); }
+.scorecard-paper .slip-pair-end { border-left-color: hsl(var(--slip-shade)); }
+.scorecard-paper .slip-run-start { border-left: 2px solid hsl(var(--slip-ink)); }
+.scorecard-paper .slip-sum-start { border-left: 3px solid hsl(var(--slip-ink)); }
+.scorecard-paper .slip-total { border-left: 3px solid hsl(var(--slip-ink)); background: hsl(var(--slip-paper)); }

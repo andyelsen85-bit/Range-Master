@@ -145,7 +145,7 @@ static bool write_file(const char *name,uint16_t section,const void *p,size_t n)
     int fd=open(tmp,O_WRONLY|O_CREAT|O_TRUNC,0644);
     const int open_errno = errno;
     if(fd<0){ESP_LOGE(TAG,"Cache %s open failed: errno=%d",name,open_errno);return false;}
-    CacheEnvelope h={CACHE_MAGIC,CACHE_SCHEMA,section,(uint32_t)n,esp_rom_crc32_le(0,(const uint8_t *)p,n)};
+    CacheEnvelope h={CACHE_MAGIC,(uint16_t)(section==OFFLINE_CACHE_ROSTER?2:CACHE_SCHEMA),section,(uint32_t)n,esp_rom_crc32_le(0,(const uint8_t *)p,n)};
     bool ok = write_all(fd, &h, sizeof(h), name, "header") &&
               write_all(fd, p, n, name, "payload");
     if (ok) {
@@ -207,7 +207,18 @@ static bool write_file(const char *name,uint16_t section,const void *p,size_t n)
 static bool read_envelope(const char *path,uint16_t section,void *p,size_t n) {
     int fd=open(path,O_RDONLY); if(fd<0)return false;
     CacheEnvelope h;
-    bool ok=read_all(fd,&h,sizeof(h))&&h.magic==CACHE_MAGIC&&h.schema==CACHE_SCHEMA&&h.section==section&&h.payload_len==n&&read_all(fd,p,n)&&esp_rom_crc32_le(0,(const uint8_t *)p,n)==h.crc32;
+    bool ok=read_all(fd,&h,sizeof(h))&&h.magic==CACHE_MAGIC&&
+        (h.schema==CACHE_SCHEMA||(section==OFFLINE_CACHE_ROSTER&&h.schema==2))&&h.section==section;
+    bool legacy_bill=ok&&section==OFFLINE_CACHE_BILLS&&h.schema==1&&h.payload_len==offsetof(BillDaySummary,ammoSold);
+    if(ok&&(h.payload_len==n||legacy_bill)){
+        memset(p,0,n);ok=read_all(fd,p,h.payload_len)&&esp_rom_crc32_le(0,(const uint8_t*)p,h.payload_len)==h.crc32;
+    }else ok=false;
+    // Legacy roster fields occupied padding: never interpret those bytes as
+    // authorization flags. Upgrade just this payload without discarding others.
+    if(ok&&section==OFFLINE_CACHE_ROSTER&&h.schema==1){
+        RosterPayload *roster=(RosterPayload*)p;
+        for(int i=0;i<MAX_PORTAL_SPIELER;i++){roster->value[i].isMaitreDeTir=false;roster->value[i].aktiv=true;}
+    }
     close(fd);
     return ok;
 }

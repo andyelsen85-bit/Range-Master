@@ -20,6 +20,8 @@ export function buildTransport(s: SmtpSettings) {
     auth: s.username ? { user: s.username, pass: s.passwort } : undefined,
     tls: s.ignoreTlsErrors ? { rejectUnauthorized: false } : undefined,
     connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
   });
 }
 
@@ -27,11 +29,12 @@ export function buildTransport(s: SmtpSettings) {
  * Send a mail using stored settings.
  * Throws with a descriptive message when SMTP is not configured or sending fails.
  */
-export async function sendMail(to: string, subject: string, text: string): Promise<void> {
+export async function sendMail(to: string | string[], subject: string, text: string, html?: string): Promise<void> {
   const s = await getSmtpSettings();
   if (!s) throw new Error("SMTP net konfiguréiert");
   const transport = buildTransport(s);
-  await transport.sendMail({ from: s.fromAddress, to, subject, text });
+  const result = await transport.sendMail({ from: s.fromAddress, to, subject, text, html });
+  if (result.rejected?.length) throw new Error("SMTP hat mindestens einen Empfänger abgelehnt");
 }
 
 /** Generate a readable random password (12 chars, no ambiguous characters) */
