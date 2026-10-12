@@ -13,6 +13,7 @@
 #include "screen_einstellungen.h"
 #include "click_sound.h"
 #include "lora_stub.h"
+#include "button_events.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_tab_view;
@@ -27,6 +28,14 @@ static lv_obj_t *s_ta_price_credit;
 static lv_obj_t *s_ta_price_cal12;
 static lv_obj_t *s_ta_price_cal20;
 static lv_obj_t *s_lbl_api_status;
+static lv_obj_t *s_remote_switch;
+static lv_obj_t *s_remote_status;
+
+static void remote_receive_cb(lv_event_t *e)
+{
+    g_store.remoteButtonsEnabled = lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
+    game_store_save();
+}
 static bool s_portal_check_pending;
 static bool s_gateway_check_pending;
 static lv_obj_t *s_lbl_machine_test_status;
@@ -360,6 +369,17 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     s_lbl_api_status = lv_label_create(parent);
     lv_label_set_text(s_lbl_api_status, "");
     lv_obj_set_style_text_font(s_lbl_api_status, UI_FONT_14, 0);
+
+    lv_obj_t *remote_label = lv_label_create(parent);
+    lv_label_set_text(remote_label, "Fernbedienung empfangen");
+    lv_obj_set_style_text_color(remote_label, lv_color_hex(CLR_TEXT), 0);
+    s_remote_switch = lv_switch_create(parent);
+    if (g_store.remoteButtonsEnabled) lv_obj_add_state(s_remote_switch, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(s_remote_switch, remote_receive_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    s_remote_status = lv_label_create(parent);
+    lv_obj_set_style_text_font(s_remote_status, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(s_remote_status, lv_color_hex(CLR_TEXT), 0);
+    lv_label_set_text(s_remote_status, "Fernbedienung: deaktiviert");
 
     lv_obj_t *backup_btn = lv_btn_create(parent);
     lv_obj_add_style(backup_btn, &g_style_btn_secondary, 0);
@@ -1650,6 +1670,20 @@ void screen_einstellungen_refresh(void)
 
 void screen_einstellungen_tick(void)
 {
+    if (s_remote_status) {
+        bool connected = false;uint32_t age = UINT32_MAX;
+        button_events_status(&connected, &age);
+        char status[128];
+        if (!g_store.remoteButtonsEnabled)
+            snprintf(status, sizeof(status), "Fernbedienung: deaktiviert");
+        else if (age == UINT32_MAX)
+            snprintf(status, sizeof(status), "Fernbedienung: %s · noch kein Ereignis",
+                connected ? "verbunden" : "getrennt");
+        else
+            snprintf(status, sizeof(status), "Fernbedienung: %s · letztes Ereignis vor %lu s",
+                connected ? "verbunden" : "getrennt", (unsigned long)(age / 1000));
+        lv_label_set_text(s_remote_status, status);
+    }
     if (s_portal_check_pending && s_lbl_api_status) {
         SyncUiState sync_state = {};
         store_get_sync_ui_state(&sync_state);

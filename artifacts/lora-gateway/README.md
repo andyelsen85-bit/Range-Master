@@ -19,6 +19,8 @@ and must never be committed or shared.
 1. Install the official **Heltec ESP32 Dev-Boards** Arduino package/library and select
    **Wireless Stick V3**. The sketches use `LoRaWan_APP.h`, which supplies the board's
    built-in SX1262 pin mapping. Do not add manually guessed radio SPI/DIO pins.
+   Install **WebSockets 2.6.1** (arduinoWebSockets) and **ArduinoJson 7.4.2**
+   for the six-button remote event service.
 2. Define `TM_PROTOCOL_KEY_BYTES` as the same unique 16-byte AES key for the gateway
    and every relay. A normal build deliberately fails until this value is provided.
    `TM_ALLOW_INSECURE_BENCH_KEY` is available only for a disconnected bench test.
@@ -53,6 +55,8 @@ GET /fire?machine=A&nonce=<32 hex characters>  # X-TrapMaster-Auth HMAC required
 GET /fire-pair?first=D&second=F&delayMs=1000&nonce=<32 hex characters>
                                   # X-TrapMaster-Auth pair HMAC header required
 GET /health             # X-TrapMaster-Auth health-check HMAC header required; never transmits
+GET /events?after=0&boot=0&client_nonce=<fresh 32 hex>
+                        # health HMAC; max 8 events; connection-bound signatures
 GET /status             # uptime, IP/RSSI, last result, ACK state
 ```
 
@@ -186,6 +190,38 @@ python artifacts/firmware/tests/test_machine_batch.py
 ```
 
 ## Counter recovery
+
+### Six-button handhelds
+
+WebSocket events use port **81** (maximum four terminals, maximum two
+unauthenticated sessions, 3-second authentication deadline). Each connection
+receives an 8-byte random server hello nonce; the terminal supplies a fresh
+16-byte random `client_nonce` in its auth frame. Canonical auth payload:
+`ws|serverNonce|after|boot|clientNonce` (full SHA-256 HMAC hex).
+Canonical event payload:
+`evt|boot|id|src|btn|age_ms|clientNonce|serverNonce` (first 8 HMAC bytes hex).
+`src` is numeric 1…8; LoRa addresses remain ASCII `'1'`…`'8'`.
+The signed HTTP fallback echoes its request's fresh client nonce and supplies
+a fresh server nonce for that response. Events from an older connection or
+another fallback request cannot be reused.
+
+The gateway saves each remote's counter to NVS **before ACK**, emits one event
+for a new counter, re-ACKs equality without another write/event, and rejects
+older counters. Slow flash can miss the 150 ms ACK window: the handheld
+retries its identical counter/frame, and the gateway re-ACKs it. The radio
+callback only queues packets; persistence and ACK occur in the main loop
+after any active FIRE transaction. Relay FIRE/ACK encryption remains unchanged.
+The ring contains 32 RAM-only events, with random boot ID and increasing IDs.
+Different boot IDs resync without replay; gaps are reported.
+Tiny WebSocket writes use a single non-blocking socket write; a blocked or
+partially written client is dropped. Ping every 10 seconds; two unanswered
+pings drop the client.
+
+Enable **Fernbedienung empfangen** on the terminal (default OFF). **Every
+enabled terminal on this gateway receives and acts on the same buttons.**
+See [remote wiring, power and safe commissioning](../lora-remote/README.md).
+
+### Relay counters
 
 The gateway persists its transmit counter and each relay persists its last accepted
 counter. Never reset either counter while retaining the same AES key: doing so is

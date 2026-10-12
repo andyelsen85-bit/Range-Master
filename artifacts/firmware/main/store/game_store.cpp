@@ -3265,6 +3265,7 @@ void game_store_save(void)
     nvs_set_i32(s_nvs, "cat_pin_fail", g_store.cateringPinFailures);
     nvs_set_i64(s_nvs, "cat_pin_lock", g_store.cateringPinLockoutUntil);
     nvs_set_i32(s_nvs, "click_snd", g_store.clickSoundEnabled ? 1 : 0);
+    nvs_set_i32(s_nvs, "remote_btn", g_store.remoteButtonsEnabled ? 1 : 0);
     nvs_set_i32(s_nvs, "auto_sync", g_store.autoSyncEnabled ? 1 : 0);
     nvs_set_u32(s_nvs, "auto_secs", g_store.autoSyncSeconds);
     nvs_set_u32(s_nvs, "bill_secs", g_store.billingSyncSeconds);
@@ -3676,6 +3677,9 @@ void game_store_init(void)
         g_store.clickSoundEnabled = true;  // first boot — enable by default
 
     int32_t auto_sync = 1;
+    int32_t remote_btn = 0;
+    nvs_get_i32(s_nvs, "remote_btn", &remote_btn);
+    g_store.remoteButtonsEnabled = (remote_btn != 0);
     uint32_t auto_secs = AUTO_SYNC_DEFAULT_SECONDS;
     uint32_t billing_secs = BILLING_SYNC_DEFAULT_SECONDS;
     if (nvs_get_i32(s_nvs, "auto_sync", &auto_sync) == ESP_OK)

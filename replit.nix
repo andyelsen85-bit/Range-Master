@@ -1,6 +1,8 @@
 {pkgs}: {
   deps = [
     pkgs.arduino-cli
+    pkgs.pkg-config
+    pkgs.mbedtls
     pkgs.libgbm
     pkgs.xorg.libxshmfence
     pkgs.at-spi2-core

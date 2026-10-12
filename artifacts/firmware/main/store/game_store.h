@@ -449,6 +449,7 @@ typedef struct {
 
     // UI preferences
     bool    clickSoundEnabled;   // touch-feedback beep via ES8311
+    bool    remoteButtonsEnabled; // explicit opt-in; default OFF
 } GameStore;
 
 // ── Global store instance ────────────────────────────────────

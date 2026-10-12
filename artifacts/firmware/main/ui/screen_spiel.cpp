@@ -44,16 +44,27 @@ static void set_label_text_if_changed(lv_obj_t *label, const char *text)
 static void score_cb(lv_event_t *e)
 {
     int pts = (int)(intptr_t)lv_event_get_user_data(e);
-    store_eintragen(pts);
-    screen_spiel_refresh();
+    spiel_action_score(pts);
 }
 
-static void fire_cb(lv_event_t *e)
+SpielActionResult spiel_action_score(int pts)
 {
-    if (g_store.taubeIndex >= g_store.sequenzLen) return;
+    if (g_store.taubeIndex >= g_store.sequenzLen || pts < 0 || pts > 2)
+        return SPIEL_ACTION_IGNORED;
+    if (pts == 1 && g_store.sequenz[g_store.taubeIndex].isPair)
+        return SPIEL_ACTION_IGNORED;
+    store_eintragen(pts);
+    screen_spiel_refresh();
+    return SPIEL_ACTION_OK;
+}
+
+SpielActionResult spiel_action_fire()
+{
+    if (g_store.taubeIndex >= g_store.sequenzLen) return SPIEL_ACTION_IGNORED;
     SequenzEintrag *se = &g_store.sequenz[g_store.taubeIndex];
-    if (se->isPair && se->isDoublette) return; // second result never sends another FIRE
-    if (g_store.currentFireSent || lora_request_busy()) return;
+    if (se->isPair && se->isDoublette) return SPIEL_ACTION_SCORE_FIRST;
+    if (g_store.currentFireSent) return SPIEL_ACTION_SCORE_FIRST;
+    if (lora_request_busy()) return SPIEL_ACTION_RADIO_BUSY;
 
     bool queued = false;
     if (se->isPair && se->maschine != MASCHINE_H) {
@@ -65,18 +76,38 @@ static void fire_cb(lv_event_t *e)
     }
     if (queued) g_store.currentFireSent = true;
     screen_spiel_refresh();
+    return queued ? SPIEL_ACTION_OK : SPIEL_ACTION_RADIO_BUSY;
+}
+
+static void fire_cb(lv_event_t *e)
+{
+    spiel_action_fire();
+}
+
+SpielActionResult spiel_action_repeat()
+{
+    if (g_store.ergebnisseCount <= 0) return SPIEL_ACTION_IGNORED;
+    store_wiederholen();
+    screen_spiel_refresh();
+    return SPIEL_ACTION_OK;
+}
+
+SpielActionResult spiel_action_skip()
+{
+    if (g_store.taubeIndex >= g_store.sequenzLen) return SPIEL_ACTION_IGNORED;
+    store_skip_taube();
+    screen_spiel_refresh();
+    return SPIEL_ACTION_OK;
 }
 
 static void wiederhole_cb(lv_event_t *e)
 {
-    store_wiederholen();
-    screen_spiel_refresh();
+    spiel_action_repeat();
 }
 
 static void skip_cb(lv_event_t *e)
 {
-    store_skip_taube();
-    screen_spiel_refresh();
+    spiel_action_skip();
 }
 
 static void close_quit_modal(void)

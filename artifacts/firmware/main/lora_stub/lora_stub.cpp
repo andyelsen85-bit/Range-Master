@@ -19,6 +19,7 @@
 #include "esp_log.h"
 #include "cJSON.h"
 #include "lora_stub.h"
+#include "button_events.h"
 #include "gateway_health.h"
 #include "game_store.h"
 #include "coprocessor.h"
@@ -588,6 +589,7 @@ static void gateway_worker(void *arg)
 
 void lora_stub_init(void)
 {
+    button_events_init();
     if (s_gateway_queue) return;
     if (!s_state_mutex) {
         s_state_mutex = xSemaphoreCreateMutex();

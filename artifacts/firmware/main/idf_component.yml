@@ -1,6 +1,8 @@
 ## IDF Component Manager manifest
 dependencies:
   idf: ">=5.3.0"
+  espressif/esp_websocket_client:
+    version: "==1.4.0"
 
   ## LVGL v9 via espressif managed components
   esp_lvgl_port:

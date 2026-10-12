@@ -6,6 +6,9 @@
 #include "esp_log.h"
 #include "lvgl.h"
 #include "ui_fonts.h"
+#include "button_events.h"
+#include "click_sound.h"
+#include "esp_timer.h"
 
 #include "ui_manager.h"
 #include "game_store.h"
@@ -39,6 +42,70 @@ static lv_obj_t *s_sync_indicator;
 static lv_indev_t *s_input_device;
 static uint32_t  s_sync_publication_seen;
 static bool      s_sync_guard_visible;
+static lv_obj_t *s_remote_toast;
+static uint32_t s_remote_toast_until;
+static uint32_t s_remote_last_action;
+static bool s_remote_has_action;
+
+static void remote_toast(const char *text)
+{
+    if (!s_remote_toast) {
+        s_remote_toast = lv_label_create(lv_layer_top());
+        lv_obj_set_style_text_color(s_remote_toast, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_set_style_text_font(s_remote_toast, UI_FONT_18, 0);
+        lv_obj_set_style_bg_color(s_remote_toast, lv_color_hex(CLR_CARD), 0);
+        lv_obj_set_style_bg_opa(s_remote_toast, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_all(s_remote_toast, 12, 0);
+        lv_obj_clear_flag(s_remote_toast, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_label_set_text(s_remote_toast, text);
+    lv_obj_align(s_remote_toast, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_clear_flag(s_remote_toast, LV_OBJ_FLAG_HIDDEN);
+    s_remote_toast_until = lv_tick_get() + 1200;
+}
+
+static void remote_buttons_tick()
+{
+    ButtonEventsConfig config = {};
+    static_assert(sizeof(config.url) >= sizeof(g_store.gatewayUrl), "URL snapshot too small");
+    static_assert(sizeof(config.key) >= sizeof(g_store.gatewayToken), "Key snapshot too small");
+    config.enabled = g_store.remoteButtonsEnabled;
+    config.gameActive = s_current == SCREEN_SPIEL && g_store.screen == SCREEN_SPIEL &&
+        g_store.spielerCount > 0 && g_store.taubeIndex < g_store.sequenzLen;
+    snprintf(config.url, sizeof(config.url), "%s", g_store.gatewayUrl);
+    snprintf(config.key, sizeof(config.key), "%s", g_store.gatewayToken);
+    button_events_publish(config);
+    const uint32_t now = lv_tick_get();
+    if (s_remote_toast && (int32_t)(now - s_remote_toast_until) >= 0)
+        lv_obj_add_flag(s_remote_toast, LV_OBJ_FLAG_HIDDEN);
+    RemoteButtonEvent e;
+    while (button_events_take(&e)) {
+        // Queue residence counts toward freshness, too. Nothing arriving during
+        // a lockout is retained for a later, potentially different clay.
+        if ((uint32_t)(esp_timer_get_time()/1000) - e.receivedMs > 3000) continue;
+        if (s_remote_has_action && now - s_remote_last_action < 500) continue;
+        if (!config.gameActive) { remote_toast("Taster ignoriert");continue; }
+        SpielActionResult result = SPIEL_ACTION_IGNORED;
+        switch (e.btn) {
+            case 1: result = spiel_action_fire(); break;
+            case 2: result = spiel_action_repeat(); break;
+            case 3: result = spiel_action_skip(); break;
+            case 4: result = spiel_action_score(0); break;
+            case 5: result = spiel_action_score(1); break;
+            case 6: result = spiel_action_score(2); break;
+        }
+        if (result == SPIEL_ACTION_OK) {
+            s_remote_has_action = true;s_remote_last_action = now;
+            click_sound_play_if_enabled();
+            const char *names[] = {"", "Fernbedienung: Schuss", "Fernbedienung: Wiederholen",
+                "Fernbedienung: Skip", "Fernbedienung: Punkt 0",
+                "Fernbedienung: Punkt 1", "Fernbedienung: Punkt 2"};
+            remote_toast(names[e.btn]);
+        } else if (result == SPIEL_ACTION_SCORE_FIRST) remote_toast("Erst Punkte eintragen");
+        else if (result == SPIEL_ACTION_RADIO_BUSY) remote_toast("Funk belegt");
+        else remote_toast("Taster ignoriert");
+    }
+}
 
 static bool screen_has_return_button(Screen screen)
 {
@@ -269,6 +336,7 @@ void ui_manager_show(Screen s)
 
 void ui_manager_tick(void)
 {
+    remote_buttons_tick();
     SyncUiState sync_state = {};
     store_get_sync_ui_state(&sync_state);
     if (s_sync_indicator) {

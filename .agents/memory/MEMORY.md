@@ -39,3 +39,4 @@
 - [All-machine test scope](machine-test-scope.md) — “all machines” tests include only enabled machines; sequential commands, not simultaneous launches.
 - [Scorecard column labels](scorecard-labels.md) — use machine letters repeated in shooting order, without round or numeric position prefixes.
 - [Doublette scoring](doublette-scoring.md) — every clay in every doublette is hit/miss worth 2/0; each pair has a maximum of 4 points.
+- [Wireless remote safety](remote-button-safety.md) — persist before ACK; bind event HMACs to both connection nonces and age; verified GPIOs only.

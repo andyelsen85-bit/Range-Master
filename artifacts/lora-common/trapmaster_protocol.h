@@ -14,6 +14,8 @@ namespace tm_protocol {
 constexpr uint8_t VERSION = 0x01;
 constexpr uint8_t CMD_FIRE = 0x01;
 constexpr uint8_t CMD_ACK  = 0x02;
+constexpr uint8_t CMD_BTN_BASE = 0x10;
+constexpr uint8_t CMD_BTN_ACK = 0x20;
 constexpr size_t  NONCE_LEN = 12;
 constexpr size_t  BODY_LEN  = 7;
 constexpr size_t  TAG_LEN   = 16;
@@ -65,8 +67,17 @@ inline bool valid_machine(uint8_t machine)
     return machine >= 'A' && machine <= 'H';
 }
 
+inline bool valid_remote(uint8_t sender) { return sender >= '1' && sender <= '8'; }
+inline bool button_command(uint8_t command) {
+    return command > CMD_BTN_BASE && command <= CMD_BTN_BASE + 6;
+}
+inline bool valid_address(uint8_t address, uint8_t command) {
+    return valid_machine(address) ||
+           (valid_remote(address) && (button_command(command) || command == CMD_BTN_ACK));
+}
+
 inline void make_nonce(uint32_t counter, uint8_t command,
-                       uint8_t nonce[NONCE_LEN])
+                       uint8_t nonce[NONCE_LEN], uint8_t sender = 0)
 {
     // The gateway's persisted counter plus command direction makes this nonce
     // unique per key: a relay ACK may echo a FIRE counter, but never its nonce.
@@ -74,16 +85,17 @@ inline void make_nonce(uint32_t counter, uint8_t command,
     nonce[0] = 'T'; nonce[1] = 'M'; nonce[2] = '0'; nonce[3] = '1';
     write_u32_le(&nonce[4], counter);
     nonce[8] = command;
+    nonce[9] = sender; // zero for legacy relay packets: byte-for-byte compatible
 }
 
 inline bool encrypt(uint8_t machine, uint8_t command, uint32_t counter,
                     uint8_t frame[FRAME_LEN])
 {
-    if (!valid_machine(machine) || counter == 0) return false;
+    if (!valid_address(machine, command) || counter == 0) return false;
 
     uint8_t plain[BODY_LEN] = { VERSION, machine, command, 0, 0, 0, 0 };
     write_u32_le(&plain[3], counter);
-    make_nonce(counter, command, frame);
+    make_nonce(counter, command, frame, valid_remote(machine) ? machine : 0);
 
     mbedtls_gcm_context ctx;
     mbedtls_gcm_init(&ctx);
@@ -122,9 +134,10 @@ inline bool decrypt(const uint8_t *frame, size_t frame_len, DecodedPacket *out)
     out->counter = read_u32_le(&plain[3]);
 
     uint8_t expected_nonce[NONCE_LEN];
-    make_nonce(out->counter, out->command, expected_nonce);
+    make_nonce(out->counter, out->command, expected_nonce,
+               valid_remote(out->machine) ? out->machine : 0);
     return out->version == VERSION && out->counter != 0 &&
-           valid_machine(out->machine) &&
+           valid_address(out->machine, out->command) &&
            memcmp(frame, expected_nonce, NONCE_LEN) == 0;
 }
 

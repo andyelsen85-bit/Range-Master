@@ -118,6 +118,13 @@ static void logHttpIdle()
 }
 
 static void renderStatus();
+static bool
+health_request_is_authentic();
+#if __has_include("remote_events.h")
+#include "remote_events.h"
+#else
+#include "../remote_events.h"
+#endif
 
 // ── WiFi addressing ────────────────────────────────────────────
 // The gateway uses DHCP unless the operator enables static addressing in the
@@ -323,6 +330,7 @@ static void admitFire(const uint8_t *nonce, bool pair, char first, char second,
 
 static void renderStatus()
 {
+    if (buttonRenderStatus()) return;
     gatewayDisplay.clear();
     gatewayDisplay.setTextAlignment(TEXT_ALIGN_LEFT);
     gatewayDisplay.setFont(ArialMT_Plain_10);
@@ -346,7 +354,11 @@ static void onTxTimeout()
 static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     tm_protocol::DecodedPacket decoded = {};
-    if (tm_protocol::decrypt(payload, size, &decoded) &&
+    bool authenticated = tm_protocol::decrypt(payload, size, &decoded);
+    if (authenticated && tm_protocol::button_command(decoded.command)) {
+        buttonEnqueue(decoded);
+    }
+    if (authenticated &&
         decoded.command == tm_protocol::CMD_ACK &&
         decoded.counter == expectedAckCounter &&
         decoded.machine == (uint8_t)expectedAckMachine) {
@@ -355,6 +367,8 @@ static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
                       decoded.machine, rssi, snr);
     }
     Radio.Sleep();
+    if (!radioBusy && !remoteTx) Radio.Rx(0);
+    else if (radioBusy && !ackReceived) Radio.Rx(ACK_TIMEOUT_MS);
 }
 
 static void onRxTimeout()
@@ -444,6 +458,7 @@ static bool sendFire(char machine, bool *ack, bool wait_for_ack)
     lastMachine = String(machine);
     lastResult = *ack ? "sent + ACK" : "sent, no ACK";
     radioBusy = false;
+    Radio.Rx(0);
     renderStatus();
     return true;
 }
@@ -715,12 +730,15 @@ void setup()
 
     nextCounter = preferences.getULong("counter", 0);
     initRadio();
+    buttonEventsInit();
+    Radio.Rx(0);
     const char *headerKeys[] = { "X-TrapMaster-Auth" };
     server.collectHeaders(headerKeys, 1);
     server.on("/nonce", HTTP_GET, [] { noteHttpRequest(); handleNonce(); });
     server.on("/fire", HTTP_GET, [] { noteHttpRequest(); handleFire(); });
     server.on("/fire-pair", HTTP_GET, [] { noteHttpRequest(); handleFirePair(); });
     server.on("/health", HTTP_GET, [] { noteHttpRequest(); handleHealth(); });
+    server.on("/events", HTTP_GET, [] { noteHttpRequest(); handleButtonEvents(); });
     server.on("/status", HTTP_GET, [] { noteHttpRequest(); handleStatus(); });
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
     server.on("/bench-fire", HTTP_GET, [] { noteHttpRequest(); handleBenchFire(); });
@@ -738,7 +756,24 @@ void setup()
 void loop()
 {
     server.handleClient();
-    runPendingFire();
+    // A started ACK is short; complete it before letting FIRE own the radio.
+    if (!remoteTx) runPendingFire();
     Radio.IrqProcess();
+    if (remoteTx && (txDone || txTimeout || millis()-remoteTxStarted>TX_TIMEOUT_MS)) {
+        remoteTx=false;
+        if (!radioBusy) Radio.Rx(0);
+    }
+    buttonRadioTick();
+    if (!pendingFire && !radioBusy && !remoteTx && Radio.GetStatus()==RF_IDLE)
+        Radio.Rx(0);
+    if (!pendingFire && !radioBusy && !remoteTx) {
+        buttonSocketTick();
+        static uint32_t lastDisplay=0;
+        if (millis()-lastDisplay>=100) {
+            lastDisplay=millis();
+            if (millis()-remoteLastMs>70) digitalWrite(LED,LOW);
+            renderStatus();
+        }
+    }
     logHttpIdle();
 }

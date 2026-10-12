@@ -56,3 +56,5 @@ attached_assets/
 /artifacts/lora-relay/TrapMasterRelay.local.h
 /artifacts/lora-gateway/TrapMasterGateway/TrapMasterGateway.local.h
 /artifacts/lora-relay/TrapMasterRelay/TrapMasterRelay.local.h
+/artifacts/lora-remote/TrapMasterRemote.local.h
+/artifacts/lora-remote/TrapMasterRemote1/TrapMasterRemote.local.h

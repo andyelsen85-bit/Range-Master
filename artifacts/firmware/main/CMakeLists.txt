@@ -31,6 +31,7 @@ idf_component_register(
         "ui/screen_wifi.cpp"
         "ui/screen_catering.cpp"
         "lora_stub/lora_stub.cpp"
+        "lora_stub/button_events.cpp"
         "net/web_config.cpp"
     INCLUDE_DIRS
         "."
@@ -48,6 +49,7 @@ idf_component_register(
         lvgl
         driver
         esp_http_client
+        esp_websocket_client
         esp-tls
         esp_http_server
         mbedtls
@@ -81,5 +83,6 @@ set_source_files_properties(
     "ui/screen_geschichte.cpp"
     "net/http_sync.cpp"
     "lora_stub/lora_stub.cpp"
+    "lora_stub/button_events.cpp"
     PROPERTIES COMPILE_OPTIONS "-Os"
 )
