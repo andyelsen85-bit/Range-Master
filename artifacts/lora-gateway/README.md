@@ -35,13 +35,22 @@ and must never be committed or shared.
 ## Setup and use
 
 - First boot opens `TrapMaster-Gateway-Setup`; use a phone to select venue WiFi.
-- Hold the USER button during boot for about 1.5 seconds to erase saved WiFi and open
-  setup again.
+- Press and release RESET, then immediately hold USER for about two seconds
+  during early firmware startup to erase saved WiFi **and its static-IP settings**
+  and open setup again. Do not hold USER before RESET is released: GPIO0 is also
+  a boot strap and that can enter flashing mode instead.
 - The setup page includes a **Use fixed IPv4 address (DHCP off)** toggle. When enabled,
   enter the gateway's fixed IPv4 address and the venue router/gateway IPv4 address.
   The gateway uses a `255.255.255.0` subnet mask and the router for DNS. Both addresses
   must be on the same `/24` network; leave the toggle off to use DHCP. Saving the setup
   page restarts the gateway once so the selected address mode takes effect.
+- The portal has one set of address controls, not WiFiManager's additional native
+  IP fields. DHCP explicitly clears the previous live static address. Mode,
+  addresses and SSID are saved together in one atomic NVS record; a saved static
+  address is only reused for that SSID. Older separate `net_static/net_ip/net_gw`
+  settings are read for compatibility until the first new save or WiFi reset.
+  Resetting WiFi does not erase radio counters, remote replay protection or
+  the firmware's authentication keys.
 - The OLED shows the connected IP, last machine, and radio result.
 - Set the terminal's **TrapMaster Gateway URL** to `http://<OLED-IP>`.
 - Set the terminal's **TrapMaster Gateway Auth Key** to the exact private

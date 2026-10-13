@@ -73,7 +73,16 @@ public:
     }
 };
 GatewayWebServer server(80);
-WiFiManager wifiManager;
+class GatewayWiFiManager : public WiFiManager {
+public:
+    void hideNativeAddressFields() {
+        // WiFiManager 2.x would otherwise show a second, non-persisted set of
+        // address inputs whenever setSTAStaticIPConfig() has been called.
+        _staShowStaticFields = -1;
+        _staShowDns = -1;
+    }
+};
+GatewayWiFiManager wifiManager;
 Preferences preferences;
 RadioEvents_t radioEvents;
 
@@ -135,6 +144,30 @@ static const IPAddress STATIC_SUBNET(255, 255, 255, 0);
 static bool staticAddressEnabled = false;
 static char staticAddressText[16] = {};
 static char staticGatewayText[16] = {};
+struct NetworkAddressSettings {
+    uint8_t version;
+    uint8_t useStatic;
+    char ssid[33];
+    char address[16];
+    char gateway[16];
+};
+static void applyNetworkSettings();
+
+static bool resetNetworkSettings()
+{
+    // Do not clear the trapmaster namespace: radio counters and remote
+    // replay protection must survive a WiFi-only reset.
+    const char *keys[] = {"net_cfg", "net_static", "net_ip", "net_gw"};
+    for (const char *key : keys) {
+        if (preferences.isKey(key) && !preferences.remove(key)) return false;
+    }
+    staticAddressEnabled = false;
+    staticAddressText[0] = '\0';
+    staticGatewayText[0] = '\0';
+    networkSettingsSaved = false;
+    wifiManager.resetSettings();
+    return true;
+}
 
 static char staticModeAttrs[80] = {};
 static const char IPV4_INPUT_ATTRS[] =
@@ -166,15 +199,46 @@ static bool parseStaticNetwork(const char *addressText, const char *gatewayText,
 
 static void loadNetworkSettings()
 {
+    staticAddressEnabled = false;
+    staticAddressText[0] = '\0';
+    staticGatewayText[0] = '\0';
+    if (preferences.isKey("net_cfg")) {
+        NetworkAddressSettings saved{};
+        if (preferences.getBytesLength("net_cfg") != sizeof(saved) ||
+            preferences.getBytes("net_cfg", &saved, sizeof(saved)) != sizeof(saved) ||
+            saved.version != 1 || saved.useStatic > 1 ||
+            saved.ssid[32] != '\0' || saved.address[15] != '\0' ||
+            saved.gateway[15] != '\0') {
+            Serial.println("Saved network configuration invalid; using DHCP");
+            return;
+        }
+        // An address belongs to its SSID, not to any network connected later.
+        if (saved.useStatic &&
+            (saved.ssid[0] == '\0' || wifiManager.getWiFiSSID(true) != saved.ssid)) {
+            Serial.println("Saved static IPv4 belongs to another WiFi; using DHCP");
+            return;
+        }
+        staticAddressEnabled = saved.useStatic;
+        memcpy(staticAddressText, saved.address, sizeof(staticAddressText));
+        memcpy(staticGatewayText, saved.gateway, sizeof(staticGatewayText));
+        return;
+    }
+    // Retain existing installations until the next explicit portal save/reset.
     staticAddressEnabled = preferences.getBool("net_static", false);
     preferences.getString("net_ip", "").toCharArray(staticAddressText,
                                                      sizeof(staticAddressText));
     preferences.getString("net_gw", "").toCharArray(staticGatewayText,
                                                      sizeof(staticGatewayText));
+    if (wifiManager.getWiFiSSID(true).length() == 0) {
+        staticAddressEnabled = false;
+        staticAddressText[0] = '\0';
+        staticGatewayText[0] = '\0';
+    }
 }
 
 static void configureNetworkPortal()
 {
+    wifiManager.hideNativeAddressFields();
     snprintf(staticModeAttrs, sizeof(staticModeAttrs),
              "type='checkbox' value='1'%s",
              staticAddressEnabled ? " checked" : "");
@@ -188,6 +252,7 @@ static void configureNetworkPortal()
 
 static void saveNetworkSettings()
 {
+    networkSettingsSaved = false;
     // An unchecked HTML checkbox is intentionally absent from the form, making
     // this test reliable when the operator switches back from static to DHCP.
     bool useStatic = wifiManager.server &&
@@ -205,11 +270,24 @@ static void saveNetworkSettings()
         return;
     }
 
-    size_t savedAddressLength = preferences.putString("net_ip", addressValue);
-    size_t savedGatewayLength = preferences.putString("net_gw", gatewayValue);
-    if (preferences.putBool("net_static", useStatic) != sizeof(bool) ||
-        (addressValue.length() > 0 && savedAddressLength == 0) ||
-        (gatewayValue.length() > 0 && savedGatewayLength == 0)) {
+    NetworkAddressSettings saved{};
+    saved.version = 1;
+    saved.useStatic = useStatic;
+    String ssid = wifiManager.server ? wifiManager.server->arg("s") : String("");
+    if (ssid.length() == 0) ssid = wifiManager.getWiFiSSID(true);
+    if (ssid.length() > 32 || (useStatic && ssid.length() == 0)) {
+        lastResult = "WiFi name invalid";
+        renderStatus();
+        return;
+    }
+    ssid.toCharArray(saved.ssid, sizeof(saved.ssid));
+    if (useStatic) {
+        addressValue.toCharArray(saved.address, sizeof(saved.address));
+        gatewayValue.toCharArray(saved.gateway, sizeof(saved.gateway));
+    }
+    // One NVS blob is committed atomically; never mix an old mode with newly
+    // written addresses after an interrupted save.
+    if (preferences.putBytes("net_cfg", &saved, sizeof(saved)) != sizeof(saved)) {
         lastResult = "Network save failed";
         Serial.println("Could not save network address settings");
         renderStatus();
@@ -217,8 +295,11 @@ static void saveNetworkSettings()
     }
 
     staticAddressEnabled = useStatic;
-    addressValue.toCharArray(staticAddressText, sizeof(staticAddressText));
-    gatewayValue.toCharArray(staticGatewayText, sizeof(staticGatewayText));
+    memcpy(staticAddressText, saved.address, sizeof(staticAddressText));
+    memcpy(staticGatewayText, saved.gateway, sizeof(staticGatewayText));
+    // This callback runs before WiFiManager connects the newly selected SSID.
+    // Update its live configuration as well as the persistent record.
+    applyNetworkSettings();
     networkSettingsSaved = true;
     Serial.printf("Saved WiFi mode: %s\n", useStatic ? "static" : "DHCP");
 }
@@ -226,6 +307,9 @@ static void saveNetworkSettings()
 static void applyNetworkSettings()
 {
     if (!staticAddressEnabled) {
+        const IPAddress unset(0, 0, 0, 0);
+        wifiManager.setSTAStaticIPConfig(unset, unset, unset, unset);
+        WiFi.config(unset, unset, unset);
         Serial.println("WiFi address mode: DHCP");
         return;
     }
@@ -235,8 +319,8 @@ static void applyNetworkSettings()
     if (!parseStaticNetwork(staticAddressText, staticGatewayText, &address, &gateway)) {
         // Do not let an incomplete persisted value block access to the setup portal.
         staticAddressEnabled = false;
-        preferences.putBool("net_static", false);
         Serial.println("Saved static IPv4 invalid; falling back to DHCP");
+        applyNetworkSettings();
         return;
     }
 
@@ -702,13 +786,17 @@ void setup()
         renderStatus();
         while (true) delay(1000); // never run without persistent security state
     }
+    WiFi.mode(WIFI_STA);
+    if (shouldResetWifi() && !resetNetworkSettings()) {
+        lastResult = "WiFi reset failed";
+        renderStatus();
+        while (true) delay(1000);
+    }
     loadNetworkSettings();
     applyNetworkSettings();
     configureNetworkPortal();
     wifiManager.setSaveParamsCallback(saveNetworkSettings);
 
-    if (shouldResetWifi()) wifiManager.resetSettings();
-    WiFi.mode(WIFI_STA);
     wifiManager.setConfigPortalTimeout(180);
     if (!wifiManager.autoConnect("TrapMaster-Gateway-Setup")) {
         lastResult = "WiFi setup failed";
