@@ -64,6 +64,13 @@
       "when": 1791072000000,
       "tag": "0008_harakiri_custom",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791849600000,
+      "tag": "0009_gameday_daily_close",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,4 @@
 -- Development migration; apply as one transaction. Never run startup-time DDL.
-BEGIN;
 ALTER TABLE spieler ADD COLUMN IF NOT EXISTS is_maitre_de_tir boolean NOT NULL DEFAULT false;
 ALTER TABLE spiele ADD COLUMN IF NOT EXISTS completed_at timestamptz;
 UPDATE spiele SET completed_at=datum WHERE abgeschlossen AND completed_at IS NULL;
@@ -56,4 +55,3 @@ CREATE TABLE IF NOT EXISTS public_page_settings (id integer PRIMARY KEY DEFAULT 
  enabled boolean NOT NULL DEFAULT false,name_mode text NOT NULL DEFAULT 'INITIAL' CHECK(name_mode IN('FULL','INITIAL')));
 INSERT INTO daily_report_settings(id) VALUES(1) ON CONFLICT DO NOTHING;
 INSERT INTO public_page_settings(id) VALUES(1) ON CONFLICT DO NOTHING;
-COMMIT;

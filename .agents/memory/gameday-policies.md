@@ -1,6 +1,6 @@
 ---
 name: Daily backup and inventory policy
-description: User-approved strict backup cap and empty-stock counting rules
+description: User-approved backup cap, empty-stock counts and automatic Gameday deployment migration
 ---
 
 Keep a strict limit of one non-revoked configuration snapshot per terminal
@@ -22,3 +22,16 @@ consistent inventory/sales units.
 
 **How to apply:** Do not reintroduce positive-only validation or convert counts
 to shells, boxes or cases without a corresponding product-unit decision.
+
+Gameday schema changes must run automatically during the existing deployment
+migration step, not be assigned to the operator as manual SQL and not run as
+DDL in the API-server startup.
+
+**Why:** The user explicitly requires automatic deployment migration and wants
+conflicting restore approvals to stop the new server from starting, rather
+than silently removing protected backups.
+
+**How to apply:** Keep migration transaction ownership with the migrator and
+retain the fail-closed backup checks. Document which obsolete approvals an
+administrator must explicitly revoke before retrying, without weakening the
+strict daily cap.
