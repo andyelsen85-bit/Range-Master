@@ -23,3 +23,15 @@ failures to remain non-fatal.
 **How to apply:** Keep cache health separate from sync status. Do not hide a
 failed section with another section's success or advance its durable manifest
 token. Preserve NVS outboxes during cache reformatting.
+
+A partition that also contains the completed-game journal is no longer a
+disposable cache. Its initialization/format permission must remain revoked.
+
+**Why:** The requested large durable game outbox cannot fit in the board's small
+NVS partition. Reusing the FAT partition for durable games changes the earlier
+cache-only rebuild assumption; formatting would now delete unacknowledged games.
+
+**How to apply:** Distinguish optional snapshot failures from journal failures.
+Never auto-format a journal-bearing volume. Keep saved games recoverable and
+block new games when safe storage is unavailable rather than silently dropping
+records.

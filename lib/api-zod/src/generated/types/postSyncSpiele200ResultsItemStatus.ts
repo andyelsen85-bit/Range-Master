@@ -12,4 +12,6 @@ export type PostSyncSpiele200ResultsItemStatus = typeof PostSyncSpiele200Results
 export const PostSyncSpiele200ResultsItemStatus = {
   created: 'created',
   skipped: 'skipped',
+  conflict: 'conflict',
+  rejected: 'rejected',
 } as const;

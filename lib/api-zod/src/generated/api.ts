@@ -8,6 +8,136 @@
 import * as zod from 'zod';
 
 
+export const uploadTerminalLogsBodyTerminalIdMax = 120;
+
+export const uploadTerminalLogsBodyEntriesItemIdMax = 120;
+
+export const uploadTerminalLogsBodyEntriesItemMsgMax = 200;
+
+export const uploadTerminalLogsBodyEntriesMax = 100;
+
+
+
+export const UploadTerminalLogsBody = zod.object({
+  "terminalId": zod.string().max(uploadTerminalLogsBodyTerminalIdMax),
+  "entries": zod.array(zod.object({
+  "id": zod.string().min(1).max(uploadTerminalLogsBodyEntriesItemIdMax),
+  "ts": zod.coerce.date(),
+  "type": zod.enum(['fire_trace', 'gateway_trace', 'sync', 'data_loss_risk', 'ui_commit', 'wifi']),
+  "level": zod.enum(['INFO', 'WARN', 'ERROR']),
+  "msg": zod.string().max(uploadTerminalLogsBodyEntriesItemMsgMax),
+  "data": zod.record(zod.string(), zod.unknown())
+})).max(uploadTerminalLogsBodyEntriesMax)
+})
+
+export const UploadTerminalLogsResponse = zod.object({
+  "acceptedIds": zod.array(zod.string())
+})
+
+
+export const getTerminalLogsQueryOffsetMin = 0;
+
+export const getTerminalLogsQueryLimitMax = 200;
+
+
+
+export const GetTerminalLogsQueryParams = zod.object({
+  "terminal": zod.coerce.string().optional(),
+  "type": zod.coerce.string().optional(),
+  "level": zod.coerce.string().optional(),
+  "from": zod.coerce.string().optional(),
+  "to": zod.coerce.string().optional(),
+  "q": zod.coerce.string().optional(),
+  "offset": zod.coerce.number().int().min(getTerminalLogsQueryOffsetMin).optional(),
+  "limit": zod.coerce.number().int().min(1).max(getTerminalLogsQueryLimitMax).optional()
+})
+
+export const getTerminalLogsResponseEntriesItemOneIdMax = 120;
+
+export const getTerminalLogsResponseEntriesItemOneMsgMax = 200;
+
+
+
+export const GetTerminalLogsResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "id": zod.string().min(1).max(getTerminalLogsResponseEntriesItemOneIdMax),
+  "ts": zod.coerce.date(),
+  "type": zod.enum(['fire_trace', 'gateway_trace', 'sync', 'data_loss_risk', 'ui_commit', 'wifi']),
+  "level": zod.enum(['INFO', 'WARN', 'ERROR']),
+  "msg": zod.string().max(getTerminalLogsResponseEntriesItemOneMsgMax),
+  "data": zod.record(zod.string(), zod.unknown())
+}).and(zod.object({
+  "terminalId": zod.string(),
+  "receivedAt": zod.coerce.date()
+}))),
+  "total": zod.number().int(),
+  "terminals": zod.array(zod.string()),
+  "summaries": zod.array(zod.object({
+  "datum": zod.string(),
+  "terminalId": zod.string(),
+  "type": zod.string(),
+  "count": zod.number().int(),
+  "median": zod.number(),
+  "p95": zod.number(),
+  "max": zod.number()
+}))
+})
+
+
+export const exportTerminalLogsQueryOffsetMin = 0;
+
+export const exportTerminalLogsQueryLimitMax = 200;
+
+
+
+export const ExportTerminalLogsQueryParams = zod.object({
+  "terminal": zod.coerce.string().optional(),
+  "type": zod.coerce.string().optional(),
+  "level": zod.coerce.string().optional(),
+  "from": zod.coerce.string().optional(),
+  "to": zod.coerce.string().optional(),
+  "q": zod.coerce.string().optional(),
+  "offset": zod.coerce.number().int().min(exportTerminalLogsQueryOffsetMin).optional(),
+  "limit": zod.coerce.number().int().min(1).max(exportTerminalLogsQueryLimitMax).optional()
+})
+
+export const ExportTerminalLogsResponse = zod.unknown()
+
+
+export const uploadGameManifestBodyExternalIdsItemMax = 80;
+
+export const uploadGameManifestBodyExternalIdsMax = 2000;
+
+
+
+export const UploadGameManifestBody = zod.object({
+  "terminalId": zod.string(),
+  "datum": zod.coerce.date(),
+  "externalIds": zod.array(zod.string().max(uploadGameManifestBodyExternalIdsItemMax)).max(uploadGameManifestBodyExternalIdsMax)
+})
+
+export const UploadGameManifestResponse = zod.object({
+  "accepted": zod.boolean()
+})
+
+
+export const GetGameReconciliationQueryParams = zod.object({
+  "terminal": zod.coerce.string().optional(),
+  "datum": zod.coerce.string().optional()
+})
+
+export const GetGameReconciliationResponse = zod.object({
+  "items": zod.array(zod.object({
+  "terminalId": zod.string(),
+  "datum": zod.string(),
+  "total": zod.number().int(),
+  "present": zod.number().int(),
+  "missingIds": zod.array(zod.string()),
+  "updatedAt": zod.coerce.date()
+}))
+})
+
+
 /**
  * @summary Health check
  */
@@ -323,7 +453,9 @@ export const PostSyncSpieleBody = zod.object({
 export const PostSyncSpieleResponse = zod.object({
   "results": zod.array(zod.object({
   "externalId": zod.string(),
-  "status": zod.enum(['created', 'skipped'])
+  "status": zod.enum(['created', 'skipped', 'conflict', 'rejected']),
+  "error": zod.string().optional(),
+  "playerIds": zod.array(zod.number().int()).optional()
 }))
 })
 

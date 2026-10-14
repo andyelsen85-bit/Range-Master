@@ -8,6 +8,7 @@ export const spielerTable = pgTable("spieler", {
   email: text("email").unique(),
   mitgliedNr: text("mitglied_nr").unique(),
   aktiv: boolean("aktiv").notNull().default(true),
+  deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
   portalAktiv: boolean("portal_aktiv").notNull().default(false),
   isAdmin: boolean("is_admin").notNull().default(false),
   isMaitreDeTir: boolean("is_maitre_de_tir").notNull().default(false),

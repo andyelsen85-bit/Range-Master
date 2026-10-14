@@ -10,6 +10,7 @@
 #include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "http_sync.h"
 #include "screen_einstellungen.h"
 #include "click_sound.h"
 #include "lora_stub.h"
@@ -285,6 +286,19 @@ static void config_backup_cb(lv_event_t *e)
                            "BACKUP NICHT GESTARTET: SYNC LÄUFT BEREITS");
     }
 }
+static void recover_games_cb(lv_event_t *e)
+{
+    (void)e;
+    if(g_store.syncStatus==SYNC_RUNNING) {
+        set_api_status("BITTE LAUFENDE SYNCHRONISIERUNG ABWARTEN",CLR_WARN);
+        return;
+    }
+    http_request_game_recovery();
+    if(store_sync())
+        set_api_status("SPIELE DER LETZTEN 7 TAGE WERDEN ERNEUT ÜBERTRAGEN",CLR_WARN);
+    else
+        set_api_status("WIEDERHERSTELLUNG VORGEMERKT FÜR NÄCHSTEN VOLL-SYNC",CLR_WARN);
+}
 
 static lv_obj_t *build_api_tab(lv_obj_t *parent)
 {
@@ -411,6 +425,13 @@ static lv_obj_t *build_api_tab(lv_obj_t *parent)
     lv_obj_set_style_text_color(backup_label, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(backup_label);
 
+    lv_obj_t *recover=lv_button_create(parent);
+    lv_obj_set_size(recover,LV_PCT(100),44);
+    lv_obj_add_style(recover,&g_style_btn_secondary,0);
+    lv_obj_add_event_cb(recover,recover_games_cb,LV_EVENT_CLICKED,nullptr);
+    lv_obj_t *recover_label=lv_label_create(recover);
+    lv_label_set_text(recover_label,"LOKALE SPIELE WIEDERHERSTELLEN (7 TAGE)");
+    lv_obj_center(recover_label);
     s_config_backup_status = lv_label_create(parent);
     char backup_status[192];
     snprintf(backup_status, sizeof(backup_status), "%s%s%s",

@@ -9,6 +9,17 @@ Player deactivation is reversible and must preserve historical games, sales, cre
 
 **How to apply:** Protect player-linked activity with a database trigger that locks and verifies the active player row inside the write transaction. For day/global purge, lock all affected activity and player tables in the purge transaction rather than reserving extra pooled connections with session advisory locks.
 
+Already-completed offline games from before a player's deactivation may be
+imported as historical scores. This is not permission for new credits, sales
+or payments, and an unknown player must not cause unrelated games to be lost.
+
+**Why:** The user requires missing historical games to remain recoverable even
+when the player has since been deactivated.
+
+**How to apply:** Keep the historical exception transaction-scoped and limited
+to completed-game participation/results with a valid deactivation cutoff.
+Reject individual unknown/invalid games and retain them locally.
+
 The global post-testing reset must delete all non-admin player accounts, preserve
 every admin account and its login credentials, and clear activity/statistics for
 everyone, including administrators.

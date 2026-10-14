@@ -1,0 +1,141 @@
+paths:
+  /sync/terminal-logs:
+    post:
+      operationId: uploadTerminalLogs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TerminalLogUpload" }
+      responses:
+        "200":
+          description: Exact acknowledged IDs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalLogAcknowledgement" }
+  /admin/terminal-logs:
+    get:
+      operationId: getTerminalLogs
+      parameters: &filters
+        - { name: terminal, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string } }
+        - { name: level, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string } }
+        - { name: to, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        "200":
+          description: Filtered diagnostics and daily latency summaries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalLogPage" }
+  /admin/terminal-logs/export:
+    get:
+      operationId: exportTerminalLogs
+      parameters: *filters
+      responses:
+        "200":
+          description: Formula-safe CSV
+          content:
+            text/csv:
+              schema: { type: string }
+  /sync/game-manifest:
+    post:
+      operationId: uploadGameManifest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GameManifestInput" }
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema: { type: object, required: [accepted], properties: { accepted: { type: boolean } } }
+  /admin/game-reconciliation:
+    get:
+      operationId: getGameReconciliation
+      parameters:
+        - { name: terminal, in: query, schema: { type: string } }
+        - { name: datum, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Finished-game manifests compared with portal games
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameReconciliationPage" }
+components:
+  schemas:
+    TerminalLogEntry:
+      type: object
+      required: [id, ts, type, level, msg, data]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 120 }
+        ts: { type: string, format: date-time }
+        type: { type: string, enum: [fire_trace, gateway_trace, sync, data_loss_risk, ui_commit, wifi] }
+        level: { type: string, enum: [INFO, WARN, ERROR] }
+        msg: { type: string, maxLength: 200 }
+        data: { type: object, additionalProperties: true }
+    TerminalLogUpload:
+      type: object
+      required: [terminalId, entries]
+      properties:
+        terminalId: { type: string, maxLength: 120 }
+        entries: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/TerminalLogEntry" } }
+    TerminalLogAcknowledgement:
+      type: object
+      required: [acceptedIds]
+      properties:
+        acceptedIds: { type: array, items: { type: string } }
+    TerminalLogRow:
+      allOf:
+        - $ref: "#/components/schemas/TerminalLogEntry"
+        - type: object
+          required: [terminalId, receivedAt]
+          properties:
+            terminalId: { type: string }
+            receivedAt: { type: string, format: date-time }
+    TerminalLatencySummary:
+      type: object
+      required: [datum, terminalId, type, count, median, p95, max]
+      properties:
+        datum: { type: string }
+        terminalId: { type: string }
+        type: { type: string }
+        count: { type: integer }
+        median: { type: number }
+        p95: { type: number }
+        max: { type: number }
+    TerminalLogPage:
+      type: object
+      required: [entries, total, terminals, summaries]
+      properties:
+        entries: { type: array, items: { $ref: "#/components/schemas/TerminalLogRow" } }
+        total: { type: integer }
+        terminals: { type: array, items: { type: string } }
+        summaries: { type: array, items: { $ref: "#/components/schemas/TerminalLatencySummary" } }
+    GameManifestInput:
+      type: object
+      required: [terminalId, datum, externalIds]
+      properties:
+        terminalId: { type: string }
+        datum: { type: string, format: date }
+        externalIds: { type: array, maxItems: 2000, items: { type: string, maxLength: 80 } }
+    GameReconciliation:
+      type: object
+      required: [terminalId, datum, total, present, missingIds, updatedAt]
+      properties:
+        terminalId: { type: string }
+        datum: { type: string }
+        total: { type: integer }
+        present: { type: integer }
+        missingIds: { type: array, items: { type: string } }
+        updatedAt: { type: string, format: date-time }
+    GameReconciliationPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/GameReconciliation" } }

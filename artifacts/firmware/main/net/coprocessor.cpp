@@ -22,6 +22,7 @@
 #include "esp_heap_caps.h"
 #include "coprocessor.h"
 #include "game_store.h"
+#include "terminal_logs.h"
 #include "esp_sntp.h"
 #include "web_config.h"
 #include "app_config.h"
@@ -32,6 +33,28 @@ static const char *TAG = "coprocessor";
 static EventGroupHandle_t  s_wifi_event_group;
 static EventGroupHandle_t  s_scan_done_group  = NULL;  // non-NULL only during cop_wifi_scan()
 static volatile bool       s_wifi_connected = false;
+static TaskHandle_t s_power_save_task;
+static void disable_power_save_worker(void *)
+{
+    for(;;) {
+        ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
+        unsigned attempts=0;
+        while(s_wifi_connected) {
+            esp_err_t result=esp_wifi_set_ps(WIFI_PS_NONE);
+            if(result==ESP_OK || attempts==0 || attempts%60==0) {
+                cJSON *data=cJSON_CreateObject();
+                cJSON_AddNumberToObject(data,"result",result);
+                cJSON_AddNumberToObject(data,"attempt",attempts+1);
+                terminal_log_add("wifi",result==ESP_OK?"INFO":"WARN",
+                    result==ESP_OK?"WiFi Power-Save deaktiviert":"WiFi Power-Save wird erneut deaktiviert",data);
+                cJSON_Delete(data);
+            }
+            if(result==ESP_OK) break;
+            ++attempts;
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+}
 static char                s_ip_addr[16]    = {0};
 static int                 s_retry_count    = 0;
 static SemaphoreHandle_t   s_wifi_op_mutex;
@@ -122,6 +145,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)event_data;
         snprintf(s_ip_addr, sizeof(s_ip_addr), IPSTR, IP2STR(&ev->ip_info.ip));
         s_wifi_connected = true;
+        if(s_power_save_task) xTaskNotifyGive(s_power_save_task);
         set_wifi_state(COP_WIFI_CONNECTED, "Connected");
         s_retry_count    = 0;
         ESP_LOGI(TAG, "WiFi got IP: %s", s_ip_addr);
@@ -179,6 +203,7 @@ void coprocessor_init(void)
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    configASSERT(xTaskCreate(disable_power_save_worker,"wifi_ps",4096,nullptr,4,&s_power_save_task)==pdPASS);
 
     ESP_ERROR_CHECK(esp_event_handler_register(
         WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL));

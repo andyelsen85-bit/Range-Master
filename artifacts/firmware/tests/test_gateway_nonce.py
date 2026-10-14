@@ -18,6 +18,8 @@ STUBS = r"""
 #include <cstdint>
 #include <string>
 #include <vector>
+static uint32_t mock_now_ms=1000;
+int64_t esp_timer_get_time() {return (int64_t)mock_now_ms*1000;}
 #include "trapmaster_auth.h"
 constexpr size_t MAX_URL_LEN = 256, MAX_KEY_LEN = 256;
 enum Maschine { MASCHINE_A, MASCHINE_B, MASCHINE_C, MASCHINE_D,

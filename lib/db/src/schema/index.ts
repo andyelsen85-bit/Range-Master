@@ -10,3 +10,4 @@ export * from "./products";
 export * from "./terminal-config";
 export * from "./bills";
 export * from "./gameday";
+export * from "./terminal-logs";

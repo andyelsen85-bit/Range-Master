@@ -22,6 +22,8 @@
 #include "button_events.h"
 #include "gateway_health.h"
 #include "game_store.h"
+#include "terminal_logs.h"
+#include "esp_timer.h"
 #include "coprocessor.h"
 #include "../../../lora-common/trapmaster_auth.h"
 
@@ -49,6 +51,8 @@ typedef enum : uint8_t {
 
 typedef struct {
     GatewayRequestKind kind;
+    uint32_t pressed_ms;
+    bool prefetched;
     Maschine machine;
     Maschine second_machine;
     uint16_t delay_ms;
@@ -60,6 +64,15 @@ typedef struct {
     char gateway_url[MAX_URL_LEN];
     char gateway_token[MAX_KEY_LEN];
 } GatewayRequest;
+// Single-worker cache: one short-lived nonce, scoped to the exact URL/key.
+// Gateway NONCE_TTL_MS is 10000. Consume well before expiry and never reuse.
+// Also compiled by host tests that isolate only a subset of worker helpers.
+[[maybe_unused]] static GatewayRequest s_prefetched;
+[[maybe_unused]] static uint32_t s_prefetched_ms;
+[[maybe_unused]] static bool s_has_prefetched;
+[[maybe_unused]] static uint32_t s_last_fire_ms;
+[[maybe_unused]] static unsigned s_transport_retries;
+[[maybe_unused]] static bool s_transport_ambiguous;
 
 static void set_status(const char *text)
 {
@@ -239,7 +252,10 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
 {
     bool success = false;
     *last_http = 0;
+    s_transport_retries=0;
+    s_transport_ambiguous=false;
     for (int attempt = 0; attempt < attempts && !success; attempt++) {
+        s_transport_retries=attempt;
         esp_http_client_config_t cfg = {};
         cfg.url = url;
         cfg.timeout_ms = timeout_ms;
@@ -251,6 +267,7 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
         }
         esp_http_client_set_header(client, "X-TrapMaster-Auth", mac_hex);
         esp_err_t err = esp_http_client_perform(client);
+        if(err!=ESP_OK) s_transport_ambiguous=true;
         *last_http = esp_http_client_get_status_code(client);
         if (err == ESP_OK && *last_http >= 200 && *last_http < 300) {
             success = true;
@@ -365,18 +382,18 @@ static void apply_health_result(bool success, const HealthFailure &failure)
     }
 }
 
-static bool fetch_gateway_nonce(GatewayRequest *request, int *last_http)
+static bool fetch_gateway_nonce(GatewayRequest *request, int *last_http, bool background=false)
 {
     char url[MAX_URL_LEN + 96];
     if (!build_health_url(url, sizeof(url), request)) return false;
     const size_t length = strlen(request->gateway_url);
     const char *suffix = request->gateway_url[length - 1] == '/' ? "nonce" : "/nonce";
     snprintf(url, sizeof(url), "%s%s", request->gateway_url, suffix);
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    for (int attempt = 0; attempt < (background?1:3); ++attempt) {
         NonceResponse response = {};
         esp_http_client_config_t cfg = {};
         cfg.url = url;
-        cfg.timeout_ms = 2000;
+        cfg.timeout_ms = background?150:2000;
         cfg.disable_auto_redirect = true;
         cfg.event_handler = nonce_http_event;
         cfg.user_data = &response;
@@ -408,7 +425,18 @@ static bool prepare_fire_request(GatewayRequest *request, char *url, size_t url_
 {
     // One fresh nonce per operator action (and per selected batch machine).
     // Once signed, retries use the same request and cannot produce a new shot.
-    if (!fetch_gateway_nonce(request, last_http)) return false;
+    uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
+    bool cached=s_has_prefetched && now-s_prefetched_ms<8000 &&
+        !strcmp(request->gateway_url,s_prefetched.gateway_url) &&
+        !strcmp(request->gateway_token,s_prefetched.gateway_token);
+    if(cached) {
+        memcpy(request->nonce,s_prefetched.nonce,sizeof(request->nonce));
+        memcpy(request->nonce_hex,s_prefetched.nonce_hex,sizeof(request->nonce_hex));
+        request->prefetched=true;s_has_prefetched=false;
+    } else {
+        s_has_prefetched=false;
+        if (!fetch_gateway_nonce(request, last_http)) return false;
+    }
     uint8_t mac[tm_auth::MAC_LEN];
     bool valid;
     if (request->kind == GATEWAY_REQUEST_FIRE_PAIR) {
@@ -482,6 +510,20 @@ static void gateway_worker(void *arg)
     for (;;) {
         if (xQueueReceive(s_gateway_queue, &request, pdMS_TO_TICKS(1000)) != pdTRUE) {
             TickType_t now = xTaskGetTickCount();
+            if(cop_wifi_is_connected() && !lora_request_busy() && g_store.gatewayUrl[0] &&
+                g_store.gatewayToken[0] && (!s_has_prefetched ||
+                (uint32_t)(esp_timer_get_time()/1000)-s_prefetched_ms>=10000) &&
+                (uint32_t)(esp_timer_get_time()/1000)-s_last_fire_ms>=2000) {
+                GatewayRequest next={};copy_gateway_config(&next);
+                int status=0;
+                if(fetch_gateway_nonce(&next,&status,true)) {
+                    s_prefetched=next;s_prefetched_ms=(uint32_t)(esp_timer_get_time()/1000);
+                    s_has_prefetched=true;
+                }
+                // Never follow nonce preparation with a competing health call.
+                continue;
+            }
+            if((uint32_t)(esp_timer_get_time()/1000)-s_last_fire_ms<2000) continue;
             if (!g_store.gatewayUrl[0] ||
                 !g_store.gatewayToken[0] ||
                 health_check_throttled(false, now)) {
@@ -536,11 +578,35 @@ static void gateway_worker(void *arg)
         }
 
         bool request_ready = false;
+        s_transport_retries=0;
+        s_transport_ambiguous=false;
+        uint32_t fire_started=request.pressed_ms?request.pressed_ms:(uint32_t)(esp_timer_get_time()/1000);
+        uint32_t nonce_ready=fire_started;
         if (prepare_fire_request(&request, url, sizeof(url), mac_hex, &last_http)) {
             request_ready = true;
+            nonce_ready=(uint32_t)(esp_timer_get_time()/1000);
             success = perform_authenticated_get(url, mac_hex, &last_http,
                 request.kind == GATEWAY_REQUEST_FIRE_PAIR ? 20000 : 7000, 3);
+            // Only an unambiguous pre-admission 401 may acquire a replacement.
+            // After any transport ambiguity, retries keep the signed request.
+            if(!success && last_http==401 && request.prefetched && !s_transport_ambiguous) {
+                request.prefetched=false;
+                if(prepare_fire_request(&request,url,sizeof(url),mac_hex,&last_http))
+                    success=perform_authenticated_get(url,mac_hex,&last_http,
+                        request.kind==GATEWAY_REQUEST_FIRE_PAIR?20000:7000,3);
+            }
         }
+        s_last_fire_ms=(uint32_t)(esp_timer_get_time()/1000);
+        cJSON *trace=cJSON_CreateObject();
+        cJSON_AddNumberToObject(trace,"durationMs",s_last_fire_ms-fire_started);
+        cJSON_AddNumberToObject(trace,"prepareMs",nonce_ready-fire_started);
+        cJSON_AddNumberToObject(trace,"retries",s_transport_retries);
+        cJSON_AddBoolToObject(trace,"prefetched",request.prefetched);
+        cJSON_AddNumberToObject(trace,"status",last_http);
+        cJSON_AddNumberToObject(trace,"machine",request.machine);
+        cJSON_AddBoolToObject(trace,"ack",success&&last_http!=202);
+        terminal_log_add("fire_trace",success?"INFO":"WARN","Gateway-Schussanfrage beendet",trace);
+        cJSON_Delete(trace);
 
         if (success) {
             s_health_history.success(); // a successful FIRE is also fresh reachability evidence
@@ -672,6 +738,7 @@ bool lora_fire_machine(Maschine m)
     set_status(msg);
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE;
+    request.pressed_ms=(uint32_t)(esp_timer_get_time()/1000);
     request.manual = true;
     request.machine = m;
     copy_gateway_config(&request);
@@ -717,6 +784,7 @@ bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms)
     }
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE_PAIR;
+    request.pressed_ms=(uint32_t)(esp_timer_get_time()/1000);
     request.manual = true;
     request.machine = first;
     request.second_machine = second;

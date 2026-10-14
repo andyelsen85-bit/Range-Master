@@ -31,6 +31,7 @@ static lv_obj_t *s_lbl_pending;
 static lv_obj_t *s_kb;
 
 static int  s_selected_pidx = -1;
+static int  s_selected_id;
 static bool s_edit_aktiv    = false;
 static char s_search_buf[64] = {0};
 
@@ -41,6 +42,26 @@ static void close_edit(void);
 static void update_aktiv_btn(void);
 static void update_day_btn(void);
 static void update_pending_badge(void);
+static bool resolve_selection()
+{
+    s_selected_pidx=-1;
+    for(int i=0;i<g_store.portalSpielerCount;i++)
+        if(s_selected_id && g_store.portalSpieler[i].id==s_selected_id) {
+            s_selected_pidx=i;return true;
+        }
+    return false;
+}
+
+void screen_spiller_remap_player_identity(int old_id,int new_id)
+{
+    if(s_selected_id==old_id) s_selected_id=new_id;
+    if(!s_list) return;
+    for(uint32_t i=0;i<lv_obj_get_child_count(s_list);i++) {
+        lv_obj_t *row=lv_obj_get_child(s_list,i);
+        if((int)(intptr_t)lv_obj_get_user_data(row)==old_id)
+            lv_obj_set_user_data(row,(void*)(intptr_t)new_id);
+    }
+}
 
 // ── Case-insensitive substring search ────────────────────────
 static bool str_icontains(const char *hay, const char *needle)
@@ -80,8 +101,9 @@ static void textarea_focus_cb(lv_event_t *e)
 
 static void player_tap_cb(lv_event_t *e)
 {
-    int pidx = (int)(intptr_t)lv_event_get_user_data(e);
-    open_edit(pidx);
+    int id=(int)(intptr_t)lv_obj_get_user_data((lv_obj_t*)lv_event_get_current_target(e));
+    for(int i=0;i<g_store.portalSpielerCount;i++)
+        if(g_store.portalSpieler[i].id==id) {open_edit(i);break;}
 }
 
 static void search_changed_cb(lv_event_t *e)
@@ -94,7 +116,7 @@ static void search_changed_cb(lv_event_t *e)
 
 static void save_cb(lv_event_t *e)
 {
-    if (s_selected_pidx < 0 || s_selected_pidx >= g_store.portalSpielerCount) return;
+    if (!resolve_selection()) return;
     PortalSpieler *ps = &g_store.portalSpieler[s_selected_pidx];
     const char *name  = lv_textarea_get_text(s_ta_name);
     const char *email = lv_textarea_get_text(s_ta_email);
@@ -112,7 +134,7 @@ static void save_cb(lv_event_t *e)
 
 static void pwd_reset_cb(lv_event_t *e)
 {
-    if (s_selected_pidx < 0 || s_selected_pidx >= g_store.portalSpielerCount) return;
+    if (!resolve_selection()) return;
     PortalSpieler *ps = &g_store.portalSpieler[s_selected_pidx];
     store_queue_passwort_reset(ps->id);
     lv_label_set_text(s_lbl_edit_status, LV_SYMBOL_LOOP "  PASSWORT-RESET VORGEMERKT");
@@ -129,8 +151,7 @@ static void aktiv_toggle_cb(lv_event_t *e)
 static void add_day_cb(lv_event_t *e)
 {
     (void)e;
-    if (s_selected_pidx < 0 ||
-        s_selected_pidx >= g_store.portalSpielerCount) return;
+    if (!resolve_selection()) return;
 
     PortalSpieler *ps = &g_store.portalSpieler[s_selected_pidx];
     if (player_is_registered_for_day(ps->id)) {
@@ -194,8 +215,7 @@ static void update_day_btn(void)
     if (!s_day_btn || !s_lbl_day) return;
 
     bool registered = false;
-    if (s_selected_pidx >= 0 &&
-        s_selected_pidx < g_store.portalSpielerCount) {
+    if (resolve_selection()) {
         registered = player_is_registered_for_day(
             g_store.portalSpieler[s_selected_pidx].id);
     }
@@ -258,7 +278,8 @@ static void build_list(void)
         lv_obj_set_style_pad_column(row, 10, 0);
         // SHORT_CLICKED fires as soon as the finger lifts without a scroll gesture;
         // avoids the ~100 ms scroll-detection hold that ate the first tap.
-        lv_obj_add_event_cb(row, player_tap_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_set_user_data(row,(void*)(intptr_t)ps->id);
+        lv_obj_add_event_cb(row, player_tap_cb, LV_EVENT_SHORT_CLICKED, NULL);
 
         // ── Info column (one nested container — unavoidable for two text lines) ──
         lv_obj_t *info = lv_obj_create(row);
@@ -345,6 +366,7 @@ static void open_edit(int pidx)
     if (pidx < 0 || pidx >= g_store.portalSpielerCount) return;
     s_selected_pidx = pidx;
     PortalSpieler *ps = &g_store.portalSpieler[pidx];
+    s_selected_id=ps->id;
 
     lv_textarea_set_text(s_ta_name,  ps->name);
     lv_textarea_set_text(s_ta_email, ps->email);   // populated after sync
@@ -361,6 +383,7 @@ static void open_edit(int pidx)
 static void close_edit(void)
 {
     s_selected_pidx = -1;
+    s_selected_id=0;
     update_day_btn();
     lv_obj_clear_flag(s_placeholder, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_edit_form, LV_OBJ_FLAG_HIDDEN);
@@ -374,6 +397,7 @@ lv_obj_t *screen_spiller_create(void)
 {
     // Reset state
     s_selected_pidx = -1;
+    s_selected_id = 0;
     s_edit_aktiv    = false;
     s_search_buf[0] = '\0';
 
@@ -719,6 +743,12 @@ lv_obj_t *screen_spiller_create(void)
 void screen_spiller_refresh(void)
 {
     if (!s_list) return;
+    if(s_selected_id) {
+        s_selected_pidx=-1;
+        for(int i=0;i<g_store.portalSpielerCount;i++)
+            if(g_store.portalSpieler[i].id==s_selected_id) {s_selected_pidx=i;break;}
+        if(s_selected_pidx<0) close_edit();
+    }
     build_list();
     update_pending_badge();
 }

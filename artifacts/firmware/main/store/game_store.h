@@ -10,7 +10,7 @@
 #define MAX_SEQUENZ         50
 #define MAX_HISTORY         20   // in-RAM cache; older games live on FAT flash
 #define MAX_PORTAL_SPIELER  200
-#define MAX_PENDING_GAMES   30   // unsynced queue; portal sync flushes this
+#define MAX_PENDING_GAMES  200   // PSRAM queue backed by the durable game journal
 #define MAX_ERGEBNISSE      200
 #define MAX_NAME_LEN        64
 #define MAX_EMAIL_LEN       64

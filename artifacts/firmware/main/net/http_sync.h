@@ -9,6 +9,8 @@
 
 /** POST /api/sync/spiele — push all pending games. */
 esp_err_t http_push_pending_games(void);
+/** Next full sync requeues completed, archived games from the last seven days. */
+void http_request_game_recovery(void);
 
 /** GET /api/portal/spieler-vum-dag — fetch today's registered players. */
 esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count);

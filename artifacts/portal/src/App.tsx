@@ -21,6 +21,8 @@ import AdminVerkeef from '@/pages/admin-verkeef';
 import AdminOfrechnung from '@/pages/admin-ofrechnung';
 import AdminSpielrProfil from '@/pages/admin-spieler-profil';
 import AdminTerminalConfig from '@/pages/admin-terminal-config';
+import AdminTerminalLogs from '@/pages/admin-terminal-logs';
+import AdminGameReconciliation from '@/pages/admin-game-reconciliation';
 import Profil from '@/pages/profil';
 import Kaef from '@/pages/kaef';
 import NotFound from '@/pages/not-found';
@@ -85,6 +87,8 @@ function Router() {
             <Route path="/admin/ofrechnung" component={() => <AdminRoute component={AdminOfrechnung} />} />
             <Route path="/admin/mail" component={() => <AdminRoute component={AdminMail} />} />
             <Route path="/admin/terminal-config" component={() => <AdminRoute component={AdminTerminalConfig} />} />
+            <Route path="/admin/terminal-logs" component={() => <AdminRoute component={AdminTerminalLogs} />} />
+            <Route path="/admin/game-reconciliation" component={() => <AdminRoute component={AdminGameReconciliation} />} />
             <Route component={NotFound} />
           </Switch>
         </Layout>

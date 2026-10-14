@@ -36,6 +36,8 @@
 #include "gsl3680_touch.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "game_journal.h"
+#include "terminal_logs.h"
 #include "offline_cache.h"
 #include "coprocessor.h"
 #include "lora_stub.h"
@@ -280,7 +282,10 @@ static void lvgl_task(void *arg)
 
     // ── 6. Main LVGL loop ─────────────────────────────────────
     for (;;) {
+        ui_manager_lock(UINT32_MAX);
+        ui_manager_before_frame();
         uint32_t delay_ms = lv_timer_handler();
+        ui_manager_unlock();
         // lv_timer_handler() returns ms until the next timer fires.
         // Cap at LVGL_TASK_MAX_DELAY_MS so we don't starve other tasks.
         if (delay_ms > LVGL_TASK_MAX_DELAY_MS) delay_ms = LVGL_TASK_MAX_DELAY_MS;
@@ -308,6 +313,8 @@ extern "C" void app_main(void)
     // Portal snapshots are independent from NVS outboxes. Load them before any
     // LVGL screen is constructed so an offline boot has a usable roster/catalog.
     offline_cache_load();
+    if(!game_journal_init())
+        terminal_log_add("data_loss_risk","ERROR","Spielarchiv nicht verfügbar; neue Spiele bleiben gesperrt");
 
     // ── Backlight ─────────────────────────────────────────────
     backlight_init();

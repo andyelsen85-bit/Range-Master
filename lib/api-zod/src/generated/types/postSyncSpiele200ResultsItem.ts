@@ -10,4 +10,6 @@ import type { PostSyncSpiele200ResultsItemStatus } from './postSyncSpiele200Resu
 export type PostSyncSpiele200ResultsItem = {
   externalId: string;
   status: PostSyncSpiele200ResultsItemStatus;
+  error?: string;
+  playerIds?: number[];
 };

@@ -24,6 +24,16 @@ tags:
     description: Administrator operations
 
 paths:
+  /sync/terminal-logs:
+    $ref: "./terminal-diagnostics.yaml#/paths/~1sync~1terminal-logs"
+  /admin/terminal-logs:
+    $ref: "./terminal-diagnostics.yaml#/paths/~1admin~1terminal-logs"
+  /admin/terminal-logs/export:
+    $ref: "./terminal-diagnostics.yaml#/paths/~1admin~1terminal-logs~1export"
+  /sync/game-manifest:
+    $ref: "./terminal-diagnostics.yaml#/paths/~1sync~1game-manifest"
+  /admin/game-reconciliation:
+    $ref: "./terminal-diagnostics.yaml#/paths/~1admin~1game-reconciliation"
   /healthz:
     get:
       operationId: healthCheck
@@ -412,7 +422,13 @@ paths:
                           type: string
                         status:
                           type: string
-                          enum: [created, skipped]
+                          enum: [created, skipped, conflict, rejected]
+                        error:
+                          type: string
+                        playerIds:
+                          type: array
+                          items:
+                            type: integer
                       required: [externalId, status]
                 required: [results]
 

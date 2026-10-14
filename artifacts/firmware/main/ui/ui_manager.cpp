@@ -3,6 +3,8 @@
 // ============================================================
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "lora_stub.h"
 #include "esp_log.h"
 #include "lvgl.h"
 #include "ui_fonts.h"
@@ -38,15 +40,113 @@ lv_style_t g_style_sidebar;
 
 static lv_obj_t *s_screens[SCREEN_COUNT];
 static Screen    s_current = SCREEN_COUNT; // invalid → force first load
-static lv_obj_t *s_sync_guard;
 static lv_obj_t *s_sync_indicator;
 static lv_indev_t *s_input_device;
 static uint32_t  s_sync_publication_seen;
-static bool      s_sync_guard_visible;
 static lv_obj_t *s_remote_toast;
 static uint32_t s_remote_toast_until;
 static uint32_t s_remote_last_action;
 static bool s_remote_has_action;
+static SemaphoreHandle_t s_frame_lock;
+static uint32_t s_last_input_tick;
+static uint32_t s_content_hash[SCREEN_COUNT];
+void screen_spiller_remap_player_identity(int old_id,int new_id);
+void ui_manager_remap_player_identity(int old_id,int new_id)
+{
+    screen_spiller_remap_player_identity(old_id,new_id);
+}
+static uint32_t content_hash(Screen screen) {
+    uint32_t hash=2166136261u;
+    auto add=[&](const void *source,size_t bytes) {
+        const uint8_t *data=(const uint8_t *)source;
+        for(size_t i=0;i<bytes;i++) hash=(hash^data[i])*16777619u;
+    };
+    switch(screen) {
+    case SCREEN_SPIEL:
+        // Score widgets are driven by their live-game tick, not portal refresh.
+        return 1;
+    case SCREEN_RESULTATE:
+        add(&g_store.lastFinished,sizeof(g_store.lastFinished));break;
+    case SCREEN_GESCHICHTE:
+        add(&g_store.historyCount,sizeof(g_store.historyCount));
+        add(g_store.history,g_store.historyCount*sizeof(FinishedGame));break;
+    case SCREEN_START:
+    case SCREEN_SPILLER:
+    case SCREEN_KREDITE:
+        add(&g_store.portalSpielerCount,sizeof(g_store.portalSpielerCount));
+        add(g_store.portalSpieler,g_store.portalSpielerCount*sizeof(PortalSpieler));
+        add(g_store.lineupIds,sizeof(g_store.lineupIds));
+        add(g_store.kreditPlayerIds,sizeof(g_store.kreditPlayerIds));
+        add(g_store.kredite,sizeof(g_store.kredite));
+        add(&g_store.spielerUpdateCount,sizeof(g_store.spielerUpdateCount));break;
+    default:
+        // Other screens retain their own refresh rules.
+        return s_sync_publication_seen;
+    }
+    return hash;
+}
+struct ViewSnapshot {
+    struct Scroll {lv_obj_t *object;int32_t x,y;} scroll[32];
+    struct Text {lv_obj_t *object;char value[512];} text[8];
+    int scroll_count=0,text_count=0;
+    lv_obj_t *focused=nullptr;
+};
+static void capture_view(lv_obj_t *object,ViewSnapshot &snapshot) {
+    if(lv_obj_has_flag(object,LV_OBJ_FLAG_HIDDEN)) return;
+    if(lv_obj_has_flag(object,LV_OBJ_FLAG_SCROLLABLE) && snapshot.scroll_count<32) {
+        auto &entry=snapshot.scroll[snapshot.scroll_count++];
+        entry.object=object;entry.x=lv_obj_get_scroll_x(object);entry.y=lv_obj_get_scroll_y(object);
+    }
+    if(lv_obj_check_type(object,&lv_textarea_class) && snapshot.text_count<8) {
+        auto &entry=snapshot.text[snapshot.text_count++];entry.object=object;
+        snprintf(entry.value,sizeof(entry.value),"%.511s",lv_textarea_get_text(object));
+    }
+    for(uint32_t i=0;i<lv_obj_get_child_count(object);i++) capture_view(lv_obj_get_child(object,i),snapshot);
+}
+static void restore_view(lv_obj_t *root,const ViewSnapshot &snapshot) {
+    for(int i=0;i<snapshot.text_count;i++) {
+        const auto &entry=snapshot.text[i];
+        if(lv_obj_is_valid(entry.object) && lv_obj_check_type(entry.object,&lv_textarea_class) &&
+            strcmp(lv_textarea_get_text(entry.object),entry.value))
+            lv_textarea_set_text(entry.object,entry.value);
+    }
+    lv_obj_update_layout(root);
+    for(int i=0;i<snapshot.scroll_count;i++) {
+        const auto &entry=snapshot.scroll[i];
+        if(lv_obj_is_valid(entry.object)) lv_obj_scroll_to(entry.object,entry.x,entry.y,LV_ANIM_OFF);
+    }
+    if(snapshot.focused && lv_obj_is_valid(snapshot.focused)) lv_group_focus_obj(snapshot.focused);
+}
+static bool scrolling(lv_obj_t *object) {
+    if(lv_obj_is_scrolling(object)) return true;
+    for(uint32_t i=0;i<lv_obj_get_child_count(object);i++)
+        if(scrolling(lv_obj_get_child(object,i))) return true;
+    return false;
+}
+bool ui_manager_lock(uint32_t timeout_ms) {
+    return s_frame_lock && xSemaphoreTake(s_frame_lock,
+        timeout_ms==UINT32_MAX?portMAX_DELAY:pdMS_TO_TICKS(timeout_ms))==pdTRUE;
+}
+void ui_manager_unlock(void) {xSemaphoreGive(s_frame_lock);}
+bool ui_manager_lock_for_sync(uint32_t timeout_ms) {
+    TickType_t started=xTaskGetTickCount();
+    do {
+        if(ui_manager_lock(10)) {
+            bool active=(s_input_device && lv_indev_get_state(s_input_device)==LV_INDEV_STATE_PRESSED) ||
+                (s_current<SCREEN_COUNT && scrolling(s_screens[s_current]));
+            if(active) s_last_input_tick=lv_tick_get();
+            if(!active && lv_tick_elaps(s_last_input_tick)>=500 &&
+                (s_current!=SCREEN_SPIEL || !lora_request_busy())) return true;
+            ui_manager_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    } while((xTaskGetTickCount()-started)*portTICK_PERIOD_MS<timeout_ms);
+    return false;
+}
+void ui_manager_before_frame(void) {
+    SyncUiState snapshot;store_get_sync_ui_state(&snapshot);
+    if(snapshot.publicationGeneration!=s_sync_publication_seen) ui_manager_tick();
+}
 
 static void remote_toast(const char *text)
 {
@@ -141,27 +241,6 @@ static void refresh_screen(Screen s)
     }
 }
 
-static void set_sync_guard_visible(bool visible)
-{
-    if (!s_sync_guard || visible == s_sync_guard_visible) return;
-    s_sync_guard_visible = visible;
-    if (visible) {
-        // A pointer-down target is retained by LVGL until release. Reset it
-        // before acknowledging the sync pause so a pre-sync press cannot
-        // dispatch a callback while datasets are being replaced.
-        if (s_input_device) {
-            lv_indev_reset(s_input_device, NULL);
-            lv_indev_enable(s_input_device, false);
-        }
-        lv_obj_remove_flag(s_sync_guard, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_sync_guard);
-    } else {
-        lv_obj_add_flag(s_sync_guard, LV_OBJ_FLAG_HIDDEN);
-        if (s_input_device)
-            lv_indev_enable(s_input_device, true);
-    }
-}
-
 void ui_manager_set_input_device(lv_indev_t *indev)
 {
     s_input_device = indev;
@@ -246,6 +325,8 @@ void screen_base_init(lv_obj_t *scr)
 // ── ui_manager_init ───────────────────────────────────────────
 void ui_manager_init(void)
 {
+    s_frame_lock=xSemaphoreCreateMutex();
+    configASSERT(s_frame_lock);
     ESP_LOGI(TAG, "Building LVGL screens...");
     ui_fonts_init();
     styles_init();
@@ -274,17 +355,6 @@ void ui_manager_init(void)
     s_screens[SCREEN_CATERING]     = screen_catering_create();
     s_screens[SCREEN_INVENTORY]    = screen_inventory_create();
 
-    // Transparent top-layer guard is used only for an acknowledged dataset
-    // commit. The status pill remains visible during the full network sync,
-    // but never intercepts normal interaction.
-    s_sync_guard = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(s_sync_guard, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
-    lv_obj_align(s_sync_guard, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_opa(s_sync_guard, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(s_sync_guard, 0, 0);
-    lv_obj_set_style_pad_all(s_sync_guard, 0, 0);
-    lv_obj_clear_flag(s_sync_guard, LV_OBJ_FLAG_SCROLLABLE);
-
     // The indicator is deliberately a separate, non-clickable top-layer
     // object. It is only a running circle: a persistent "synchronized"
     // message is noisy and can cover the header's return button.
@@ -300,7 +370,6 @@ void ui_manager_init(void)
     lv_obj_align(s_sync_indicator, LV_ALIGN_TOP_RIGHT, -20, 22);
     lv_obj_clear_flag(s_sync_indicator, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(s_sync_indicator, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_sync_guard, LV_OBJ_FLAG_HIDDEN);
 
     SyncUiState sync_state = {};
     store_get_sync_ui_state(&sync_state);
@@ -353,26 +422,30 @@ void ui_manager_tick(void)
         else
             lv_obj_add_flag(s_sync_indicator, LV_OBJ_FLAG_HIDDEN);
     }
-    if (sync_state.status == SYNC_RUNNING && sync_state.commitRequested) {
-        set_sync_guard_visible(true);
-        // The worker waits only for this commit acknowledgement. Network
-        // fetches/retries leave input, navigation, game and Catering live.
-        store_sync_ack_ui_commit();
-        return;
-    }
+    if((s_input_device && lv_indev_get_state(s_input_device)==LV_INDEV_STATE_PRESSED) ||
+        (s_current<SCREEN_COUNT && scrolling(s_screens[s_current])))
+        s_last_input_tick=lv_tick_get();
 
-    set_sync_guard_visible(false);
     if (sync_state.publicationGeneration != s_sync_publication_seen) {
         s_sync_publication_seen = sync_state.publicationGeneration;
         if (g_store.screen != s_current) {
             ui_manager_show(g_store.screen);
         } else {
-            refresh_screen(s_current);
+            uint32_t signature=content_hash(s_current);
+            if(signature!=s_content_hash[s_current]) {
+                ViewSnapshot view;
+                lv_group_t *group=lv_group_get_default();
+                if(group) view.focused=lv_group_get_focused(group);
+                capture_view(s_screens[s_current],view);
+                if(s_current!=SCREEN_SPIEL) refresh_screen(s_current);
+                restore_view(s_screens[s_current],view);
+                s_content_hash[s_current]=content_hash(s_current);
+            }
             if (s_current == SCREEN_KREDITE)
                 screen_kredite_sync_completed(sync_state.status == SYNC_SUCCESS,
                                                sync_state.error);
         }
-        ESP_LOGI(TAG, "Published coherent sync update generation=%u screen=%d",
+        ESP_LOGD(TAG, "Published coherent sync update generation=%u screen=%d",
                  (unsigned)s_sync_publication_seen, (int)s_current);
         return;
     }

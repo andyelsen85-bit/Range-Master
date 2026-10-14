@@ -88,7 +88,12 @@ static std::map<std::string, std::vector<uint8_t>> files;
 static std::map<int, std::string> descriptors;
 static int next_fd = 1;
 int nvs_open(const char *, int, int *handle) { *handle = 1; return ESP_OK; }
-int nvs_get_u8(int, const char *, uint8_t *value) {
+static bool protected_journal=false;
+int nvs_get_u8(int, const char *key, uint8_t *value) {
+    if(!std::strcmp(key,"game_journal")) {
+        *value=protected_journal?1:0;
+        return protected_journal?ESP_OK:ESP_ERR_NVS_NOT_FOUND;
+    }
     *value = 3; return fresh ? ESP_ERR_NVS_NOT_FOUND : ESP_OK;
 }
 int nvs_set_u8(int, const char *, uint8_t value) { assert(value == 3); return ESP_OK; }
@@ -169,6 +174,11 @@ void store_apply_portal_roster(const PortalSpieler *players, int count) {
 """
 
 SYNC_STUBS = r"""
+#include <atomic>
+static std::atomic<bool> s_recovery_requested{false};
+int game_journal_recover(unsigned) {return 0;}
+int game_journal_reload_pending() {return 0;}
+void terminal_log_add(const char*,const char*,const char*) {}
 using TickType_t = uint32_t;
 static char s_last_error[128];
 struct SyncManifest { bool available; char token[OFFLINE_CACHE_SECTION_COUNT][CACHE_MANIFEST_TOKEN_LEN]; };
@@ -227,6 +237,11 @@ int main() {
     assert(logged("total=9895936") && logged("write(16): ret=16 errno=0"));
     assert(logged("fsync: ret=0 errno=0") && logged("close: ret=0 errno=0"));
     assert(offline_cache_mount() && mounts == 1);
+
+    reset();protected_journal=true;fresh=true;probe_fails=true;
+    (void)offline_cache_mount();
+    assert(formats==0); // Durable games prohibit even a fresh-cache rebuild.
+    protected_journal=false;
 
     for (bool is_fresh : {false, true}) {
         reset(); fresh = is_fresh; total_bytes = free_bytes = 0;

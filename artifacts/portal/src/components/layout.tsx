@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuthStore } from "@/store/use-auth-store";
-import { LogOut, LayoutDashboard, List, Trophy, BarChart3, Target, Shield, User, KeyRound, Coins, Mail, ShoppingCart, Settings2, FileText } from "lucide-react";
+import { LogOut, LayoutDashboard, List, Trophy, BarChart3, Target, Shield, User, KeyRound, Coins, Mail, ShoppingCart, Settings2, FileText, ScrollText, GitCompareArrows } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -23,6 +23,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       { href: "/admin/api-schluesselen", label: "API-Schlüssel", icon: KeyRound },
       { href: "/admin/mail", label: "Mailserver", icon: Mail },
       { href: "/admin/terminal-config", label: "Terminal-Backups", icon: Settings2 },
+      { href: "/admin/terminal-logs", label: "Terminal-Logs", icon: ScrollText },
+      { href: "/admin/game-reconciliation", label: "Spiele-Abgleich", icon: GitCompareArrows },
     ] : []),
   ];
 

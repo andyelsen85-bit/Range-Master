@@ -30,7 +30,7 @@ app.use((req,res,next)=>{
   if (/^(?:\/api)?\/public\/last-game\/?$/.test(req.path)) { next(); return; }
   cors()(req,res,next);
 });
-app.use(express.json());
+app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // Root-level liveness / readiness probe.

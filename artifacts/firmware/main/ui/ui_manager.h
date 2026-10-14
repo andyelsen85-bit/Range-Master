@@ -7,12 +7,19 @@
 
 /** Create all LVGL screens and show the dashboard. */
 void ui_manager_init(void);
+/** One shared lock around LVGL dispatch and bounded sync RAM mutations. */
+bool ui_manager_lock(uint32_t timeout_ms);
+bool ui_manager_lock_for_sync(uint32_t timeout_ms);
+void ui_manager_unlock(void);
+/** Publish a completed sync before LVGL handles another input event. */
+void ui_manager_before_frame(void);
 
-/** Register the touch input so sync can cancel an active press safely. */
+/** Register touch tracking; sync defers RAM changes during active input. */
 void ui_manager_set_input_device(lv_indev_t *indev);
 
 /** Switch to the given screen (called when g_store.screen changes). */
 void ui_manager_show(Screen s);
+void ui_manager_remap_player_identity(int old_id,int new_id);
 
 /** Call from the LVGL timer task to react to store state changes. */
 void ui_manager_tick(void);

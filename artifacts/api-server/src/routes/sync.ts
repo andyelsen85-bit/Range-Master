@@ -357,23 +357,26 @@ router.post("/spiele", requireApiKey, async (req, res) => {
     ...spiel.teilnahmen.map((teilnahme) => teilnahme.spielerId),
     ...spiel.ergebnisse.map((ergebnis) => ergebnis.spielerId),
   ]))];
-  const activePlayers = playerIds.length
+  const knownPlayers = playerIds.length
     ? await db.select({ id: spielerTable.id }).from(spielerTable)
-      .where(and(inArray(spielerTable.id, playerIds), eq(spielerTable.aktiv, true)))
+      .where(inArray(spielerTable.id, playerIds))
     : [];
-  const activePlayerIds = new Set(activePlayers.map((player) => player.id));
-  const inactivePlayerIds = playerIds.filter((id) => !activePlayerIds.has(id));
-  if (inactivePlayerIds.length) {
-    return res.status(409).json({ error: `Unknown or inactive players in game batch: ${inactivePlayerIds.join(", ")}` });
-  }
+  const knownPlayerIds = new Set(knownPlayers.map((player) => player.id));
   const results = [];
 
   for (const s of body.spiele) {
+    const missingIds = [...s.teilnahmen,...s.ergebnisse].map(t=>t.spielerId).filter(id=>!knownPlayerIds.has(id));
+    if (missingIds.length) {
+      results.push({ externalId: s.externalId, status: "rejected" as const, error: "Unbekannte Spieler", playerIds: [...new Set(missingIds)] });
+      continue;
+    }
     if (s.confirmedLaunches > 0 && (!s.abgeschlossen || s.confirmedLaunches > s.ergebnisse.length)) {
       results.push({ externalId: s.externalId, status: "conflict" as const, error: "confirmedLaunches requires completed game and cannot exceed result count" });
       continue;
     }
+    try {
     const status = await db.transaction(async tx => {
+      await tx.execute(sql`SELECT set_config('rangemaster.historical_game_import','1',true)`);
       // The unique external ID is the concurrency gate.  A competing writer
       // either creates all children in this transaction or leaves nothing.
       const inserted = await tx.insert(spieleTable).values({
@@ -400,6 +403,10 @@ router.post("/spiele", requireApiKey, async (req, res) => {
         ? "skipped" as const : "conflict" as const;
     });
     results.push({ externalId: s.externalId, status });
+    } catch {
+      // A rejected game cannot block unrelated games. The terminal retains it.
+      results.push({ externalId: s.externalId, status: "rejected" as const, error: "Spiel nicht gespeichert: Spieler deaktiviert oder Daten widersprüchlich" });
+    }
   }
 
   return res.json({ results });

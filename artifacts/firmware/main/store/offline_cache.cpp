@@ -321,7 +321,9 @@ bool offline_cache_mount(void) {
     esp_err_t marker_err = nvs_err == ESP_OK
         ? nvs_get_u8(n, "fat_layout", &initialized_layout)
         : nvs_err;
-    const bool may_initialize = nvs_err == ESP_OK &&
+    uint8_t journal_protected=0;
+    if(nvs_err==ESP_OK) (void)nvs_get_u8(n,"game_journal",&journal_protected);
+    const bool may_initialize = !journal_protected && nvs_err == ESP_OK &&
         (marker_err == ESP_ERR_NVS_NOT_FOUND ||
          (marker_err == ESP_OK && initialized_layout == 2u));
 
@@ -361,7 +363,7 @@ bool offline_cache_mount(void) {
              (int)empty_cache, (int)fresh_volume);
     bool bad_capacity = false;
     bool usable = inspect_volume(&bad_capacity);
-    if (!usable && (bad_capacity || fresh_volume)) {
+    if (!usable && !journal_protected && (bad_capacity || fresh_volume)) {
         ESP_LOGW(TAG, "Deliberate FAT cache rebuild: bad_capacity=%d fresh=%d; "
                      "erasing ONLY storage, allocation_unit=%u (NVS untouched)",
                  (int)bad_capacity, (int)fresh_volume,

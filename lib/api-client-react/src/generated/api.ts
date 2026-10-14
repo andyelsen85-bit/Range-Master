@@ -33,12 +33,16 @@ import type {
   DailyReportSettings,
   DaySalesReport,
   ErrorResponse,
+  ExportTerminalLogsParams,
   FlexibleProductInput,
+  GameManifestInput,
+  GameReconciliationPage,
   GamedayInput,
   GetAdminBillActivityDaysParams,
   GetAdminBillDaySummaryParams,
   GetAdminBillPeriodSummaryParams,
   GetAdminDaySalesParams,
+  GetGameReconciliationParams,
   GetInventoryStateParams,
   GetMyPurchases200,
   GetRangliste200,
@@ -52,6 +56,7 @@ import type {
   GetSyncDaySalesParams,
   GetSyncSpieler200,
   GetSyncStatus200,
+  GetTerminalLogsParams,
   HealthStatus,
   InventoryInput,
   InventoryState,
@@ -78,7 +83,11 @@ import type {
   SaleSyncResult,
   SharedScorecard,
   SpielerProfile,
-  SpielerStatistik
+  SpielerStatistik,
+  TerminalLogAcknowledgement,
+  TerminalLogPage,
+  TerminalLogUpload,
+  UploadGameManifest200
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -107,6 +116,370 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getUploadTerminalLogsUrl = () => {
+
+
+
+
+  return `/api/sync/terminal-logs`
+}
+
+export const uploadTerminalLogs = async (terminalLogUpload: TerminalLogUpload, options?: Parameters<typeof customFetch>[1]): Promise<TerminalLogAcknowledgement> => {
+
+  return customFetch<TerminalLogAcknowledgement>(getUploadTerminalLogsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(terminalLogUpload)
+  }
+);}
+
+
+
+
+
+export const getUploadTerminalLogsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadTerminalLogs>>, TError,{data: BodyType<TerminalLogUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadTerminalLogs>>, TError,{data: BodyType<TerminalLogUpload>}, TContext> => {
+
+const mutationKey = ['uploadTerminalLogs'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadTerminalLogs>>, {data: BodyType<TerminalLogUpload>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  uploadTerminalLogs(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadTerminalLogsMutationResult = NonNullable<Awaited<ReturnType<typeof uploadTerminalLogs>>>
+    export type UploadTerminalLogsMutationBody = BodyType<TerminalLogUpload>
+    export type UploadTerminalLogsMutationError = ErrorType<unknown>
+
+    export const useUploadTerminalLogs = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadTerminalLogs>>, TError,{data: BodyType<TerminalLogUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadTerminalLogs>>,
+        TError,
+        {data: BodyType<TerminalLogUpload>},
+        TContext
+      > => {
+      return useMutation(getUploadTerminalLogsMutationOptions(options));
+    }
+
+export const getGetTerminalLogsUrl = (params?: GetTerminalLogsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/terminal-logs?${stringifiedParams}` : `/api/admin/terminal-logs`
+}
+
+export const getTerminalLogs = async (params?: GetTerminalLogsParams, options?: Parameters<typeof customFetch>[1]): Promise<TerminalLogPage> => {
+
+  return customFetch<TerminalLogPage>(getGetTerminalLogsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTerminalLogsQueryKey = (params?: GetTerminalLogsParams,) => {
+    return [
+    `/api/admin/terminal-logs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTerminalLogsQueryOptions = <TData = Awaited<ReturnType<typeof getTerminalLogs>>, TError = ErrorType<unknown>>(params?: GetTerminalLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTerminalLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTerminalLogsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTerminalLogs>>> = ({ signal }) => getTerminalLogs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTerminalLogs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTerminalLogsQueryResult = NonNullable<Awaited<ReturnType<typeof getTerminalLogs>>>
+export type GetTerminalLogsQueryError = ErrorType<unknown>
+
+
+
+export function useGetTerminalLogs<TData = Awaited<ReturnType<typeof getTerminalLogs>>, TError = ErrorType<unknown>>(
+ params?: GetTerminalLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTerminalLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTerminalLogsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportTerminalLogsUrl = (params?: ExportTerminalLogsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/terminal-logs/export?${stringifiedParams}` : `/api/admin/terminal-logs/export`
+}
+
+export const exportTerminalLogs = async (params?: ExportTerminalLogsParams, options?: Parameters<typeof customFetch>[1]): Promise<string> => {
+
+  return customFetch<string>(getExportTerminalLogsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportTerminalLogsQueryKey = (params?: ExportTerminalLogsParams,) => {
+    return [
+    `/api/admin/terminal-logs/export`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportTerminalLogsQueryOptions = <TData = Awaited<ReturnType<typeof exportTerminalLogs>>, TError = ErrorType<unknown>>(params?: ExportTerminalLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportTerminalLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportTerminalLogsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportTerminalLogs>>> = ({ signal }) => exportTerminalLogs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportTerminalLogs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportTerminalLogsQueryResult = NonNullable<Awaited<ReturnType<typeof exportTerminalLogs>>>
+export type ExportTerminalLogsQueryError = ErrorType<unknown>
+
+
+
+export function useExportTerminalLogs<TData = Awaited<ReturnType<typeof exportTerminalLogs>>, TError = ErrorType<unknown>>(
+ params?: ExportTerminalLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportTerminalLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportTerminalLogsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUploadGameManifestUrl = () => {
+
+
+
+
+  return `/api/sync/game-manifest`
+}
+
+export const uploadGameManifest = async (gameManifestInput: GameManifestInput, options?: Parameters<typeof customFetch>[1]): Promise<UploadGameManifest200> => {
+
+  return customFetch<UploadGameManifest200>(getUploadGameManifestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(gameManifestInput)
+  }
+);}
+
+
+
+
+
+export const getUploadGameManifestMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadGameManifest>>, TError,{data: BodyType<GameManifestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadGameManifest>>, TError,{data: BodyType<GameManifestInput>}, TContext> => {
+
+const mutationKey = ['uploadGameManifest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadGameManifest>>, {data: BodyType<GameManifestInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  uploadGameManifest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadGameManifestMutationResult = NonNullable<Awaited<ReturnType<typeof uploadGameManifest>>>
+    export type UploadGameManifestMutationBody = BodyType<GameManifestInput>
+    export type UploadGameManifestMutationError = ErrorType<unknown>
+
+    export const useUploadGameManifest = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadGameManifest>>, TError,{data: BodyType<GameManifestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadGameManifest>>,
+        TError,
+        {data: BodyType<GameManifestInput>},
+        TContext
+      > => {
+      return useMutation(getUploadGameManifestMutationOptions(options));
+    }
+
+export const getGetGameReconciliationUrl = (params?: GetGameReconciliationParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/game-reconciliation?${stringifiedParams}` : `/api/admin/game-reconciliation`
+}
+
+export const getGameReconciliation = async (params?: GetGameReconciliationParams, options?: Parameters<typeof customFetch>[1]): Promise<GameReconciliationPage> => {
+
+  return customFetch<GameReconciliationPage>(getGetGameReconciliationUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGameReconciliationQueryKey = (params?: GetGameReconciliationParams,) => {
+    return [
+    `/api/admin/game-reconciliation`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetGameReconciliationQueryOptions = <TData = Awaited<ReturnType<typeof getGameReconciliation>>, TError = ErrorType<unknown>>(params?: GetGameReconciliationParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGameReconciliation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGameReconciliationQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGameReconciliation>>> = ({ signal }) => getGameReconciliation(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGameReconciliation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGameReconciliationQueryResult = NonNullable<Awaited<ReturnType<typeof getGameReconciliation>>>
+export type GetGameReconciliationQueryError = ErrorType<unknown>
+
+
+
+export function useGetGameReconciliation<TData = Awaited<ReturnType<typeof getGameReconciliation>>, TError = ErrorType<unknown>>(
+ params?: GetGameReconciliationParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGameReconciliation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGameReconciliationQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getHealthCheckUrl = () => {
 

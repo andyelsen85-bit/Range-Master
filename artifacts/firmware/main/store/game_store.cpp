@@ -22,6 +22,10 @@
 #include "cJSON.h"
 
 #include "game_store.h"
+#include "terminal_logs.h"
+#include "game_journal.h"
+#include "lvgl.h"
+#include "ui_manager.h"
 #include "day_inventory.h"
 #include "payment_receipts.h"
 #include "http_sync.h"
@@ -1882,6 +1886,7 @@ void store_apply_portal_roster(const PortalSpieler *spieler, int count)
 void store_remap_spieler_id(int old_id, int new_id)
 {
     if (old_id == new_id || old_id == 0 || new_id == 0) return;
+    ui_manager_remap_player_identity(old_id,new_id);
     for (int i = 0; i < s_payment_receipt_count; ++i)
         if (s_payment_receipts[i].spielerId == old_id) s_payment_receipts[i].spielerId = new_id;
     for (int i = 0; i < g_store.portalSpielerCount; ++i)
@@ -2101,6 +2106,14 @@ bool store_adjust_kredite(int spieler_id, int delta)
 // ── store_start_spiel ────────────────────────────────────────
 bool store_start_spiel(void)
 {
+    if(g_store.pendingGamesCount>=MAX_PENDING_GAMES || !game_journal_ready()) {
+        snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),
+            "SPIELSPEICHER VOLL ODER NICHT VERFÜGBAR. BITTE SYNCHRONISIEREN.");
+        terminal_log_add("data_loss_risk","ERROR","Neues Spiel gesperrt: Speicher voll oder Spielarchiv nicht verfügbar");
+        return false;
+    }
+    if(g_store.pendingGamesCount>=MAX_PENDING_GAMES*8/10)
+        terminal_log_add("data_loss_risk","ERROR","Spiele-Warteschlange zu mehr als 80 Prozent belegt");
     GameStore *s = &g_store;
     if (s->operatingMode == TERMINAL_MODE_CATERING) return false;
     if (s->modus == MODUS_HARAKIRI_CUSTOM) {
@@ -2495,6 +2508,14 @@ static void _store_finish_game(void)
         fg.base.teilnahmen_count = s->spielerCount;
     }
 
+    // The full record must be durable before reporting the game as finished.
+    fg.base.finishedAt[0]='\0';
+    snprintf(fg.base.finishedAt,sizeof(fg.base.finishedAt),"%.31s",fg.finishedAt);
+    if(!game_journal_save(&fg)) {
+        terminal_log_add("data_loss_risk","ERROR","Fertiges Spiel noch nicht dauerhaft gespeichert");
+        // Keep the complete game in the RAM outbox too. Further starts are
+        // blocked by the latched journal failure, not by a broken live-game UI.
+    }
     // Store in history (ring buffer)
     if (s->historyCount < MAX_HISTORY) {
         s->history[s->historyCount++] = fg;
@@ -3117,16 +3138,11 @@ bool store_sync_commit_begin(void)
         ESP_LOGE(TAG, "Sync commit request rejected (sync/UI not ready)");
         return false;
     }
-    for (int attempt = 0; attempt < 50; ++attempt) {
+    if(ui_manager_lock_for_sync(5000)) {
         portENTER_CRITICAL(&s_sync_request_lock);
-        bool acknowledged = s_sync_ui_paused;
+        s_sync_ui_paused=true;
         portEXIT_CRITICAL(&s_sync_request_lock);
-        if (acknowledged) {
-            ESP_LOGD(TAG, "Sync commit UI acknowledgement in %ums",
-                     (unsigned)((xTaskGetTickCount() - started) * portTICK_PERIOD_MS));
-            return true;
-        }
-        vTaskDelay(pdMS_TO_TICKS(5));
+        return true;
     }
     portENTER_CRITICAL(&s_sync_request_lock);
     s_sync_commit_requested = false;
@@ -3134,6 +3150,7 @@ bool store_sync_commit_begin(void)
     portEXIT_CRITICAL(&s_sync_request_lock);
     ESP_LOGE(TAG, "Sync commit UI acknowledgement timed out after %ums",
              (unsigned)((xTaskGetTickCount() - started) * portTICK_PERIOD_MS));
+    terminal_log_add("ui_commit","WARN","RAM-Übernahme wegen aktiver Eingabe verschoben");
     return false;
 }
 
@@ -3143,6 +3160,7 @@ void store_sync_commit_end(void)
     s_sync_commit_requested = false;
     s_sync_ui_paused = false;
     portEXIT_CRITICAL(&s_sync_request_lock);
+    ui_manager_unlock();
 }
 
 void store_sync_ack_ui_commit(void)
@@ -3330,6 +3348,7 @@ void game_store_init(void)
     nvs_open();
 
     // Defaults
+    terminal_logs_init();
     snprintf(g_store.apiUrl, MAX_URL_LEN, "%s", DEFAULT_API_URL);
     snprintf(g_store.apiKey, MAX_KEY_LEN, "%s", DEFAULT_API_KEY);
     for (int m = 0; m < MASCHINE_COUNT; m++) g_store.maschinenAktiv[m] = true;

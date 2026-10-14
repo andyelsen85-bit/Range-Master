@@ -14,3 +14,16 @@ When a local player receives a portal ID, remap every player-keyed structure as 
 **Why:** Remapping only the visible roster or lineup can strand balances and outbox events under the old ID, making the same player appear unfunded or unsynchronizable.
 
 **How to apply:** Extend the central identity-remap operation whenever a new player-keyed ledger or cache is introduced; do not add one-off remaps in individual sync routes.
+
+Do not acknowledge the local-player update before durable game identities have
+been remapped. Include games finishing during the disk-to-RAM transition and
+private UI selections/row actions, not just games already in the RAM queue.
+
+**Why:** A reset after acknowledging the player but before rewriting its games
+can strand historical games under a negative ID with no pending create left to
+repair them. A concurrent game finish can otherwise recreate that old identity.
+
+**How to apply:** Remap disk records first, translate concurrent finishing
+snapshots, retain the local-player update on persistence failure, then publish
+the bounded RAM transition. Never let array reordering change the player an
+operator's open form or queued action targets.

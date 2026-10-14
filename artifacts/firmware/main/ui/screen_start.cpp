@@ -31,7 +31,8 @@ static void refresh_lineup_selections(void)
             lv_dropdown_set_selected(s_player_dropdowns[i],
                                      option_for_player_id(g_store.lineupIds[i]));
     s_refreshing_dropdowns = false;
-    lv_label_set_text(s_lbl_error, "");
+    lv_label_set_text(s_lbl_error, g_store.pendingGamesCount>=MAX_PENDING_GAMES*8/10
+        ? "SPIELSPEICHER FAST VOLL. BITTE SYNCHRONISIEREN." : "");
 }
 
 static int option_for_player_id(int id)
@@ -439,5 +440,6 @@ void screen_start_refresh(void)
         }
         lv_obj_invalidate(s_maschinen_btns[m]);
     }
-    lv_label_set_text(s_lbl_error, "");
+    lv_label_set_text(s_lbl_error, g_store.pendingGamesCount>=MAX_PENDING_GAMES*8/10
+        ? "SPIELSPEICHER FAST VOLL. BITTE SYNCHRONISIEREN." : "");
 }

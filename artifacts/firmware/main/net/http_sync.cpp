@@ -16,6 +16,9 @@
 #include "http_sync.h"
 #include "game_store.h"
 #include "day_inventory.h"
+#include "terminal_logs.h"
+#include "game_journal.h"
+#include <atomic>
 #include "app_config.h"
 #include "coprocessor.h"
 #include "offline_cache.h"
@@ -38,6 +41,9 @@ typedef struct {
 
 static http_session_t *s_active_session;
 static TaskHandle_t s_active_session_owner;
+static int s_last_http_status;
+static std::atomic<bool> s_recovery_requested{false};
+void http_request_game_recovery(void) {s_recovery_requested.store(true);}
 
 static void set_http_error(const char *operation, const char *path,
                            const char *reason);
@@ -99,8 +105,13 @@ static void sync_commit_end(const char *dataset, TickType_t started)
 {
     TickType_t elapsed = xTaskGetTickCount() - started;
     store_sync_commit_end();
-    ESP_LOGI(TAG, "Sync commit dataset=%s duration=%ums", dataset,
-             (unsigned)(elapsed * portTICK_PERIOD_MS));
+    if(elapsed*portTICK_PERIOD_MS>50) {
+        cJSON *data=cJSON_CreateObject();
+        cJSON_AddStringToObject(data,"dataset",dataset);
+        cJSON_AddNumberToObject(data,"durationMs",elapsed*portTICK_PERIOD_MS);
+        terminal_log_add("ui_commit","WARN","Langes Übernahmefenster",data);
+        cJSON_Delete(data);
+    }
 }
 
 // Outbox acknowledgements affect both the queue and the bill projection.
@@ -850,6 +861,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
             (void)esp_http_client_set_user_data(session->client, NULL);
         if (err == ESP_OK) {
             int status = esp_http_client_get_status_code(session->client);
+            s_last_http_status=status;
             if (status < 200 || status >= 300) {
                 ESP_LOGW(TAG, "POST %s → HTTP %d", diagnostic_path, status);
                 char reason[32];
@@ -920,6 +932,7 @@ static esp_err_t http_get_json(const char *path,
             (void)esp_http_client_set_user_data(session->client, NULL);
         if (err == ESP_OK) {
             int status = esp_http_client_get_status_code(session->client);
+            s_last_http_status=status;
             if (status < 200 || status >= 300) {
                 ESP_LOGW(TAG, "GET %s → HTTP %d", diagnostic_path, status);
                 char reason[32];
@@ -1028,26 +1041,38 @@ esp_err_t http_push_pending_games(void)
     if (!resp) return ESP_ERR_NO_MEM;
 
     esp_err_t overall = ESP_OK;
-    int synced = 0;
-
-    for (int i = 0; i < g_store.pendingGamesCount; i++) {
-        // Skip games that contain local (negative-ID) players — the portal
-        // cannot resolve them and the sync would fail or produce corrupt data.
+    int snapshot_count=g_store.pendingGamesCount;
+    PendingGame *snapshot=(PendingGame *)heap_caps_malloc(snapshot_count*sizeof(PendingGame),
+        MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!snapshot) { free(resp); return ESP_ERR_NO_MEM; }
+    TickType_t snapshot_started;
+    if(!sync_commit_begin("game-snapshot",&snapshot_started)) {
+        heap_caps_free(snapshot); free(resp); return ESP_ERR_TIMEOUT;
+    }
+    snapshot_count=g_store.pendingGamesCount<snapshot_count?g_store.pendingGamesCount:snapshot_count;
+    memcpy(snapshot,g_store.pendingGames,snapshot_count*sizeof(PendingGame));
+    sync_commit_end("game-snapshot",snapshot_started);
+    for (int i = 0; i < snapshot_count; i++) {
+        // Local identities must be remapped before submission, never discarded.
         bool has_local = false;
-        for (int j = 0; j < g_store.pendingGames[i].teilnahmen_count; j++) {
-            if (g_store.pendingGames[i].teilnahmen[j].spielerId < 0) {
+        for (int j = 0; j < snapshot[i].teilnahmen_count; j++) {
+            if (snapshot[i].teilnahmen[j].spielerId < 0) {
                 has_local = true;
                 break;
             }
         }
+        for(int j=0;j<snapshot[i].ergebnisse_count;j++)
+            if(snapshot[i].ergebnisse[j].spielerId<0) has_local=true;
         if (has_local) {
-            ESP_LOGI(TAG, "Discarding game %d: contains local player(s)", i);
-            synced++; // remove from queue on next flush
+            cJSON *data=cJSON_CreateObject();
+            cJSON_AddStringToObject(data,"externalId",snapshot[i].externalId);
+            terminal_log_add("data_loss_risk","ERROR","Spiel wartet auf lokale Spieler-ID",data);
+            cJSON_Delete(data); overall=ESP_ERR_INVALID_STATE;
             continue;
         }
 
         // Server expects { "spiele": [ <game> ] }
-        cJSON *obj  = pending_game_to_json(&g_store.pendingGames[i]);
+        cJSON *obj  = pending_game_to_json(&snapshot[i]);
         cJSON *arr  = cJSON_CreateArray();
         cJSON *wrap = cJSON_CreateObject();
         cJSON_AddItemToArray(arr, obj);
@@ -1062,28 +1087,43 @@ esp_err_t http_push_pending_games(void)
 
         esp_err_t err = http_post_json("/api/sync/spiele", body, resp, HTTP_BUF_SIZE);
         free(body);
-        if (err == ESP_OK) {
-            synced++;
-        } else {
-            overall = err;
+        bool accepted=false;
+        cJSON *reply=err==ESP_OK?cJSON_Parse(resp):nullptr;
+        cJSON *results=reply?cJSON_GetObjectItem(reply,"results"):nullptr;
+        cJSON *item;
+        cJSON_ArrayForEach(item,results) {
+            cJSON *id=cJSON_GetObjectItem(item,"externalId"),*status=cJSON_GetObjectItem(item,"status");
+            if(cJSON_IsString(id)&&cJSON_IsString(status)&&!strcmp(id->valuestring,snapshot[i].externalId))
+                accepted=!strcmp(status->valuestring,"created")||!strcmp(status->valuestring,"skipped");
         }
-    }
-
-    if (synced > 0) {
-        // Remove synced games (simple: remove all on full success)
-        if (synced == g_store.pendingGamesCount) {
-            TickType_t commit_started;
-            if (!sync_commit_begin("pending-games", &commit_started)) {
-                free(resp);
-                return ESP_ERR_TIMEOUT;
+        cJSON_Delete(reply);
+        if(accepted) {
+            if(!game_journal_ack(snapshot[i].externalId)) {
+                overall=ESP_FAIL;
+                terminal_log_add("data_loss_risk","ERROR","Portal-ACK gespeichert; lokale Journal-Bestätigung fehlgeschlagen");
+                continue;
             }
-            g_store.pendingGamesCount = 0;
-            sync_commit_end("pending-games", commit_started);
+            TickType_t started;
+            if(!sync_commit_begin("pending-game-ack",&started)) { overall=ESP_ERR_TIMEOUT; continue; }
+            for(int j=0;j<g_store.pendingGamesCount;j++) {
+                if(strcmp(g_store.pendingGames[j].externalId,snapshot[i].externalId)) continue;
+                memmove(g_store.pendingGames+j,g_store.pendingGames+j+1,
+                    (g_store.pendingGamesCount-j-1)*sizeof(PendingGame));
+                --g_store.pendingGamesCount; break;
+            }
+            sync_commit_end("pending-game-ack",started);
             game_store_save();
+        } else {
+            cJSON *data=cJSON_CreateObject();
+            cJSON_AddStringToObject(data,"externalId",snapshot[i].externalId);
+            cJSON_AddNumberToObject(data,"errorCode",err);
+            terminal_log_add("data_loss_risk","ERROR","Spiel nicht übertragen; bleibt gespeichert",data);
+            cJSON_Delete(data);
+            overall=err==ESP_OK?ESP_ERR_INVALID_RESPONSE:err;
         }
-        ESP_LOGI(TAG, "Pushed %d/%d games", synced, g_store.pendingGamesCount + synced);
     }
-
+    heap_caps_free(snapshot);
+    (void)game_journal_reload_pending();
     free(resp);
     return overall;
 }
@@ -1333,6 +1373,13 @@ esp_err_t http_push_spieler_updates(void)
                 }
                 if (new_id > 0) {
                     int old_id = e->spielerId;          // negative local ID
+                    // Do not acknowledge/remove the durable local-player
+                    // update until every game file has the portal identity.
+                    if(!game_journal_remap(old_id,new_id)) {
+                        terminal_log_add("data_loss_risk","ERROR","Spielerzuordnung bleibt vorgemerkt: Archiv konnte nicht umgestellt werden");
+                        free(resp);free(body);
+                        return ESP_FAIL;
+                    }
                     // One coherent remap covers lineup, credit balances and
                     // every durable outbox. Persistence follows the short
                     // publication window, never inside it.
@@ -2133,6 +2180,9 @@ static esp_err_t http_sync_inventory()
 }
 static esp_err_t http_sync_all_impl(void)
 {
+    int recovered=s_recovery_requested.exchange(false)?game_journal_recover(7):game_journal_reload_pending();
+    if(recovered<0)
+        terminal_log_add("data_loss_risk","ERROR","Spielarchiv konnte nicht in die Übertragung geladen werden");
     portENTER_CRITICAL(&s_error_lock);
     s_last_error[0] = '\0';
     portEXIT_CRITICAL(&s_error_lock);
@@ -2277,6 +2327,73 @@ static esp_err_t http_sync_all_impl(void)
     return overall;
 }
 
+static void upload_terminal_logs()
+{
+    time_t trusted_now=time(nullptr);
+    if(trusted_now<1700000000) return; // Keep critical logs until SNTP is valid.
+    TerminalLogEntry *entries=(TerminalLogEntry *)heap_caps_malloc(
+        sizeof(TerminalLogEntry)*100,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    char *response=(char *)heap_caps_malloc(8192,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!entries || !response) {heap_caps_free(entries);heap_caps_free(response);return;}
+    for(int batch=0;batch<4;batch++) {
+        int count=terminal_logs_snapshot(entries,100);if(!count) break;
+        cJSON *body=cJSON_CreateObject(),*array=cJSON_AddArrayToObject(body,"entries");
+        char id[64];terminal_id(id,sizeof(id));cJSON_AddStringToObject(body,"terminalId",id);
+        for(int i=0;i<count;i++) {
+            cJSON *entry=cJSON_CreateObject();cJSON_AddItemToArray(array,entry);
+            cJSON_AddStringToObject(entry,"id",entries[i].id);
+            struct tm original{};
+            time_t event_time=strptime(entries[i].ts,"%Y-%m-%dT%H:%M:%S",&original)?timegm(&original):0;
+            if(event_time<1700000000 || event_time>trusted_now+300) {
+                char original_message[201];
+                snprintf(original_message,sizeof(original_message),"Zeit geschätzt (%.24s): %.140s",
+                    entries[i].ts,entries[i].msg);
+                snprintf(entries[i].msg,sizeof(entries[i].msg),"%s",original_message);
+                struct tm utc;gmtime_r(&trusted_now,&utc);
+                strftime(entries[i].ts,sizeof(entries[i].ts),"%Y-%m-%dT%H:%M:%S.000Z",&utc);
+            }
+            cJSON_AddStringToObject(entry,"ts",entries[i].ts);
+            cJSON_AddStringToObject(entry,"type",entries[i].type);
+            cJSON_AddStringToObject(entry,"level",entries[i].level);
+            cJSON_AddStringToObject(entry,"msg",entries[i].msg);
+            cJSON *data=cJSON_Parse(entries[i].data);
+            cJSON_AddItemToObject(entry,"data",data?data:cJSON_CreateObject());
+        }
+        char *json=cJSON_PrintUnformatted(body);cJSON_Delete(body);
+        if(!json) break;
+        esp_err_t error=http_post_json("/api/sync/terminal-logs",json,response,8192);
+        cJSON_free(json);if(error!=ESP_OK) break;
+        cJSON *reply=cJSON_Parse(response),*acks=reply?cJSON_GetObjectItem(reply,"acceptedIds"):nullptr;
+        const char *accepted[100];int accepted_count=0;cJSON *item;
+        cJSON_ArrayForEach(item,acks) {
+            if(!cJSON_IsString(item) || accepted_count>=100) continue;
+            for(int i=0;i<count;i++) if(!strcmp(entries[i].id,item->valuestring)) {
+                accepted[accepted_count++]=entries[i].id;break;
+            }
+        }
+        terminal_logs_ack(accepted,accepted_count);cJSON_Delete(reply);
+        if(!accepted_count) break;
+    }
+    heap_caps_free(entries);heap_caps_free(response);
+}
+static void upload_game_manifest()
+{
+    time_t now=time(nullptr);if(now<1700000000) return;
+    char (*external_ids)[40]=(char (*)[40])heap_caps_malloc(2000*40,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!external_ids) return;
+    for(int d=0;d<7;d++) {
+        time_t date=now-d*86400;struct tm local;localtime_r(&date,&local);
+        char day[11];strftime(day,sizeof(day),"%Y-%m-%d",&local);
+        int count=game_journal_manifest(day,external_ids,2000);if(count<=0) continue;
+        cJSON *body=cJSON_CreateObject(),*ids=cJSON_AddArrayToObject(body,"externalIds");
+        char id[64];terminal_id(id,sizeof(id));cJSON_AddStringToObject(body,"terminalId",id);
+        cJSON_AddStringToObject(body,"datum",day);
+        for(int i=0;i<count;i++) cJSON_AddItemToArray(ids,cJSON_CreateString(external_ids[i]));
+        char *json=cJSON_PrintUnformatted(body);cJSON_Delete(body);
+        if(json) {char reply[256];esp_err_t err=http_post_json("/api/sync/game-manifest",json,reply,sizeof(reply));cJSON_free(json);if(err!=ESP_OK) break;}
+    }
+    heap_caps_free(external_ids);
+}
 static esp_err_t http_run_sync_cycle(const char *cycle_name,
                                      esp_err_t (*sync_impl)(void))
 {
@@ -2285,6 +2402,7 @@ static esp_err_t http_run_sync_cycle(const char *cycle_name,
     esp_err_t err = http_session_open(&session);
     if (err != ESP_OK) {
         set_http_error("SYNC", cycle_name, "client init failed");
+        terminal_log_add("sync","ERROR","Synchronisierung konnte nicht starten");
         return err;
     }
     err = http_session_activate(&session);
@@ -2295,6 +2413,16 @@ static esp_err_t http_run_sync_cycle(const char *cycle_name,
     }
 
     esp_err_t sync_err = sync_impl();
+    cJSON *data=cJSON_CreateObject();
+    cJSON_AddStringToObject(data,"cycle",cycle_name);
+    cJSON_AddNumberToObject(data,"durationMs",(xTaskGetTickCount()-started)*portTICK_PERIOD_MS);
+    cJSON_AddNumberToObject(data,"result",sync_err);
+    cJSON_AddNumberToObject(data,"httpStatus",s_last_http_status);
+    cJSON_AddNumberToObject(data,"pendingGames",g_store.pendingGamesCount);
+    terminal_log_add("sync",sync_err==ESP_OK?"INFO":"ERROR","Synchronisierung beendet",data);
+    cJSON_Delete(data);
+    upload_game_manifest();
+    upload_terminal_logs(); // Diagnostics failure never changes the sync result.
     http_session_deactivate(&session);
     http_session_close(&session);
     TickType_t elapsed = xTaskGetTickCount() - started;

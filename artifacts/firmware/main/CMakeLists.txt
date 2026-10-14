@@ -6,6 +6,8 @@ idf_component_register(
         "display/gsl3680_touch.cpp"
         "store/game_store.cpp"
         "store/day_inventory.cpp"
+        "store/terminal_logs.cpp"
+        "store/game_journal.cpp"
         "ui/screen_inventory.cpp"
         "store/offline_cache.cpp"
         "net/coprocessor.cpp"

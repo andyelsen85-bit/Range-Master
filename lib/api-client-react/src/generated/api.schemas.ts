@@ -726,6 +726,144 @@ export interface SyncSpiel {
   ergebnisse: SyncErgebnis[];
 }
 
+export type TerminalLogEntryType = typeof TerminalLogEntryType[keyof typeof TerminalLogEntryType];
+
+
+export const TerminalLogEntryType = {
+  fire_trace: 'fire_trace',
+  gateway_trace: 'gateway_trace',
+  sync: 'sync',
+  data_loss_risk: 'data_loss_risk',
+  ui_commit: 'ui_commit',
+  wifi: 'wifi',
+} as const;
+
+export type TerminalLogEntryLevel = typeof TerminalLogEntryLevel[keyof typeof TerminalLogEntryLevel];
+
+
+export const TerminalLogEntryLevel = {
+  INFO: 'INFO',
+  WARN: 'WARN',
+  ERROR: 'ERROR',
+} as const;
+
+export type TerminalLogEntryData = { [key: string]: unknown };
+
+export interface TerminalLogEntry {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  id: string;
+  ts: string;
+  type: TerminalLogEntryType;
+  level: TerminalLogEntryLevel;
+  /** @maxLength 200 */
+  msg: string;
+  data: TerminalLogEntryData;
+}
+
+export interface TerminalLogUpload {
+  /** @maxLength 120 */
+  terminalId: string;
+  /** @maxItems 100 */
+  entries: TerminalLogEntry[];
+}
+
+export interface TerminalLogAcknowledgement {
+  acceptedIds: string[];
+}
+
+export type TerminalLogRow = TerminalLogEntry & {
+  terminalId: string;
+  receivedAt: string;
+};
+
+export interface TerminalLatencySummary {
+  datum: string;
+  terminalId: string;
+  type: string;
+  count: number;
+  median: number;
+  p95: number;
+  max: number;
+}
+
+export interface TerminalLogPage {
+  entries: TerminalLogRow[];
+  total: number;
+  terminals: string[];
+  summaries: TerminalLatencySummary[];
+}
+
+export interface GameManifestInput {
+  terminalId: string;
+  datum: string;
+  /**
+     * @maxItems 2000
+     * @items.maxLength 80
+     */
+  externalIds: string[];
+}
+
+export interface GameReconciliation {
+  terminalId: string;
+  datum: string;
+  total: number;
+  present: number;
+  missingIds: string[];
+  updatedAt: string;
+}
+
+export interface GameReconciliationPage {
+  items: GameReconciliation[];
+}
+
+export type GetTerminalLogsParams = {
+terminal?: string;
+type?: string;
+level?: string;
+from?: string;
+to?: string;
+q?: string;
+/**
+ * @minimum 0
+ */
+offset?: number;
+/**
+ * @minimum 1
+ * @maximum 200
+ */
+limit?: number;
+};
+
+export type ExportTerminalLogsParams = {
+terminal?: string;
+type?: string;
+level?: string;
+from?: string;
+to?: string;
+q?: string;
+/**
+ * @minimum 0
+ */
+offset?: number;
+/**
+ * @minimum 1
+ * @maximum 200
+ */
+limit?: number;
+};
+
+export type UploadGameManifest200 = {
+  accepted: boolean;
+};
+
+export type GetGameReconciliationParams = {
+terminal?: string;
+datum?: string;
+};
+
 export type ListSpieler200 = {
   spieler: SpielerProfile[];
 };
@@ -794,11 +932,15 @@ export type PostSyncSpiele200ResultsItemStatus = typeof PostSyncSpiele200Results
 export const PostSyncSpiele200ResultsItemStatus = {
   created: 'created',
   skipped: 'skipped',
+  conflict: 'conflict',
+  rejected: 'rejected',
 } as const;
 
 export type PostSyncSpiele200ResultsItem = {
   externalId: string;
   status: PostSyncSpiele200ResultsItemStatus;
+  error?: string;
+  playerIds?: number[];
 };
 
 export type PostSyncSpiele200 = {

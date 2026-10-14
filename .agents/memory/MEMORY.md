@@ -29,7 +29,7 @@
 - [FAT cache mount safety](fat-cache-mount-safety.md) — validate mounts, log cache-only rebuilds, latch failures; FAT snapshots are optional and must not fail successful syncs.
 - [Sync manifest token sizing](sync-manifest-token-sizing.md) — revision tokens include the hash algorithm prefix; firmware buffers must treat them as opaque strings
 - [MIPI DSI PSRAM underruns](mipi-dsi-psram-underruns.md) — full-screen cyan flashes during FAT writes are DSI framebuffer underruns, not LVGL redraw tearing
-- [Non-blocking sync publication](nonblocking-sync-publication.md) — HTTP and persistence must never pause the UI; only acknowledged, bounded RAM swaps may briefly gate touch
+- [Non-blocking sync publication](nonblocking-sync-publication.md) — short shared LVGL/RAM locks; never disable/reset touch or add an input guard; preserve state and defer during input.
 - [Firmware warning policy](firmware-build-werror.md) — Windows ESP-IDF builds use -Werror=all; keep snprintf inputs provably bounded and avoid same-object restrict overlap
 - [German UI language](german-ui-language.md) — Portal and terminal user-facing text should be natural German; preserve internal routes, enums, and protocol identifiers
 - [LVGL generated font include path](lvgl-font-include-path.md) — firmware font sources must include simple `lvgl.h`, not nested `lvgl/lvgl.h`
