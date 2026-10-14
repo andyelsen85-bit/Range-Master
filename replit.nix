@@ -1,5 +1,8 @@
 {pkgs}: {
   deps = [
+    pkgs.patchelf
+    pkgs.ninja
+    pkgs.cmake
     pkgs.arduino-cli
     pkgs.pkg-config
     pkgs.mbedtls

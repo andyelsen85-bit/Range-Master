@@ -18,6 +18,12 @@ def function(source, signature):
 
 
 STUBS = r"""
+namespace tm_fire_link {struct Samples {}; } // statistics are tested separately
+#include <cstdint>
+int64_t esp_timer_get_time(){return 1000000;}
+struct wifi_ap_record_t {int rssi=-60;};
+int esp_wifi_sta_get_ap_info(wifi_ap_record_t*){return 0;}
+constexpr int ESP_OK=0;
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -249,7 +255,7 @@ int xQueueSend(void *, const GatewayRequest *request, int) {
     queued = *request; ++queues; order.push_back("queue"); return pdTRUE;
 }
 """
-    transport_functions = "\n".join(function(transport, signature) for signature in [
+    transport_functions = "static void record_fire_trace(const GatewayRequest &,uint32_t,uint32_t,uint32_t,int,bool,int) {}\nstatic bool perform_fire_transport(const GatewayRequest *,const char *url,const char *mac,int *status,int timeout) { return perform_authenticated_get(url,mac,status,timeout,3); }\n" + "\n".join(function(transport, signature) for signature in [
         "static void publish_machine_test_status", "void lora_copy_machine_test_status",
         "static bool begin_request", "static bool copy_gateway_config",
         "static bool build_fire_url", "static void perform_machine_test_batch",

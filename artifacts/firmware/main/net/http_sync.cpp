@@ -19,11 +19,16 @@
 #include "terminal_logs.h"
 #include "game_journal.h"
 #include <atomic>
+#include <functional>
+#include <memory>
+#include "esp_timer.h"
+#include "ui_time_fmt.h"
 #include "app_config.h"
 #include "coprocessor.h"
 #include "offline_cache.h"
 
 static const char *TAG = "http_sync";
+static int64_t s_commit_start_us;
 // One live history read after boot upgrades old caches that stored totals
 // but discarded clay records, without changing/erasing the FAT layout.
 static bool s_history_results_loaded;
@@ -43,6 +48,70 @@ static http_session_t *s_active_session;
 static TaskHandle_t s_active_session_owner;
 static int s_last_http_status;
 static std::atomic<bool> s_recovery_requested{false};
+// Only the HTTP session owner can enqueue baseline replacements. The UI keeps
+// reading live RAM throughout network/JSON work; all successful baselines are
+// published together, replaying CURRENT local outboxes at the final boundary.
+struct SyncBatch {
+    std::function<void()> apply[8];
+    unsigned count=0;
+    bool cache[OFFLINE_CACHE_SECTION_COUNT]{};
+    char tokens[OFFLINE_CACHE_SECTION_COUNT][CACHE_MANIFEST_TOKEN_LEN]{};
+    bool tokenSet[OFFLINE_CACHE_SECTION_COUNT]{};
+    bool active=true;
+    uint64_t commitUs=0;
+    char day[11]{};
+    struct Metric {
+        const char *name=nullptr;
+        uint32_t start=0,end=0;
+        int status=0,initial=0,pending=0,pushed=0;
+    } metrics[10];
+    uint32_t started=(uint32_t)(esp_timer_get_time()/1000);
+};
+static SyncBatch *s_batch;
+static void note_pushed(const char *name,int count) {
+    if(!s_batch||s_active_session_owner!=xTaskGetCurrentTaskHandle())return;
+    for(auto &metric:s_batch->metrics)
+        if(metric.name&&!strcmp(name,metric.name)){metric.pushed+=count;return;}
+}
+static bool batching() {
+    return s_batch&&s_batch->active&&s_active_session_owner==xTaskGetCurrentTaskHandle();
+}
+static int pending_for(const char *name) {
+    if(!strcmp(name,"spiele"))return g_store.pendingGamesCount;
+    if(!strcmp(name,"spieler"))return g_store.spielerUpdateCount;
+    if(!strcmp(name,"sales"))return g_store.pendingVerkaufEventCount;
+    if(!strcmp(name,"credits"))return g_store.pendingKreditEventCount;
+    if(!strcmp(name,"payments"))return g_store.pendingPaymentEventCount;
+    return 0;
+}
+struct SyncHttpMeasurement {
+    SyncBatch::Metric *metric=nullptr;
+    explicit SyncHttpMeasurement(const char *path) {
+        if(!s_batch||s_active_session_owner!=xTaskGetCurrentTaskHandle()||!path)return;
+        const char *name=strstr(path,"backup")?"backup":
+            strstr(path,"spieler")?"spieler":
+            strstr(path,"spiele")?(strchr(path,'?')?"history":"spiele"):
+            strstr(path,"kredite")?"credits":strstr(path,"payments")?"payments":
+            strstr(path,"sales")?"sales":strstr(path,"products")?"products":
+            strstr(path,"bills")?"bills":
+            (strstr(path,"inventory")||strstr(path,"gameday"))?"inventory":nullptr;
+        if(!name)return;
+        for(auto &m:s_batch->metrics)if(!m.name||!strcmp(name,m.name)) {
+            if(!m.name) {
+                m.name=name;m.initial=pending_for(name);
+                m.start=(uint32_t)(esp_timer_get_time()/1000)-s_batch->started;
+            }
+            metric=&m;break;
+        }
+        s_last_http_status=0;
+    }
+    ~SyncHttpMeasurement() {
+        if(!metric)return;
+        metric->end=(uint32_t)(esp_timer_get_time()/1000)-s_batch->started;
+        if(metric->status<400)metric->status=s_last_http_status;
+        metric->pending=pending_for(metric->name);
+    }
+};
 void http_request_game_recovery(void) {s_recovery_requested.store(true);}
 
 static void set_http_error(const char *operation, const char *path,
@@ -98,20 +167,40 @@ static bool sync_commit_begin(const char *dataset, TickType_t *started)
         return false;
     }
     *started = xTaskGetTickCount();
+    s_commit_start_us=esp_timer_get_time();
     return true;
 }
 
 static void sync_commit_end(const char *dataset, TickType_t started)
 {
-    TickType_t elapsed = xTaskGetTickCount() - started;
+    (void)started;
+    const uint64_t elapsed=(uint64_t)(esp_timer_get_time()-s_commit_start_us);
     store_sync_commit_end();
-    if(elapsed*portTICK_PERIOD_MS>50) {
+    if(s_batch&&s_active_session_owner==xTaskGetCurrentTaskHandle())s_batch->commitUs+=elapsed;
+    if(elapsed>50000) {
         cJSON *data=cJSON_CreateObject();
         cJSON_AddStringToObject(data,"dataset",dataset);
-        cJSON_AddNumberToObject(data,"durationMs",elapsed*portTICK_PERIOD_MS);
+        cJSON_AddNumberToObject(data,"durationMs",elapsed/1000.0);
         terminal_log_add("ui_commit","WARN","Langes Übernahmefenster",data);
         cJSON_Delete(data);
     }
+}
+
+static esp_err_t stage_dataset(const char *name,OfflineCacheSection section,
+                               std::function<void()> action) {
+    if(batching()) {
+        if(s_batch->count>=8)return ESP_ERR_NO_MEM;
+        s_batch->apply[s_batch->count++]=std::move(action);
+        if(section<OFFLINE_CACHE_SECTION_COUNT)s_batch->cache[section]=true;
+        return ESP_OK;
+    }
+    TickType_t started;
+    if(!sync_commit_begin(name,&started))return ESP_ERR_TIMEOUT;
+    action();sync_commit_end(name,started);
+    game_store_save();
+    if(section<OFFLINE_CACHE_SECTION_COUNT&&!offline_cache_save(section))
+        ESP_LOGW(TAG,"Optional snapshot unavailable for %s",name);
+    return ESP_OK;
 }
 
 // Outbox acknowledgements affect both the queue and the bill projection.
@@ -204,6 +293,13 @@ static bool manifest_changed(const SyncManifest *manifest, OfflineCacheSection s
 
 static void commit_manifest_token(const SyncManifest *manifest, OfflineCacheSection section)
 {
+    if(batching()) {
+        if(manifest&&manifest->available) {
+            memcpy(s_batch->tokens[section],manifest->token[section],CACHE_MANIFEST_TOKEN_LEN);
+            s_batch->tokenSet[section]=true;
+        }
+        return;
+    }
     if (manifest && manifest->available &&
         !offline_cache_set_manifest_token(section, manifest->token[section]))
         ESP_LOGW(TAG, "Manifest token not persisted; cache unavailable, server data remains applied");
@@ -211,10 +307,42 @@ static void commit_manifest_token(const SyncManifest *manifest, OfflineCacheSect
 
 static void cache_pulled_section(OfflineCacheSection section)
 {
+    if(batching()){s_batch->cache[section]=true;return;}
     if (!offline_cache_save(section))
         ESP_LOGW(TAG, "Cache unavailable for pulled section %d; "
                      "server data retained in RAM, sync remains successful",
                  (int)section);
+}
+
+static esp_err_t publish_sync_batch() {
+    if(!batching())return ESP_OK;
+    char today[11];
+    if(!day_inventory_today(today,sizeof(today)))return ESP_ERR_INVALID_STATE;
+    if(s_batch->day[0]&&strcmp(today,s_batch->day))return ESP_ERR_INVALID_STATE;
+    const int64_t begin=esp_timer_get_time();
+    TickType_t started;
+    if(s_batch->count&&!sync_commit_begin("coherent-datasets",&started))return ESP_ERR_TIMEOUT;
+    if(s_batch->count) {
+        for(unsigned i=0;i<s_batch->count;++i)s_batch->apply[i]();
+        store_rebuild_bill_projection();
+        sync_commit_end("coherent-datasets",started);
+    }
+    s_batch->active=false; // Persistence and disposal NEVER hold the UI mutex.
+    if(s_batch->count)game_store_save();
+    (void)day_inventory_persist();
+    for(int i=0;i<OFFLINE_CACHE_SECTION_COUNT;++i) {
+        if(s_batch->cache[i])cache_pulled_section((OfflineCacheSection)i);
+        if(s_batch->tokenSet[i])
+            (void)offline_cache_set_manifest_token((OfflineCacheSection)i,s_batch->tokens[i]);
+    }
+    // Includes idle waiting separately; not falsely reported as blocked input.
+    cJSON *data=cJSON_CreateObject();
+    cJSON_AddNumberToObject(data,"commitMs",s_batch->commitUs/1000.0);
+    cJSON_AddNumberToObject(data,"waitAndPersistMs",(esp_timer_get_time()-begin)/1000.0);
+    cJSON_AddNumberToObject(data,"datasets",s_batch->count);
+    if(s_batch->commitUs>50000)
+        terminal_log_add("ui_commit","WARN","Lange zusammenhängende RAM-Übernahme",data);
+    cJSON_Delete(data);return ESP_OK;
 }
 
 static void redact_query(const char *path, char *out, size_t out_size)
@@ -827,6 +955,7 @@ static esp_err_t http_prepare_request(http_session_t *session, const char *path,
 static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap)
 {
+    SyncHttpMeasurement measurement(path);
     char diagnostic_path[160];
     redact_query(path, diagnostic_path, sizeof(diagnostic_path));
     if (!path || !body || (resp_buf && resp_cap < 2)) {
@@ -898,6 +1027,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
 static esp_err_t http_get_json(const char *path,
                                char *resp_buf, size_t resp_cap)
 {
+    SyncHttpMeasurement measurement(path);
     char diagnostic_path[160];
     redact_query(path, diagnostic_path, sizeof(diagnostic_path));
     if (!path || !resp_buf || resp_cap < 2) {
@@ -1109,7 +1239,7 @@ esp_err_t http_push_pending_games(void)
                 if(strcmp(g_store.pendingGames[j].externalId,snapshot[i].externalId)) continue;
                 memmove(g_store.pendingGames+j,g_store.pendingGames+j+1,
                     (g_store.pendingGamesCount-j-1)*sizeof(PendingGame));
-                --g_store.pendingGamesCount; break;
+                --g_store.pendingGamesCount;note_pushed("spiele",1);break;
             }
             sync_commit_end("pending-game-ack",started);
             game_store_save();
@@ -1175,7 +1305,7 @@ esp_err_t http_fetch_spieler(PortalSpieler *out, int max, int *count)
     }
 
     cJSON_Delete(root);
-    ESP_LOGI(TAG, "Fetched %d portal players", *count);
+    ESP_LOGD(TAG, "Fetched %d portal players", *count);
     return ESP_OK;
 }
 
@@ -1318,19 +1448,12 @@ esp_err_t http_fetch_spielhistorie(void)
     }
 
     cJSON_Delete(root);
-    TickType_t commit_started;
-    if (!sync_commit_begin("history", &commit_started)) {
-        heap_caps_free(staged);
-        return ESP_ERR_TIMEOUT;
-    }
-    memcpy(g_store.history, staged, MAX_HISTORY * sizeof(FinishedGame));
-    g_store.historyCount = count;
-    sync_commit_end("history", commit_started);
-    heap_caps_free(staged);
-    game_store_save();
-    cache_pulled_section(OFFLINE_CACHE_HISTORY);
-    ESP_LOGI(TAG, "Fetched %d games from portal into history", count);
-    return ESP_OK;
+    auto owned=std::shared_ptr<FinishedGame>(staged,heap_caps_free);
+    return stage_dataset("history",OFFLINE_CACHE_HISTORY,[owned,count]() {
+        memcpy(g_store.history,owned.get(),MAX_HISTORY*sizeof(FinishedGame));
+        g_store.historyCount=count;
+        s_history_results_loaded=true;
+    });
 }
 
 // ── http_push_spieler_updates ─────────────────────────────────
@@ -1392,8 +1515,9 @@ esp_err_t http_push_spieler_updates(void)
                     store_remap_spieler_id(old_id, new_id);
                     e->used = false;    // mark done — compacted below
                     sync_commit_end("player-remap", commit_started);
-                    ESP_LOGI(TAG, "Spieler '%s' created in portal → id=%d (was local %d)",
+                    ESP_LOGD(TAG, "Spieler '%s' created in portal → id=%d (was local %d)",
                              e->name, new_id, old_id);
+                    note_pushed("spieler",1);
                     game_store_save();
                     (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
                     (void)offline_cache_save(OFFLINE_CACHE_HISTORY);
@@ -1466,7 +1590,8 @@ esp_err_t http_push_spieler_updates(void)
                         if (e->used && e->typ != SPIELER_CREATE) e->used = false;
                     }
                     sync_commit_end("player-update-ack", commit_started);
-                    ESP_LOGI(TAG, "Pushed %d spieler update(s)", update_count);
+                    ESP_LOGD(TAG, "Pushed %d spieler update(s)", update_count);
+                    note_pushed("spieler",update_count);
                 } else {
                     ESP_LOGW(TAG, "Spieler updates push failed (%s) — queue retained", esp_err_to_name(uerr));
                     if (overall == ESP_OK) overall = uerr;
@@ -1576,7 +1701,8 @@ esp_err_t http_push_kredit_events(void)
     free(snapshot);
     if (finish_err != ESP_OK) return finish_err;
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Pushed %d kredit event(s)", snapshotCount);
+        ESP_LOGD(TAG, "Pushed %d kredit event(s)", snapshotCount);
+        note_pushed("credits",snapshotCount);
     } else {
         ESP_LOGW(TAG, "Kredit push failed (%s) — queue retained", esp_err_to_name(err));
     }
@@ -1666,6 +1792,7 @@ esp_err_t http_push_payment_events(void)
     free(snapshot);
     // A 2xx with a conflict/rejection is not delivery success: preserve a
     // visible sync error and retry the unchanged externalId later.
+    note_pushed("payments",accepted_count);
     return finish_saved && accepted_count == count ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
@@ -1831,15 +1958,11 @@ esp_err_t http_fetch_bill_day_summary(void)
             set_http_error("GET", path, "invalid bill summary response");
             err = ESP_ERR_INVALID_RESPONSE;
         } else {
-            TickType_t commit_started;
-            if (!sync_commit_begin("bills", &commit_started)) {
-                err = ESP_ERR_TIMEOUT;
-            } else {
-                store_cache_bill_day(parsed);
-                sync_commit_end("bills", commit_started);
-                game_store_save();
-                cache_pulled_section(OFFLINE_CACHE_BILLS);
-            }
+            auto owned=std::shared_ptr<BillDaySummary>(parsed,heap_caps_free);
+            parsed=nullptr;
+            err=stage_dataset("bills",OFFLINE_CACHE_BILLS,[owned]() {
+                store_cache_bill_day(owned.get());
+            });
         }
         if (parsed) heap_caps_free(parsed);
         if (summary) cJSON_Delete(summary);
@@ -1894,12 +2017,9 @@ esp_err_t http_pull_kredite(void)
             return ESP_ERR_INVALID_RESPONSE;
         }
     }
-    {
-        TickType_t commit_started;
-        if (!sync_commit_begin("credits", &commit_started)) {
-            cJSON_Delete(root);
-            return ESP_ERR_TIMEOUT;
-        }
+    auto owned=std::shared_ptr<cJSON>(root,cJSON_Delete);
+    return stage_dataset("credits",OFFLINE_CACHE_CREDITS,[owned]() {
+        cJSON *arr=cJSON_GetObjectItem(owned.get(),"kredite");
         cJSON *item;
         // This endpoint is a FULL current-day baseline. Omitted players have
         // zero portal credits, not their old terminal balance. Reconciliation
@@ -1928,13 +2048,7 @@ esp_err_t http_pull_kredite(void)
             int ver = jver && cJSON_IsNumber(jver) ? (int)jver->valuedouble : 0;
             store_apply_portal_kredit(sid, gew, ver);
         }
-        sync_commit_end("credits", commit_started);
-        ESP_LOGI(TAG, "Pulled credits for %s", datum);
-    }
-    cJSON_Delete(root);
-    game_store_save();
-    cache_pulled_section(OFFLINE_CACHE_CREDITS);
-    return ESP_OK;
+    });
 }
 
 // ── Product catalog and sale-event sync ────────────────────────
@@ -1978,17 +2092,14 @@ esp_err_t http_fetch_produkte(void)
     // An empty array is an authoritative catalog replacement, not "no update".
     // Apply authoritative RAM and operational NVS state even if the optional
     // FAT snapshot fails. Failed sections cannot advance their disk token.
-    TickType_t commit_started;
-    if (!sync_commit_begin("products", &commit_started)) {
-        cJSON_Delete(root);
-        return ESP_ERR_TIMEOUT;
-    }
-    store_replace_produkte(products, count);
-    sync_commit_end("products", commit_started);
-    game_store_save();
-    cache_pulled_section(OFFLINE_CACHE_PRODUCTS);
+    Produkt *copy=(Produkt*)malloc(sizeof(products));
+    if(!copy){cJSON_Delete(root);return ESP_ERR_NO_MEM;}
+    memcpy(copy,products,sizeof(products));
+    auto owned=std::shared_ptr<Produkt>(copy,free);
     cJSON_Delete(root);
-    return ESP_OK;
+    return stage_dataset("products",OFFLINE_CACHE_PRODUCTS,[owned,count]() {
+        store_replace_produkte(owned.get(),count);
+    });
 }
 
 esp_err_t http_push_verkauf_events(void)
@@ -2036,6 +2147,7 @@ esp_err_t http_push_verkauf_events(void)
     // snapshot: a non-2xx leaves every externalId in the durable outbox for
     // an idempotent retry, while a 2xx removes the complete snapshot.
     esp_err_t finish_err = finish_verkauf_sync_publication(snapshot, count, err == ESP_OK);
+    if(err==ESP_OK)note_pushed("sales",count);
     heap_caps_free(snapshot);
     if (finish_err != ESP_OK) return finish_err;
     return err;
@@ -2054,11 +2166,9 @@ esp_err_t http_pull_verkaeufe(void)
     if (!root) return ESP_ERR_INVALID_RESPONSE;
     cJSON *arr = cJSON_GetObjectItem(root, "sales");
     if (!arr || !cJSON_IsArray(arr)) { cJSON_Delete(root); return ESP_ERR_INVALID_RESPONSE; }
-    TickType_t commit_started;
-    if (!sync_commit_begin("sales", &commit_started)) {
-        cJSON_Delete(root);
-        return ESP_ERR_TIMEOUT;
-    }
+    auto owned=std::shared_ptr<cJSON>(root,cJSON_Delete);
+    return stage_dataset("sales",OFFLINE_CACHE_SALES,[owned,date]() {
+    cJSON *arr=cJSON_GetObjectItem(owned.get(),"sales");
     memset(g_store.munition, 0, sizeof(g_store.munition));
     snprintf(g_store.verkaufDatum, sizeof(g_store.verkaufDatum), "%s", date);
     g_store.verkaufCal12Total = g_store.verkaufCal20Total = 0;
@@ -2085,10 +2195,7 @@ esp_err_t http_pull_verkaeufe(void)
         if (strcmp(ev->datum, date) == 0)
             store_apply_portal_verkauf(ev->spielerId, ev->produktId, ev->quantity);
     }
-    sync_commit_end("sales", commit_started);
-    cJSON_Delete(root); game_store_save();
-    cache_pulled_section(OFFLINE_CACHE_SALES);
-    return ESP_OK;
+    });
 }
 
 static esp_err_t http_sync_billing_impl(void)
@@ -2102,7 +2209,7 @@ static esp_err_t http_sync_billing_impl(void)
     }
     if (!wait_for_trusted_day()) return ESP_ERR_INVALID_STATE;
 
-    ESP_LOGI(TAG, "Starting billing sync...");
+    if(batching())(void)day_inventory_today(s_batch->day,sizeof(s_batch->day));
     esp_err_t overall = ESP_OK;
     esp_err_t credit_push = http_push_kredit_events();
     if (credit_push != ESP_OK) overall = credit_push;
@@ -2130,7 +2237,7 @@ static esp_err_t http_sync_billing_impl(void)
         if (!offline_cache_save_metadata())
             ESP_LOGW(TAG, "Billing sync succeeded; cache metadata unavailable");
     }
-    ESP_LOGI(TAG, "Billing sync complete (%s)",
+    ESP_LOGD(TAG, "Billing sync complete (%s)",
              overall == ESP_OK ? "success" : "partial failure");
     return overall;
 }
@@ -2171,12 +2278,19 @@ static esp_err_t http_sync_inventory()
     esp_err_t err=http_get_json(url,response,32768);
     cJSON *root=err==ESP_OK?cJSON_Parse(response):NULL;free(response);
     if(!root)return err==ESP_OK?ESP_ERR_INVALID_RESPONSE:err;
-    TickType_t started;
-    if(!sync_commit_begin("inventory",&started)){cJSON_Delete(root);return ESP_ERR_TIMEOUT;}
-    bool ok=day_inventory_apply(root,today);
-    sync_commit_end("inventory",started);cJSON_Delete(root);
-    if(!ok)return ESP_ERR_INVALID_RESPONSE;
-    return day_inventory_persist()?ESP_OK:ESP_FAIL;
+    if(!cJSON_IsObject(cJSON_GetObjectItem(root,"today"))) {
+        cJSON_Delete(root);
+        set_http_error("GET","/api/sync/inventory","Invalid inventory baseline");
+        return ESP_FAIL;
+    }
+    auto owned=std::shared_ptr<cJSON>(root,cJSON_Delete);
+    // Inventory validates its shape/date before mutating state. Hold the date
+    // in the owned payload, not a pointer to this worker's stack.
+    cJSON_AddStringToObject(root,"_publicationDay",today);
+    return stage_dataset("inventory",OFFLINE_CACHE_SECTION_COUNT,[owned]() {
+        const char *date=cJSON_GetObjectItem(owned.get(),"_publicationDay")->valuestring;
+        (void)day_inventory_apply(owned.get(),date);
+    });
 }
 static esp_err_t http_sync_all_impl(void)
 {
@@ -2192,7 +2306,7 @@ static esp_err_t http_sync_all_impl(void)
         return ESP_ERR_INVALID_STATE;
     }
     if (!wait_for_trusted_day()) return ESP_ERR_INVALID_STATE;
-    ESP_LOGI(TAG, "Starting full sync...");
+    if(batching())(void)day_inventory_today(s_batch->day,sizeof(s_batch->day));
     // The manifest is optional for compatibility with older portals. It is
     // fetched before any data endpoint, but outbox pushes below force their
     // affected baseline pulls so locally accepted events are reconciled.
@@ -2204,8 +2318,7 @@ static esp_err_t http_sync_all_impl(void)
         s_last_error[0] = '\0';
         portEXIT_CRITICAL(&s_error_lock);
     }
-    ESP_LOGI(TAG, "  URL: %s (authenticated)", g_store.apiUrl);
-    ESP_LOGI(TAG, "  internal free=%u B  largest block=%u B",
+    ESP_LOGD(TAG, "  internal free=%u B  largest block=%u B",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     // Push queued player edits (non-critical)
@@ -2260,7 +2373,6 @@ static esp_err_t http_sync_all_impl(void)
                         manifest_changed(&manifest, OFFLINE_CACHE_HISTORY) || (had_games && err == ESP_OK);
     err = pull_history ? http_fetch_spielhistorie() : ESP_OK;
     if (pull_history && err == ESP_OK) {
-        s_history_results_loaded = true;
         commit_manifest_token(&manifest, OFFLINE_CACHE_HISTORY);
     }
     if (err != ESP_OK && overall == ESP_OK) overall = err;
@@ -2288,21 +2400,23 @@ static esp_err_t http_sync_all_impl(void)
     err = pull_roster ? http_fetch_spieler(buf, MAX_PORTAL_SPIELER, &count) : ESP_OK;
     if (err == ESP_OK) {
         if (pull_roster) {
-            TickType_t commit_started;
-            if (!sync_commit_begin("roster", &commit_started)) {
-                free(buf);
-                return ESP_ERR_TIMEOUT;
-            }
-            store_apply_portal_roster(buf, count);
-            sync_commit_end("roster", commit_started);
-            game_store_save();
-            cache_pulled_section(OFFLINE_CACHE_ROSTER);
+            auto owned=std::shared_ptr<PortalSpieler>(buf,free);buf=nullptr;
+            err=stage_dataset("roster",OFFLINE_CACHE_ROSTER,[owned,count]() {
+                store_apply_portal_roster(owned.get(),count);
+            });
             commit_manifest_token(&manifest, OFFLINE_CACHE_ROSTER);
         }
     }
     free(buf);
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
+    // Each staged dataset is fully validated. Publish all eligible datasets at
+    // one boundary; failures keep their previous COMPLETE baseline. An unrelated
+    // rejected game must not prevent the roster/other accepted data progressing.
+    {
+        esp_err_t publication=publish_sync_batch();
+        if(publication!=ESP_OK)return publication;
+    }
     // A configuration backup is deliberately last: operational outboxes are
     // processed first, and backup failure must never undo successful sync work.
     // Only the first successful operational sync uploads a daily snapshot.
@@ -2323,7 +2437,7 @@ static esp_err_t http_sync_all_impl(void)
         if (!offline_cache_save_metadata())
             ESP_LOGW(TAG, "Full sync succeeded; cache metadata unavailable");
     }
-    ESP_LOGI(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
+    ESP_LOGD(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
     return overall;
 }
 
@@ -2343,7 +2457,9 @@ static void upload_terminal_logs()
             cJSON *entry=cJSON_CreateObject();cJSON_AddItemToArray(array,entry);
             cJSON_AddStringToObject(entry,"id",entries[i].id);
             struct tm original{};
-            time_t event_time=strptime(entries[i].ts,"%Y-%m-%dT%H:%M:%S",&original)?timegm(&original):0;
+            time_t event_time=strptime(entries[i].ts,"%Y-%m-%dT%H:%M:%S",&original)?
+                utc_mktime(original.tm_year+1900,original.tm_mon+1,original.tm_mday,
+                           original.tm_hour,original.tm_min,original.tm_sec):0;
             if(event_time<1700000000 || event_time>trusted_now+300) {
                 char original_message[201];
                 snprintf(original_message,sizeof(original_message),"Zeit geschätzt (%.24s): %.140s",
@@ -2412,15 +2528,45 @@ static esp_err_t http_run_sync_cycle(const char *cycle_name,
         return err;
     }
 
+    SyncBatch batch;s_batch=&batch;
+    const time_t utc_start=time(NULL);
     esp_err_t sync_err = sync_impl();
+    if(sync_err==ESP_OK&&batch.active)sync_err=publish_sync_batch();
+    batch.active=false;
     cJSON *data=cJSON_CreateObject();
     cJSON_AddStringToObject(data,"cycle",cycle_name);
     cJSON_AddNumberToObject(data,"durationMs",(xTaskGetTickCount()-started)*portTICK_PERIOD_MS);
     cJSON_AddNumberToObject(data,"result",sync_err);
-    cJSON_AddNumberToObject(data,"httpStatus",s_last_http_status);
-    cJSON_AddNumberToObject(data,"pendingGames",g_store.pendingGamesCount);
-    terminal_log_add("sync",sync_err==ESP_OK?"INFO":"ERROR","Synchronisierung beendet",data);
+    cJSON_AddNumberToObject(data,"startUtc",utc_start);
+    cJSON_AddNumberToObject(data,"endUtc",time(NULL));
+    cJSON_AddNumberToObject(data,"commitMs",batch.commitUs/1000.0);
+    cJSON *sets=cJSON_AddObjectToObject(data,"datasets");
+    for(const auto &m:batch.metrics)if(m.name) {
+        // UTC = startUtc + offset/1000. Compact tuples retain the full report
+        // inside the 500-byte data budget: [start,end,status,pushed,pending].
+        const char *alias=!strcmp(m.name,"spieler")?"p":!strcmp(m.name,"products")?"pr":
+            !strcmp(m.name,"sales")?"v":!strcmp(m.name,"credits")?"k":
+            !strcmp(m.name,"payments")?"pay":!strcmp(m.name,"inventory")?"i":
+            !strcmp(m.name,"bills")?"b":!strcmp(m.name,"spiele")?"g":
+            !strcmp(m.name,"history")?"h":"bk";
+        cJSON *row=cJSON_AddArrayToObject(sets,alias);
+        cJSON_AddItemToArray(row,cJSON_CreateNumber(m.start));
+        cJSON_AddItemToArray(row,cJSON_CreateNumber(m.end));
+        cJSON_AddItemToArray(row,cJSON_CreateNumber(m.status));
+        const int pending=pending_for(m.name);
+        cJSON_AddItemToArray(row,cJSON_CreateNumber(m.pushed));
+        cJSON_AddItemToArray(row,cJSON_CreateNumber(pending));
+    }
+    char message[201]="Synchronisierung beendet";
+    if(sync_err!=ESP_OK) {
+        char error[160];http_sync_copy_last_error(error,sizeof(error));
+        snprintf(message,sizeof(message),"Synchronisierung fehlgeschlagen: %.155s",error);
+        // A failed-sync log is durable before starting its optional upload.
+        terminal_log_add("sync","ERROR",message,data);
+        terminal_logs_flush_critical();
+    } else terminal_log_add("sync","INFO",message,data);
     cJSON_Delete(data);
+    s_batch=nullptr;
     upload_game_manifest();
     upload_terminal_logs(); // Diagnostics failure never changes the sync result.
     http_session_deactivate(&session);

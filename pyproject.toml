@@ -1,0 +1,27 @@
+[project]
+name = "repl-nix-workspace"
+version = "0.1.0"
+description = "ESP-IDF firmware build and diagnostic test dependencies"
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.5.0",
+    "construct>=2.10.70",
+    "cryptography>=50.0.2",
+    "esp-coredump<2",
+    "esp-idf-kconfig<3",
+    "esp-idf-monitor>=1.10.0",
+    "esp-idf-nvs-partition-gen>=0.3.0",
+    "esp-idf-panic-decoder>=1.5.0",
+    "esp-idf-size<2",
+    "esptool<5",
+    "freertos-gdb>=1.0.4",
+    "idf-component-manager<3",
+    "packaging>=26.3",
+    "pyclang>=0.7.0",
+    "pyelftools>=0.33",
+    "pyparsing>=3.3.3",
+    "pyserial>=3.5",
+    "setuptools>=84.0.0",
+    "tree-sitter>=0.26.0",
+    "tree-sitter-c>=0.24.2",
+]

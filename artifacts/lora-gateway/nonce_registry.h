@@ -10,7 +10,9 @@ constexpr uint32_t NONCE_TTL_MS = 10000;
 constexpr uint32_t RESULT_TTL_MS = 30000;
 constexpr uint32_t NONCE_INTERVAL_MS = 20;
 constexpr size_t MAX_OUTSTANDING = 8;
-constexpr size_t NONCE_SLOTS = 32;
+// Preserve 30-second completed results during the required 100-shot burst,
+// plus two scoped prefetches; unused live nonce admission remains capped at 8.
+constexpr size_t NONCE_SLOTS = 128;
 constexpr size_t RESPONSE_BYTES = 384;
 
 enum class State : uint8_t { Empty, Issued, Running, Complete };

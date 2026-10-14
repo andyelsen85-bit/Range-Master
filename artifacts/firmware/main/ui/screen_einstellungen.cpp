@@ -12,6 +12,7 @@
 #include "game_store.h"
 #include "http_sync.h"
 #include "screen_einstellungen.h"
+static lv_obj_t *s_latency_label;
 #include "click_sound.h"
 #include "lora_stub.h"
 #include "button_events.h"
@@ -1561,6 +1562,25 @@ lv_obj_t *screen_einstellungen_create(void)
     lv_obj_set_scroll_dir(tab_stats, LV_DIR_VER);
 
     build_api_tab(tab_conn);
+    lv_obj_t *latency=lv_label_create(tab_conn);
+    s_latency_label=latency;
+    lv_obj_set_width(latency,LV_PCT(95));
+    lv_obj_set_style_text_color(latency,lv_color_hex(CLR_TEXT),0);
+    char latency_text[256];lora_copy_latency_text(latency_text,sizeof(latency_text));
+    lv_label_set_text(latency,latency_text);
+    lv_obj_t *clear_latency=lv_button_create(tab_conn);
+    lv_obj_t *clear_text=lv_label_create(clear_latency);
+    lv_label_set_text(clear_text,"Messwerte löschen");
+    lv_obj_add_event_cb(clear_latency,[](lv_event_t *event) {
+        lora_clear_latency();
+        char text[256];lora_copy_latency_text(text,sizeof(text));
+        lv_label_set_text((lv_obj_t*)lv_event_get_user_data(event),text);
+    },LV_EVENT_CLICKED,latency);
+    // Refresh this standalone label without rebuilding forms, focus or scroll.
+    lv_obj_add_event_cb(latency,[](lv_event_t *event) {
+        char text[256];lora_copy_latency_text(text,sizeof(text));
+        lv_label_set_text((lv_obj_t*)lv_event_get_target(event),text);
+    },LV_EVENT_REFRESH,nullptr);
     build_wifi_tab(tab_conn);
     build_mach_tab(tab_machines);
     build_catering_tab(tab_catering);
@@ -1716,6 +1736,12 @@ void screen_einstellungen_refresh(void)
 
 void screen_einstellungen_tick(void)
 {
+    if(s_latency_label&&lv_obj_is_valid(s_latency_label)) {
+        static uint32_t last=0;
+        if(lv_tick_get()-last>=1000) {
+            last=lv_tick_get();lv_obj_send_event(s_latency_label,LV_EVENT_REFRESH,nullptr);
+        }
+    }
     if (s_remote_status) {
         bool connected = false;uint32_t age = UINT32_MAX;
         button_events_status(&connected, &age);

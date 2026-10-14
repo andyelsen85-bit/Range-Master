@@ -3,6 +3,11 @@
 // RxDone only admits a small decoded packet to this bounded mailbox.
 #include <WebSocketsServer.h>
 #include <ArduinoJson.h>
+#if __has_include("../lora-common/fire_link.h")
+#include "../lora-common/fire_link.h"
+#else
+#include "../../lora-common/fire_link.h"
+#endif
 #include <sys/socket.h>
 #if __has_include("../lora-common/button_events.h")
 #include "../lora-common/button_events.h"
@@ -41,6 +46,16 @@ struct ButtonClient {
     uint8_t missed=0;
 };
 static ButtonClient buttonClients[4];
+static void handleSocketFire(uint8_t n,JsonVariantConst json);
+static bool socketFireReply(uint8_t n,const char *nonce,int status,const char *body) {
+    if(n>=4||!buttonClients[n].auth)return false;
+    const auto &c=buttonClients[n];
+    char signature[65];
+    if(!tm_fire_link::reply_mac(GATEWAY_AUTH_KEY,c.server,c.client,nonce,status,body,signature))return false;
+    JsonDocument doc;doc["fire"]=nonce;doc["status"]=status;doc["body"]=body;doc["sig"]=signature;
+    char output[500];size_t count=serializeJson(doc,output,sizeof(output));
+    return count<sizeof(output)&&eventSocket.frame(n,output);
+}
 static uint32_t buttonBoot=0,remoteCounters[8]{},remoteLastMs=0,remoteLastId=0;
 static uint8_t remoteLastSrc=0,remoteLastBtn=0;
 static bool remoteDelivered=false;
@@ -113,6 +128,7 @@ static void buttonSocketEvent(uint8_t n,WStype_t type,uint8_t *payload,size_t le
         return;
     }
     uint32_t ack=0;
+    if(json["fire"].is<const char*>()) {handleSocketFire(n,json.as<JsonVariantConst>());return;}
     if(buttonNumber(json["ack"],ack) && ack<=c.sent && ack>c.ack) {
         c.ack=ack;
         if(ack>=remoteLastId && remoteLastId) remoteDelivered=true;

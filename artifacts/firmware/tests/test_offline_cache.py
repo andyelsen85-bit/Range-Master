@@ -175,6 +175,16 @@ void store_apply_portal_roster(const PortalSpieler *players, int count) {
 
 SYNC_STUBS = r"""
 #include <atomic>
+#include <memory>
+#include <functional>
+struct SyncBatch {char day[11]{};bool cache[OFFLINE_CACHE_SECTION_COUNT]{};char tokens[OFFLINE_CACHE_SECTION_COUNT][CACHE_MANIFEST_TOKEN_LEN]{};bool tokenSet[OFFLINE_CACHE_SECTION_COUNT]{};};
+static SyncBatch *s_batch=nullptr;
+bool batching(){return false;}
+int publish_sync_batch(){return ESP_OK;}
+void game_store_save();
+int stage_dataset(const char*,OfflineCacheSection section,std::function<void()> action) {
+    action();game_store_save();(void)offline_cache_save(section);return ESP_OK;
+}
 static std::atomic<bool> s_recovery_requested{false};
 int game_journal_recover(unsigned) {return 0;}
 int game_journal_reload_pending() {return 0;}
@@ -363,7 +373,7 @@ if __name__ == "__main__":
         "static esp_err_t http_sync_billing_impl", "static esp_err_t http_sync_all_impl"])
     # Guard every other parsed-data path against reintroducing cache-fatal code.
     for section in ("PRODUCTS", "CREDITS", "SALES", "BILLS", "HISTORY", "ROSTER"):
-        assert f"cache_pulled_section(OFFLINE_CACHE_{section})" in sync
+        assert f"OFFLINE_CACHE_{section}," in sync or f"cache_pulled_section(OFFLINE_CACHE_{section})" in sync
     assert "FAT cache was not durable" not in sync
     assert "g_store.offlineCacheHealthy = true" not in sync
     with tempfile.TemporaryDirectory(prefix="tm-offline-cache-") as directory:

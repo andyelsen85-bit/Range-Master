@@ -2,6 +2,7 @@
 // UI manager — LVGL screen router
 // ============================================================
 #include "freertos/FreeRTOS.h"
+#include <string.h>
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "lora_stub.h"
@@ -71,6 +72,8 @@ static uint32_t content_hash(Screen screen) {
         add(&g_store.historyCount,sizeof(g_store.historyCount));
         add(g_store.history,g_store.historyCount*sizeof(FinishedGame));break;
     case SCREEN_START:
+        add(&g_store.pendingGamesCount,sizeof(g_store.pendingGamesCount));
+        [[fallthrough]];
     case SCREEN_SPILLER:
     case SCREEN_KREDITE:
         add(&g_store.portalSpielerCount,sizeof(g_store.portalSpielerCount));

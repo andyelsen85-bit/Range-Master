@@ -1,11 +1,11 @@
 # Terminal diagnostics and completed-game recovery
 
-## Status: partial implementation — not approved for flashing
+## Status: integrated software — hardware acceptance required
 
-The portal, database/API support, terminal log outbox and completed-game journal
-are implemented. Host tests are not an ESP32 target build or a power-loss test.
-The remaining software and hardware acceptance work below must be completed
-before replacing installed firmware.
+Portal/API diagnostics, recovery, coherent sync publication and the fire
+transport are implemented together. Native builds and host regression tests
+do not prove physical relay latency or flash-controller power-loss behavior.
+The hardware acceptance work below remains mandatory before installation.
 
 ## Implemented
 
@@ -47,22 +47,39 @@ before replacing installed firmware.
   Transport failures retain the same signed fire request; ambiguity must never
   authorize a fresh nonce.
 
-## Remaining software
+## Integrated sync and fire implementation
 
-1. Complete per-dataset sync diagnostics: UTC start/end, each dataset's HTTP
-   outcome, durations, pending/acknowledged counts and aggregate commit timing.
-   The current cycle summary is not that full report.
-2. Complete coherent whole-cycle dataset staging/publication. The current
-   bounded RAM windows and final publication generation do not yet constitute
-   one atomic replacement of every dataset.
-3. Implement the gateway's 50-entry monotonic trace ring, authenticated trace
-   retrieval and terminal forwarding/deduplication.
-4. Implement a persistent authenticated fire transport through the same gateway
-   nonce/admission/counter/radio core. Current fire requests still use HTTP
-   connections. Add connection-bound response authentication if using WebSocket.
-5. Complete t0–t4, first-byte, RSSI and rolling-60 latency measurements and the
-   full quiet-period policy. Current terminal fire traces are only basic
-   preparation/total-duration summaries.
+- Sync stages validated roster, products, sales, credits, inventory, bills and
+  history privately. One final RAM boundary applies the eligible baselines,
+  replaying current local outboxes; persistence and callback destruction happen
+  outside it. A rejected game does not prevent other games or datasets syncing.
+  Critical outbox ACK/identity changes retain their own short, durable windows.
+- The compact sync report includes UTC start/end, outcome, total commit time
+  and per-dataset tuples `[startOffsetMs,endOffsetMs,httpStatus,pushed,pending]`.
+  Aliases are `p` players, `pr` products, `v` sales, `k` credits, `pay` payments,
+  `i` inventory, `b` bills, `g` games, `h` history and `bk` backup. Offsets are
+  relative to the cycle start; zero status means no HTTP response was received.
+  Count successful ACKs directly, not by subtracting concurrently changing queues.
+- The existing authenticated WebSocket carries FIRE with the original nonce
+  and action HMAC. Signed progress/final replies bind both connection challenges,
+  action nonce, status and exact body. HTTP fallback uses the SAME request and
+  admission/radio/counter path. At most three sends total, never a fresh action
+  after an ambiguous send. Only an unambiguous expired-prefetch 401 permits a
+  fresh inline nonce, within that same budget.
+- Gateway traces retain 50 entries with authenticated `/trace?after=...`.
+  Sequence ranges are reserved separately in NVS, surviving reboot without
+  resetting radio counters. The terminal forwards only whitelisted fields
+  from a separate low-priority worker; portal dedupe uses gateway ID and seq.
+- FIRE captures t0 press, t1 nonce ready, t2 send, t3 first response and t4
+  completion, RSSI, retries, HTTP result and ACK. Settings show last-50
+  min/median/P95/max and **Messwerte löschen**. These measure press-to-response,
+  NOT physical press-to-relay-pulse latency (pairs include their configured delay).
+- Prefetch is scoped to URL/key, consumed once, prepared after completion and
+  refreshed while idle. Health checks stay out of the two-second FIRE quiet
+  period; automatic health attempts are bounded to 150 ms. Slow trace retrieval
+  does not occupy the FIRE worker.
+- The pinned Hosted slave already initializes `WIFI_PS_NONE` and exposes the
+  host's SetPs RPC. Host reconnect also explicitly disables power saving.
 
 ## Checks and acceptance
 
@@ -75,7 +92,21 @@ pnpm --filter @workspace/api-server test
 pnpm --filter @workspace/portal run typecheck
 node --test lib/db/tests/migrations.test.mjs
 python artifacts/firmware/tests/test_game_journal.py
+python artifacts/firmware/tests/test_sync_batch.py
+python artifacts/firmware/tests/test_fire_link.py
 ```
+
+The full ESP32-P4 target build was checked with ESP-IDF 5.3.5, the resolved
+managed-component lockfile and the existing `0x220000` slots. SDK/control/layout
+size optimization preserves pixel renderers, DMA/PPA, radio and cryptography
+optimization. No storage offsets changed. Export the SDK tools normally,
+including the ROM ELF directory, before building.
+
+Run all host scripts in `artifacts/firmware/tests` and `artifacts/lora-gateway/tests`.
+Protocol tests use real SHA-256 HMAC. If native mbedTLS has no `mbedcrypto.pc`,
+pass its installation prefix as the first argument to `test_button_events.py`
+and `test_remote_events.py`; this must match the host architecture. The
+100-action nonce model is NOT a 100-shot physical relay measurement.
 
 The archive test compiles the real journal/log modules against SDK shims and
 uses separate processes and file-backed NVS. It covers restart, checksums,
@@ -91,7 +122,9 @@ Required before flashing:
   silent deletion, including a full 200-game queue.
 - On a disconnected test bench, measure 100 single/doublette requests,
   interrupted responses and identical retries. Record actual median/P95/max
-  (targets: median under 300 ms, P95 under 650 ms), rather than estimated values.
+  press-to-relay-pulse latency (median <150 ms, P95 <300 ms, max <500 ms on
+  normal WiFi), separately from press-to-response statistics. Do not substitute
+  modeled test results or estimates for those measurements.
 - Continue scoring, scrolling and typing during sync. Measure short commits and
   total blocked time; confirm no lost taps or selection/result resets.
 

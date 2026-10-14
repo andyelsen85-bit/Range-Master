@@ -20,6 +20,8 @@ STUBS=r'''
 #include "button_events.h"
 #include "trapmaster_auth.h"
 #include "native_button_events.h"
+#include "fire_link.h"
+struct {bool active=false,progress=false,done=false;char nonce[33]{};FireLinkResult result;} fire;
 struct cJSON {
     bool string=false,number=false;
     double valuedouble=0;
@@ -116,8 +118,9 @@ if __name__=="__main__":
     assert "g_store" not in source and "lv_" not in source
     functions="\n".join(fixture.function(source,sig) for sig in [
         "bool number(","const char *text(","bool admit(","bool process("])
-    flags=shlex.split(subprocess.check_output(["pkg-config","--cflags","--libs","mbedcrypto"],text=True))
+    from native_crypto import mbedcrypto_flags
     with tempfile.TemporaryDirectory(prefix="tm-terminal-events-") as directory:
+        flags=mbedcrypto_flags(directory)
         p=Path(directory)
         (p/"native_button_events.h").write_text((ROOT/"main/lora_stub/button_events.h").read_text())
         cpp=p/"test.cpp";cpp.write_text(STUBS+functions+MAIN)

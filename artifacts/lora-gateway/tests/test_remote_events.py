@@ -37,15 +37,18 @@ struct Value {
     template<class T>bool is()const{return numeric;}
     template<class T>T as()const{return (T)n;}
     operator const char*()const{return numeric?nullptr:s.c_str();}
+    bool isNull()const{return !numeric&&s.empty();}
 };
 using JsonVariantConst=Value;
 struct JsonDocument {
+    template<class T>T as()const{return T{};}
     std::map<std::string,Value> values;
     const Value &operator[](const char *s)const {
         static const Value empty{};
         auto i=values.find(s);return i==values.end()?empty:i->second;
     }
 };
+static void handleSocketFire(uint8_t,JsonVariantConst) {} // FIRE core tested separately
 static JsonDocument incoming;
 bool deserializeJson(JsonDocument &j,uint8_t*,size_t){j=incoming;return false;}
 void buttonDisconnect(uint8_t);
@@ -185,13 +188,17 @@ int main(){
 if __name__=="__main__":
     source=(ROOT/"remote_events.h").read_text()
     globals_=source[source.index("static tm_buttons::Ring"):source.index("static void buttonRandomHex")]
+    globals_=globals_.replace(fixture.function(source,"static bool socketFireReply"),"")
     funcs="\n".join(fixture.function(source,s) for s in [
         "static void buttonRandomHex","static bool buttonNumber","static bool buttonEventText",
         "static void buttonSocketEvent","static void buttonSocketTick","static bool buttonEnqueue",
         "static void buttonRadioTick","static bool buttonRenderStatus",
         "static bool buttonQueryNumber","static void handleButtonEvents"])
-    flags=shlex.split(subprocess.check_output(["pkg-config","--cflags","--libs","mbedcrypto"],text=True))
+    import sys
+    sys.path.insert(0,str(ROOT.parent/"firmware/tests"))
+    from native_crypto import mbedcrypto_flags
     with tempfile.TemporaryDirectory(prefix="tm-gateway-buttons-") as directory:
+        flags=mbedcrypto_flags(directory)
         p=Path(directory);cpp=p/"test.cpp";cpp.write_text(STUBS+globals_+funcs+MAIN)
         subprocess.run(["g++","-std=c++17","-Wall","-Wextra","-Werror",
             "-I",str(ROOT.parent/"lora-common"),str(cpp),*flags,"-o",str(p/"test")],check=True)

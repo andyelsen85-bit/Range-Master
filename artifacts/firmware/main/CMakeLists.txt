@@ -83,6 +83,21 @@ idf_component_register(
 # Per-source options are emitted after the sdkconfig-selected -O2, so this also
 # applies to existing builds without deleting sdkconfig or terminal data.
 set_source_files_properties(
+    "store/game_store.cpp"
+    "store/game_journal.cpp"
+    "store/day_stats.cpp"
+    "store/day_inventory.cpp"
+    "store/offline_cache.cpp"
+    "store/terminal_logs.cpp"
+    "ui/screen_dashboard.cpp"
+    "ui/screen_start.cpp"
+    "ui/screen_spiel.cpp"
+    "ui/screen_resultate.cpp"
+    "ui/screen_spiller.cpp"
+    "ui/screen_kredite.cpp"
+    "ui/screen_wifi.cpp"
+    "ui/screen_catering.cpp"
+    "ui/screen_inventory.cpp"
     "ui/screen_einstellungen.cpp"
     "ui/screen_geschichte.cpp"
     "net/http_sync.cpp"

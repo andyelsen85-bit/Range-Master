@@ -58,3 +58,5 @@ GatewayReachability lora_gateway_state(void);
 uint32_t lora_gateway_state_timestamp_ms(void);
 const char *lora_gateway_state_label(GatewayReachability state);
 void lora_copy_gateway_state_label(char *out, size_t out_len);
+void lora_copy_latency_text(char *out,size_t out_len);
+void lora_clear_latency(void);

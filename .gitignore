@@ -52,6 +52,9 @@ Thumbs.db
 attached_assets/
 
 # Local TrapMaster provisioning values; never commit radio/authentication keys.
+/artifacts/firmware/managed_components/
+/artifacts/firmware/build/
+/generated-artifacts/
 /artifacts/lora-gateway/TrapMasterGateway.local.h
 /artifacts/lora-relay/TrapMasterRelay.local.h
 /artifacts/lora-gateway/TrapMasterGateway/TrapMasterGateway.local.h

@@ -156,7 +156,19 @@ static int scan(unsigned days,bool recover,int old_id=0,int new_id=0) {
         if(!read_record(file,record)) { corrupt=true;continue; }
         struct tm utc{};time_t finished=0;
         const char *stamp=record->game.finishedAt;
-        if(strptime(stamp,"%Y-%m-%dT%H:%M:%S",&utc)) finished=timegm(&utc);
+        if(strptime(stamp,"%Y-%m-%dT%H:%M:%S",&utc)) {
+            // Newlib/ESP-IDF has no timegm. Convert civil UTC directly; never
+            // change process TZ while the UI/inventory use local club dates.
+            int year=utc.tm_year+1900,month=utc.tm_mon+1;
+            year-=month<=2;
+            const int era=(year>=0?year:year-399)/400;
+            const unsigned yoe=(unsigned)(year-era*400);
+            const unsigned doy=(153*(unsigned)(month+(month>2?-3:9))+2)/5+
+                (unsigned)utc.tm_mday-1;
+            const unsigned doe=yoe*365+yoe/4-yoe/100+doy;
+            const int64_t days=(int64_t)era*146097+(int64_t)doe-719468;
+            finished=(time_t)(days*86400+utc.tm_hour*3600+utc.tm_min*60+utc.tm_sec);
+        }
         // Unsynced games never expire; only portal-acknowledged history does.
         if(record->accepted && now>1700000000 && finished>0 && finished<now-7*86400) {
             unlink(file);continue;

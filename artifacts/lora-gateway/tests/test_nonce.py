@@ -131,6 +131,13 @@ static constexpr char GATEWAY_AUTH_KEY[] = "synthetic-gateway-auth-key";
 """
 
 AFTER_GLOBALS = r"""
+struct {char server[17]="0123456789abcdef",client[33]="00112233445566778899aabbccddeeff";bool connected=true,auth=true;} buttonClients[4];
+void socketFireReply(uint8_t,const char*,int status,const char *body) {server.send(status==102?202:status,"application/json",body);}
+void buttonSocketTick() {}
+struct {uint32_t saved=0,nvsDuration=0,tx=0,done=0,ack=0;int rssi=0;} activeTrace;
+static bool traceActive=false;
+void traceStart(char,uint32_t) {activeTrace={};traceActive=true;}
+void traceFinish(int) {traceActive=false;}
 static void renderStatus() {}
 void RadioMock::IrqProcess() {
     if (!receiving) { if (tx_ok) txDone = true; }
@@ -214,7 +221,7 @@ int main() {
     now += 20; auto second_nonce = issue();
     server.next = [=]() {
         sign(second_nonce, 'B'); handleFire(); assert(server.status == 409);
-        sign(nonce); handleFire(); assert(server.status == 409);
+        sign(nonce); handleFire(); assert(server.status == 202 && server.body.find("progress")!=std::string::npos);
     };
     runPendingFire(); assert(!pendingFire && transmissions == std::vector<char>{'A'});
     assert(response->find("HTTP/1.1 200") == 0);
@@ -254,7 +261,7 @@ int main() {
         bool busy_seen = false;
         server.next = [&]() {
             sign(nonce, 'D', 'F', timing); handleFirePair();
-            assert(server.status == 409); busy_seen = true;
+            assert(server.status == 202 && server.body.find("progress")!=std::string::npos); busy_seen = true;
             // Schedule another terminal specifically during the pair delay.
             if (timing) server.next = [&]() {
                 now += 20; auto other = issue(); sign(other, 'H');

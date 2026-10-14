@@ -11,6 +11,8 @@ fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
 STUBS = r"""
+#include <memory>
+#include <functional>
 #include <cassert>
 #include <cstring>
 #include <cstdio>
@@ -21,6 +23,8 @@ STUBS = r"""
 #include <vector>
 #include <string>
 #include "payment_receipts.h"
+int stage_dataset(const char*,int,std::function<void()> action) {action();return 0;}
+void note_pushed(const char*,int) {}
 #define EXT_RAM_BSS_ATTR
 #define ESP_LOGE(tag, ...) ((void)(tag))
 #define ESP_LOGI(tag, ...) ((void)(tag))

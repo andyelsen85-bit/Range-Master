@@ -21,6 +21,7 @@ STUBS = r"""
 static uint32_t mock_now_ms=1000;
 int64_t esp_timer_get_time() {return (int64_t)mock_now_ms*1000;}
 #include "trapmaster_auth.h"
+#include "fire_link.h"
 constexpr size_t MAX_URL_LEN = 256, MAX_KEY_LEN = 256;
 enum Maschine { MASCHINE_A, MASCHINE_B, MASCHINE_C, MASCHINE_D,
     MASCHINE_E, MASCHINE_F, MASCHINE_G, MASCHINE_H, MASCHINE_COUNT };
@@ -30,6 +31,7 @@ static std::string status;
 void set_status(const char *text) { status = text; }
 using esp_err_t = int;
 constexpr int ESP_OK = 0, ESP_ERR_TIMEOUT = -1, HTTP_EVENT_ON_DATA = 1;
+constexpr int HTTP_EVENT_ON_HEADER=2,HTTP_EVENT_HEADERS_SENT=3;
 struct esp_http_client_event_t { int event_id, data_len; void *data, *user_data; };
 struct esp_http_client_config_t {
     const char *url;
@@ -55,7 +57,7 @@ int esp_http_client_perform(Client *client) {
     urls.emplace_back(client->config.url); macs.push_back(client->mac);
     Reply reply = replies.at(calls++); client->code = reply.code;
     if (client->config.event_handler) {
-        ++issued; // every attempt here is a nonce GET, never a fire GET
+        if(std::string(client->config.url).find("/nonce")!=std::string::npos)++issued;
         // Deliberately deliver a fragmented response like real TCP.
         for (size_t start = 0; start < reply.body.size(); start += 7) {
             size_t count = reply.body.size() - start; if (count > 7) count = 7;
@@ -86,6 +88,9 @@ cJSON *cJSON_GetObjectItemCaseSensitive(cJSON *node, const char *name) {
     assert(std::string(name) == "nonce"); return node;
 }
 bool cJSON_IsString(cJSON *node) { return node != nullptr; }
+// Fire progress is not returned by these nonce/retry fixtures.
+cJSON *cJSON_GetObjectItem(cJSON *,const char *) {return nullptr;}
+bool cJSON_IsTrue(cJSON *) {return false;}
 void cJSON_Delete(cJSON *node) { delete node; }
 """
 
@@ -151,8 +156,8 @@ int main() {
 
 if __name__ == "__main__":
     source = (ROOT / "main/lora_stub/lora_stub.cpp").read_text()
-    types = source[source.index("typedef enum : uint8_t"):source.index("static void set_status")]
-    functions = "\n".join(gateway.function(source, name) for name in [
+    types = '#include "fire_link.h"\n' + source[source.index("typedef enum : uint8_t"):source.index("static void set_status")]
+    functions = source[source.index("struct FireHttpBody"):source.index("static bool perform_authenticated_get")] + "\n".join(gateway.function(source, name) for name in [
         "static bool build_fire_url", "static bool build_fire_pair_url",
         "static bool build_health_url", "static bool perform_authenticated_get",
         "const char *lora_gateway_state_label"])

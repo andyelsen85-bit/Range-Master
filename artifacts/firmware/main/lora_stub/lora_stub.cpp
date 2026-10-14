@@ -26,6 +26,8 @@
 #include "esp_timer.h"
 #include "coprocessor.h"
 #include "../../../lora-common/trapmaster_auth.h"
+#include "../../../lora-common/fire_link.h"
+#include "esp_wifi.h"
 
 static const char *TAG = "lora_stub";
 static QueueHandle_t s_gateway_queue;
@@ -73,6 +75,13 @@ typedef struct {
 [[maybe_unused]] static uint32_t s_last_fire_ms;
 [[maybe_unused]] static unsigned s_transport_retries;
 [[maybe_unused]] static bool s_transport_ambiguous;
+[[maybe_unused]] static tm_fire_link::Samples s_latency;
+[[maybe_unused]] static uint32_t s_send_ms,s_first_byte_ms;
+struct FireTrace {uint32_t t0,t1,t2,t3,t4;int status,rssi;unsigned retries;bool prefetched,ack;char machine;};
+[[maybe_unused]] static FireTrace s_traces[50];
+[[maybe_unused]] static unsigned s_trace_next;
+[[maybe_unused]] static uint32_t s_trace_cursor;
+[[maybe_unused]] static char s_trace_gateway[32]{};
 
 static void set_status(const char *text)
 {
@@ -81,7 +90,7 @@ static void set_status(const char *text)
     snprintf(s_status, sizeof(s_status), "%s", text);
     snprintf(log_text, sizeof(log_text), "%s", s_status);
     if (s_state_mutex) xSemaphoreGive(s_state_mutex);
-    ESP_LOGI(TAG, "%s", log_text);
+    (void)log_text; // Structured shot summary below is the one INFO line.
 }
 
 static void publish_machine_test_status(const char *text, bool running)
@@ -247,6 +256,22 @@ static bool build_health_url(char *url, size_t url_len, const GatewayRequest *re
     return true;
 }
 
+struct FireHttpBody {char body[384]{};size_t length=0;};
+static esp_err_t fire_http_event(esp_http_client_event_t *event) {
+    if(event->event_id==HTTP_EVENT_HEADERS_SENT&&!s_send_ms)
+        s_send_ms=(uint32_t)(esp_timer_get_time()/1000);
+    if(event->event_id==HTTP_EVENT_ON_HEADER&&!s_first_byte_ms)
+        s_first_byte_ms=(uint32_t)(esp_timer_get_time()/1000);
+    if(event->event_id==HTTP_EVENT_ON_DATA&&event->data_len>0) {
+        if(!s_first_byte_ms)s_first_byte_ms=(uint32_t)(esp_timer_get_time()/1000);
+        auto *b=(FireHttpBody*)event->user_data;
+        const size_t n=(size_t)event->data_len;
+        if(b&&b->length+n<sizeof(b->body)) {
+            memcpy(b->body+b->length,event->data,n);b->length+=n;b->body[b->length]=0;
+        }
+    }
+    return ESP_OK;
+}
 static bool perform_authenticated_get(const char *url, const char *mac_hex,
                                        int *last_http, int timeout_ms, int attempts)
 {
@@ -260,6 +285,8 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
         cfg.url = url;
         cfg.timeout_ms = timeout_ms;
         cfg.disable_auto_redirect = true;
+        FireHttpBody body;
+        cfg.event_handler=fire_http_event;cfg.user_data=&body;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) {
             set_status("Gateway client unavailable");
@@ -269,18 +296,45 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
         esp_err_t err = esp_http_client_perform(client);
         if(err!=ESP_OK) s_transport_ambiguous=true;
         *last_http = esp_http_client_get_status_code(client);
-        if (err == ESP_OK && *last_http >= 200 && *last_http < 300) {
+        cJSON *json=cJSON_Parse(body.body);
+        bool progress=json&&cJSON_IsTrue(cJSON_GetObjectItem(json,"progress"));
+        if(json)cJSON_Delete(json);
+        if (err == ESP_OK && *last_http >= 200 && *last_http < 300&&!progress) {
             success = true;
         }
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         // Retry only transport failures, with this exact URL/MAC/nonce. Never
         // acquire another nonce or retry a final busy/auth/storage rejection.
-        if (err == ESP_OK) break;
+        if (err == ESP_OK&&!progress) break;
+        if(progress) {s_transport_ambiguous=true;vTaskDelay(pdMS_TO_TICKS(timeout_ms));}
         if (!success && attempt + 1 < attempts)
             vTaskDelay(pdMS_TO_TICKS(100));
     }
     return success;
+}
+
+static bool perform_fire_transport(const GatewayRequest *request,const char *url,
+                                  const char *mac,int *status,int timeout,unsigned budget=3) {
+    FireLinkResult ws;
+    bool completed=button_events_fire(request->gateway_url,request->gateway_token,
+        request->nonce_hex,mac,(char)('A'+request->machine),
+        request->kind==GATEWAY_REQUEST_FIRE_PAIR?(char)('A'+request->second_machine):0,
+        request->delay_ms,timeout,&ws,budget);
+    s_send_ms=ws.sentMs;s_first_byte_ms=ws.firstByteMs;
+    if(completed) {
+        *status=ws.status;s_transport_retries=ws.attempts?ws.attempts-1:0;
+        s_transport_ambiguous=false;return ws.status>=200&&ws.status<300;
+    }
+    if(ws.attempts>=budget) {
+        *status=0;s_transport_retries=2;s_transport_ambiguous=true;return false;
+    }
+    // Connection absent or lost: same nonce and MAC, sharing the TOTAL retry
+    // budget with WS. Never replace the action merely because transport changed.
+    bool result=perform_authenticated_get(url,mac,status,timeout,(int)(budget-ws.attempts));
+    s_transport_retries+=ws.attempts;
+    s_transport_ambiguous|=ws.ambiguous;
+    return result;
 }
 
 struct NonceResponse {
@@ -326,13 +380,14 @@ static const char *health_failure_reason(const HealthFailure &failure)
     return "connection";
 }
 
-static bool perform_health_get(const char *url, const char *mac_hex, HealthFailure *failure)
+static bool perform_health_get(const char *url, const char *mac_hex, HealthFailure *failure,
+                               bool background=false)
 {
-    for (int attempt = 0; attempt < 2; ++attempt) {
+    for (int attempt = 0; attempt < (background?1:2); ++attempt) {
         *failure = {};
         esp_http_client_config_t cfg = {};
         cfg.url = url;
-        cfg.timeout_ms = 2000; // bounds connect AND response waits; at most two attempts
+        cfg.timeout_ms = background?150:2000;
         cfg.disable_auto_redirect = true;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) { failure->error = ESP_ERR_NO_MEM; return false; }
@@ -420,6 +475,67 @@ static bool fetch_gateway_nonce(GatewayRequest *request, int *last_http, bool ba
     return false;
 }
 
+struct GatewayTraceBody {char *bytes;size_t length=0;bool overflow=false;};
+static esp_err_t gateway_trace_event(esp_http_client_event_t *e) {
+    if(e->event_id==HTTP_EVENT_ON_DATA&&e->data_len>0) {
+        auto *b=(GatewayTraceBody*)e->user_data;
+        if(b->length+(size_t)e->data_len>=24576)b->overflow=true;
+        else {memcpy(b->bytes+b->length,e->data,e->data_len);b->length+=e->data_len;b->bytes[b->length]=0;}
+    }
+    return ESP_OK;
+}
+static void fetch_gateway_traces(const GatewayRequest &request) {
+    uint8_t digest[32];char auth[65],url[MAX_URL_LEN+80];
+    if(!tm_auth::make_health_mac((const uint8_t*)request.gateway_token,strlen(request.gateway_token),digest))return;
+    tm_auth::mac_to_hex(digest,auth);
+    size_t n=strlen(request.gateway_url);while(n&&request.gateway_url[n-1]=='/')--n;
+    snprintf(url,sizeof(url),"%.*s/trace?after=%lu",(int)n,request.gateway_url,(unsigned long)s_trace_cursor);
+    char *bytes=(char*)heap_caps_calloc(1,24576,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!bytes)return;
+    GatewayTraceBody body{bytes};
+    esp_http_client_config_t cfg{};cfg.url=url;cfg.timeout_ms=300;
+    cfg.disable_auto_redirect=true;cfg.event_handler=gateway_trace_event;cfg.user_data=&body;
+    auto client=esp_http_client_init(&cfg);
+    if(!client){heap_caps_free(bytes);return;}
+    esp_http_client_set_header(client,"X-TrapMaster-Auth",auth);
+    esp_err_t result=esp_http_client_perform(client);
+    const int status=esp_http_client_get_status_code(client);esp_http_client_cleanup(client);
+    cJSON *root=result==ESP_OK&&status==200&&!body.overflow?cJSON_Parse(bytes):nullptr;
+    heap_caps_free(bytes);if(!root)return;
+    cJSON *id=cJSON_GetObjectItem(root,"gatewayId"),*rows=cJSON_GetObjectItem(root,"entries");
+    if(cJSON_IsString(id)&&strlen(id->valuestring)<sizeof(s_trace_gateway)&&
+       cJSON_IsArray(rows)&&cJSON_GetArraySize(rows)<=50) {
+        if(strcmp(s_trace_gateway,id->valuestring)) {
+            snprintf(s_trace_gateway,sizeof(s_trace_gateway),"%s",id->valuestring);s_trace_cursor=0;
+        }
+        cJSON *row;
+        cJSON_ArrayForEach(row,rows) {
+            cJSON *seq=cJSON_GetObjectItem(row,"seq");
+            if(!cJSON_IsNumber(seq)||seq->valuedouble<=s_trace_cursor||seq->valuedouble>UINT32_MAX||
+                seq->valuedouble!=(uint32_t)seq->valuedouble)continue;
+            // Never forward an arbitrary gateway object (including credentials
+            // added by a different/older gateway firmware).
+            cJSON *clean=cJSON_CreateObject();
+            if(!clean)break;
+            cJSON_AddStringToObject(clean,"gatewayId",id->valuestring);
+            const char *fields[]={"seq","durationMs","rssi","status","authMs","nvsMs",
+                "nvsDurationMs","txStartMs","txDoneMs","ackMs","answerMs"};
+            for(const char *field:fields) {
+                cJSON *value=cJSON_GetObjectItem(row,field);
+                if(cJSON_IsNumber(value))cJSON_AddNumberToObject(clean,field,value->valuedouble);
+            }
+            cJSON *machine=cJSON_GetObjectItem(row,"machine");
+            if(cJSON_IsString(machine)&&strlen(machine->valuestring)==1&&
+                machine->valuestring[0]>='A'&&machine->valuestring[0]<='H')
+                cJSON_AddStringToObject(clean,"machine",machine->valuestring);
+            terminal_log_add("gateway_trace","INFO","Gateway-Funkweg",clean);
+            cJSON_Delete(clean);
+            s_trace_cursor=(uint32_t)seq->valuedouble;
+        }
+    }
+    cJSON_Delete(root);
+}
+
 static bool prepare_fire_request(GatewayRequest *request, char *url, size_t url_len,
                                  char *mac_hex, int *last_http)
 {
@@ -453,6 +569,30 @@ static bool prepare_fire_request(GatewayRequest *request, char *url, size_t url_
     return valid;
 }
 
+static void record_fire_trace(const GatewayRequest &request,uint32_t start,uint32_t ready,
+                              uint32_t end,int status,bool success,int rssi) {
+    const FireTrace sample{start,ready,s_send_ms,s_first_byte_ms,end,status,rssi,
+        s_transport_retries,request.prefetched,success&&status!=202,(char)('A'+request.machine)};
+    if(s_state_mutex)xSemaphoreTake(s_state_mutex,portMAX_DELAY);
+    s_traces[s_trace_next++%50]=sample;s_latency.add(end-start);
+    if(s_state_mutex)xSemaphoreGive(s_state_mutex);
+    cJSON *trace=cJSON_CreateObject();
+    cJSON_AddNumberToObject(trace,"durationMs",end-start);
+    cJSON_AddNumberToObject(trace,"prepareMs",ready-start);
+    cJSON_AddNumberToObject(trace,"retries",sample.retries);
+    cJSON_AddBoolToObject(trace,"prefetched",sample.prefetched);
+    cJSON_AddNumberToObject(trace,"status",status);
+    cJSON_AddNumberToObject(trace,"machine",request.machine);
+    cJSON_AddBoolToObject(trace,"ack",sample.ack);
+    cJSON_AddNumberToObject(trace,"t0",start);cJSON_AddNumberToObject(trace,"t1",ready);
+    cJSON_AddNumberToObject(trace,"t2",sample.t2);cJSON_AddNumberToObject(trace,"t3",sample.t3);
+    cJSON_AddNumberToObject(trace,"t4",end);cJSON_AddNumberToObject(trace,"rssi",rssi);
+    terminal_log_add("fire_trace",success?"INFO":"WARN","Gateway-Schussanfrage beendet",trace);
+    cJSON_Delete(trace);
+    ESP_LOGI(TAG,"FIRE %c duration=%lums status=%d retries=%u",sample.machine,
+        (unsigned long)(end-start),status,sample.retries);
+}
+
 static void perform_machine_test_batch(const GatewayRequest *batch)
 {
     char results[256] = "TEST: ";
@@ -475,9 +615,16 @@ static void perform_machine_test_batch(const GatewayRequest *batch)
             char mac_hex[tm_auth::MAC_HEX_LEN + 1];
             int http_status = 0;
             bool success = false;
+            const uint32_t start=(uint32_t)(esp_timer_get_time()/1000);
+            uint32_t ready=start;
+            s_send_ms=s_first_byte_ms=0;s_transport_retries=0;
+            wifi_ap_record_t ap{};const int rssi=esp_wifi_sta_get_ap_info(&ap)==ESP_OK?ap.rssi:0;
             if (prepare_fire_request(&request, url, sizeof(url), mac_hex, &http_status)) {
-                success = perform_authenticated_get(url, mac_hex, &http_status, 7000, 3);
+                ready=(uint32_t)(esp_timer_get_time()/1000);
+                success = perform_fire_transport(&request,url,mac_hex,&http_status,7000);
             }
+            s_last_fire_ms=(uint32_t)(esp_timer_get_time()/1000);
+            record_fire_trace(request,start,ready,s_last_fire_ms,http_status,success,rssi);
             if (success) {
                 previous_completed = true;
                 s_health_history.success();
@@ -558,13 +705,19 @@ static void gateway_worker(void *arg)
         bool success = false;
 
         if (request.kind == GATEWAY_REQUEST_HEALTH) {
+            // Includes manually queued health; defer rather than competing with
+            // a just-pressed FIRE or its two-second quiet interval.
+            if((uint32_t)(esp_timer_get_time()/1000)-s_last_fire_ms<2000) {
+                if(request.manual)set_request_busy(false);
+                continue;
+            }
             HealthFailure failure;
             if (build_health_url(url, sizeof(url), &request) &&
                 tm_auth::make_health_mac((const uint8_t *)request.gateway_token,
                                          strlen(request.gateway_token), mac)) {
                 tm_auth::mac_to_hex(mac, mac_hex);
                 if (cop_wifi_is_connected()) {
-                    success = perform_health_get(url, mac_hex, &failure);
+                    success = perform_health_get(url, mac_hex, &failure,!request.manual);
                 } else {
                     failure.error = ESP_ERR_INVALID_STATE;
                     failure.socket_errno = ENETUNREACH;
@@ -580,33 +733,31 @@ static void gateway_worker(void *arg)
         bool request_ready = false;
         s_transport_retries=0;
         s_transport_ambiguous=false;
+        s_send_ms=s_first_byte_ms=0;
         uint32_t fire_started=request.pressed_ms?request.pressed_ms:(uint32_t)(esp_timer_get_time()/1000);
+        wifi_ap_record_t ap{};int rssi=0;
+        if(esp_wifi_sta_get_ap_info(&ap)==ESP_OK)rssi=ap.rssi;
         uint32_t nonce_ready=fire_started;
         if (prepare_fire_request(&request, url, sizeof(url), mac_hex, &last_http)) {
             request_ready = true;
             nonce_ready=(uint32_t)(esp_timer_get_time()/1000);
-            success = perform_authenticated_get(url, mac_hex, &last_http,
-                request.kind == GATEWAY_REQUEST_FIRE_PAIR ? 20000 : 7000, 3);
+            success = perform_fire_transport(&request,url,mac_hex,&last_http,
+                request.kind == GATEWAY_REQUEST_FIRE_PAIR ? 20000 : 7000);
             // Only an unambiguous pre-admission 401 may acquire a replacement.
             // After any transport ambiguity, retries keep the signed request.
             if(!success && last_http==401 && request.prefetched && !s_transport_ambiguous) {
+                const unsigned used=s_transport_retries+1;
                 request.prefetched=false;
-                if(prepare_fire_request(&request,url,sizeof(url),mac_hex,&last_http))
-                    success=perform_authenticated_get(url,mac_hex,&last_http,
-                        request.kind==GATEWAY_REQUEST_FIRE_PAIR?20000:7000,3);
+                if(used<3&&prepare_fire_request(&request,url,sizeof(url),mac_hex,&last_http)) {
+                    nonce_ready=(uint32_t)(esp_timer_get_time()/1000);
+                    success=perform_fire_transport(&request,url,mac_hex,&last_http,
+                        request.kind==GATEWAY_REQUEST_FIRE_PAIR?20000:7000,3-used);
+                    s_transport_retries+=used;
+                }
             }
         }
         s_last_fire_ms=(uint32_t)(esp_timer_get_time()/1000);
-        cJSON *trace=cJSON_CreateObject();
-        cJSON_AddNumberToObject(trace,"durationMs",s_last_fire_ms-fire_started);
-        cJSON_AddNumberToObject(trace,"prepareMs",nonce_ready-fire_started);
-        cJSON_AddNumberToObject(trace,"retries",s_transport_retries);
-        cJSON_AddBoolToObject(trace,"prefetched",request.prefetched);
-        cJSON_AddNumberToObject(trace,"status",last_http);
-        cJSON_AddNumberToObject(trace,"machine",request.machine);
-        cJSON_AddBoolToObject(trace,"ack",success&&last_http!=202);
-        terminal_log_add("fire_trace",success?"INFO":"WARN","Gateway-Schussanfrage beendet",trace);
-        cJSON_Delete(trace);
+        record_fire_trace(request,fire_started,nonce_ready,s_last_fire_ms,last_http,success,rssi);
 
         if (success) {
             s_health_history.success(); // a successful FIRE is also fresh reachability evidence
@@ -650,6 +801,23 @@ static void gateway_worker(void *arg)
             set_gateway_state(GATEWAY_UNREACHABLE);
         }
         set_request_busy(false);
+        if(cop_wifi_is_connected()&&!s_has_prefetched) {
+            GatewayRequest next{};copy_gateway_config(&next);int code=0;
+            if(fetch_gateway_nonce(&next,&code,true)) {
+                s_prefetched=next;s_prefetched_ms=(uint32_t)(esp_timer_get_time()/1000);
+                s_has_prefetched=true;
+            }
+        }
+    }
+}
+
+static void gateway_trace_worker(void *) {
+    for(;;) {
+        vTaskDelay(pdMS_TO_TICKS(10000));
+        if(!cop_wifi_is_connected()||lora_request_busy()||
+           (uint32_t)(esp_timer_get_time()/1000)-s_last_fire_ms<2000)continue;
+        GatewayRequest scope{};copy_gateway_config(&scope);
+        if(scope.gateway_url[0]&&strlen(scope.gateway_token)>=16)fetch_gateway_traces(scope);
     }
 }
 
@@ -677,8 +845,25 @@ void lora_stub_init(void)
         return;
     }
     ESP_LOGI(TAG, "Gateway fire worker ready");
+    if(xTaskCreateWithCaps(gateway_trace_worker,"gateway_trace",6144,nullptr,2,nullptr,
+                          MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)!=pdPASS)
+        terminal_log_add("sync","WARN","Gateway-Spuren-Worker nicht verfügbar");
     set_gateway_state((g_store.gatewayUrl[0] && g_store.gatewayToken[0])
                           ? GATEWAY_CHECKING : GATEWAY_NOT_CONFIGURED);
+}
+
+void lora_copy_latency_text(char *out,size_t cap) {
+    uint32_t min,median,p95,max;unsigned count;
+    if(s_state_mutex)xSemaphoreTake(s_state_mutex,portMAX_DELAY);
+    count=s_latency.count;s_latency.summary(min,median,p95,max);
+    if(s_state_mutex)xSemaphoreGive(s_state_mutex);
+    snprintf(out,cap,"Letzte %u Würfe (Taste → Antwort)\nMin: %lu ms · Median: %lu ms\nP95: %lu ms · Max: %lu ms",
+        count,(unsigned long)min,(unsigned long)median,(unsigned long)p95,(unsigned long)max);
+}
+void lora_clear_latency() {
+    if(s_state_mutex)xSemaphoreTake(s_state_mutex,portMAX_DELAY);
+    s_latency.clear();s_trace_next=0;memset(s_traces,0,sizeof(s_traces));
+    if(s_state_mutex)xSemaphoreGive(s_state_mutex);
 }
 
 bool lora_test_enabled_machines(uint8_t confirmed_mask)
@@ -739,6 +924,7 @@ bool lora_fire_machine(Maschine m)
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE;
     request.pressed_ms=(uint32_t)(esp_timer_get_time()/1000);
+    s_last_fire_ms=request.pressed_ms;
     request.manual = true;
     request.machine = m;
     copy_gateway_config(&request);
@@ -757,6 +943,8 @@ bool lora_fire_machine_game(Maschine m)
     if (!s_gateway_queue || m < MASCHINE_A || m >= MASCHINE_COUNT || !cop_wifi_is_connected() ||
         !begin_request()) return false;
     GatewayRequest request = {};
+    request.pressed_ms=(uint32_t)(esp_timer_get_time()/1000);
+    s_last_fire_ms=request.pressed_ms;
     request.kind = GATEWAY_REQUEST_FIRE; request.manual = true; request.gameLaunch = true;
     request.machine = m; copy_gateway_config(&request);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
@@ -785,6 +973,7 @@ bool lora_fire_doublette(Maschine first, Maschine second, uint16_t delay_ms)
     GatewayRequest request = {};
     request.kind = GATEWAY_REQUEST_FIRE_PAIR;
     request.pressed_ms=(uint32_t)(esp_timer_get_time()/1000);
+    s_last_fire_ms=request.pressed_ms;
     request.manual = true;
     request.machine = first;
     request.second_machine = second;
@@ -808,6 +997,8 @@ bool lora_fire_doublette_game(Maschine first, Maschine second, uint16_t delay_ms
         second < MASCHINE_A || second > MASCHINE_G || first == second || delay_ms > 10000 ||
         !cop_wifi_is_connected() || !begin_request()) return false;
     GatewayRequest request = {};
+    request.pressed_ms=(uint32_t)(esp_timer_get_time()/1000);
+    s_last_fire_ms=request.pressed_ms;
     request.kind = GATEWAY_REQUEST_FIRE_PAIR; request.manual = true; request.gameLaunch = true;
     request.machine = first; request.second_machine = second; request.delay_ms = delay_ms;
     copy_gateway_config(&request);

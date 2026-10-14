@@ -43,3 +43,4 @@
 - [Daily backup and inventory policy](gameday-policies.md) — protected backups never bypass the daily cap; zero stock is valid and sales units must match.
 - [Drizzle SQL array bindings](drizzle-array-bindings.md) — use explicit bound membership lists; JS-array interpolation is not a PostgreSQL array parameter.
 - [Gateway network addressing](gateway-network-addressing.md) — WiFiManager static-field visibility is conditional; clear live DHCP state without erasing replay counters.
+- [Integrated diagnostics delivery](terminal-diagnostics-scope.md) — logs, recovery, sync publication and FIRE are one software scope; hardware proof remains separate.

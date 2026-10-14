@@ -30,3 +30,15 @@ production declaration, so regression tests passed while the native build failed
 **How to apply:** Compile the real helper where practical, keeping its
 declaration and definition in production order. Host regression success does
 not replace a complete native firmware build.
+
+Hosted/Remote optional Kconfig includes need the SDK series (for example 5.3),
+not its full patch version. Preserve it in the generated Kconfig environment
+as well as CMake's environment.
+
+**Why:** A missing/wrong series silently skipped Remote's optional configuration
+and produced missing WiFi buffer symbols. CMake-only environment changes did
+not survive Ninja's later Kconfig regeneration.
+
+**How to apply:** Derive the series from the actual SDK's version.cmake.
+Use the pinned SDK and exported tool environment, including ROM ELF files.
+Host libc compatibility is insufficient: target newlib also lacks timegm.

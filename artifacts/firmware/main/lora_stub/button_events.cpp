@@ -1,5 +1,6 @@
 #include "button_events.h"
 #include "../../../lora-common/button_events.h"
+#include "../../../lora-common/fire_link.h"
 #include "esp_websocket_client.h"
 #include "esp_http_client.h"
 #include "esp_timer.h"
@@ -34,6 +35,13 @@ tm_buttons::Cursor cursor;
 uint32_t helloBoot=0;
 char clientNonce[33]{},serverNonce[17]{};
 bool authenticated=false;
+struct FireExchange {
+    bool active=false,progress=false,done=false;
+    char payload[256]{},nonce[33]{};
+    uint32_t deadline=0,lastSend=0;
+    unsigned maxAttempts=3;
+    FireLinkResult result{};
+} fire;
 void *socketReserve;
 uint32_t nowMs() { return (uint32_t)(esp_timer_get_time()/1000); }
 void randomHex(char *out,size_t bytes) {
@@ -143,12 +151,30 @@ bool process(const WireMessage &message,const Shared &s) {
             }
         }
     } else if(!authenticated) ok=false;
+    else if(cJSON_HasObjectItem(json,"fire")) {
+        uint32_t status=0;char signature[65];
+        const char *nonce=text(json,"fire"),*body=text(json,"body");
+        ok=number(json,"status",status)&&status<=599&&
+            tm_fire_link::reply_mac(s.config.key,serverNonce,clientNonce,nonce,(int)status,body,signature)&&
+            tm_buttons::equal(signature,text(json,"sig"),64);
+        if(ok) {
+            xSemaphoreTake(mutex,portMAX_DELAY);
+            if(fire.active&&nonce&&!strcmp(nonce,fire.nonce)) {
+                if(!fire.result.firstByteMs)fire.result.firstByteMs=nowMs();
+                if(status==102)fire.progress=true;
+                else if(status>=200) {
+                    fire.result.status=(int)status;fire.result.finishedMs=nowMs();fire.done=true;
+                }
+            }
+            xSemaphoreGive(mutex);
+        }
+    }
     else if(cJSON_HasObjectItem(json,"resync")) {
         ok=number(json,"boot",boot)&&boot==helloBoot&&number(json,"next",next);
         if(ok) { cursor.boot=boot;cursor.after=next; }
     } else if(cJSON_HasObjectItem(json,"gap")) {
         ESP_LOGW(TAG,"Gateway event buffer gap");
-    } else ok=admit(json,helloBoot,serverNonce,clientNonce,s,true);
+    } else if(s.config.enabled) ok=admit(json,helloBoot,serverNonce,clientNonce,s,true);
     cJSON_Delete(json);return ok;
 }
 struct HttpBody { char bytes[2048];size_t len;bool overflow; };
@@ -232,7 +258,7 @@ void worker(void *) {
             stopSocket();generation=s.generation;cursor={};down=nowMs();attemptAt=0;retry=0;
         }
         char uri[224];
-        const bool enabled=s.config.enabled&&strlen(s.config.key)>=16&&wsUrl(s.config.url,uri,sizeof(uri));
+        const bool enabled=strlen(s.config.key)>=16&&wsUrl(s.config.url,uri,sizeof(uri));
         if(!enabled) {
             if(socketClient) stopSocket();
             vTaskDelay(pdMS_TO_TICKS(100));continue;
@@ -246,6 +272,20 @@ void worker(void *) {
             if(!process(message,s)) { lost=true;break; }
         }
         uint32_t now=nowMs();
+        // This is the sole socket writer. Three total transmissions, byte-for-
+        // byte identical; a signed progress reply suppresses short retries.
+        xSemaphoreTake(mutex,portMAX_DELAY);
+        if(fire.active&&!fire.done&&authenticated&&!lost.load()&&
+           !fire.progress&&fire.result.attempts<fire.maxAttempts&&
+           (!fire.result.attempts||now-fire.lastSend>=300)) {
+            fire.lastSend=now;
+            if(!fire.result.attempts)fire.result.sentMs=now;
+            ++fire.result.attempts;
+            fire.result.ambiguous=true; // even a partial socket write is ambiguous
+            if(!sendText(fire.payload))lost=true;
+        }
+        const bool firing=fire.active;
+        xSemaphoreGive(mutex);
         if(!socketClient && (int32_t)(now-attemptAt)>=0) {
             randomHex(clientNonce,16);serverNonce[0]=0;authenticated=false;
             started=now;
@@ -266,14 +306,46 @@ void worker(void *) {
         if(socketClient&&!authenticated&&(int32_t)(now-attemptAt)>=0) lost=true;
         if(authenticated && now-started>=5000) retry=0;
         // down is deliberately not reset by unsuccessful connection attempts.
-        if(!authenticated && now-down>5000 && s.config.gameActive && now-lastHttp>=2000) {
+        if(!firing&&!authenticated && now-down>5000 && s.config.enabled&&s.config.gameActive && now-lastHttp>=2000) {
             lastHttp=now;fallback(s);
         }
         vTaskDelay(pdMS_TO_TICKS(25));
     }
 }
+
 } // namespace
 
+bool button_events_fire(const char *url,const char *key,const char *nonce,
+    const char *mac,char first,char second,uint32_t delayMs,int timeoutMs,
+    FireLinkResult *result,unsigned maxAttempts) {
+    if(!result)return false;
+    *result={};
+    if(!mutex||!maxAttempts||maxAttempts>3||!tm_buttons::hex(nonce,32)||!tm_buttons::hex(mac,64))return false;
+    xSemaphoreTake(mutex,portMAX_DELAY);
+    if(!shared.connected||fire.active||strcmp(url,shared.config.url)||strcmp(key,shared.config.key)) {
+        xSemaphoreGive(mutex);return false;
+    }
+    fire={};fire.active=true;fire.maxAttempts=maxAttempts;memcpy(fire.nonce,nonce,33);
+    fire.deadline=nowMs()+(uint32_t)timeoutMs;
+    if(second)snprintf(fire.payload,sizeof(fire.payload),
+        "{\"fire\":\"%s\",\"mac\":\"%s\",\"first\":\"%c\",\"second\":\"%c\",\"delayMs\":%lu}",
+        nonce,mac,first,second,(unsigned long)delayMs);
+    else snprintf(fire.payload,sizeof(fire.payload),"{\"fire\":\"%s\",\"mac\":\"%s\",\"first\":\"%c\"}",
+                  nonce,mac,first);
+    xSemaphoreGive(mutex);
+    for(;;) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        xSemaphoreTake(mutex,portMAX_DELAY);
+        const bool done=fire.done;
+        const bool stop=done||!shared.connected||
+            (int32_t)(nowMs()-fire.deadline)>=0||
+            (!fire.progress&&fire.result.attempts>=fire.maxAttempts&&nowMs()-fire.lastSend>=300);
+        if(stop) {
+            *result=fire.result;fire.active=false;xSemaphoreGive(mutex);return done;
+        }
+        xSemaphoreGive(mutex);
+    }
+}
 void button_events_init() {
     if(mutex) return;
     const size_t before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);

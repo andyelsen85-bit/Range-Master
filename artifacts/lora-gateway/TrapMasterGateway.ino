@@ -6,6 +6,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ArduinoJson.h>
 #include <WebServer.h>
 #include <WiFiManager.h>
 #include <Preferences.h>
@@ -92,6 +93,8 @@ static tm_gateway::Entry *pendingFire = nullptr;
 // Copies share ownership of the socket; WebServer can accept other requests
 // after the handler returns while this original awaits its radio result.
 static WiFiClient pendingClient;
+static int pendingSocket=-1;
+static char pendingServer[17]{},pendingConnection[33]{};
 static uint32_t expectedAckCounter = 0;
 static char expectedAckMachine = 0;
 static volatile bool txDone = false;
@@ -383,33 +386,74 @@ static void handleNonce()
     server.send(200, "application/json", body);
 }
 
+#if __has_include("gateway_trace.h")
+#include "gateway_trace.h"
+#else
+#include "../gateway_trace.h"
+#endif
 static void admitFire(const uint8_t *nonce, bool pair, char first, char second,
-                      uint32_t delayMs)
+                      uint32_t delayMs,int socket,uint32_t received)
 {
     char hex[tm_auth::NONCE_HEX_LEN + 1];
     tm_auth::nonce_to_hex(nonce, hex);
     tm_gateway::Entry *entry = nullptr;
     auto admission = nonces.admit(hex, pair, first, second, delayMs,
                                  pendingFire != nullptr || radioBusy, millis(), &entry);
-    server.sendHeader("Cache-Control", "no-store");
+    if(socket<0)server.sendHeader("Cache-Control", "no-store");
+    auto reply=[&](int status,const char *body) {
+        if(socket>=0)socketFireReply((uint8_t)socket,hex,status,body);
+        else server.send(status==102?202:status,"application/json",body);
+    };
     switch (admission) {
     case tm_gateway::Admission::Unauthorized:
-        server.send(401, "application/json", "{\"ok\":false,\"error\":\"unknown or expired nonce\"}");
+        reply(401, "{\"ok\":false,\"error\":\"unknown or expired nonce\"}");
         return;
     case tm_gateway::Admission::Conflict:
-        server.send(409, "application/json", "{\"ok\":false,\"error\":\"conflicting request\"}");
+        reply(409, "{\"ok\":false,\"error\":\"conflicting request\"}");
         return;
     case tm_gateway::Admission::Busy:
-        server.send(409, "application/json", "{\"ok\":false,\"error\":\"busy\"}");
+        // Identical running commands receive progress, NEVER another radio TX.
+        reply(entry&&entry==pendingFire?102:409,
+              entry&&entry==pendingFire?"{\"progress\":true}":"{\"ok\":false,\"error\":\"busy\"}");
         return;
     case tm_gateway::Admission::Cached:
-        server.send(entry->status, "application/json", entry->response);
+        reply(entry->status, entry->response);
         return;
     case tm_gateway::Admission::Start:
         pendingFire = entry;
-        pendingClient = server.detachClient();
+        traceStart(first,received?received:millis());
+        pendingSocket=socket;
+        if(socket<0)pendingClient = server.detachClient();
+        else {
+            memcpy(pendingServer,buttonClients[socket].server,sizeof(pendingServer));
+            memcpy(pendingConnection,buttonClients[socket].client,sizeof(pendingConnection));
+            reply(102,"{\"progress\":true}");
+        }
         return; // execution is outside the handler, never nested inside it
     }
+}
+
+static void handleSocketFire(uint8_t n,JsonVariantConst json) {
+    const uint32_t received=millis();
+    const char *hex=json["fire"],*signature=json["mac"],*firstText=json["first"];
+    const char *secondText=json["second"];
+    uint8_t nonce[16],expected[32];uint32_t delay=0;
+    if(!tm_auth::nonce_from_hex(hex,nonce)||!firstText||strlen(firstText)!=1) {
+        eventSocket.drop(n);return;
+    }
+    const char first=firstText[0];
+    const bool pair=secondText!=nullptr;
+    bool valid;
+    if(pair) {
+        if(strlen(secondText)!=1||!buttonNumber(json["delayMs"],delay)) {eventSocket.drop(n);return;}
+        valid=tm_auth::make_pair_request_mac((const uint8_t*)GATEWAY_AUTH_KEY,sizeof(GATEWAY_AUTH_KEY)-1,
+            first,secondText[0],delay,nonce,expected);
+    } else valid=tm_auth::make_request_mac((const uint8_t*)GATEWAY_AUTH_KEY,
+                                         sizeof(GATEWAY_AUTH_KEY)-1,first,nonce,expected);
+    if(!valid||!tm_auth::mac_matches_hex(expected,signature)) {
+        socketFireReply(n,hex,401,"{\"ok\":false,\"error\":\"unauthorized\"}");return;
+    }
+    admitFire(nonce,pair,first,pair?secondText[0]:0,delay,n,received);
 }
 
 static void renderStatus()
@@ -484,6 +528,7 @@ static bool waitForFlag(volatile bool &flag, uint32_t timeoutMs)
     uint32_t started = millis();
     while (!flag && millis() - started < timeoutMs) {
         if (pendingFire) server.handleClient();
+        buttonSocketTick();
         Radio.IrqProcess();
         delay(1);
     }
@@ -502,11 +547,14 @@ static bool sendFire(char machine, bool *ack, bool wait_for_ack)
         return false;
     }
     // Persist before radio TX: a power loss can skip values, never reuse one.
+    const uint32_t savedStarted=millis();
     if (preferences.putULong("counter", counter) != sizeof(uint32_t)) {
         lastResult = "Counter save failed";
         radioBusy = false;
         return false;
     }
+    activeTrace.nvsDuration+=millis()-savedStarted;
+    if(!activeTrace.saved)activeTrace.saved=millis();
 
     uint8_t frame[tm_protocol::FRAME_LEN];
     if (!tm_protocol::encrypt(machine, tm_protocol::CMD_FIRE, counter, frame)) {
@@ -520,12 +568,14 @@ static bool sendFire(char machine, bool *ack, bool wait_for_ack)
     ackReceived = false;
     txDone = false;
     txTimeout = false;
+    if(!activeTrace.tx)activeTrace.tx=millis();
     Radio.Send(frame, sizeof(frame));
     if (!waitForFlag(txDone, TX_TIMEOUT_MS) || txTimeout) {
         lastResult = "LoRa TX failed";
         radioBusy = false;
         return false;
     }
+    activeTrace.done=millis();
 
     if (!wait_for_ack) {
         lastAck = false;
@@ -538,6 +588,7 @@ static bool sendFire(char machine, bool *ack, bool wait_for_ack)
 
     Radio.Rx(ACK_TIMEOUT_MS);
     *ack = waitForFlag(ackReceived, ACK_TIMEOUT_MS);
+    if(*ack)activeTrace.ack=millis();
     lastAck = *ack;
     lastMachine = String(machine);
     lastResult = *ack ? "sent + ACK" : "sent, no ACK";
@@ -585,6 +636,7 @@ static void handleBenchFire()
 
 static void handleFire()
 {
+    const uint32_t received=millis();
     if (!server.hasArg("machine") || server.arg("machine").length() != 1) {
         server.send(400, "application/json", "{\"error\":\"machine must be A-H\"}");
         return;
@@ -603,7 +655,7 @@ static void handleFire()
         server.send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
         return;
     }
-    admitFire(nonce, false, machine, 0, 0);
+    admitFire(nonce, false, machine, 0, 0,-1,received);
 }
 
 static bool parse_pair_machine(const char *name, char *machine)
@@ -632,6 +684,7 @@ static bool parse_delay_ms(uint32_t *delay_ms)
 
 static void handleFirePair()
 {
+    const uint32_t received=millis();
     char first = 0;
     char second = 0;
     uint32_t delay_ms = 0;
@@ -655,7 +708,7 @@ static void handleFirePair()
         server.send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
         return;
     }
-    admitFire(nonce, true, first, second, delay_ms);
+    admitFire(nonce, true, first, second, delay_ms,-1,received);
 }
 
 static void finishPendingFire(int status, const char *body)
@@ -663,6 +716,13 @@ static void finishPendingFire(int status, const char *body)
     // Cache even failures before writing the socket. A lost HTTP response must
     // never permit a second transmission; these results use preallocated RAM.
     nonces.finish(pendingFire, status, body, millis());
+    if(pendingSocket>=0) {
+        // Never deliver a completed action to a different connection reusing
+        // the same socket index. Reconnect retrieves the cached nonce result.
+        const auto &c=buttonClients[pendingSocket];
+        if(c.auth&&!strcmp(c.server,pendingServer)&&!strcmp(c.client,pendingConnection))
+            socketFireReply((uint8_t)pendingSocket,pendingFire->nonce,status,pendingFire->response);
+    } else {
     pendingClient.printf("HTTP/1.1 %d Result\r\nContent-Type: application/json\r\n"
                          "Content-Length: %u\r\nConnection: close\r\n"
                          "Cache-Control: no-store\r\n\r\n%s",
@@ -670,6 +730,8 @@ static void finishPendingFire(int status, const char *body)
                          pendingFire->response);
     pendingClient.stop();
     pendingClient = WiFiClient();
+    }
+    traceFinish(status);pendingSocket=-1;
     pendingFire = nullptr;
 }
 
@@ -709,6 +771,7 @@ static void runPendingFire()
     uint32_t started = millis();
     while (millis() - started < delay_ms) {
         server.handleClient(); // answer busy throughout the pair delay
+        buttonSocketTick();
         Radio.IrqProcess();
         delay(1);
     }
@@ -819,6 +882,7 @@ void setup()
     nextCounter = preferences.getULong("counter", 0);
     initRadio();
     buttonEventsInit();
+    traceReserve();
     Radio.Rx(0);
     const char *headerKeys[] = { "X-TrapMaster-Auth" };
     server.collectHeaders(headerKeys, 1);
@@ -828,6 +892,7 @@ void setup()
     server.on("/health", HTTP_GET, [] { noteHttpRequest(); handleHealth(); });
     server.on("/events", HTTP_GET, [] { noteHttpRequest(); handleButtonEvents(); });
     server.on("/status", HTTP_GET, [] { noteHttpRequest(); handleStatus(); });
+    server.on("/trace", HTTP_GET, [] {noteHttpRequest();handleGatewayTrace();});
 #if defined(TM_ENABLE_UNENCRYPTED_BENCH_TEST)
     server.on("/bench-fire", HTTP_GET, [] { noteHttpRequest(); handleBenchFire(); });
 #endif
@@ -844,6 +909,7 @@ void setup()
 void loop()
 {
     server.handleClient();
+    buttonSocketTick();
     // A started ACK is short; complete it before letting FIRE own the radio.
     if (!remoteTx) runPendingFire();
     Radio.IrqProcess();
