@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { visibleErgebnisse } from "../lib/visible-results";
 import { db, spielerTable, ergebnisseTable, spieleTable } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { authenticate } from "./auth";
@@ -96,7 +97,7 @@ router.get("/:id/ergebnisse", authenticate, async (req, res) => {
     })
     .from(ergebnisseTable)
     .innerJoin(spieleTable, eq(ergebnisseTable.spielId, spieleTable.id))
-    .where(eq(ergebnisseTable.spielerId, spielerId))
+    .where(and(eq(ergebnisseTable.spielerId, spielerId),visibleErgebnisse))
     .orderBy(spieleTable.datum);
 
   const ergebnisse = rows.map((r) => ({

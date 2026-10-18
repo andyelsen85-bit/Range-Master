@@ -85,6 +85,13 @@
       "when": 1791936000001,
       "tag": "0011_historical_game_import",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792310400000,
+      "tag": "0012_queue_kiosk_live",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,7 @@
 #include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "screen_queue.h"
 #include "screen_kredite.h"
 
 static lv_obj_t *s_scr;
@@ -765,6 +766,7 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_flex_flow(s_player_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(s_player_list, 8, 0);
 
+    screen_queue_button(s_scr);
     return s_scr;
 }
 

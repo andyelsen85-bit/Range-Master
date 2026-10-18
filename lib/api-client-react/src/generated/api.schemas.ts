@@ -5,6 +5,365 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+export interface PortalData { [key: string]: unknown }
+
+export interface ManagedGameRow {
+  id: number;
+  external_id?: string | null;
+  datum: string;
+  modus: string;
+  lauf: number;
+  tauben_pro_lauf?: number;
+  abgeschlossen?: boolean;
+  completed_at?: string | null;
+  hidden_at?: string | null;
+  edited_at?: string | null;
+  playerCount?: number;
+}
+
+export interface ManagedGameList {
+  items: ManagedGameRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ManagedGameShot {
+  id: number;
+  spieler_id: number;
+  lauf: number;
+  taube: number;
+  maschine: string;
+  posten: number;
+  schuss1: boolean;
+  schuss2: boolean;
+  punkte: number;
+  wiederholt: boolean;
+}
+
+export type ManagedGameAuditBefore = { [key: string]: unknown } | null;
+
+export type ManagedGameAuditAfter = { [key: string]: unknown } | null;
+
+export interface ManagedGameAudit {
+  id: number;
+  at: string;
+  admin_user_id?: number | null;
+  action: string;
+  spieler_id?: number | null;
+  before?: ManagedGameAuditBefore;
+  after?: ManagedGameAuditAfter;
+}
+
+export type ManagedGameDetailPlayersItem = {
+  id: number;
+  name: string;
+  hidden: boolean;
+};
+
+/**
+ * @nullable
+ */
+export type SharedScorecardColumnsItemPair = typeof SharedScorecardColumnsItemPair[keyof typeof SharedScorecardColumnsItemPair] | null;
+
+
+export const SharedScorecardColumnsItemPair = {
+  start: 'start',
+  end: 'end',
+} as const;
+
+export type SharedScorecardColumnsItem = {
+  run: number;
+  clay: number;
+  machine: string;
+  /** @nullable */
+  pair: SharedScorecardColumnsItemPair;
+};
+
+export type SharedScorecardPlayersItem = {
+  name: string;
+  total: number;
+  runTotals: number[];
+  cells: (number | null)[];
+};
+
+export interface SharedScorecard {
+  date: string;
+  /** @nullable */
+  completedAt: string | null;
+  mode: string;
+  runs: number;
+  claysPerRun: number;
+  columns: SharedScorecardColumnsItem[];
+  players: SharedScorecardPlayersItem[];
+}
+
+export interface ManagedGameDetail {
+  game: ManagedGameRow;
+  scorecard: SharedScorecard | null;
+  players: ManagedGameDetailPlayersItem[];
+  shots: ManagedGameShot[];
+  audit: ManagedGameAudit[];
+}
+
+export interface KioskQueuePlayer {
+  entryId: number;
+  spielerId: number;
+  name: string;
+  groupId: number | null;
+}
+
+export type KioskQueueGameStatus = typeof KioskQueueGameStatus[keyof typeof KioskQueueGameStatus];
+
+
+export const KioskQueueGameStatus = {
+  OPEN: 'OPEN',
+  LOCKED: 'LOCKED',
+} as const;
+
+export interface KioskQueueGame {
+  queueGameId: number;
+  position: number;
+  modus: string;
+  status: KioskQueueGameStatus;
+  players: KioskQueuePlayer[];
+  free: number;
+}
+
+export interface KioskQueueSettings {
+  queueEnabled: boolean;
+  groupsEnabled: boolean;
+  showRanking: boolean;
+  maxQueueGames: number;
+  enabledModes: string[];
+}
+
+export interface KioskQueueSnapshot {
+  version: string;
+  games: KioskQueueGame[];
+  settings: KioskQueueSettings;
+}
+
+export interface KioskPickerPlayer {
+  id: number;
+  displayName: string;
+  activeSignup: boolean;
+  running: boolean;
+}
+
+export interface KioskPicker {
+  players: KioskPickerPlayer[];
+}
+
+export interface KioskGroupMember {
+  id: number;
+  displayName: string;
+}
+
+export interface KioskGroup {
+  id: number;
+  name: string;
+  members: KioskGroupMember[];
+}
+
+export interface KioskGroupList {
+  groups: KioskGroup[];
+}
+
+export interface KioskTokenMetadata {
+  id: number;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  lastUsedIpHash: string | null;
+  revokedAt: string | null;
+}
+
+export interface KioskTokenList {
+  tokens: KioskTokenMetadata[];
+}
+
+export interface KioskTokenOnce {
+  id: number;
+  /**
+     * @minLength 43
+     * @maxLength 43
+     */
+  token: string;
+  url: string;
+}
+
+export interface KioskPrintDays {
+  days: string[];
+}
+
+export type SpielerStatistikBreakdownItem = {
+  modus: string;
+  anzahlSpiele: number;
+  durchschnitt: number;
+  durchschnittProzent: number;
+};
+
+export type SpielerStatistikTauben = {[key: string]: {
+  versuche: number;
+  treffer: number;
+  quote: number;
+}};
+
+export type SpielerStatistikMaschinen = {[key: string]: {
+  versuche: number;
+  treffer: number;
+  quote: number;
+}};
+
+export interface SpielerStatistik {
+  breakdown?: SpielerStatistikBreakdownItem[];
+  gesamtSchuesse: number;
+  gesamtTreffer: number;
+  tauben: SpielerStatistikTauben;
+  spielerId: number;
+  gesamtSpiele: number;
+  durchschnitt: number;
+  bestPunkte: number;
+  trefferquote: number;
+  maschinen: SpielerStatistikMaschinen;
+}
+
+export interface KioskPrintData {
+  name: string;
+  tag: string;
+  club: string;
+  games: SharedScorecard[];
+  stats: SpielerStatistik;
+}
+
+export interface RanglisteEntry {
+  bestMaximum?: number;
+  bestProzent?: number;
+  rang: number;
+  spielerId: number;
+  name: string;
+  gesamtPunkte: number;
+  anzahlSpiele: number;
+  durchschnitt: number;
+  /** Normalized average as a percentage of the maximum possible score (gesamtPunkte / gesamtMaxPunkte × 100). Use this for cross-format comparisons because different game formats have different max scores. */
+  durchschnittProzent: number;
+  bestPunkte: number;
+}
+
+export interface KioskRanking {
+  rangliste: RanglisteEntry[];
+}
+
+export interface KioskLivePlayer {
+  spielerId: number;
+  name: string;
+  posten: number;
+}
+
+export interface KioskLiveResult {
+  spielerId: number;
+  lauf: number;
+  taube: number;
+  maschine: string;
+  schuss1: boolean;
+  schuss2: boolean;
+  punkte: number;
+}
+
+export type LiveSnapshotInputState = typeof LiveSnapshotInputState[keyof typeof LiveSnapshotInputState];
+
+
+export const LiveSnapshotInputState = {
+  RUNNING: 'RUNNING',
+  FINISHED: 'FINISHED',
+  ABORTED: 'ABORTED',
+} as const;
+
+export interface LiveSnapshotInput {
+  /** @maxLength 100 */
+  terminalId: string;
+  /** @minimum 0 */
+  seq: number;
+  state: LiveSnapshotInputState;
+  spielExternalId: string;
+  modus: string;
+  lauf: number;
+  taubenProLauf: number;
+  startedAt: string;
+  currentSpielerId: number;
+  currentTaube: number;
+  /** @maxItems 6 */
+  players: KioskLivePlayer[];
+  /** @maxItems 384 */
+  results: KioskLiveResult[];
+}
+
+export type KioskLiveGame = LiveSnapshotInput & {
+  updatedAt: string;
+};
+
+export interface KioskTokenInput {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  name: string;
+}
+
+export type QueueSignupInputModus = typeof QueueSignupInputModus[keyof typeof QueueSignupInputModus];
+
+
+export const QueueSignupInputModus = {
+  NORMAL: 'NORMAL',
+  HARAKIRI: 'HARAKIRI',
+  HARAKIRI_CUSTOM: 'HARAKIRI_CUSTOM',
+  CUSTOM_1: 'CUSTOM_1',
+  CUSTOM_2: 'CUSTOM_2',
+  CUSTOM_3: 'CUSTOM_3',
+  CUSTOM_4: 'CUSTOM_4',
+} as const;
+
+export interface QueueSignupInput {
+  /** @minimum 1 */
+  spielerId?: number;
+  modus: QueueSignupInputModus;
+}
+
+export interface QueueCancelInput {
+  /** @minimum 1 */
+  entryId: number;
+}
+
+export interface QueueGroupInput {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  name: string;
+  /**
+     * @minItems 2
+     * @maxItems 6
+     * @items.minimum 1
+     */
+  spielerIds: number[];
+}
+
+export interface QueueCommandInput {
+  /** @minimum 1 */
+  queueGameId: number;
+  terminalId: string;
+  /** @maxItems 6 */
+  entryIds?: number[];
+  spielExternalId?: string;
+}
+
+export interface GameShotInput {
+  schuss1: boolean;
+  schuss2: boolean;
+  wiederholt?: boolean;
+}
+
 export interface ReportDateInput {
   datum: string;
 }
@@ -20,6 +379,15 @@ export const PublicPageSettingsNameMode = {
 export interface PublicPageSettings {
   enabled: boolean;
   nameMode: PublicPageSettingsNameMode;
+  queueEnabled?: boolean;
+  groupsEnabled?: boolean;
+  showRanking?: boolean;
+  /**
+     * @minimum 1
+     * @maximum 40
+     */
+  maxQueueGames?: number;
+  enabledModes?: string[];
 }
 
 export interface DailyReportRecipient {
@@ -80,43 +448,6 @@ export interface GamedayInput {
 }
 
 export interface InventoryState { [key: string]: unknown }
-
-/**
- * @nullable
- */
-export type SharedScorecardColumnsItemPair = typeof SharedScorecardColumnsItemPair[keyof typeof SharedScorecardColumnsItemPair] | null;
-
-
-export const SharedScorecardColumnsItemPair = {
-  start: 'start',
-  end: 'end',
-} as const;
-
-export type SharedScorecardColumnsItem = {
-  run: number;
-  clay: number;
-  machine: string;
-  /** @nullable */
-  pair: SharedScorecardColumnsItemPair;
-};
-
-export type SharedScorecardPlayersItem = {
-  name: string;
-  total: number;
-  runTotals: number[];
-  cells: (number | null)[];
-};
-
-export interface SharedScorecard {
-  date: string;
-  /** @nullable */
-  completedAt: string | null;
-  mode: string;
-  runs: number;
-  claysPerRun: number;
-  columns: SharedScorecardColumnsItem[];
-  players: SharedScorecardPlayersItem[];
-}
 
 export type ProductCategory = typeof ProductCategory[keyof typeof ProductCategory];
 
@@ -621,18 +952,6 @@ export interface ErgebnisWithSpiel {
   spiel: ErgebnisWithSpielSpiel;
 }
 
-export interface RanglisteEntry {
-  rang: number;
-  spielerId: number;
-  name: string;
-  gesamtPunkte: number;
-  anzahlSpiele: number;
-  durchschnitt: number;
-  /** Normalized average as a percentage of the maximum possible score (gesamtPunkte / gesamtMaxPunkte × 100). Use this for cross-format comparisons because different game formats have different max scores. */
-  durchschnittProzent: number;
-  bestPunkte: number;
-}
-
 export interface ModusBreakdownEntry {
   modus: Modus;
   anzahlSpiele: number;
@@ -640,21 +959,6 @@ export interface ModusBreakdownEntry {
   durchschnitt: number;
   /** Normalized average as % of max possible score (same method as leaderboard) */
   durchschnittProzent: number;
-}
-
-export type SpielerStatistikMaschinen = {[key: string]: {
-  versuche: number;
-  treffer: number;
-  quote: number;
-}};
-
-export interface SpielerStatistik {
-  spielerId: number;
-  gesamtSpiele: number;
-  durchschnitt: number;
-  bestPunkte: number;
-  trefferquote: number;
-  maschinen: SpielerStatistikMaschinen;
 }
 
 export interface SyncSpieler {
@@ -877,12 +1181,29 @@ export type GetMyPurchases200 = {
 };
 
 export type GetRanglisteParams = {
+/**
+ * @maximum 100
+ */
+limit?: number;
+sort?: GetRanglisteSort;
 modus?: Modus;
 jahr?: number;
 };
 
+export type GetRanglisteSort = typeof GetRanglisteSort[keyof typeof GetRanglisteSort];
+
+
+export const GetRanglisteSort = {
+  best: 'best',
+  prozent: 'prozent',
+  punkte: 'punkte',
+  spiele: 'spiele',
+} as const;
+
 export type GetRangliste200 = {
   rangliste: RanglisteEntry[];
+  years?: number[];
+  ownRow?: RanglisteEntry | null;
 };
 
 export type GetStatistikModusBreakdown200 = {
@@ -997,4 +1318,39 @@ export type MarkAdminBillPaidBody = {
 export type GetInventoryStateParams = {
 datum: string;
 };
+
+export type GetKioskPlayersParams = {
+q?: string;
+};
+
+export type GetKioskPrintParams = {
+tag: string;
+};
+
+export type GetTerminalQueueParams = {
+/**
+ * Include this terminal's own locked reservation for recovery
+ * @maxLength 100
+ */
+terminalId?: string;
+};
+
+export type GetManagedGamesParams = {
+page?: number;
+from?: string;
+to?: string;
+modus?: string;
+spielerId?: number;
+hidden?: GetManagedGamesHidden;
+q?: string;
+};
+
+export type GetManagedGamesHidden = typeof GetManagedGamesHidden[keyof typeof GetManagedGamesHidden];
+
+
+export const GetManagedGamesHidden = {
+  all: 'all',
+  yes: 'yes',
+  no: 'no',
+} as const;
 

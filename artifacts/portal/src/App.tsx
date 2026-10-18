@@ -27,6 +27,9 @@ import Profil from '@/pages/profil';
 import Kaef from '@/pages/kaef';
 import NotFound from '@/pages/not-found';
 import Live from '@/pages/live';
+import LivePrint from '@/pages/live-print';
+import AdminSpiele from '@/pages/admin-spiele';
+import AdminSpielDetail from '@/pages/admin-spiel-detail';
 
 const queryClient = new QueryClient();
 
@@ -70,6 +73,7 @@ function Router() {
     <Switch>
       <Route path="/login" component={Login} />
       <Route path="/live" component={Live} />
+      <Route path="/live/print/:spielerId" component={LivePrint} />
       <Route>
         <Layout>
           <Switch>
@@ -89,6 +93,8 @@ function Router() {
             <Route path="/admin/terminal-config" component={() => <AdminRoute component={AdminTerminalConfig} />} />
             <Route path="/admin/terminal-logs" component={() => <AdminRoute component={AdminTerminalLogs} />} />
             <Route path="/admin/game-reconciliation" component={() => <AdminRoute component={AdminGameReconciliation} />} />
+            <Route path="/admin/spiele" component={() => <AdminRoute component={AdminSpiele} />} />
+            <Route path="/admin/spiele/:id" component={() => <AdminRoute component={AdminSpielDetail} />} />
             <Route component={NotFound} />
           </Switch>
         </Layout>

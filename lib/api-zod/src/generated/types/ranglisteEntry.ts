@@ -7,6 +7,8 @@
  */
 
 export interface RanglisteEntry {
+  bestMaximum?: number;
+  bestProzent?: number;
   rang: number;
   spielerId: number;
   name: string;

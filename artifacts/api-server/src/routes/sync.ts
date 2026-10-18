@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { closeQueueEntries } from "../lib/queue";
+import { computeTaubePunkte,isPairClay } from "../lib/scoring";
 import bcrypt from "bcryptjs";
 import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, kreditEventsTable, spielerUpdatesTable, productsTable, productPriceRevisionsTable, saleEventsTable, billPaymentsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
 import { and, eq, inArray, sql, desc, isNotNull, gt, isNull } from "drizzle-orm";
@@ -367,6 +369,8 @@ router.post("/spiele", requireApiKey, async (req, res) => {
   const results = [];
 
   for (const s of body.spiele) {
+    s.ergebnisse=s.ergebnisse.map(e=>({...e,punkte:computeTaubePunkte(e,isPairClay(e,s.ergebnisse))}));
+    if(s.ergebnisse.length)s.teilnahmen=s.teilnahmen.map(t=>({...t,punkte:s.ergebnisse.filter(e=>e.spielerId===t.spielerId&&e.lauf===t.lauf).reduce((n,e)=>n+e.punkte,0)}));
     const missingIds = [...s.teilnahmen,...s.ergebnisse].map(t=>t.spielerId).filter(id=>!knownPlayerIds.has(id));
     if (missingIds.length) {
       results.push({ externalId: s.externalId, status: "rejected" as const, error: "Unbekannte Spieler", playerIds: [...new Set(missingIds)] });
@@ -390,10 +394,13 @@ router.post("/spiele", requireApiKey, async (req, res) => {
       if (inserted[0]) {
         if (s.teilnahmen.length) await tx.insert(spielTeilnahmenTable).values(s.teilnahmen.map(t => ({ spielId: inserted[0].id, ...t })));
         if (s.ergebnisse.length) await tx.insert(ergebnisseTable).values(s.ergebnisse.map(e => ({ spielId: inserted[0].id, ...e })));
+        await closeQueueEntries(tx,inserted[0].id,s.externalId,s.abgeschlossen);
+        await tx.execute(sql`DELETE FROM live_game_state WHERE payload->>'spielExternalId'=${s.externalId}`);
         return "created" as const;
       }
-      const [stored] = await tx.select().from(spieleTable).where(eq(spieleTable.externalId, s.externalId)).limit(1);
+      const [stored] = await tx.select().from(spieleTable).where(eq(spieleTable.externalId, s.externalId)).limit(1).for("update");
       if (!stored) return "conflict" as const; // defensive: a concurrently deleted row
+      if(stored.editedAt)return "edited" as const;
       const [storedTeilnahmen, storedErgebnisse] = await Promise.all([
         tx.select({ spielerId: spielTeilnahmenTable.spielerId, startPosten: spielTeilnahmenTable.startPosten, punkte: spielTeilnahmenTable.punkte, lauf: spielTeilnahmenTable.lauf }).from(spielTeilnahmenTable).where(eq(spielTeilnahmenTable.spielId, stored.id)),
         tx.select({ spielerId: ergebnisseTable.spielerId, lauf: ergebnisseTable.lauf, taube: ergebnisseTable.taube, maschine: ergebnisseTable.maschine, posten: ergebnisseTable.posten, schuss1: ergebnisseTable.schuss1, schuss2: ergebnisseTable.schuss2, punkte: ergebnisseTable.punkte, wiederholt: ergebnisseTable.wiederholt }).from(ergebnisseTable).where(eq(ergebnisseTable.spielId, stored.id)),
@@ -404,7 +411,7 @@ router.post("/spiele", requireApiKey, async (req, res) => {
       return sameParent && sameImmutableChildren(storedTeilnahmen, s.teilnahmen) && sameImmutableChildren(storedErgebnisse, s.ergebnisse)
         ? "skipped" as const : "conflict" as const;
     });
-    results.push({ externalId: s.externalId, status });
+    results.push({ externalId: s.externalId, status:status==="edited"?"skipped":status,...(status==="edited"?{reason:"EDITED_BY_ADMIN"}:{}) });
     } catch {
       // A rejected game cannot block unrelated games. The terminal retains it.
       results.push({ externalId: s.externalId, status: "rejected" as const, error: "Spiel nicht gespeichert: Spieler deaktiviert oder Daten widersprüchlich" });

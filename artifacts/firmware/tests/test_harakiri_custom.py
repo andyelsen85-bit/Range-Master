@@ -22,6 +22,10 @@ static uint32_t esp_random(){static std::mt19937 rng(81374);return rng();}
 GameStore g_store = {};
 static int finished = 0;
 void game_store_save(void) {}
+void portal_live_changed(int){}
+bool portal_queue_game_started(){return true;}
+bool portal_queue_release(){return true;}
+bool portal_queue_busy(){return false;}
 static void _store_finish_game(void) { ++finished; }
 """
 

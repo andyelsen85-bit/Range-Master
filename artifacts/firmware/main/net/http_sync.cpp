@@ -26,6 +26,8 @@
 #include "app_config.h"
 #include "coprocessor.h"
 #include "offline_cache.h"
+#include "portal_runtime.h"
+#include "ui_manager.h"
 
 static const char *TAG = "http_sync";
 static int64_t s_commit_start_us;
@@ -874,6 +876,32 @@ static esp_err_t http_prepare_request(http_session_t *session, const char *path,
     (void)esp_http_client_delete_header(session->client, "Content-Type");
     (void)esp_http_client_set_post_field(session->client, NULL, 0);
     return ESP_OK;
+}
+bool http_terminal_id(char *out,size_t size){return terminal_id(out,size);}
+bool http_optional_ready(void) {
+    portENTER_CRITICAL(&s_session_lock);
+    bool available=s_active_session_owner==nullptr;
+    portEXIT_CRITICAL(&s_session_lock);
+    return available&&g_store.syncStatus!=SYNC_RUNNING;
+}
+esp_err_t http_optional_json(const char *path,const char *body,char *out,size_t capacity) {
+    if(!path||!out||capacity<2||!http_optional_ready())return ESP_ERR_INVALID_STATE;
+    http_session_t session={};
+    if(!ui_manager_lock(0))return ESP_ERR_TIMEOUT;
+    snprintf(session.base_url,sizeof(session.base_url),"%.127s",g_store.apiUrl);
+    snprintf(session.api_key,sizeof(session.api_key),"%.64s",g_store.apiKey);
+    ui_manager_unlock();
+    esp_http_client_config_t cfg={};
+    cfg.url=session.base_url;cfg.event_handler=http_event_handler;
+    cfg.crt_bundle_attach=esp_crt_bundle_attach;cfg.timeout_ms=2000;
+    session.client=esp_http_client_init(&cfg);
+    if(!session.client)return ESP_ERR_NO_MEM;
+    http_acc_t acc={out,0,(int)capacity,false};out[0]='\0';
+    esp_err_t err=http_prepare_request(&session,path,body?HTTP_METHOD_POST:HTTP_METHOD_GET,body,&acc);
+    if(err==ESP_OK)err=esp_http_client_perform(session.client);
+    int status=esp_http_client_get_status_code(session.client);
+    http_session_close(&session);
+    return err!=ESP_OK?err:acc.truncated?ESP_ERR_INVALID_SIZE:status>=200&&status<300?ESP_OK:ESP_FAIL;
 }
 
 // ── Generic POST helper (with retry) ─────────────────────────
@@ -2363,6 +2391,7 @@ static esp_err_t http_sync_all_impl(void)
         if (!offline_cache_save_metadata())
             ESP_LOGW(TAG, "Full sync succeeded; cache metadata unavailable");
     }
+    portal_queue_refresh();
     ESP_LOGD(TAG, "Sync complete (%s)", overall == ESP_OK ? "success" : "partial failure");
     return overall;
 }

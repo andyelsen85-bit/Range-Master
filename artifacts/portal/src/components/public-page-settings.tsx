@@ -4,7 +4,9 @@ import {
   useGetPublicPageSettings, getGetPublicPageSettingsQueryKey, useUpdatePublicPageSettings,
   getGetPublicLastGameQueryKey,
 } from "@workspace/api-client-react";
+import { QueueSignupInputModus } from "@workspace/api-client-react";
 import type { PublicPageSettingsNameMode } from "@workspace/api-client-react";
+import { modeLabel } from "@/components/scorecard";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tv, Save, ShieldAlert, ExternalLink, AlertCircle } from "lucide-react";
@@ -16,6 +18,11 @@ export function PublicPageSettingsCard() {
   const { data, isLoading, isError, refetch } = useGetPublicPageSettings();
   const [enabled, setEnabled] = useState(false);
   const [nameMode, setNameMode] = useState<PublicPageSettingsNameMode>("INITIAL");
+  const [queueEnabled, setQueueEnabled] = useState(false);
+  const [groupsEnabled, setGroupsEnabled] = useState(true);
+  const [showRanking, setShowRanking] = useState(false);
+  const [maxQueueGames, setMaxQueueGames] = useState("6");
+  const [enabledModes, setEnabledModes] = useState<string[]>(["NORMAL"]);
   const init = useRef(false);
 
   useEffect(() => {
@@ -23,6 +30,11 @@ export function PublicPageSettingsCard() {
       init.current = true;
       setEnabled(!!data.enabled);
       setNameMode(data.nameMode ?? "INITIAL");
+      setQueueEnabled(!!data.queueEnabled);
+      setGroupsEnabled(data.groupsEnabled ?? true);
+      setShowRanking(!!data.showRanking);
+      setMaxQueueGames(String(data.maxQueueGames ?? 6));
+      setEnabledModes(data.enabledModes?.length ? data.enabledModes : ["NORMAL"]);
     }
   }, [data]);
 
@@ -56,7 +68,7 @@ export function PublicPageSettingsCard() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="font-bold flex items-center gap-2"><Tv size={18} className="text-primary" /> Öffentliche Seite</h2>
-          <p className="text-xs text-muted-foreground mt-1">Zeigt ohne Login das zuletzt abgeschlossene Spiel – z. B. auf dem Fernseher im Clubhaus.</p>
+          <p className="text-xs text-muted-foreground mt-1">Live-Resultate, Warteschlange und Ausdruck für den Touch-PC am Stand. Nur mit Kiosk-Token erreichbar.</p>
         </div>
         <a href={liveUrl} target="_blank" rel="noreferrer" data-testid="link-live"
           className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline shrink-0">
@@ -66,7 +78,7 @@ export function PublicPageSettingsCard() {
 
       <div className="flex items-start gap-2 text-xs text-amber-500 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2.5">
         <ShieldAlert size={15} className="shrink-0 mt-px" />
-        <span>Wenn aktiviert, werden die Namen der Spieler des letzten Spiels und ihre Resultate <strong>öffentlich im Internet sichtbar</strong> – für jeden, der die Adresse kennt. Nur einschalten, wenn die Mitglieder einverstanden sind.</span>
+        <span>Die Seite zeigt Namen und Resultate nur mit einem gültigen Kiosk-Token. Den Einrichtungslink wie einen Zugangsschlüssel behandeln und nur auf den Stand-PCs verwenden. Nur einschalten, wenn die Mitglieder einverstanden sind.</span>
       </div>
 
       <button type="button" data-testid="toggle-public-page" onClick={() => setEnabled(!enabled)}
@@ -89,10 +101,52 @@ export function PublicPageSettingsCard() {
         </div>
       </div>
 
-      <button onClick={() => saveMut.mutate({ data: { enabled, nameMode } })} disabled={saveMut.isPending} data-testid="button-save-public-page"
+      <div className="space-y-3 border-t border-border/40 pt-4">
+        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Warteschlange am Stand-PC</p>
+        <Toggle on={queueEnabled} set={setQueueEnabled} label="Warteschlange aktiv (Einschreiben und Ergebnisse drucken)" testid="toggle-queue-enabled" />
+        <Toggle on={groupsEnabled} set={setGroupsEnabled} label="Gruppen erlaubt" testid="toggle-groups-enabled" />
+        <Toggle on={showRanking} set={setShowRanking} label="Top 15 anzeigen, wenn kein Spiel läuft" testid="toggle-show-ranking" />
+        <label className="flex items-center gap-3 text-sm">
+          <span className="text-muted-foreground font-semibold">Max. Spiele in der Warteschlange</span>
+          <input type="number" min={1} max={40} value={maxQueueGames} onChange={(e) => setMaxQueueGames(e.target.value)} data-testid="input-max-queue-games"
+            className="w-20 bg-background border border-border/60 rounded-lg px-2 py-1.5 text-sm font-mono" />
+        </label>
+        <div className="space-y-1.5">
+          <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Modi zum Einschreiben</span>
+          <div className="flex flex-wrap gap-2">
+            {Object.values(QueueSignupInputModus).map((m) => {
+              const on = enabledModes.includes(m);
+              return (
+                <button key={m} type="button" data-testid={`button-mode-${m}`}
+                  onClick={() => setEnabledModes((cur) => on ? (cur.length > 1 ? cur.filter((x) => x !== m) : cur) : [...cur, m])}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${on ? "bg-primary/15 border-primary text-primary" : "border-border/60 text-muted-foreground hover:text-foreground"}`}>
+                  {modeLabel(m)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <button onClick={() => saveMut.mutate({ data: {
+        enabled, nameMode, queueEnabled, groupsEnabled, showRanking, enabledModes,
+        maxQueueGames: Math.min(40, Math.max(1, Math.round(Number(maxQueueGames) || 6))),
+      } })} disabled={saveMut.isPending} data-testid="button-save-public-page"
         className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-lg disabled:opacity-50">
         <Save size={16} /> {saveMut.isPending ? "Wird gespeichert…" : "Speichern"}
       </button>
     </div>
+  );
+}
+
+function Toggle({ on, set, label, testid }: { on: boolean; set: (v: boolean) => void; label: string; testid: string }) {
+  return (
+    <button type="button" data-testid={testid} onClick={() => set(!on)}
+      className="flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">
+      <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${on ? "bg-primary" : "bg-secondary"}`}>
+        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
+      </div>
+      {label}
+    </button>
   );
 }

@@ -23,6 +23,7 @@
 #include "cJSON.h"
 
 #include "game_store.h"
+#include "portal_runtime.h"
 #include "terminal_logs.h"
 #include "game_journal.h"
 #include "lvgl.h"
@@ -1792,6 +1793,7 @@ static void clear_active_game_credit_tracking(GameStore *s)
 
 bool store_set_lineup_post(int post, int spieler_id)
 {
+    if(!portal_queue_release())return false;
     if (post < 1 || post > MAX_SPIELER) return false;
     int slot = post - 1;
     if (spieler_id != 0) {
@@ -1809,6 +1811,7 @@ bool store_set_lineup_post(int post, int spieler_id)
 }
 
 void store_clear_lineup(void) {
+    if(!portal_queue_release())return;
     memset(g_store.lineupIds, 0, sizeof(g_store.lineupIds));
     g_store.lineupWarning[0] = '\0';
     game_store_save();
@@ -2131,6 +2134,10 @@ bool store_adjust_kredite(int spieler_id, int delta)
 // ── store_start_spiel ────────────────────────────────────────
 bool store_start_spiel(void)
 {
+    if(portal_queue_busy()) {
+        snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),"Warteschlange wird noch übernommen. Bitte warten.");
+        return false;
+    }
     if(g_store.harakiriOrdersReady || g_store.activeGameStorageError) {
         snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),
                  "Offenes Harakiri-Spiel oder Speicherfehler: zuerst fortsetzen, prüfen oder abbrechen.");
@@ -2275,6 +2282,13 @@ bool store_start_spiel(void)
     }
 
     s->screen = SCREEN_SPIEL;
+    if(!portal_queue_game_started()) {
+        (void)store_cancel_spiel();
+        snprintf(s->lineupWarning,sizeof(s->lineupWarning),"Warteschlange konnte nicht gespeichert werden. Bitte freigeben.");
+        s->screen=SCREEN_START;return false;
+    }
+    s->liveStartedAt=(int64_t)time(nullptr)>s->liveStartedAt?(int64_t)time(nullptr):s->liveStartedAt+1;
+    portal_live_changed(1);
     s->lineupWarning[0] = '\0';
     game_store_save();
     store_rebuild_bill_projection();
@@ -2343,6 +2357,7 @@ bool store_cancel_spiel(void)
     memset(s->spieler, 0, sizeof(s->spieler));
     memset(s->sequenz, 0, sizeof(s->sequenz));
     memset(s->harakiriOrder,0,sizeof(s->harakiriOrder));
+    portal_live_changed(3);
     s->harakiriOrdersReady=false;
     s->activeGameResumed=false;
     memset(s->ergebnisse, 0, sizeof(s->ergebnisse));
@@ -2505,6 +2520,7 @@ void store_eintragen(int punkte)
             }
         }
     }
+    portal_live_changed(1);
     game_store_save();
 }
 
@@ -2598,6 +2614,7 @@ static void _store_finish_game(void)
     s->harakiriOrdersReady=false;
     memset(s->harakiriOrder,0,sizeof(s->harakiriOrder));
     s->lastFinished   = fg;
+    portal_live_changed(2);
     s->hasLastFinished = true;
     clear_active_game_credit_tracking(s);
     s->activeAcknowledgedClays = 0;
@@ -3402,6 +3419,8 @@ void game_store_save(void)
     nvs_set_blob(s_nvs, "custom_run", g_store.customLaeufe,
                  sizeof(g_store.customLaeufe[0]) * 4);
     nvs_set_i32(s_nvs, "hc_len", g_store.customSequenzLen[4]);
+    nvs_set_u64(s_nvs,"live_seq",g_store.liveSequence);
+    nvs_set_i64(s_nvs,"live_start",g_store.liveStartedAt);
     nvs_set_i32(s_nvs, "hc_run", g_store.customLaeufe[4]);
     nvs_set_blob(s_nvs, "hc_pair", &g_store.customSequenzen[4][0],
                  sizeof(CustomSequenzEintrag));
@@ -3451,6 +3470,8 @@ void game_store_init(void)
     s_verkauf_events_mutex = xSemaphoreCreateMutex();
     configASSERT(s_verkauf_events_mutex);
     nvs_open();
+    (void)nvs_get_u64(s_nvs,"live_seq",&g_store.liveSequence);
+    (void)nvs_get_i64(s_nvs,"live_start",&g_store.liveStartedAt);
 
     // Defaults
     terminal_logs_init();

@@ -44,3 +44,4 @@
 - [Drizzle SQL array bindings](drizzle-array-bindings.md) — use explicit bound membership lists; JS-array interpolation is not a PostgreSQL array parameter.
 - [Gateway network addressing](gateway-network-addressing.md) — WiFiManager static-field visibility is conditional; clear live DHCP state without erasing replay counters.
 - [Integrated diagnostics delivery](terminal-diagnostics-scope.md) — logs, recovery, sync publication and FIRE are one software scope; hardware proof remains separate.
+- [Queue and kiosk contracts](queue-kiosk-contracts.md) — voluntary takeover/start, financial isolation, full live snapshots and authoritative null; preserve journal compatibility.

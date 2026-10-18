@@ -43,3 +43,7 @@ esp_err_t http_backup_config(void);
 
 /** Consume a one-time portal approval and atomically apply validated settings. */
 esp_err_t http_restore_config(const char *restore_code);
+bool http_terminal_id(char *out,size_t size);
+bool http_optional_ready(void);
+/** Independent optional-channel connection; no shared sync/FIRE lock, 2 s timeout. */
+esp_err_t http_optional_json(const char *path,const char *body,char *out,size_t capacity);

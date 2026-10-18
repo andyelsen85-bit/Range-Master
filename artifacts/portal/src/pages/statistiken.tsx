@@ -167,6 +167,8 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
         </CardContent>
       </Card>
 
+      <TaubenCard tauben={(stats as { tauben?: Record<string, { versuche: number; treffer: number; quote: number }> } | undefined)?.tauben} />
+
       {machineData.length > 0 && (
         <Card className="bg-card border-border/50 shadow-sm overflow-hidden mt-6">
           <CardHeader className="bg-secondary/20 border-b border-border/50 pb-4">
@@ -195,4 +197,33 @@ export default function Statistiken({ spielerId }: StatistikenProps = {}) {
 
 function EmptyState() {
   return <div className="w-full h-full flex items-center justify-center text-muted-foreground font-medium text-sm">Keine Daten verfügbar</div>;
+}
+
+function TaubenCard({ tauben }: { tauben?: Record<string, { versuche: number; treffer: number; quote: number }> }) {
+  const rows = Object.entries(tauben ?? {}).sort(([a], [b]) => Number(a) - Number(b));
+  return (
+    <Card className="bg-card border-border/50 shadow-sm overflow-hidden mt-6" data-testid="card-tauben">
+      <CardHeader className="bg-secondary/20 border-b border-border/50 pb-4">
+        <CardTitle className="text-sm uppercase tracking-widest font-bold">Trefferquote pro Taube</CardTitle>
+        <CardDescription className="font-medium mt-1">Taube 1..n jedes Laufs, über alle sichtbaren Spiele.</CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6">
+        {rows.length === 0 ? (
+          <div className="py-8 text-center text-muted-foreground font-medium text-sm">Keine Daten verfügbar</div>
+        ) : (
+          <div className="space-y-2">
+            {rows.map(([k, v]) => (
+              <div key={k} className="grid grid-cols-[5.5rem_1fr_7rem] items-center gap-3 text-sm" data-testid={`row-taube-${k}`}>
+                <span className="font-bold">Taube {k}</span>
+                <span className="h-3 rounded-full bg-secondary/50 overflow-hidden">
+                  <span className="block h-full bg-primary rounded-full" style={{ width: `${Math.max(0, Math.min(100, v.quote))}%` }} />
+                </span>
+                <span className="text-right font-mono"><span className="font-black">{Math.round(v.quote)}%</span> <span className="text-muted-foreground text-xs">{v.treffer}/{v.versuche}</span></span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }

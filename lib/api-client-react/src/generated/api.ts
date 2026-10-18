@@ -37,6 +37,7 @@ import type {
   FlexibleProductInput,
   GameManifestInput,
   GameReconciliationPage,
+  GameShotInput,
   GamedayInput,
   GetAdminBillActivityDaysParams,
   GetAdminBillDaySummaryParams,
@@ -44,6 +45,9 @@ import type {
   GetAdminDaySalesParams,
   GetGameReconciliationParams,
   GetInventoryStateParams,
+  GetKioskPlayersParams,
+  GetKioskPrintParams,
+  GetManagedGamesParams,
   GetMyPurchases200,
   GetRangliste200,
   GetRanglisteParams,
@@ -57,14 +61,29 @@ import type {
   GetSyncSpieler200,
   GetSyncStatus200,
   GetTerminalLogsParams,
+  GetTerminalQueueParams,
   HealthStatus,
   InventoryInput,
   InventoryState,
+  KioskGroupList,
+  KioskLiveGame,
+  KioskPicker,
+  KioskPrintData,
+  KioskPrintDays,
+  KioskQueueSnapshot,
+  KioskRanking,
+  KioskTokenInput,
+  KioskTokenList,
+  KioskTokenOnce,
   ListSpieler200,
+  LiveSnapshotInput,
   LoginRequest,
   LoginResponse,
+  ManagedGameDetail,
+  ManagedGameList,
   MarkAdminBillPaidBody,
   PlayerActivationResult,
+  PortalData,
   PostSyncBillPayments200,
   PostSyncBillPaymentsBody,
   PostSyncCreditEventsBody,
@@ -78,6 +97,10 @@ import type {
   ProductList,
   ProductUpdate,
   PublicPageSettings,
+  QueueCancelInput,
+  QueueCommandInput,
+  QueueGroupInput,
+  QueueSignupInput,
   ReportDateInput,
   SaleEventBatchInput,
   SaleSyncResult,
@@ -4084,4 +4107,1743 @@ export function useGetSharedScorecard<TData = Awaited<ReturnType<typeof getShare
 
 
 
+
+export const getGetKioskTokensUrl = () => {
+
+
+
+
+  return `/api/admin/kiosk-tokens`
+}
+
+export const getKioskTokens = async ( options?: Parameters<typeof customFetch>[1]): Promise<KioskTokenList> => {
+
+  return customFetch<KioskTokenList>(getGetKioskTokensUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKioskTokensQueryKey = () => {
+    return [
+    `/api/admin/kiosk-tokens`
+    ] as const;
+    }
+
+
+export const getGetKioskTokensQueryOptions = <TData = Awaited<ReturnType<typeof getKioskTokens>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskTokens>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKioskTokensQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskTokens>>> = ({ signal }) => getKioskTokens({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskTokens>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKioskTokensQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskTokens>>>
+export type GetKioskTokensQueryError = ErrorType<unknown>
+
+
+
+export function useGetKioskTokens<TData = Awaited<ReturnType<typeof getKioskTokens>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskTokens>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKioskTokensQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateKioskTokenUrl = () => {
+
+
+
+
+  return `/api/admin/kiosk-tokens`
+}
+
+export const createKioskToken = async (kioskTokenInput: KioskTokenInput, options?: Parameters<typeof customFetch>[1]): Promise<KioskTokenOnce> => {
+
+  return customFetch<KioskTokenOnce>(getCreateKioskTokenUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(kioskTokenInput)
+  }
+);}
+
+
+
+
+
+export const getCreateKioskTokenMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKioskToken>>, TError,{data: BodyType<KioskTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createKioskToken>>, TError,{data: BodyType<KioskTokenInput>}, TContext> => {
+
+const mutationKey = ['createKioskToken'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createKioskToken>>, {data: BodyType<KioskTokenInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createKioskToken(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateKioskTokenMutationResult = NonNullable<Awaited<ReturnType<typeof createKioskToken>>>
+    export type CreateKioskTokenMutationBody = BodyType<KioskTokenInput>
+    export type CreateKioskTokenMutationError = ErrorType<unknown>
+
+    export const useCreateKioskToken = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKioskToken>>, TError,{data: BodyType<KioskTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createKioskToken>>,
+        TError,
+        {data: BodyType<KioskTokenInput>},
+        TContext
+      > => {
+      return useMutation(getCreateKioskTokenMutationOptions(options));
+    }
+
+export const getRenameKioskTokenUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/kiosk-tokens/${id}`
+}
+
+export const renameKioskToken = async (id: number,
+    kioskTokenInput: KioskTokenInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getRenameKioskTokenUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(kioskTokenInput)
+  }
+);}
+
+
+
+
+
+export const getRenameKioskTokenMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameKioskToken>>, TError,{id: number;data: BodyType<KioskTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameKioskToken>>, TError,{id: number;data: BodyType<KioskTokenInput>}, TContext> => {
+
+const mutationKey = ['renameKioskToken'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameKioskToken>>, {id: number;data: BodyType<KioskTokenInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renameKioskToken(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenameKioskTokenMutationResult = NonNullable<Awaited<ReturnType<typeof renameKioskToken>>>
+    export type RenameKioskTokenMutationBody = BodyType<KioskTokenInput>
+    export type RenameKioskTokenMutationError = ErrorType<unknown>
+
+    export const useRenameKioskToken = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameKioskToken>>, TError,{id: number;data: BodyType<KioskTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof renameKioskToken>>,
+        TError,
+        {id: number;data: BodyType<KioskTokenInput>},
+        TContext
+      > => {
+      return useMutation(getRenameKioskTokenMutationOptions(options));
+    }
+
+export const getChangeKioskTokenUrl = (id: number,
+    action: 'revoke' | 'renew',) => {
+
+
+
+
+  return `/api/admin/kiosk-tokens/${id}/${action}`
+}
+
+export const changeKioskToken = async (id: number,
+    action: 'revoke' | 'renew', options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getChangeKioskTokenUrl(id,action),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getChangeKioskTokenMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeKioskToken>>, TError,{id: number;action: 'revoke' | 'renew'}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof changeKioskToken>>, TError,{id: number;action: 'revoke' | 'renew'}, TContext> => {
+
+const mutationKey = ['changeKioskToken'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeKioskToken>>, {id: number;action: 'revoke' | 'renew'}> = (props) => {
+          const {id,action} = props ?? {};
+
+          return  changeKioskToken(id,action,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChangeKioskTokenMutationResult = NonNullable<Awaited<ReturnType<typeof changeKioskToken>>>
+
+    export type ChangeKioskTokenMutationError = ErrorType<unknown>
+
+    export const useChangeKioskToken = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeKioskToken>>, TError,{id: number;action: 'revoke' | 'renew'}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof changeKioskToken>>,
+        TError,
+        {id: number;action: 'revoke' | 'renew'},
+        TContext
+      > => {
+      return useMutation(getChangeKioskTokenMutationOptions(options));
+    }
+
+export const getGetKioskQueueUrl = () => {
+
+
+
+
+  return `/api/public/queue`
+}
+
+export const getKioskQueue = async ( options?: Parameters<typeof customFetch>[1]): Promise<KioskQueueSnapshot> => {
+
+  return customFetch<KioskQueueSnapshot>(getGetKioskQueueUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKioskQueueQueryKey = () => {
+    return [
+    `/api/public/queue`
+    ] as const;
+    }
+
+
+export const getGetKioskQueueQueryOptions = <TData = Awaited<ReturnType<typeof getKioskQueue>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKioskQueueQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskQueue>>> = ({ signal }) => getKioskQueue({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskQueue>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKioskQueueQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskQueue>>>
+export type GetKioskQueueQueryError = ErrorType<unknown>
+
+
+
+export function useGetKioskQueue<TData = Awaited<ReturnType<typeof getKioskQueue>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKioskQueueQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetKioskPlayersUrl = (params?: GetKioskPlayersParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/public/queue/players?${stringifiedParams}` : `/api/public/queue/players`
+}
+
+export const getKioskPlayers = async (params?: GetKioskPlayersParams, options?: Parameters<typeof customFetch>[1]): Promise<KioskPicker> => {
+
+  return customFetch<KioskPicker>(getGetKioskPlayersUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKioskPlayersQueryKey = (params?: GetKioskPlayersParams,) => {
+    return [
+    `/api/public/queue/players`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetKioskPlayersQueryOptions = <TData = Awaited<ReturnType<typeof getKioskPlayers>>, TError = ErrorType<unknown>>(params?: GetKioskPlayersParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPlayers>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKioskPlayersQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskPlayers>>> = ({ signal }) => getKioskPlayers(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskPlayers>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKioskPlayersQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskPlayers>>>
+export type GetKioskPlayersQueryError = ErrorType<unknown>
+
+
+
+export function useGetKioskPlayers<TData = Awaited<ReturnType<typeof getKioskPlayers>>, TError = ErrorType<unknown>>(
+ params?: GetKioskPlayersParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPlayers>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKioskPlayersQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getKioskSignupUrl = () => {
+
+
+
+
+  return `/api/public/queue/signup`
+}
+
+export const kioskSignup = async (queueSignupInput: QueueSignupInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getKioskSignupUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(queueSignupInput)
+  }
+);}
+
+
+
+
+
+export const getKioskSignupMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof kioskSignup>>, TError,{data: BodyType<QueueSignupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof kioskSignup>>, TError,{data: BodyType<QueueSignupInput>}, TContext> => {
+
+const mutationKey = ['kioskSignup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof kioskSignup>>, {data: BodyType<QueueSignupInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  kioskSignup(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type KioskSignupMutationResult = NonNullable<Awaited<ReturnType<typeof kioskSignup>>>
+    export type KioskSignupMutationBody = BodyType<QueueSignupInput>
+    export type KioskSignupMutationError = ErrorType<unknown>
+
+    export const useKioskSignup = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof kioskSignup>>, TError,{data: BodyType<QueueSignupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof kioskSignup>>,
+        TError,
+        {data: BodyType<QueueSignupInput>},
+        TContext
+      > => {
+      return useMutation(getKioskSignupMutationOptions(options));
+    }
+
+export const getKioskCancelUrl = () => {
+
+
+
+
+  return `/api/public/queue/cancel`
+}
+
+export const kioskCancel = async (queueCancelInput: QueueCancelInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getKioskCancelUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(queueCancelInput)
+  }
+);}
+
+
+
+
+
+export const getKioskCancelMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof kioskCancel>>, TError,{data: BodyType<QueueCancelInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof kioskCancel>>, TError,{data: BodyType<QueueCancelInput>}, TContext> => {
+
+const mutationKey = ['kioskCancel'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof kioskCancel>>, {data: BodyType<QueueCancelInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  kioskCancel(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type KioskCancelMutationResult = NonNullable<Awaited<ReturnType<typeof kioskCancel>>>
+    export type KioskCancelMutationBody = BodyType<QueueCancelInput>
+    export type KioskCancelMutationError = ErrorType<unknown>
+
+    export const useKioskCancel = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof kioskCancel>>, TError,{data: BodyType<QueueCancelInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof kioskCancel>>,
+        TError,
+        {data: BodyType<QueueCancelInput>},
+        TContext
+      > => {
+      return useMutation(getKioskCancelMutationOptions(options));
+    }
+
+export const getGetKioskGroupsUrl = () => {
+
+
+
+
+  return `/api/public/groups`
+}
+
+export const getKioskGroups = async ( options?: Parameters<typeof customFetch>[1]): Promise<KioskGroupList> => {
+
+  return customFetch<KioskGroupList>(getGetKioskGroupsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKioskGroupsQueryKey = () => {
+    return [
+    `/api/public/groups`
+    ] as const;
+    }
+
+
+export const getGetKioskGroupsQueryOptions = <TData = Awaited<ReturnType<typeof getKioskGroups>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskGroups>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKioskGroupsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskGroups>>> = ({ signal }) => getKioskGroups({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskGroups>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKioskGroupsQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskGroups>>>
+export type GetKioskGroupsQueryError = ErrorType<unknown>
+
+
+
+export function useGetKioskGroups<TData = Awaited<ReturnType<typeof getKioskGroups>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskGroups>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKioskGroupsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateKioskGroupUrl = () => {
+
+
+
+
+  return `/api/public/groups`
+}
+
+export const createKioskGroup = async (queueGroupInput: QueueGroupInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getCreateKioskGroupUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(queueGroupInput)
+  }
+);}
+
+
+
+
+
+export const getCreateKioskGroupMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKioskGroup>>, TError,{data: BodyType<QueueGroupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createKioskGroup>>, TError,{data: BodyType<QueueGroupInput>}, TContext> => {
+
+const mutationKey = ['createKioskGroup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createKioskGroup>>, {data: BodyType<QueueGroupInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createKioskGroup(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateKioskGroupMutationResult = NonNullable<Awaited<ReturnType<typeof createKioskGroup>>>
+    export type CreateKioskGroupMutationBody = BodyType<QueueGroupInput>
+    export type CreateKioskGroupMutationError = ErrorType<unknown>
+
+    export const useCreateKioskGroup = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKioskGroup>>, TError,{data: BodyType<QueueGroupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createKioskGroup>>,
+        TError,
+        {data: BodyType<QueueGroupInput>},
+        TContext
+      > => {
+      return useMutation(getCreateKioskGroupMutationOptions(options));
+    }
+
+export const getUpdateKioskGroupUrl = (id: number,) => {
+
+
+
+
+  return `/api/public/groups/${id}`
+}
+
+export const updateKioskGroup = async (id: number,
+    queueGroupInput: QueueGroupInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getUpdateKioskGroupUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(queueGroupInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateKioskGroupMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateKioskGroup>>, TError,{id: number;data: BodyType<QueueGroupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateKioskGroup>>, TError,{id: number;data: BodyType<QueueGroupInput>}, TContext> => {
+
+const mutationKey = ['updateKioskGroup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateKioskGroup>>, {id: number;data: BodyType<QueueGroupInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateKioskGroup(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateKioskGroupMutationResult = NonNullable<Awaited<ReturnType<typeof updateKioskGroup>>>
+    export type UpdateKioskGroupMutationBody = BodyType<QueueGroupInput>
+    export type UpdateKioskGroupMutationError = ErrorType<unknown>
+
+    export const useUpdateKioskGroup = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateKioskGroup>>, TError,{id: number;data: BodyType<QueueGroupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateKioskGroup>>,
+        TError,
+        {id: number;data: BodyType<QueueGroupInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateKioskGroupMutationOptions(options));
+    }
+
+export const getDeleteKioskGroupUrl = (id: number,) => {
+
+
+
+
+  return `/api/public/groups/${id}`
+}
+
+export const deleteKioskGroup = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getDeleteKioskGroupUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteKioskGroupMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteKioskGroup>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteKioskGroup>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteKioskGroup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteKioskGroup>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteKioskGroup(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteKioskGroupMutationResult = NonNullable<Awaited<ReturnType<typeof deleteKioskGroup>>>
+
+    export type DeleteKioskGroupMutationError = ErrorType<unknown>
+
+    export const useDeleteKioskGroup = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteKioskGroup>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteKioskGroup>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteKioskGroupMutationOptions(options));
+    }
+
+export const getKioskGroupSignupUrl = (id: number,) => {
+
+
+
+
+  return `/api/public/groups/${id}/signup`
+}
+
+export const kioskGroupSignup = async (id: number,
+    queueSignupInput: QueueSignupInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getKioskGroupSignupUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(queueSignupInput)
+  }
+);}
+
+
+
+
+
+export const getKioskGroupSignupMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof kioskGroupSignup>>, TError,{id: number;data: BodyType<QueueSignupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof kioskGroupSignup>>, TError,{id: number;data: BodyType<QueueSignupInput>}, TContext> => {
+
+const mutationKey = ['kioskGroupSignup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof kioskGroupSignup>>, {id: number;data: BodyType<QueueSignupInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  kioskGroupSignup(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type KioskGroupSignupMutationResult = NonNullable<Awaited<ReturnType<typeof kioskGroupSignup>>>
+    export type KioskGroupSignupMutationBody = BodyType<QueueSignupInput>
+    export type KioskGroupSignupMutationError = ErrorType<unknown>
+
+    export const useKioskGroupSignup = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof kioskGroupSignup>>, TError,{id: number;data: BodyType<QueueSignupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof kioskGroupSignup>>,
+        TError,
+        {id: number;data: BodyType<QueueSignupInput>},
+        TContext
+      > => {
+      return useMutation(getKioskGroupSignupMutationOptions(options));
+    }
+
+export const getGetKioskPrintDaysUrl = (id: number,) => {
+
+
+
+
+  return `/api/public/player/${id}/days`
+}
+
+export const getKioskPrintDays = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<KioskPrintDays> => {
+
+  return customFetch<KioskPrintDays>(getGetKioskPrintDaysUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKioskPrintDaysQueryKey = (id: number,) => {
+    return [
+    `/api/public/player/${id}/days`
+    ] as const;
+    }
+
+
+export const getGetKioskPrintDaysQueryOptions = <TData = Awaited<ReturnType<typeof getKioskPrintDays>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPrintDays>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKioskPrintDaysQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskPrintDays>>> = ({ signal }) => getKioskPrintDays(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskPrintDays>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKioskPrintDaysQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskPrintDays>>>
+export type GetKioskPrintDaysQueryError = ErrorType<unknown>
+
+
+
+export function useGetKioskPrintDays<TData = Awaited<ReturnType<typeof getKioskPrintDays>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPrintDays>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKioskPrintDaysQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetKioskPrintUrl = (id: number,
+    params: GetKioskPrintParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/public/player/${id}/print?${stringifiedParams}` : `/api/public/player/${id}/print`
+}
+
+export const getKioskPrint = async (id: number,
+    params: GetKioskPrintParams, options?: Parameters<typeof customFetch>[1]): Promise<KioskPrintData> => {
+
+  return customFetch<KioskPrintData>(getGetKioskPrintUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKioskPrintQueryKey = (id: number,
+    params?: GetKioskPrintParams,) => {
+    return [
+    `/api/public/player/${id}/print`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetKioskPrintQueryOptions = <TData = Awaited<ReturnType<typeof getKioskPrint>>, TError = ErrorType<unknown>>(id: number,
+    params: GetKioskPrintParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPrint>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKioskPrintQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskPrint>>> = ({ signal }) => getKioskPrint(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskPrint>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKioskPrintQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskPrint>>>
+export type GetKioskPrintQueryError = ErrorType<unknown>
+
+
+
+export function useGetKioskPrint<TData = Awaited<ReturnType<typeof getKioskPrint>>, TError = ErrorType<unknown>>(
+ id: number,
+    params: GetKioskPrintParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPrint>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKioskPrintQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetKioskRankingUrl = () => {
+
+
+
+
+  return `/api/public/ranking`
+}
+
+export const getKioskRanking = async ( options?: Parameters<typeof customFetch>[1]): Promise<KioskRanking> => {
+
+  return customFetch<KioskRanking>(getGetKioskRankingUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKioskRankingQueryKey = () => {
+    return [
+    `/api/public/ranking`
+    ] as const;
+    }
+
+
+export const getGetKioskRankingQueryOptions = <TData = Awaited<ReturnType<typeof getKioskRanking>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskRanking>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKioskRankingQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskRanking>>> = ({ signal }) => getKioskRanking({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskRanking>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKioskRankingQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskRanking>>>
+export type GetKioskRankingQueryError = ErrorType<unknown>
+
+
+
+export function useGetKioskRanking<TData = Awaited<ReturnType<typeof getKioskRanking>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskRanking>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKioskRankingQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetKioskLiveGameUrl = () => {
+
+
+
+
+  return `/api/public/live-game`
+}
+
+export const getKioskLiveGame = async ( options?: Parameters<typeof customFetch>[1]): Promise<KioskLiveGame | null> => {
+
+  return customFetch<KioskLiveGame | null>(getGetKioskLiveGameUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKioskLiveGameQueryKey = () => {
+    return [
+    `/api/public/live-game`
+    ] as const;
+    }
+
+
+export const getGetKioskLiveGameQueryOptions = <TData = Awaited<ReturnType<typeof getKioskLiveGame>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskLiveGame>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKioskLiveGameQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskLiveGame>>> = ({ signal }) => getKioskLiveGame({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskLiveGame>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKioskLiveGameQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskLiveGame>>>
+export type GetKioskLiveGameQueryError = ErrorType<unknown>
+
+
+
+export function useGetKioskLiveGame<TData = Awaited<ReturnType<typeof getKioskLiveGame>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskLiveGame>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKioskLiveGameQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetTerminalQueueUrl = (params?: GetTerminalQueueParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/queue?${stringifiedParams}` : `/api/sync/queue`
+}
+
+export const getTerminalQueue = async (params?: GetTerminalQueueParams, options?: Parameters<typeof customFetch>[1]): Promise<KioskQueueSnapshot> => {
+
+  return customFetch<KioskQueueSnapshot>(getGetTerminalQueueUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTerminalQueueQueryKey = (params?: GetTerminalQueueParams,) => {
+    return [
+    `/api/sync/queue`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTerminalQueueQueryOptions = <TData = Awaited<ReturnType<typeof getTerminalQueue>>, TError = ErrorType<unknown>>(params?: GetTerminalQueueParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTerminalQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTerminalQueueQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTerminalQueue>>> = ({ signal }) => getTerminalQueue(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTerminalQueue>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTerminalQueueQueryResult = NonNullable<Awaited<ReturnType<typeof getTerminalQueue>>>
+export type GetTerminalQueueQueryError = ErrorType<unknown>
+
+
+
+export function useGetTerminalQueue<TData = Awaited<ReturnType<typeof getTerminalQueue>>, TError = ErrorType<unknown>>(
+ params?: GetTerminalQueueParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTerminalQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTerminalQueueQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getTerminalQueueCommandUrl = (action: 'take' | 'release' | 'started',) => {
+
+
+
+
+  return `/api/sync/queue/${action}`
+}
+
+export const terminalQueueCommand = async (action: 'take' | 'release' | 'started',
+    queueCommandInput: QueueCommandInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getTerminalQueueCommandUrl(action),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(queueCommandInput)
+  }
+);}
+
+
+
+
+
+export const getTerminalQueueCommandMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof terminalQueueCommand>>, TError,{action: 'take' | 'release' | 'started';data: BodyType<QueueCommandInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof terminalQueueCommand>>, TError,{action: 'take' | 'release' | 'started';data: BodyType<QueueCommandInput>}, TContext> => {
+
+const mutationKey = ['terminalQueueCommand'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof terminalQueueCommand>>, {action: 'take' | 'release' | 'started';data: BodyType<QueueCommandInput>}> = (props) => {
+          const {action,data} = props ?? {};
+
+          return  terminalQueueCommand(action,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TerminalQueueCommandMutationResult = NonNullable<Awaited<ReturnType<typeof terminalQueueCommand>>>
+    export type TerminalQueueCommandMutationBody = BodyType<QueueCommandInput>
+    export type TerminalQueueCommandMutationError = ErrorType<unknown>
+
+    export const useTerminalQueueCommand = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof terminalQueueCommand>>, TError,{action: 'take' | 'release' | 'started';data: BodyType<QueueCommandInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof terminalQueueCommand>>,
+        TError,
+        {action: 'take' | 'release' | 'started';data: BodyType<QueueCommandInput>},
+        TContext
+      > => {
+      return useMutation(getTerminalQueueCommandMutationOptions(options));
+    }
+
+export const getTerminalLiveSnapshotUrl = () => {
+
+
+
+
+  return `/api/sync/live`
+}
+
+export const terminalLiveSnapshot = async (liveSnapshotInput: LiveSnapshotInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getTerminalLiveSnapshotUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(liveSnapshotInput)
+  }
+);}
+
+
+
+
+
+export const getTerminalLiveSnapshotMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof terminalLiveSnapshot>>, TError,{data: BodyType<LiveSnapshotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof terminalLiveSnapshot>>, TError,{data: BodyType<LiveSnapshotInput>}, TContext> => {
+
+const mutationKey = ['terminalLiveSnapshot'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof terminalLiveSnapshot>>, {data: BodyType<LiveSnapshotInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  terminalLiveSnapshot(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TerminalLiveSnapshotMutationResult = NonNullable<Awaited<ReturnType<typeof terminalLiveSnapshot>>>
+    export type TerminalLiveSnapshotMutationBody = BodyType<LiveSnapshotInput>
+    export type TerminalLiveSnapshotMutationError = ErrorType<unknown>
+
+    export const useTerminalLiveSnapshot = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof terminalLiveSnapshot>>, TError,{data: BodyType<LiveSnapshotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof terminalLiveSnapshot>>,
+        TError,
+        {data: BodyType<LiveSnapshotInput>},
+        TContext
+      > => {
+      return useMutation(getTerminalLiveSnapshotMutationOptions(options));
+    }
+
+export const getGetManagedGamesUrl = (params?: GetManagedGamesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/spiele?${stringifiedParams}` : `/api/admin/spiele`
+}
+
+export const getManagedGames = async (params?: GetManagedGamesParams, options?: Parameters<typeof customFetch>[1]): Promise<ManagedGameList> => {
+
+  return customFetch<ManagedGameList>(getGetManagedGamesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetManagedGamesQueryKey = (params?: GetManagedGamesParams,) => {
+    return [
+    `/api/admin/spiele`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetManagedGamesQueryOptions = <TData = Awaited<ReturnType<typeof getManagedGames>>, TError = ErrorType<unknown>>(params?: GetManagedGamesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getManagedGames>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetManagedGamesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getManagedGames>>> = ({ signal }) => getManagedGames(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getManagedGames>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetManagedGamesQueryResult = NonNullable<Awaited<ReturnType<typeof getManagedGames>>>
+export type GetManagedGamesQueryError = ErrorType<unknown>
+
+
+
+export function useGetManagedGames<TData = Awaited<ReturnType<typeof getManagedGames>>, TError = ErrorType<unknown>>(
+ params?: GetManagedGamesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getManagedGames>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetManagedGamesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetManagedGameUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/spiele/${id}`
+}
+
+export const getManagedGame = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<ManagedGameDetail> => {
+
+  return customFetch<ManagedGameDetail>(getGetManagedGameUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetManagedGameQueryKey = (id: number,) => {
+    return [
+    `/api/admin/spiele/${id}`
+    ] as const;
+    }
+
+
+export const getGetManagedGameQueryOptions = <TData = Awaited<ReturnType<typeof getManagedGame>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getManagedGame>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetManagedGameQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getManagedGame>>> = ({ signal }) => getManagedGame(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getManagedGame>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetManagedGameQueryResult = NonNullable<Awaited<ReturnType<typeof getManagedGame>>>
+export type GetManagedGameQueryError = ErrorType<unknown>
+
+
+
+export function useGetManagedGame<TData = Awaited<ReturnType<typeof getManagedGame>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getManagedGame>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetManagedGameQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getChangeManagedGameUrl = (id: number,
+    action: 'hide' | 'unhide',) => {
+
+
+
+
+  return `/api/admin/spiele/${id}/${action}`
+}
+
+export const changeManagedGame = async (id: number,
+    action: 'hide' | 'unhide', options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getChangeManagedGameUrl(id,action),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getChangeManagedGameMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeManagedGame>>, TError,{id: number;action: 'hide' | 'unhide'}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof changeManagedGame>>, TError,{id: number;action: 'hide' | 'unhide'}, TContext> => {
+
+const mutationKey = ['changeManagedGame'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeManagedGame>>, {id: number;action: 'hide' | 'unhide'}> = (props) => {
+          const {id,action} = props ?? {};
+
+          return  changeManagedGame(id,action,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChangeManagedGameMutationResult = NonNullable<Awaited<ReturnType<typeof changeManagedGame>>>
+
+    export type ChangeManagedGameMutationError = ErrorType<unknown>
+
+    export const useChangeManagedGame = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeManagedGame>>, TError,{id: number;action: 'hide' | 'unhide'}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof changeManagedGame>>,
+        TError,
+        {id: number;action: 'hide' | 'unhide'},
+        TContext
+      > => {
+      return useMutation(getChangeManagedGameMutationOptions(options));
+    }
+
+export const getChangeManagedPlayerUrl = (id: number,
+    spielerId: number,
+    action: 'hide' | 'unhide',) => {
+
+
+
+
+  return `/api/admin/spiele/${id}/spieler/${spielerId}/${action}`
+}
+
+export const changeManagedPlayer = async (id: number,
+    spielerId: number,
+    action: 'hide' | 'unhide', options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getChangeManagedPlayerUrl(id,spielerId,action),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getChangeManagedPlayerMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeManagedPlayer>>, TError,{id: number;spielerId: number;action: 'hide' | 'unhide'}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof changeManagedPlayer>>, TError,{id: number;spielerId: number;action: 'hide' | 'unhide'}, TContext> => {
+
+const mutationKey = ['changeManagedPlayer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeManagedPlayer>>, {id: number;spielerId: number;action: 'hide' | 'unhide'}> = (props) => {
+          const {id,spielerId,action} = props ?? {};
+
+          return  changeManagedPlayer(id,spielerId,action,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChangeManagedPlayerMutationResult = NonNullable<Awaited<ReturnType<typeof changeManagedPlayer>>>
+
+    export type ChangeManagedPlayerMutationError = ErrorType<unknown>
+
+    export const useChangeManagedPlayer = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeManagedPlayer>>, TError,{id: number;spielerId: number;action: 'hide' | 'unhide'}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof changeManagedPlayer>>,
+        TError,
+        {id: number;spielerId: number;action: 'hide' | 'unhide'},
+        TContext
+      > => {
+      return useMutation(getChangeManagedPlayerMutationOptions(options));
+    }
+
+export const getEditManagedShotUrl = (id: number,
+    ergebnisId: number,) => {
+
+
+
+
+  return `/api/admin/spiele/${id}/ergebnisse/${ergebnisId}`
+}
+
+export const editManagedShot = async (id: number,
+    ergebnisId: number,
+    gameShotInput: GameShotInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+
+  return customFetch<PortalData>(getEditManagedShotUrl(id,ergebnisId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(gameShotInput)
+  }
+);}
+
+
+
+
+
+export const getEditManagedShotMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof editManagedShot>>, TError,{id: number;ergebnisId: number;data: BodyType<GameShotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof editManagedShot>>, TError,{id: number;ergebnisId: number;data: BodyType<GameShotInput>}, TContext> => {
+
+const mutationKey = ['editManagedShot'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof editManagedShot>>, {id: number;ergebnisId: number;data: BodyType<GameShotInput>}> = (props) => {
+          const {id,ergebnisId,data} = props ?? {};
+
+          return  editManagedShot(id,ergebnisId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EditManagedShotMutationResult = NonNullable<Awaited<ReturnType<typeof editManagedShot>>>
+    export type EditManagedShotMutationBody = BodyType<GameShotInput>
+    export type EditManagedShotMutationError = ErrorType<unknown>
+
+    export const useEditManagedShot = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof editManagedShot>>, TError,{id: number;ergebnisId: number;data: BodyType<GameShotInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof editManagedShot>>,
+        TError,
+        {id: number;ergebnisId: number;data: BodyType<GameShotInput>},
+        TContext
+      > => {
+      return useMutation(getEditManagedShotMutationOptions(options));
+    }
 

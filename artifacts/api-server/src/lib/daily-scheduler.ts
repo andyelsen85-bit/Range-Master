@@ -6,6 +6,7 @@ import { localDay, shiftDay } from "./local-day";
 import { pruneBackups } from "./backup-retention";
 import { logger } from "./logger";
 import { pruneTerminalLogs } from "./terminal-logs";
+import { pruneQueue } from "./queue";
 
 type Delivery = { send: typeof sendMail; portalUrl: () => Promise<string | null> };
 const smtpDelivery: Delivery = { send: sendMail, portalUrl: async () => {
@@ -65,6 +66,7 @@ export async function dailyTick() {
   running = true;
   try {
     const today = localDay();
+    await pruneQueue();
     if (retainedDay !== today) { const removed = await pruneBackups(today); await pruneTerminalLogs(); logger.info({ removed }, "Daily backup retention"); retainedDay = today; }
     const [settings] = (await db.execute(sql`SELECT enabled FROM daily_report_settings WHERE id=1`)).rows as { enabled: boolean }[];
     if (!settings?.enabled) return;

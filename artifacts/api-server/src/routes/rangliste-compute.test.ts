@@ -175,7 +175,7 @@ describe("computeRangliste", () => {
     assert.equal(entry.gesamtPunkte, 70);
     assert.equal(entry.anzahlSpiele, 2);
     assert.equal(entry.durchschnittProzent, 76.1);
-    assert.equal(entry.bestPunkte, 54);
+    assert.equal(entry.bestPunkte, 16); // 80% beats 54/72 (75%) across modes
   });
 
   it("handles multiple Teilnahme rows (Läufe) per game for mixed-format player", () => {
@@ -197,7 +197,7 @@ describe("computeRangliste", () => {
 
     assert.equal(entry.gesamtPunkte, 73);
     assert.equal(entry.anzahlSpiele, 2);
-    assert.equal(entry.bestPunkte, 56);
+    assert.equal(entry.bestPunkte, 17); // 85% beats 56/72 across modes
     const expected = Math.round((73 / 92) * 1000) / 10;
     assert.equal(entry.durchschnittProzent, expected);
   });

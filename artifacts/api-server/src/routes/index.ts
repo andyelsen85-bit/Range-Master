@@ -8,10 +8,16 @@ import syncRouter from "./sync";
 import adminRouter from "./admin";
 import gamedayRouter from "./gameday";
 import terminalLogsRouter from "./terminal-logs";
+import { requireKiosk } from "../lib/kiosk";
+import kioskQueueRouter from "./kiosk-queue";
+import managedGamesRouter from "./managed-games";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/public",requireKiosk);
+router.use(kioskQueueRouter);
+router.use(managedGamesRouter);
 router.use(gamedayRouter);
 router.use(terminalLogsRouter);
 router.use("/auth", authRouter);

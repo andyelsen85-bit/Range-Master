@@ -17,6 +17,7 @@
 
 #include "ui_manager.h"
 #include "game_store.h"
+#include "screen_queue.h"
 
 #include "screen_dashboard.h"
 #include "screen_start.h"
@@ -440,6 +441,7 @@ void ui_manager_tick(void)
     if (g_store.screen != s_current) {
         ui_manager_show(g_store.screen);
     }
+    screen_queue_tick();
     // Let the active screen update live data
     switch (s_current) {
         case SCREEN_SPIEL:      screen_spiel_tick();      break;

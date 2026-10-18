@@ -27,7 +27,7 @@ app.use(
 );
 // The unauthenticated TV feed is same-origin only, including OPTIONS.
 app.use((req,res,next)=>{
-  if (/^(?:\/api)?\/public\/last-game\/?$/.test(req.path)) { next(); return; }
+  if (/^(?:\/api)?\/public(?:\/|$)/.test(req.path)) { next(); return; }
   cors()(req,res,next);
 });
 app.use(express.json({ limit: "256kb" }));

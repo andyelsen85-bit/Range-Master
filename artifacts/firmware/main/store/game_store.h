@@ -390,6 +390,8 @@ typedef struct {
     Ergebnis ergebnisse[MAX_ERGEBNISSE];
     int      ergebnisseCount;
     char     spielId[40];
+    uint64_t liveSequence; // durable scalar only; never persist a live snapshot
+    int64_t  liveStartedAt;
     bool     currentFireSent; // one physical gateway request per launch unit
     int      activeAcknowledgedClays;
     // Exact USE events charged when this game started. They let a canceled

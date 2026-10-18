@@ -26,6 +26,10 @@ struct {int taubeIndex=0,sequenzLen=2,ergebnisseCount=0,spielerCount=1,screen=SC
 } g_store;
 template<class Store> static const SequenzEintrag *store_sequence_entry(const Store *s,int,int c){return &s->sequenz[c];}
 void game_store_save(){}
+void portal_live_changed(int){}
+bool portal_queue_game_started(){return true;}
+bool portal_queue_release(){return true;}
+bool portal_queue_busy(){return false;}
 static bool busy=false,queueOk=true;static unsigned launches=0,scores=0,repeats=0,skips=0,refreshes=0,clicks=0;
 bool lora_request_busy(){return busy;}
 bool lora_fire_machine_game(int){if(queueOk) ++launches;return queueOk;}

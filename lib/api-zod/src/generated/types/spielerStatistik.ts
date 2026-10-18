@@ -5,9 +5,15 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+import type { SpielerStatistikBreakdownItem } from './spielerStatistikBreakdownItem';
 import type { SpielerStatistikMaschinen } from './spielerStatistikMaschinen';
+import type { SpielerStatistikTauben } from './spielerStatistikTauben';
 
 export interface SpielerStatistik {
+  breakdown?: SpielerStatistikBreakdownItem[];
+  gesamtSchuesse: number;
+  gesamtTreffer: number;
+  tauben: SpielerStatistikTauben;
   spielerId: number;
   gesamtSpiele: number;
   durchschnitt: number;

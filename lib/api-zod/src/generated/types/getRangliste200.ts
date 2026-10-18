@@ -9,4 +9,6 @@ import type { RanglisteEntry } from './ranglisteEntry';
 
 export type GetRangliste200 = {
   rangliste: RanglisteEntry[];
+  years?: number[];
+  ownRow?: RanglisteEntry | null;
 };

@@ -197,6 +197,8 @@ paths:
       tags: [rangliste]
       summary: Get leaderboard
       parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 15, maximum: 100 } }
+        - { name: sort, in: query, schema: { type: string, enum: [best, prozent, punkte, spiele], default: best } }
         - name: modus
           in: query
           schema:
@@ -217,6 +219,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/RanglisteEntry"
+                  years: { type: array, items: { type: integer } }
+                  ownRow: { anyOf: [{ $ref: "#/components/schemas/RanglisteEntry" }, { type: "null" }] }
                 required: [rangliste]
 
   # ── STATISTIK ─────────────────────────────────────────────────────────────
@@ -751,6 +755,7 @@ paths:
   /public/last-game:
     get:
       operationId: getPublicLastGame
+      security: [{ KioskToken: [] }]
       responses:
         "200": { description: Most recently completed scorecard or null, content: { application/json: { schema: { $ref: "#/components/schemas/SharedScorecard" } } } }
         "404": { description: Public page disabled }
@@ -762,8 +767,185 @@ paths:
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
         "200": { description: Stored ledger scorecard, content: { application/json: { schema: { $ref: "#/components/schemas/SharedScorecard" } } } }
+  /admin/kiosk-tokens:
+    get:
+      operationId: getKioskTokens
+      responses:
+        "200": { description: Kiosk token metadata only, content: { application/json: { schema: { $ref: "#/components/schemas/KioskTokenList" } } } }
+    post:
+      operationId: createKioskToken
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KioskTokenInput" } } } }
+      responses:
+        "201": { description: Token shown once, content: { application/json: { schema: { $ref: "#/components/schemas/KioskTokenOnce" } } } }
+  /admin/kiosk-tokens/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    patch:
+      operationId: renameKioskToken
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KioskTokenInput" } } } }
+      responses:
+        "200": { description: Renamed, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /admin/kiosk-tokens/{id}/{action}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+      - { name: action, in: path, required: true, schema: { type: string, enum: [revoke, renew] } }
+    post:
+      operationId: changeKioskToken
+      responses:
+        "200": { description: Revoked or renewed, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /public/queue:
+    get:
+      operationId: getKioskQueue
+      security: [{ KioskToken: [] }]
+      responses:
+        "200": { description: Queue and kiosk settings, content: { application/json: { schema: { $ref: "#/components/schemas/KioskQueueSnapshot" } } } }
+  /public/queue/players:
+    get:
+      operationId: getKioskPlayers
+      security: [{ KioskToken: [] }]
+      parameters: [{ name: q, in: query, schema: { type: string } }]
+      responses:
+        "200": { description: Minimal active player picker, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPicker" } } } }
+  /public/queue/signup:
+    post:
+      operationId: kioskSignup
+      security: [{ KioskToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueSignupInput" } } } }
+      responses:
+        "201": { description: Signed up atomically, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /public/queue/cancel:
+    post:
+      operationId: kioskCancel
+      security: [{ KioskToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueCancelInput" } } } }
+      responses:
+        "200": { description: Cancelled, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /public/groups:
+    get:
+      operationId: getKioskGroups
+      security: [{ KioskToken: [] }]
+      responses:
+        "200": { description: Persistent groups, content: { application/json: { schema: { $ref: "#/components/schemas/KioskGroupList" } } } }
+    post:
+      operationId: createKioskGroup
+      security: [{ KioskToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueGroupInput" } } } }
+      responses:
+        "200": { description: Saved group, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /public/groups/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    put:
+      operationId: updateKioskGroup
+      security: [{ KioskToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueGroupInput" } } } }
+      responses:
+        "200": { description: Updated group, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+    delete:
+      operationId: deleteKioskGroup
+      security: [{ KioskToken: [] }]
+      responses:
+        "200": { description: Soft deleted group, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /public/groups/{id}/signup:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    post:
+      operationId: kioskGroupSignup
+      security: [{ KioskToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueSignupInput" } } } }
+      responses:
+        "200": { description: Entire group signed up, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /public/player/{id}/days:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    get:
+      operationId: getKioskPrintDays
+      security: [{ KioskToken: [] }]
+      responses:
+        "200": { description: All visible result days, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPrintDays" } } } }
+  /public/player/{id}/print:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    get:
+      operationId: getKioskPrint
+      security: [{ KioskToken: [] }]
+      parameters: [{ name: tag, in: query, required: true, schema: { type: string, format: date } }]
+      responses:
+        "200": { description: Anonymised cards and shared day statistics, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPrintData" } } } }
+  /public/ranking:
+    get:
+      operationId: getKioskRanking
+      security: [{ KioskToken: [] }]
+      responses:
+        "200": { description: Visible best-game top fifteen, content: { application/json: { schema: { $ref: "#/components/schemas/KioskRanking" } } } }
+  /public/live-game:
+    get:
+      operationId: getKioskLiveGame
+      security: [{ KioskToken: [] }]
+      responses:
+        "200": { description: Most recent running snapshot or null, content: { application/json: { schema: { anyOf: [{ $ref: "#/components/schemas/KioskLiveGame" }, { type: "null" }] } } } }
+  /sync/queue:
+    get:
+      operationId: getTerminalQueue
+      parameters: [{ name: terminalId, in: query, schema: { type: string, maxLength: 100 }, description: Include this terminal's own locked reservation for recovery }]
+      responses:
+        "200": { description: Full-name terminal queue snapshot, content: { application/json: { schema: { $ref: "#/components/schemas/KioskQueueSnapshot" } } } }
+  /sync/queue/{action}:
+    parameters: [{ name: action, in: path, required: true, schema: { type: string, enum: [take, release, started] } }]
+    post:
+      operationId: terminalQueueCommand
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueCommandInput" } } } }
+      responses:
+        "200": { description: Idempotent queue lifecycle event, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /sync/live:
+    post:
+      operationId: terminalLiveSnapshot
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LiveSnapshotInput" } } } }
+      responses:
+        "200": { description: Monotonic full snapshot accepted or ignored, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /admin/spiele:
+    get:
+      operationId: getManagedGames
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: modus, in: query, schema: { type: string } }
+        - { name: spielerId, in: query, schema: { type: integer } }
+        - { name: hidden, in: query, schema: { type: string, enum: [all, yes, no] } }
+        - { name: q, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Paged operational game list for administrators, content: { application/json: { schema: { $ref: "#/components/schemas/ManagedGameList" } } } }
+  /admin/spiele/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    get:
+      operationId: getManagedGame
+      responses:
+        "200": { description: "Full scorecard, players, shots and audit", content: { application/json: { schema: { $ref: "#/components/schemas/ManagedGameDetail" } } } }
+  /admin/spiele/{id}/{action}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+      - { name: action, in: path, required: true, schema: { type: string, enum: [hide, unhide] } }
+    post:
+      operationId: changeManagedGame
+      responses:
+        "200": { description: Audited visibility change, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /admin/spiele/{id}/spieler/{spielerId}/{action}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+      - { name: spielerId, in: path, required: true, schema: { type: integer } }
+      - { name: action, in: path, required: true, schema: { type: string, enum: [hide, unhide] } }
+    post:
+      operationId: changeManagedPlayer
+      responses:
+        "200": { description: Audited participation visibility change, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /admin/spiele/{id}/ergebnisse/{ergebnisId}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+      - { name: ergebnisId, in: path, required: true, schema: { type: integer } }
+    patch:
+      operationId: editManagedShot
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/GameShotInput" } } } }
+      responses:
+        "200": { description: Corrected points and audited before/after, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
 components:
   securitySchemes:
+    KioskToken: { type: apiKey, in: header, name: X-Kiosk-Token }
     bearerAuth:
       type: http
       scheme: bearer
@@ -774,6 +956,258 @@ components:
       name: x-api-key
 
   schemas:
+    PortalData:
+      type: object
+      additionalProperties: true
+    ManagedGameRow:
+      type: object
+      required: [id, datum, modus, lauf]
+      properties:
+        id: { type: integer }
+        external_id: { type: string, nullable: true }
+        datum: { type: string, format: date-time }
+        modus: { type: string }
+        lauf: { type: integer }
+        tauben_pro_lauf: { type: integer }
+        abgeschlossen: { type: boolean }
+        completed_at: { type: string, nullable: true }
+        hidden_at: { type: string, nullable: true }
+        edited_at: { type: string, nullable: true }
+        playerCount: { type: integer }
+    ManagedGameList:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ManagedGameRow" } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    ManagedGameShot:
+      type: object
+      required: [id, spieler_id, lauf, taube, maschine, posten, schuss1, schuss2, punkte, wiederholt]
+      properties:
+        id: { type: integer }
+        spieler_id: { type: integer }
+        lauf: { type: integer }
+        taube: { type: integer }
+        maschine: { type: string }
+        posten: { type: integer }
+        schuss1: { type: boolean }
+        schuss2: { type: boolean }
+        punkte: { type: integer }
+        wiederholt: { type: boolean }
+    ManagedGameAudit:
+      type: object
+      required: [id, at, action]
+      properties:
+        id: { type: integer }
+        at: { type: string, format: date-time }
+        admin_user_id: { type: integer, nullable: true }
+        action: { type: string }
+        spieler_id: { type: integer, nullable: true }
+        before: { type: object, additionalProperties: true, nullable: true }
+        after: { type: object, additionalProperties: true, nullable: true }
+    ManagedGameDetail:
+      type: object
+      required: [game, scorecard, players, shots, audit]
+      properties:
+        game: { $ref: "#/components/schemas/ManagedGameRow" }
+        scorecard: { allOf: [{ $ref: "#/components/schemas/SharedScorecard" }], nullable: true }
+        players:
+          type: array
+          items:
+            type: object
+            required: [id, name, hidden]
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              hidden: { type: boolean }
+        shots: { type: array, items: { $ref: "#/components/schemas/ManagedGameShot" } }
+        audit: { type: array, items: { $ref: "#/components/schemas/ManagedGameAudit" } }
+    KioskQueuePlayer:
+      type: object
+      required: [entryId, spielerId, name, groupId]
+      properties:
+        entryId: { type: integer }
+        spielerId: { type: integer }
+        name: { type: string }
+        groupId: { type: integer, nullable: true }
+    KioskQueueGame:
+      type: object
+      required: [queueGameId, position, modus, status, players, free]
+      properties:
+        queueGameId: { type: integer }
+        position: { type: integer }
+        modus: { type: string }
+        status: { type: string, enum: [OPEN, LOCKED] }
+        players: { type: array, items: { $ref: "#/components/schemas/KioskQueuePlayer" } }
+        free: { type: integer }
+    KioskQueueSettings:
+      type: object
+      required: [queueEnabled, groupsEnabled, showRanking, maxQueueGames, enabledModes]
+      properties:
+        queueEnabled: { type: boolean }
+        groupsEnabled: { type: boolean }
+        showRanking: { type: boolean }
+        maxQueueGames: { type: integer }
+        enabledModes: { type: array, items: { type: string } }
+    KioskQueueSnapshot:
+      type: object
+      required: [version, games, settings]
+      properties:
+        version: { type: string }
+        games: { type: array, items: { $ref: "#/components/schemas/KioskQueueGame" } }
+        settings: { $ref: "#/components/schemas/KioskQueueSettings" }
+    KioskPickerPlayer:
+      type: object
+      required: [id, displayName, activeSignup, running]
+      properties:
+        id: { type: integer }
+        displayName: { type: string }
+        activeSignup: { type: boolean }
+        running: { type: boolean }
+    KioskPicker:
+      type: object
+      required: [players]
+      properties:
+        players: { type: array, items: { $ref: "#/components/schemas/KioskPickerPlayer" } }
+    KioskGroupMember:
+      type: object
+      required: [id, displayName]
+      properties:
+        id: { type: integer }
+        displayName: { type: string }
+    KioskGroup:
+      type: object
+      required: [id, name, members]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        members: { type: array, items: { $ref: "#/components/schemas/KioskGroupMember" } }
+    KioskGroupList:
+      type: object
+      required: [groups]
+      properties:
+        groups: { type: array, items: { $ref: "#/components/schemas/KioskGroup" } }
+    KioskTokenMetadata:
+      type: object
+      required: [id, name, createdAt, lastUsedAt, lastUsedIpHash, revokedAt]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+        lastUsedIpHash: { type: string, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+    KioskTokenList:
+      type: object
+      required: [tokens]
+      properties:
+        tokens: { type: array, items: { $ref: "#/components/schemas/KioskTokenMetadata" } }
+    KioskTokenOnce:
+      type: object
+      required: [id, token, url]
+      properties:
+        id: { type: integer }
+        token: { type: string, minLength: 43, maxLength: 43 }
+        url: { type: string }
+    KioskPrintDays:
+      type: object
+      required: [days]
+      properties:
+        days: { type: array, items: { type: string, format: date } }
+    KioskPrintData:
+      type: object
+      required: [name, tag, club, games, stats]
+      properties:
+        name: { type: string }
+        tag: { type: string, format: date }
+        club: { type: string }
+        games: { type: array, items: { $ref: "#/components/schemas/SharedScorecard" } }
+        stats: { $ref: "#/components/schemas/SpielerStatistik" }
+    KioskRanking:
+      type: object
+      required: [rangliste]
+      properties:
+        rangliste: { type: array, items: { $ref: "#/components/schemas/RanglisteEntry" } }
+    KioskLivePlayer:
+      type: object
+      required: [spielerId, name, posten]
+      properties:
+        spielerId: { type: integer }
+        name: { type: string }
+        posten: { type: integer }
+    KioskLiveResult:
+      type: object
+      required: [spielerId, lauf, taube, maschine, schuss1, schuss2, punkte]
+      properties:
+        spielerId: { type: integer }
+        lauf: { type: integer }
+        taube: { type: integer }
+        maschine: { type: string }
+        schuss1: { type: boolean }
+        schuss2: { type: boolean }
+        punkte: { type: integer }
+    KioskLiveGame:
+      allOf:
+        - { $ref: "#/components/schemas/LiveSnapshotInput" }
+        - type: object
+          required: [updatedAt]
+          properties:
+            updatedAt: { type: string, format: date-time }
+    KioskTokenInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+    QueueSignupInput:
+      type: object
+      required: [modus]
+      properties:
+        spielerId: { type: integer, minimum: 1 }
+        modus: { type: string, enum: [NORMAL, HARAKIRI, HARAKIRI_CUSTOM, CUSTOM_1, CUSTOM_2, CUSTOM_3, CUSTOM_4] }
+    QueueCancelInput:
+      type: object
+      required: [entryId]
+      properties:
+        entryId: { type: integer, minimum: 1 }
+    QueueGroupInput:
+      type: object
+      required: [name, spielerIds]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        spielerIds: { type: array, minItems: 2, maxItems: 6, uniqueItems: true, items: { type: integer, minimum: 1 } }
+    QueueCommandInput:
+      type: object
+      required: [queueGameId, terminalId]
+      properties:
+        queueGameId: { type: integer, minimum: 1 }
+        terminalId: { type: string }
+        entryIds: { type: array, maxItems: 6, items: { type: integer } }
+        spielExternalId: { type: string }
+    LiveSnapshotInput:
+      type: object
+      required: [terminalId, seq, state, spielExternalId, modus, lauf, taubenProLauf, startedAt, currentSpielerId, currentTaube, players, results]
+      properties:
+        terminalId: { type: string, maxLength: 100 }
+        seq: { type: integer, minimum: 0 }
+        state: { type: string, enum: [RUNNING, FINISHED, ABORTED] }
+        spielExternalId: { type: string }
+        modus: { type: string }
+        lauf: { type: integer }
+        taubenProLauf: { type: integer }
+        startedAt: { type: string, format: date-time }
+        currentSpielerId: { type: integer }
+        currentTaube: { type: integer }
+        players: { type: array, maxItems: 6, items: { $ref: "#/components/schemas/KioskLivePlayer" } }
+        results: { type: array, maxItems: 384, items: { $ref: "#/components/schemas/KioskLiveResult" } }
+    GameShotInput:
+      type: object
+      required: [schuss1, schuss2]
+      properties:
+        schuss1: { type: boolean }
+        schuss2: { type: boolean }
+        wiederholt: { type: boolean }
     ReportDateInput:
       type: object
       required: [datum]
@@ -781,7 +1215,14 @@ components:
     PublicPageSettings:
       type: object
       required: [enabled, nameMode]
-      properties: { enabled: { type: boolean }, nameMode: { type: string, enum: [FULL, INITIAL] } }
+      properties:
+        enabled: { type: boolean }
+        nameMode: { type: string, enum: [FULL, INITIAL] }
+        queueEnabled: { type: boolean }
+        groupsEnabled: { type: boolean }
+        showRanking: { type: boolean }
+        maxQueueGames: { type: integer, minimum: 1, maximum: 40 }
+        enabledModes: { type: array, items: { type: string } }
     DailyReportRecipient:
       type: object
       required: [email, active]
@@ -1321,6 +1762,8 @@ components:
     RanglisteEntry:
       type: object
       properties:
+        bestMaximum: { type: integer }
+        bestProzent: { type: number }
         rang:
           type: integer
         spielerId:
@@ -1361,6 +1804,27 @@ components:
     SpielerStatistik:
       type: object
       properties:
+        breakdown:
+          type: array
+          items:
+            type: object
+            required: [modus, anzahlSpiele, durchschnitt, durchschnittProzent]
+            properties:
+              modus: { type: string }
+              anzahlSpiele: { type: integer }
+              durchschnitt: { type: number }
+              durchschnittProzent: { type: number }
+        gesamtSchuesse: { type: integer }
+        gesamtTreffer: { type: integer }
+        tauben:
+          type: object
+          additionalProperties:
+            type: object
+            required: [versuche, treffer, quote]
+            properties:
+              versuche: { type: integer }
+              treffer: { type: integer }
+              quote: { type: number }
         spielerId:
           type: integer
         gesamtSpiele:
@@ -1383,7 +1847,7 @@ components:
               quote:
                 type: number
             required: [versuche, treffer, quote]
-      required: [spielerId, gesamtSpiele, durchschnitt, bestPunkte, trefferquote, maschinen]
+      required: [spielerId, gesamtSpiele, gesamtSchuesse, gesamtTreffer, durchschnitt, bestPunkte, trefferquote, maschinen, tauben]
 
     SyncSpieler:
       type: object

@@ -8,6 +8,7 @@
 #include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "screen_queue.h"
 #include "screen_start.h"
 #include "offline_cache.h"
 
@@ -410,6 +411,7 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_text_color(start_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(start_lbl);
 
+    screen_queue_button(s_scr);
     return s_scr;
 }
 

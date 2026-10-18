@@ -5,9 +5,15 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+import type { GetRanglisteSort } from './getRanglisteSort';
 import type { Modus } from './modus';
 
 export type GetRanglisteParams = {
+/**
+ * @maximum 100
+ */
+limit?: number;
+sort?: GetRanglisteSort;
 modus?: Modus;
 jahr?: number;
 };

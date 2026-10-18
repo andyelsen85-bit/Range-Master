@@ -10,4 +10,13 @@ import type { PublicPageSettingsNameMode } from './publicPageSettingsNameMode';
 export interface PublicPageSettings {
   enabled: boolean;
   nameMode: PublicPageSettingsNameMode;
+  queueEnabled?: boolean;
+  groupsEnabled?: boolean;
+  showRanking?: boolean;
+  /**
+     * @minimum 1
+     * @maximum 40
+     */
+  maxQueueGames?: number;
+  enabledModes?: string[];
 }

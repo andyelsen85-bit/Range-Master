@@ -127,7 +127,7 @@ router.get("/spieler", async (_req, res) => {
       COALESCE(MAX(game_total), 0)         AS best_punkte
     FROM (
       SELECT spieler_id, spiel_id, SUM(punkte) AS game_total
-      FROM spiel_teilnahmen
+      FROM v_teilnahmen_visible
       GROUP BY spieler_id, spiel_id
     ) t
     GROUP BY spieler_id

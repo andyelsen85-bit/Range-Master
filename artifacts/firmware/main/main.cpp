@@ -36,6 +36,7 @@
 #include "gsl3680_touch.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "portal_runtime.h"
 #include "game_journal.h"
 #include "active_game.h"
 #include "terminal_logs.h"
@@ -319,6 +320,7 @@ extern "C" void app_main(void)
     (void)offline_cache_recheck(); // acknowledged archive pruning may have freed space
     if(!active_game_restore())
         terminal_log_add("data_loss_risk","ERROR","Offenes Harakiri-Spiel konnte nicht geladen werden");
+    portal_runtime_init();
 
     // ── Backlight ─────────────────────────────────────────────
     backlight_init();

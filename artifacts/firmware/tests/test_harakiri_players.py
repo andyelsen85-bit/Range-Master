@@ -30,6 +30,10 @@ static int finished=0;
 static std::mt19937 rng(173128);
 static uint32_t esp_random(){return rng();}
 void game_store_save(){if(persist)assert(active_game_checkpoint());}
+void portal_live_changed(int){}
+bool portal_queue_game_started(){return true;}
+bool portal_queue_release(){return true;}
+bool portal_queue_busy(){return false;}
 static void _store_finish_game(){finished++;}
 enum SpielActionResult {SPIEL_ACTION_OK,SPIEL_ACTION_IGNORED,SPIEL_ACTION_SCORE_FIRST,SPIEL_ACTION_RADIO_BUSY};
 static int fired_machine=-1,fired_partner=-1;

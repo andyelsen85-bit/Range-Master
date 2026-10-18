@@ -279,13 +279,22 @@ export const GetMyPurchasesResponse = zod.object({
 /**
  * @summary Get leaderboard
  */
+export const getRanglisteQueryLimitDefault = 15;
+export const getRanglisteQueryLimitMax = 100;
+
+export const getRanglisteQuerySortDefault = `best`;
+
 export const GetRanglisteQueryParams = zod.object({
+  "limit": zod.coerce.number().int().max(getRanglisteQueryLimitMax).default(getRanglisteQueryLimitDefault),
+  "sort": zod.enum(['best', 'prozent', 'punkte', 'spiele']).default(getRanglisteQuerySortDefault),
   "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'HARAKIRI_DELAYED', 'HARAKIRI_FULL', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4']).optional(),
   "jahr": zod.coerce.number().int().optional()
 })
 
 export const GetRanglisteResponse = zod.object({
   "rangliste": zod.array(zod.object({
+  "bestMaximum": zod.number().int().optional(),
+  "bestProzent": zod.number().optional(),
   "rang": zod.number().int(),
   "spielerId": zod.number().int(),
   "name": zod.string(),
@@ -294,7 +303,20 @@ export const GetRanglisteResponse = zod.object({
   "durchschnitt": zod.number(),
   "durchschnittProzent": zod.number().describe('Normalized average as a percentage of the maximum possible score (gesamtPunkte \/ gesamtMaxPunkte × 100). Use this for cross-format comparisons because different game formats have different max scores.\n'),
   "bestPunkte": zod.number().int()
-}))
+})),
+  "years": zod.array(zod.number().int()).optional(),
+  "ownRow": zod.union([zod.object({
+  "bestMaximum": zod.number().int().optional(),
+  "bestProzent": zod.number().optional(),
+  "rang": zod.number().int(),
+  "spielerId": zod.number().int(),
+  "name": zod.string(),
+  "gesamtPunkte": zod.number().int(),
+  "anzahlSpiele": zod.number().int(),
+  "durchschnitt": zod.number(),
+  "durchschnittProzent": zod.number().describe('Normalized average as a percentage of the maximum possible score (gesamtPunkte \/ gesamtMaxPunkte × 100). Use this for cross-format comparisons because different game formats have different max scores.\n'),
+  "bestPunkte": zod.number().int()
+}),zod.null()]).optional()
 })
 
 
@@ -306,6 +328,19 @@ export const GetStatistikParams = zod.object({
 })
 
 export const GetStatistikResponse = zod.object({
+  "breakdown": zod.array(zod.object({
+  "modus": zod.string(),
+  "anzahlSpiele": zod.number().int(),
+  "durchschnitt": zod.number(),
+  "durchschnittProzent": zod.number()
+})).optional(),
+  "gesamtSchuesse": zod.number().int(),
+  "gesamtTreffer": zod.number().int(),
+  "tauben": zod.record(zod.string(), zod.object({
+  "versuche": zod.number().int(),
+  "treffer": zod.number().int(),
+  "quote": zod.number()
+})),
   "spielerId": zod.number().int(),
   "gesamtSpiele": zod.number().int(),
   "durchschnitt": zod.number(),
@@ -1131,20 +1166,47 @@ export const ResendDailyReportBody = zod.object({
 export const ResendDailyReportResponse = zod.unknown()
 
 
+export const getPublicPageSettingsResponseMaxQueueGamesMax = 40;
+
+
+
 export const GetPublicPageSettingsResponse = zod.object({
   "enabled": zod.boolean(),
-  "nameMode": zod.enum(['FULL', 'INITIAL'])
+  "nameMode": zod.enum(['FULL', 'INITIAL']),
+  "queueEnabled": zod.boolean().optional(),
+  "groupsEnabled": zod.boolean().optional(),
+  "showRanking": zod.boolean().optional(),
+  "maxQueueGames": zod.number().int().min(1).max(getPublicPageSettingsResponseMaxQueueGamesMax).optional(),
+  "enabledModes": zod.array(zod.string()).optional()
 })
+
+
+export const updatePublicPageSettingsBodyMaxQueueGamesMax = 40;
+
 
 
 export const UpdatePublicPageSettingsBody = zod.object({
   "enabled": zod.boolean(),
-  "nameMode": zod.enum(['FULL', 'INITIAL'])
+  "nameMode": zod.enum(['FULL', 'INITIAL']),
+  "queueEnabled": zod.boolean().optional(),
+  "groupsEnabled": zod.boolean().optional(),
+  "showRanking": zod.boolean().optional(),
+  "maxQueueGames": zod.number().int().min(1).max(updatePublicPageSettingsBodyMaxQueueGamesMax).optional(),
+  "enabledModes": zod.array(zod.string()).optional()
 })
+
+export const updatePublicPageSettingsResponseMaxQueueGamesMax = 40;
+
+
 
 export const UpdatePublicPageSettingsResponse = zod.object({
   "enabled": zod.boolean(),
-  "nameMode": zod.enum(['FULL', 'INITIAL'])
+  "nameMode": zod.enum(['FULL', 'INITIAL']),
+  "queueEnabled": zod.boolean().optional(),
+  "groupsEnabled": zod.boolean().optional(),
+  "showRanking": zod.boolean().optional(),
+  "maxQueueGames": zod.number().int().min(1).max(updatePublicPageSettingsResponseMaxQueueGamesMax).optional(),
+  "enabledModes": zod.array(zod.string()).optional()
 })
 
 
@@ -1192,5 +1254,535 @@ export const GetSharedScorecardResponse = zod.object({
   "cells": zod.array(zod.number().int().nullable())
 }))
 })
+
+
+export const GetKioskTokensResponse = zod.object({
+  "tokens": zod.array(zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "lastUsedAt": zod.coerce.date().nullable(),
+  "lastUsedIpHash": zod.string().nullable(),
+  "revokedAt": zod.coerce.date().nullable()
+}))
+})
+
+
+export const createKioskTokenBodyNameMax = 80;
+
+
+
+export const CreateKioskTokenBody = zod.object({
+  "name": zod.string().min(1).max(createKioskTokenBodyNameMax)
+})
+
+export const createKioskTokenResponseTokenMin = 43;
+export const createKioskTokenResponseTokenMax = 43;
+
+
+
+export const CreateKioskTokenResponse = zod.object({
+  "id": zod.number().int(),
+  "token": zod.string().min(createKioskTokenResponseTokenMin).max(createKioskTokenResponseTokenMax),
+  "url": zod.string()
+})
+
+
+export const RenameKioskTokenParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const renameKioskTokenBodyNameMax = 80;
+
+
+
+export const RenameKioskTokenBody = zod.object({
+  "name": zod.string().min(1).max(renameKioskTokenBodyNameMax)
+})
+
+export const RenameKioskTokenResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const ChangeKioskTokenParams = zod.object({
+  "id": zod.coerce.number().int(),
+  "action": zod.enum(['revoke', 'renew'])
+})
+
+export const ChangeKioskTokenResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const GetKioskQueueResponse = zod.object({
+  "version": zod.string(),
+  "games": zod.array(zod.object({
+  "queueGameId": zod.number().int(),
+  "position": zod.number().int(),
+  "modus": zod.string(),
+  "status": zod.enum(['OPEN', 'LOCKED']),
+  "players": zod.array(zod.object({
+  "entryId": zod.number().int(),
+  "spielerId": zod.number().int(),
+  "name": zod.string(),
+  "groupId": zod.number().int().nullable()
+})),
+  "free": zod.number().int()
+})),
+  "settings": zod.object({
+  "queueEnabled": zod.boolean(),
+  "groupsEnabled": zod.boolean(),
+  "showRanking": zod.boolean(),
+  "maxQueueGames": zod.number().int(),
+  "enabledModes": zod.array(zod.string())
+})
+})
+
+
+export const GetKioskPlayersQueryParams = zod.object({
+  "q": zod.coerce.string().optional()
+})
+
+export const GetKioskPlayersResponse = zod.object({
+  "players": zod.array(zod.object({
+  "id": zod.number().int(),
+  "displayName": zod.string(),
+  "activeSignup": zod.boolean(),
+  "running": zod.boolean()
+}))
+})
+
+
+
+
+
+export const KioskSignupBody = zod.object({
+  "spielerId": zod.number().int().min(1).optional(),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4'])
+})
+
+export const KioskSignupResponse = zod.record(zod.string(), zod.unknown())
+
+
+
+
+
+export const KioskCancelBody = zod.object({
+  "entryId": zod.number().int().min(1)
+})
+
+export const KioskCancelResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const GetKioskGroupsResponse = zod.object({
+  "groups": zod.array(zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "members": zod.array(zod.object({
+  "id": zod.number().int(),
+  "displayName": zod.string()
+}))
+}))
+})
+
+
+export const createKioskGroupBodyNameMax = 80;
+
+
+export const createKioskGroupBodySpielerIdsMin = 2;
+export const createKioskGroupBodySpielerIdsMax = 6;
+
+
+
+export const CreateKioskGroupBody = zod.object({
+  "name": zod.string().min(1).max(createKioskGroupBodyNameMax),
+  "spielerIds": zod.array(zod.number().int().min(1)).min(createKioskGroupBodySpielerIdsMin).max(createKioskGroupBodySpielerIdsMax)
+})
+
+export const CreateKioskGroupResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const UpdateKioskGroupParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const updateKioskGroupBodyNameMax = 80;
+
+
+export const updateKioskGroupBodySpielerIdsMin = 2;
+export const updateKioskGroupBodySpielerIdsMax = 6;
+
+
+
+export const UpdateKioskGroupBody = zod.object({
+  "name": zod.string().min(1).max(updateKioskGroupBodyNameMax),
+  "spielerIds": zod.array(zod.number().int().min(1)).min(updateKioskGroupBodySpielerIdsMin).max(updateKioskGroupBodySpielerIdsMax)
+})
+
+export const UpdateKioskGroupResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const DeleteKioskGroupParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const DeleteKioskGroupResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const KioskGroupSignupParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+
+
+
+export const KioskGroupSignupBody = zod.object({
+  "spielerId": zod.number().int().min(1).optional(),
+  "modus": zod.enum(['NORMAL', 'HARAKIRI', 'HARAKIRI_CUSTOM', 'CUSTOM_1', 'CUSTOM_2', 'CUSTOM_3', 'CUSTOM_4'])
+})
+
+export const KioskGroupSignupResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const GetKioskPrintDaysParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const GetKioskPrintDaysResponse = zod.object({
+  "days": zod.array(zod.coerce.date())
+})
+
+
+export const GetKioskPrintParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const GetKioskPrintQueryParams = zod.object({
+  "tag": zod.date()
+})
+
+export const GetKioskPrintResponse = zod.object({
+  "name": zod.string(),
+  "tag": zod.coerce.date(),
+  "club": zod.string(),
+  "games": zod.array(zod.object({
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable(),
+  "mode": zod.string(),
+  "runs": zod.number().int(),
+  "claysPerRun": zod.number().int(),
+  "columns": zod.array(zod.object({
+  "run": zod.number().int(),
+  "clay": zod.number().int(),
+  "machine": zod.string(),
+  "pair": zod.union([zod.literal('start'),zod.literal('end'),zod.literal(null)]).nullable()
+})),
+  "players": zod.array(zod.object({
+  "name": zod.string(),
+  "total": zod.number().int(),
+  "runTotals": zod.array(zod.number().int()),
+  "cells": zod.array(zod.number().int().nullable())
+}))
+})),
+  "stats": zod.object({
+  "breakdown": zod.array(zod.object({
+  "modus": zod.string(),
+  "anzahlSpiele": zod.number().int(),
+  "durchschnitt": zod.number(),
+  "durchschnittProzent": zod.number()
+})).optional(),
+  "gesamtSchuesse": zod.number().int(),
+  "gesamtTreffer": zod.number().int(),
+  "tauben": zod.record(zod.string(), zod.object({
+  "versuche": zod.number().int(),
+  "treffer": zod.number().int(),
+  "quote": zod.number()
+})),
+  "spielerId": zod.number().int(),
+  "gesamtSpiele": zod.number().int(),
+  "durchschnitt": zod.number(),
+  "bestPunkte": zod.number().int(),
+  "trefferquote": zod.number(),
+  "maschinen": zod.record(zod.string(), zod.object({
+  "versuche": zod.number().int(),
+  "treffer": zod.number().int(),
+  "quote": zod.number()
+}))
+})
+})
+
+
+export const GetKioskRankingResponse = zod.object({
+  "rangliste": zod.array(zod.object({
+  "bestMaximum": zod.number().int().optional(),
+  "bestProzent": zod.number().optional(),
+  "rang": zod.number().int(),
+  "spielerId": zod.number().int(),
+  "name": zod.string(),
+  "gesamtPunkte": zod.number().int(),
+  "anzahlSpiele": zod.number().int(),
+  "durchschnitt": zod.number(),
+  "durchschnittProzent": zod.number().describe('Normalized average as a percentage of the maximum possible score (gesamtPunkte \/ gesamtMaxPunkte × 100). Use this for cross-format comparisons because different game formats have different max scores.\n'),
+  "bestPunkte": zod.number().int()
+}))
+})
+
+
+export const getKioskLiveGameResponseOneOneTerminalIdMax = 100;
+
+export const getKioskLiveGameResponseOneOneSeqMin = 0;
+
+export const getKioskLiveGameResponseOneOnePlayersMax = 6;
+
+export const getKioskLiveGameResponseOneOneResultsMax = 384;
+
+
+
+export const GetKioskLiveGameResponse = zod.union([zod.object({
+  "terminalId": zod.string().max(getKioskLiveGameResponseOneOneTerminalIdMax),
+  "seq": zod.number().int().min(getKioskLiveGameResponseOneOneSeqMin),
+  "state": zod.enum(['RUNNING', 'FINISHED', 'ABORTED']),
+  "spielExternalId": zod.string(),
+  "modus": zod.string(),
+  "lauf": zod.number().int(),
+  "taubenProLauf": zod.number().int(),
+  "startedAt": zod.coerce.date(),
+  "currentSpielerId": zod.number().int(),
+  "currentTaube": zod.number().int(),
+  "players": zod.array(zod.object({
+  "spielerId": zod.number().int(),
+  "name": zod.string(),
+  "posten": zod.number().int()
+})).max(getKioskLiveGameResponseOneOnePlayersMax),
+  "results": zod.array(zod.object({
+  "spielerId": zod.number().int(),
+  "lauf": zod.number().int(),
+  "taube": zod.number().int(),
+  "maschine": zod.string(),
+  "schuss1": zod.boolean(),
+  "schuss2": zod.boolean(),
+  "punkte": zod.number().int()
+})).max(getKioskLiveGameResponseOneOneResultsMax)
+}).and(zod.object({
+  "updatedAt": zod.coerce.date()
+})),zod.null()])
+
+
+export const getTerminalQueueQueryTerminalIdMax = 100;
+
+
+
+export const GetTerminalQueueQueryParams = zod.object({
+  "terminalId": zod.coerce.string().max(getTerminalQueueQueryTerminalIdMax).optional().describe('Include this terminal\'s own locked reservation for recovery')
+})
+
+export const GetTerminalQueueResponse = zod.object({
+  "version": zod.string(),
+  "games": zod.array(zod.object({
+  "queueGameId": zod.number().int(),
+  "position": zod.number().int(),
+  "modus": zod.string(),
+  "status": zod.enum(['OPEN', 'LOCKED']),
+  "players": zod.array(zod.object({
+  "entryId": zod.number().int(),
+  "spielerId": zod.number().int(),
+  "name": zod.string(),
+  "groupId": zod.number().int().nullable()
+})),
+  "free": zod.number().int()
+})),
+  "settings": zod.object({
+  "queueEnabled": zod.boolean(),
+  "groupsEnabled": zod.boolean(),
+  "showRanking": zod.boolean(),
+  "maxQueueGames": zod.number().int(),
+  "enabledModes": zod.array(zod.string())
+})
+})
+
+
+export const TerminalQueueCommandParams = zod.object({
+  "action": zod.enum(['take', 'release', 'started'])
+})
+
+
+export const terminalQueueCommandBodyEntryIdsMax = 6;
+
+
+
+export const TerminalQueueCommandBody = zod.object({
+  "queueGameId": zod.number().int().min(1),
+  "terminalId": zod.string(),
+  "entryIds": zod.array(zod.number().int()).max(terminalQueueCommandBodyEntryIdsMax).optional(),
+  "spielExternalId": zod.string().optional()
+})
+
+export const TerminalQueueCommandResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const terminalLiveSnapshotBodyTerminalIdMax = 100;
+
+export const terminalLiveSnapshotBodySeqMin = 0;
+
+export const terminalLiveSnapshotBodyPlayersMax = 6;
+
+export const terminalLiveSnapshotBodyResultsMax = 384;
+
+
+
+export const TerminalLiveSnapshotBody = zod.object({
+  "terminalId": zod.string().max(terminalLiveSnapshotBodyTerminalIdMax),
+  "seq": zod.number().int().min(terminalLiveSnapshotBodySeqMin),
+  "state": zod.enum(['RUNNING', 'FINISHED', 'ABORTED']),
+  "spielExternalId": zod.string(),
+  "modus": zod.string(),
+  "lauf": zod.number().int(),
+  "taubenProLauf": zod.number().int(),
+  "startedAt": zod.coerce.date(),
+  "currentSpielerId": zod.number().int(),
+  "currentTaube": zod.number().int(),
+  "players": zod.array(zod.object({
+  "spielerId": zod.number().int(),
+  "name": zod.string(),
+  "posten": zod.number().int()
+})).max(terminalLiveSnapshotBodyPlayersMax),
+  "results": zod.array(zod.object({
+  "spielerId": zod.number().int(),
+  "lauf": zod.number().int(),
+  "taube": zod.number().int(),
+  "maschine": zod.string(),
+  "schuss1": zod.boolean(),
+  "schuss2": zod.boolean(),
+  "punkte": zod.number().int()
+})).max(terminalLiveSnapshotBodyResultsMax)
+})
+
+export const TerminalLiveSnapshotResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const getManagedGamesQueryPageDefault = 1;
+
+export const GetManagedGamesQueryParams = zod.object({
+  "page": zod.coerce.number().int().default(getManagedGamesQueryPageDefault),
+  "from": zod.date().optional(),
+  "to": zod.date().optional(),
+  "modus": zod.coerce.string().optional(),
+  "spielerId": zod.coerce.number().int().optional(),
+  "hidden": zod.enum(['all', 'yes', 'no']).optional(),
+  "q": zod.coerce.string().optional()
+})
+
+export const GetManagedGamesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.number().int(),
+  "external_id": zod.string().nullish(),
+  "datum": zod.coerce.date(),
+  "modus": zod.string(),
+  "lauf": zod.number().int(),
+  "tauben_pro_lauf": zod.number().int().optional(),
+  "abgeschlossen": zod.boolean().optional(),
+  "completed_at": zod.string().nullish(),
+  "hidden_at": zod.string().nullish(),
+  "edited_at": zod.string().nullish(),
+  "playerCount": zod.number().int().optional()
+})),
+  "total": zod.number().int(),
+  "page": zod.number().int(),
+  "pageSize": zod.number().int()
+})
+
+
+export const GetManagedGameParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const GetManagedGameResponse = zod.object({
+  "game": zod.object({
+  "id": zod.number().int(),
+  "external_id": zod.string().nullish(),
+  "datum": zod.coerce.date(),
+  "modus": zod.string(),
+  "lauf": zod.number().int(),
+  "tauben_pro_lauf": zod.number().int().optional(),
+  "abgeschlossen": zod.boolean().optional(),
+  "completed_at": zod.string().nullish(),
+  "hidden_at": zod.string().nullish(),
+  "edited_at": zod.string().nullish(),
+  "playerCount": zod.number().int().optional()
+}),
+  "scorecard": zod.object({
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable(),
+  "mode": zod.string(),
+  "runs": zod.number().int(),
+  "claysPerRun": zod.number().int(),
+  "columns": zod.array(zod.object({
+  "run": zod.number().int(),
+  "clay": zod.number().int(),
+  "machine": zod.string(),
+  "pair": zod.union([zod.literal('start'),zod.literal('end'),zod.literal(null)]).nullable()
+})),
+  "players": zod.array(zod.object({
+  "name": zod.string(),
+  "total": zod.number().int(),
+  "runTotals": zod.array(zod.number().int()),
+  "cells": zod.array(zod.number().int().nullable())
+}))
+}).nullable(),
+  "players": zod.array(zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "hidden": zod.boolean()
+})),
+  "shots": zod.array(zod.object({
+  "id": zod.number().int(),
+  "spieler_id": zod.number().int(),
+  "lauf": zod.number().int(),
+  "taube": zod.number().int(),
+  "maschine": zod.string(),
+  "posten": zod.number().int(),
+  "schuss1": zod.boolean(),
+  "schuss2": zod.boolean(),
+  "punkte": zod.number().int(),
+  "wiederholt": zod.boolean()
+})),
+  "audit": zod.array(zod.object({
+  "id": zod.number().int(),
+  "at": zod.coerce.date(),
+  "admin_user_id": zod.number().int().nullish(),
+  "action": zod.string(),
+  "spieler_id": zod.number().int().nullish(),
+  "before": zod.record(zod.string(), zod.unknown()).nullish(),
+  "after": zod.record(zod.string(), zod.unknown()).nullish()
+}))
+})
+
+
+export const ChangeManagedGameParams = zod.object({
+  "id": zod.coerce.number().int(),
+  "action": zod.enum(['hide', 'unhide'])
+})
+
+export const ChangeManagedGameResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const ChangeManagedPlayerParams = zod.object({
+  "id": zod.coerce.number().int(),
+  "spielerId": zod.coerce.number().int(),
+  "action": zod.enum(['hide', 'unhide'])
+})
+
+export const ChangeManagedPlayerResponse = zod.record(zod.string(), zod.unknown())
+
+
+export const EditManagedShotParams = zod.object({
+  "id": zod.coerce.number().int(),
+  "ergebnisId": zod.coerce.number().int()
+})
+
+export const EditManagedShotBody = zod.object({
+  "schuss1": zod.boolean(),
+  "schuss2": zod.boolean(),
+  "wiederholt": zod.boolean().optional()
+})
+
+export const EditManagedShotResponse = zod.record(zod.string(), zod.unknown())
 
 

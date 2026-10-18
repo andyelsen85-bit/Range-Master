@@ -27,6 +27,10 @@ export const spieleTable = pgTable("spiele", {
   confirmedLaunches: integer("confirmed_launches").notNull().default(0),
   syncedAt: timestamp("synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  hiddenAt: timestamp("hidden_at", { withTimezone: true }),
+  hiddenBy: integer("hidden_by"),
+  editedAt: timestamp("edited_at", { withTimezone: true }),
+  editedBy: integer("edited_by"),
 });
 
 export const insertSpielSchema = createInsertSchema(spieleTable).omit({ id: true, createdAt: true });
