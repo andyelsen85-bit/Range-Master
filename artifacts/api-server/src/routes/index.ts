@@ -11,6 +11,7 @@ import terminalLogsRouter from "./terminal-logs";
 import { requireKiosk } from "../lib/kiosk";
 import kioskQueueRouter from "./kiosk-queue";
 import managedGamesRouter from "./managed-games";
+import { configureSyncRoutes } from "../lib/build-health";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,12 @@ router.use("/rangliste", ranglisteRouter);
 router.use("/statistik", statistikRouter);
 router.use("/sync", syncRouter);
 router.use("/admin", adminRouter);
+
+configureSyncRoutes([
+  {router:syncRouter,prefix:"/api/sync"},
+  {router:kioskQueueRouter,prefix:"/api"},
+  {router:gamedayRouter,prefix:"/api"},
+  {router:terminalLogsRouter,prefix:"/api"},
+]);
 
 export default router;

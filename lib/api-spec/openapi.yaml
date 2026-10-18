@@ -24,6 +24,18 @@ tags:
     description: Administrator operations
 
 paths:
+  /health:
+    get:
+      operationId: getPortalHealth
+      tags: [Health]
+      summary: Portal build identity and mounted sync contract
+      responses:
+        "200":
+          description: Build metadata and mounted sync routes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalHealth"
   /sync/terminal-logs:
     $ref: "./terminal-diagnostics.yaml#/paths/~1sync~1terminal-logs"
   /admin/terminal-logs:
@@ -1029,6 +1041,28 @@ components:
       name: x-api-key
 
   schemas:
+    PortalSyncRoute:
+      type: object
+      required: [method, path]
+      properties:
+        method: {type: string}
+        path: {type: string}
+    PortalBuild:
+      type: object
+      required: [commit, builtAt, dirty]
+      properties:
+        commit: {type: string}
+        builtAt: {type: ["string", "null"], format: date-time}
+        dirty: {type: boolean}
+    PortalHealth:
+      type: object
+      required: [status, build, syncRoutes]
+      properties:
+        status: {type: string, enum: [ok]}
+        build: {$ref: "#/components/schemas/PortalBuild"}
+        syncRoutes:
+          type: array
+          items: {$ref: "#/components/schemas/PortalSyncRoute"}
     PortalData:
       type: object
       additionalProperties: true

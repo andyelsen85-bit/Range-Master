@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PortalBuildStatus } from "@/components/portal-build-status";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useToast } from "@/hooks/use-toast";
@@ -159,6 +160,7 @@ export default function Admin() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      <PortalBuildStatus />
       <header className="flex items-start justify-between border-b border-border/50 pb-6 gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Spielerverwaltung</h1>

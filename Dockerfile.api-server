@@ -20,6 +20,8 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 
 # Build the API server bundle (produces dist/index.mjs + dist/migrate.mjs)
+ARG BUILD_COMMIT
+ENV BUILD_COMMIT=$BUILD_COMMIT
 RUN pnpm --filter @workspace/api-server run build
 
 # ── Stage 2: runner ───────────────────────────────────────────────────────────

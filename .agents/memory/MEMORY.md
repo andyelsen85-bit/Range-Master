@@ -47,3 +47,4 @@
 - [Queue and kiosk contracts](queue-kiosk-contracts.md) — voluntary takeover/start, financial isolation, full live snapshots and authoritative null; preserve journal compatibility.
 - [Isolated PostgreSQL test cleanup](postgres-test-pool-cleanup.md) — mixed module loaders can create multiple pools; close every test-owned pool before dropping the temporary database.
 - [Multi-run scoring compatibility](multi-run-scoring.md) — expand per-run rows on the wire, not the persisted journal ABI; retain aggregate-only legacy history.
+- [Sync build verification](sync-build-verification.md) — embedded build identity and authenticated production probes; an image push or 401 is not rollout proof.

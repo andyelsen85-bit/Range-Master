@@ -15,8 +15,32 @@ env:
   IMAGE_EMULATOR: ghcr.io/${{ github.repository }}/emulator
 
 jobs:
+  sync-contract:
+    name: Firmware/API sync contract
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @workspace/api-server test:sync-contract
+
   build-and-push:
     name: Build & Push
+    needs: sync-contract
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -75,6 +99,8 @@ jobs:
         with:
           context: .
           file: Dockerfile.api-server
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
           push: true
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}

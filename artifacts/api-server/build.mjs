@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
 import { rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -11,6 +12,14 @@ globalThis.require = createRequire(import.meta.url);
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
 async function buildAll() {
+  let commit=process.env.BUILD_COMMIT,dirty=false;
+  if(!/^[0-9a-f]{40}$/i.test(commit??"")) {
+    try {
+      commit=execFileSync("git",["rev-parse","HEAD"],{cwd:artifactDir,encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim();
+      dirty=!!execFileSync("git",["status","--porcelain","--untracked-files=normal"],{cwd:artifactDir,encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim();
+    } catch { commit="unknown"; }
+  }
+  const buildInfo={commit,builtAt:new Date().toISOString(),dirty};
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
@@ -26,6 +35,7 @@ async function buildAll() {
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
+    define: {__PORTAL_BUILD__:JSON.stringify(buildInfo)},
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
     // Examples of unbundleable packages:

@@ -41,6 +41,7 @@ static bool s_history_results_loaded;
 static portMUX_TYPE s_error_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_session_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_last_error[384];
+static char s_contract_error[160];
 
 typedef struct {
     esp_http_client_handle_t client;
@@ -399,7 +400,7 @@ void http_sync_copy_last_error(char *out, size_t out_len)
 {
     if (!out || !out_len) return;
     portENTER_CRITICAL(&s_error_lock);
-    snprintf(out, out_len, "%s", s_last_error);
+    snprintf(out, out_len, "%s", s_contract_error[0]?s_contract_error:s_last_error);
     portEXIT_CRITICAL(&s_error_lock);
 }
 
@@ -750,7 +751,7 @@ typedef struct {
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
     http_acc_t *acc = (http_acc_t *)evt->user_data;
-    if (evt->event_id == HTTP_EVENT_ON_DATA && acc) {
+    if (evt->event_id == HTTP_EVENT_ON_DATA && acc && acc->buf) {
         int available = acc->cap - acc->len - 1;
         if (available > 0) {
             int copy = evt->data_len < available ? evt->data_len : available;
@@ -914,15 +915,39 @@ esp_err_t http_optional_json(const char *path,const char *body,char *out,size_t 
 // ── Generic POST helper (with retry) ─────────────────────────
 static HttpFailurePolicy s_http_failures;
 static portMUX_TYPE s_http_failure_lock=portMUX_INITIALIZER_UNLOCKED;
-static bool post_blocked(const char *path) {
+static bool post_blocked(const char *path,const char *method="POST") {
     portENTER_CRITICAL(&s_http_failure_lock);
-    bool blocked=s_http_failures.blocked(path,esp_timer_get_time());
+    bool blocked=s_http_failures.blocked(path,esp_timer_get_time(),method);
     portEXIT_CRITICAL(&s_http_failure_lock);return blocked;
 }
-static bool post_failure_log(const char *path,int status) {
+static bool post_failure_log(const char *path,int status,const char *method="POST") {
     portENTER_CRITICAL(&s_http_failure_lock);
-    bool log=s_http_failures.failure(path,status,esp_timer_get_time());
+    bool log=s_http_failures.failure(path,status,esp_timer_get_time(),method);
     portEXIT_CRITICAL(&s_http_failure_lock);return log;
+}
+static void contract_error_message(const char *path,int status,bool log) {
+    char message[160];
+    const char *endpoint=!strncmp(path,"/api/",5)?path+4:path;
+    snprintf(message,sizeof(message),"Portal-Version veraltet: %.110s %s",
+        endpoint,status==404?"fehlt":"nicht unterstützt");
+    portENTER_CRITICAL(&s_error_lock);
+    if(!s_contract_error[0])snprintf(s_contract_error,sizeof(s_contract_error),"%s",message);
+    portEXIT_CRITICAL(&s_error_lock);
+    if(log) {
+        ESP_LOGE(TAG,"HTTP %d deployment/contract error: %s",status,message);
+        cJSON *details=cJSON_CreateObject();
+        if(details) {
+            cJSON_AddStringToObject(details,"endpoint",path);
+            cJSON_AddNumberToObject(details,"httpStatus",status);
+        }
+        terminal_log_add("diagnostic","ERROR",message,details);
+        if(details)cJSON_Delete(details);
+    }
+}
+static int endpoint_blocked_status(const char *path,const char *method="POST") {
+    portENTER_CRITICAL(&s_http_failure_lock);
+    int status=s_http_failures.blocked_status(path,esp_timer_get_time(),method);
+    portEXIT_CRITICAL(&s_http_failure_lock);return status;
 }
 static void http_error_excerpt(const char *body,char out[201]) {
     snprintf(out,201,"%.200s",body?body:"");
@@ -943,8 +968,10 @@ static esp_err_t http_post_json(const char *path, const char *body,
         return ESP_ERR_INVALID_ARG;
     }
     if(post_blocked(diagnostic_path)) {
-        s_last_http_status=400;
-        set_http_error("POST",diagnostic_path,"HTTP 400: endpoint paused for 10 minutes");
+        s_last_http_status=endpoint_blocked_status(diagnostic_path);
+        if(HttpFailurePolicy::contract_error(diagnostic_path,s_last_http_status))
+            contract_error_message(diagnostic_path,s_last_http_status,false);
+        else set_http_error("POST",diagnostic_path,"HTTP 400: endpoint paused for 10 minutes");
         return ESP_ERR_INVALID_STATE;
     }
     http_session_t owned_session;
@@ -978,7 +1005,10 @@ static esp_err_t http_post_json(const char *path, const char *body,
             int status = esp_http_client_get_status_code(session->client);
             s_last_http_status=status;
             if (status < 200 || status >= 300) {
-                if(post_failure_log(diagnostic_path,status)) {
+                bool log=post_failure_log(diagnostic_path,status);
+                if(HttpFailurePolicy::contract_error(diagnostic_path,status))
+                    contract_error_message(diagnostic_path,status,log);
+                else if(log) {
                     char excerpt[201];http_error_excerpt(resp_buf,excerpt);
                     ESP_LOGW(TAG,"POST %s -> HTTP %d response=%.200s",diagnostic_path,status,excerpt);
                 }
@@ -1021,6 +1051,13 @@ static esp_err_t http_get_json(const char *path,
     SyncHttpMeasurement measurement(path);
     char diagnostic_path[160];
     redact_query(path, diagnostic_path, sizeof(diagnostic_path));
+    if(post_blocked(diagnostic_path,"GET")) {
+        s_last_http_status=endpoint_blocked_status(diagnostic_path,"GET");
+        if(HttpFailurePolicy::contract_error(diagnostic_path,s_last_http_status))
+            contract_error_message(diagnostic_path,s_last_http_status,false);
+        else set_http_error("GET",diagnostic_path,"HTTP 400: endpoint paused for 10 minutes");
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!path || !resp_buf || resp_cap < 2) {
         set_http_error("GET", diagnostic_path, "invalid arguments");
         return ESP_ERR_INVALID_ARG;
@@ -1039,6 +1076,7 @@ static esp_err_t http_get_json(const char *path,
 
     esp_err_t err = ESP_FAIL;
     for (int attempt = 1; attempt <= 3; attempt++) {
+        bool non_retryable=false;
         resp_buf[0] = '\0';
         http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap,
                            .truncated = false };
@@ -1055,7 +1093,11 @@ static esp_err_t http_get_json(const char *path,
             int status = esp_http_client_get_status_code(session->client);
             s_last_http_status=status;
             if (status < 200 || status >= 300) {
-                ESP_LOGW(TAG, "GET %s → HTTP %d", diagnostic_path, status);
+                bool log=post_failure_log(diagnostic_path,status,"GET");
+                if(HttpFailurePolicy::contract_error(diagnostic_path,status))
+                    contract_error_message(diagnostic_path,status,log);
+                else if(log)ESP_LOGW(TAG, "GET %s → HTTP %d", diagnostic_path, status);
+                non_retryable=status>=400 && status<500 && status!=408 && status!=429;
                 char reason[32];
                 snprintf(reason, sizeof(reason), "HTTP %d", status);
                 set_http_error("GET", diagnostic_path, reason);
@@ -1070,6 +1112,7 @@ static esp_err_t http_get_json(const char *path,
             err = ESP_ERR_INVALID_SIZE;
         }
         if (err == ESP_OK) break;
+        if(non_retryable)break;
         if (transport_error && (!owns_session || attempt < 3)) {
             esp_err_t reopen_err = http_session_reopen(session);
             if (reopen_err != ESP_OK) {
@@ -1102,6 +1145,46 @@ static const char *modus_api_str(Modus m)
 }
 
 // ── Build JSON for a PendingGame ──────────────────────────────
+static void http_probe_portal_build(void)
+{
+    static int64_t next_probe=0,next_warning=0;
+    static char last_commit[65];
+    int64_t now=esp_timer_get_time();
+    if(now<next_probe)return;
+    next_probe=now+60000000LL;
+    char *response=(char*)malloc(8192);
+    if(!response)return;
+    char previous_error[sizeof(s_last_error)];
+    portENTER_CRITICAL(&s_error_lock);
+    snprintf(previous_error,sizeof(previous_error),"%s",s_last_error);
+    portEXIT_CRITICAL(&s_error_lock);
+    esp_err_t err=http_get_json("/api/health",response,8192);
+    portENTER_CRITICAL(&s_error_lock);
+    snprintf(s_last_error,sizeof(s_last_error),"%s",previous_error);
+    portEXIT_CRITICAL(&s_error_lock);
+    cJSON *root=err==ESP_OK?cJSON_Parse(response):nullptr;
+    free(response);
+    cJSON *build=root?cJSON_GetObjectItemCaseSensitive(root,"build"):nullptr;
+    cJSON *commit=build?cJSON_GetObjectItemCaseSensitive(build,"commit"):nullptr;
+    cJSON *routes=root?cJSON_GetObjectItemCaseSensitive(root,"syncRoutes"):nullptr;
+    if(cJSON_IsString(commit) && commit->valuestring[0] && strlen(commit->valuestring)<sizeof(last_commit) && cJSON_IsArray(routes)) {
+        if(strcmp(commit->valuestring,last_commit)) {
+            snprintf(last_commit,sizeof(last_commit),"%.64s",commit->valuestring);
+            portENTER_CRITICAL(&s_http_failure_lock);
+            s_http_failures.reset_contract_errors();
+            portEXIT_CRITICAL(&s_http_failure_lock);
+            char message[160];snprintf(message,sizeof(message),"Portal-Build %.64s; Sync-Schnittstellen: %d",
+                last_commit,cJSON_GetArraySize(routes));
+            ESP_LOGI(TAG,"%s",message);terminal_log_add("diagnostic","INFO",message,nullptr);
+        }
+    } else if(now>=next_warning) {
+        next_warning=now+3600000000LL;
+        ESP_LOGW(TAG,"Portal-Build nicht prüfbar: GET /api/health HTTP %d",s_last_http_status);
+        terminal_log_add("diagnostic","WARN","Portal-Build nicht prüfbar: /api/health fehlt oder ist ungültig",nullptr);
+    }
+    if(root)cJSON_Delete(root);
+}
+
 static cJSON *pending_game_to_json(const PendingGame *g)
 {
     cJSON *obj = cJSON_CreateObject();
@@ -1638,6 +1721,18 @@ esp_err_t http_push_kredit_events(void)
     if (snapshotCount == 0) {
         free(snapshot);
         return ESP_OK;
+    }
+
+    // Do not settle/drop even ACKable events against an old portal that cannot
+    // supply the reconciliation baseline. No response body is needed for this
+    // read-only capability probe; the normal pull validates/publishes the proof.
+    char probe[96];
+    snprintf(probe,sizeof(probe),"{\"datum\":\"%.10s\",\"pendingEventIds\":[],\"useIds\":[]}",snapshot[0].datum);
+    esp_err_t capability=http_post_json("/api/sync/kredite/state",probe,nullptr,0);
+    if(capability!=ESP_OK) {
+        esp_err_t finish=finish_kredit_sync_publication(snapshot,snapshotCount,false);
+        free(snapshot);
+        return finish==ESP_OK?capability:finish;
     }
 
     cJSON *root = cJSON_CreateObject();
@@ -2302,7 +2397,7 @@ static esp_err_t http_sync_inventory()
     if(!root)return err==ESP_OK?ESP_ERR_INVALID_RESPONSE:err;
     if(!cJSON_IsObject(cJSON_GetObjectItem(root,"today"))) {
         cJSON_Delete(root);
-        set_http_error("GET","/api/sync/inventory","Invalid inventory baseline");
+        set_http_error("GET","/api/sync/inventory/state","Invalid inventory baseline");
         return ESP_FAIL;
     }
     auto owned=std::shared_ptr<cJSON>(root,cJSON_Delete);
@@ -2553,9 +2648,17 @@ static esp_err_t http_run_sync_cycle(const char *cycle_name,
         return err;
     }
 
+    portENTER_CRITICAL(&s_error_lock);
+    s_contract_error[0]='\0';
+    portEXIT_CRITICAL(&s_error_lock);
+    http_probe_portal_build();
     SyncBatch batch;s_batch=&batch;
     const time_t utc_start=time(NULL);
     esp_err_t sync_err = sync_impl();
+    portENTER_CRITICAL(&s_error_lock);
+    bool contract_failed=s_contract_error[0]!='\0';
+    portEXIT_CRITICAL(&s_error_lock);
+    if(contract_failed)sync_err=ESP_FAIL;
     if(sync_err==ESP_OK&&batch.active)sync_err=publish_sync_batch();
     batch.active=false;
     cJSON *data=cJSON_CreateObject();

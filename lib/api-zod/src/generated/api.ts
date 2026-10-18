@@ -8,6 +8,23 @@
 import * as zod from 'zod';
 
 
+/**
+ * @summary Portal build identity and mounted sync contract
+ */
+export const GetPortalHealthResponse = zod.object({
+  "status": zod.enum(['ok']),
+  "build": zod.object({
+  "commit": zod.string(),
+  "builtAt": zod.coerce.date().nullable(),
+  "dirty": zod.boolean()
+}),
+  "syncRoutes": zod.array(zod.object({
+  "method": zod.string(),
+  "path": zod.string()
+}))
+})
+
+
 export const uploadTerminalLogsBodyTerminalIdMax = 120;
 
 export const uploadTerminalLogsBodyEntriesItemIdMax = 120;

@@ -86,6 +86,7 @@ import type {
   MarkAdminBillPaidBody,
   PlayerActivationResult,
   PortalData,
+  PortalHealth,
   PostSyncBillPayments200,
   PostSyncBillPaymentsBody,
   PostSyncCreditEventsBody,
@@ -143,6 +144,83 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetPortalHealthUrl = () => {
+
+
+
+
+  return `/api/health`
+}
+
+/**
+ * @summary Portal build identity and mounted sync contract
+ */
+export const getPortalHealth = async ( options?: Parameters<typeof customFetch>[1]): Promise<PortalHealth> => {
+
+  return customFetch<PortalHealth>(getGetPortalHealthUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPortalHealthQueryKey = () => {
+    return [
+    `/api/health`
+    ] as const;
+    }
+
+
+export const getGetPortalHealthQueryOptions = <TData = Awaited<ReturnType<typeof getPortalHealth>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPortalHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortalHealthQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortalHealth>>> = ({ signal }) => getPortalHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortalHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPortalHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getPortalHealth>>>
+export type GetPortalHealthQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Portal build identity and mounted sync contract
+ */
+
+export function useGetPortalHealth<TData = Awaited<ReturnType<typeof getPortalHealth>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPortalHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPortalHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getUploadTerminalLogsUrl = () => {
 

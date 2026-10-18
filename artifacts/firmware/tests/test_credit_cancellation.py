@@ -51,6 +51,39 @@ FUNCTIONS=[
  "static bool credit_id_in(","void store_capture_kredit_reconcile(",
  "void store_apply_portal_kredit(","bool store_credit_game_cancelled(",
 ]
+HTTP_STUBS=r'''
+using esp_err_t=int;
+constexpr int ESP_OK=0,ESP_FAIL=-1,ESP_ERR_NO_MEM=-2,ESP_ERR_INVALID_RESPONSE=-3,ESP_ERR_INVALID_STATE=-4;
+#define ESP_LOGD(...) ((void)0)
+void note_pushed(const char*,int){}
+bool store_credit_outbox_ready(){return true;}
+static int contract_status=404,baseline_probes=0,credit_posts=0;
+struct cJSON{};
+cJSON *cJSON_CreateObject(){static cJSON value;return &value;}
+cJSON *cJSON_CreateArray(){return cJSON_CreateObject();}
+void cJSON_Delete(cJSON*){}
+void cJSON_AddItemToObject(cJSON*,const char*,cJSON*){}
+void cJSON_AddStringToObject(cJSON*,const char*,const char*){}
+void cJSON_AddNumberToObject(cJSON*,const char*,double){}
+void cJSON_AddItemToArray(cJSON*,cJSON*){}
+char *cJSON_PrintUnformatted(cJSON*){return strdup("{}");}
+cJSON *cJSON_Parse(const char*){return nullptr;}
+cJSON *cJSON_GetObjectItem(cJSON*,const char*){return nullptr;}
+bool response_acknowledges_event(cJSON*,const char*){return false;}
+void set_http_error(const char*,const char*,const char*){}
+esp_err_t http_post_json(const char *path,const char *body,char*,size_t){
+ if(!strcmp(path,"/api/sync/kredite/state")){
+  baseline_probes++;assert(strstr(body,"pendingEventIds")&&strstr(body,"useIds"));
+  return contract_status==200?ESP_OK:ESP_FAIL;
+ }
+ assert(!strcmp(path,"/api/sync/kredite"));credit_posts++;return ESP_FAIL;
+}
+esp_err_t finish_kredit_sync_publication(const KreditEvent *snapshot,int count,bool delivered){
+ store_finish_kredit_event_sync_commit(snapshot,count,delivered);
+ return save_kredit_state_unlocked()?ESP_OK:ESP_FAIL;
+}
+'''
+HTTP_PUSH=fixture.function((ROOT/"main/net/http_sync.cpp").read_text(),"esp_err_t http_push_kredit_events(")
 MAIN=r'''
 static void setup(int players=1) {
  g_store={};storage_ok=true;s_credit_cancelled_game_id[0]=0;
@@ -73,6 +106,17 @@ static KreditReconcileProof proof(const KreditEvent&use,bool counted) {
  if(counted){p.countedCount=1;strcpy(p.countedUseIds[0],use.externalId);}return p;
 }
 int main(){
+ for(int status:{404,405}) {
+  setup();contract_status=status;baseline_probes=0;credit_posts=0;
+  assert(http_push_kredit_events()!=ESP_OK);
+  assert(baseline_probes==1&&credit_posts==0&&g_store.pendingKreditEventCount==1);
+  assert(!g_store.pendingKreditEvents[0].inFlight&&g_store.pendingKreditEvents[0].mayBeAccepted);
+  int restored=0;KreditEvent pending[MAX_KREDIT_EVENTS]{};
+  assert(credit_outbox_decode(disk.data(),disk.size(),0,pending,&restored)&&restored==1);
+  assert(!strcmp(pending[0].typ,"USE"));
+  assert(store_cancel_spiel());zero();assert(g_store.pendingKreditEventCount==2);
+  assert(!strcmp(g_store.pendingKreditEvents[1].typ,"VOID_USE"));
+ }
  setenv("TZ","Europe/Luxembourg",1);tzset();KreditEvent snap[MAX_KREDIT_EVENTS]{};
  // a: never sent => remove USE, no refund event and no GRANT inflation.
  setup();assert(store_cancel_spiel());zero();assert(!g_store.pendingKreditEventCount);
@@ -130,7 +174,7 @@ int main(){
 '''
 with tempfile.TemporaryDirectory(prefix="credit-cancel-") as tmp:
     source=Path(tmp)/"test.cpp"
-    source.write_text(STUBS+"\n".join(extract(s) for s in FUNCTIONS)+MAIN)
+    source.write_text(STUBS+"\n".join(extract(s) for s in FUNCTIONS)+HTTP_STUBS+HTTP_PUSH+MAIN)
     subprocess.run(["g++","-std=c++17","-Wall","-Wextra","-Werror","-Wno-unused-function",
                     "-I",str(ROOT/"main/store"),str(source),"-o",str(Path(tmp)/"test")],check=True)
     subprocess.run([str(Path(tmp)/"test")],check=True)

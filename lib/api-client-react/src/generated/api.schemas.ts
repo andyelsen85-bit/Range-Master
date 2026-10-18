@@ -5,6 +5,31 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+export interface PortalSyncRoute {
+  method: string;
+  path: string;
+}
+
+export interface PortalBuild {
+  commit: string;
+  /** @nullable */
+  builtAt: string | null;
+  dirty: boolean;
+}
+
+export type PortalHealthStatus = typeof PortalHealthStatus[keyof typeof PortalHealthStatus];
+
+
+export const PortalHealthStatus = {
+  ok: 'ok',
+} as const;
+
+export interface PortalHealth {
+  status: PortalHealthStatus;
+  build: PortalBuild;
+  syncRoutes: PortalSyncRoute[];
+}
+
 export interface PortalData { [key: string]: unknown }
 
 export interface ManagedGameRow {
