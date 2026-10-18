@@ -37,6 +37,67 @@ View-Mitgliedschaft für vorhandene ORM-Abfragen.
 Dashboard-/Profil-/Resultater-Komponenten konsumieren die oben genannten
 Statistik-/Ranking-/Ergebnisendpunkte und führen keine eigenen SQL-Abfragen aus.
 
+## Gezielte Prüfung der Admin-Spielverwaltung
+
+Der Admin-Menüpunkt **Spiele verwalten** verweist auf `/admin/spiele` und
+verwendet `ListChecks`. **Spiele-Abgleich** behält ausschließlich
+`GitCompareArrows` als Icon; die irrtümliche zusätzliche Objekteigenschaft wurde
+entfernt. Nicht-Administratoren erhalten keinen dieser Menüpunkte.
+
+Reproduzierbarer, isolierter PostgreSQL-Test:
+
+```sh
+pnpm --filter @workspace/api-server exec node --import tsx/esm --test ../../lib/db/tests/admin-games.test.mjs
+```
+
+Der Test erzeugt eine eigene temporäre Datenbank, führt sämtliche registrierten
+Migrationen einschließlich `0012` zweimal aus und prüft unveränderte
+Migrationseinträge beim zweiten Durchlauf. Drei Spiele/vier Spieler decken
+Datums-, Modus-, Spieler-, Text- und Versteckt-Filter, Hide/Unhide auf beiden
+Ebenen, Scorecards/Druck, Statistik/Verlauf, letzte-Spiel-Auswahl einschließlich
+vollständig ausgeblendeter Teilnehmer, Schusskorrektur, Audit und erneuten Sync
+ab. Alle Admin-Endpunkte müssen Nicht-Administratoren mit 403 abweisen.
+Nach jeder Änderung werden die echten Tagesberichte einschließlich Hash,
+Finanz-/Inventarledger sowie rohe Spiel-/Taubenzähler mit dem Ausgangszustand
+verglichen. Nur die temporäre Testdatenbank wird anschließend entfernt.
+
+Der gezielte Browserlauf im Entwicklungsportal bestätigte zusätzlich den
+Menüklick, alle Filter, ausgegraute Hidden-Zustände, beide Hide/Unhide-Ebenen,
+Schusskorrektur mit Neuberechnung und Audit nach Neuladen sowie die exakten
+Bestätigungstexte aus Abschnitt 6.3. Ein normaler Spieler sieht keine Adminlinks
+und erhält 403 bei Listen- und Änderungszugriff. Sämtliche Browserfixtures wurden
+entfernt; bestehende Spiele, Gruppen und Einstellungen blieben unangetastet.
+Beim Bearbeiten der Datumsfelder traten zwei vorübergehende HTTP-400-Meldungen auf;
+der fertig gesetzte Datumsfilter und der weitere Ablauf funktionierten.
+Portal-Typecheck und vier bestehende Komponententests waren ebenfalls erfolgreich.
+
+**Produktionsstatus bei der Prüfung am 18.10.2026:** Der im Kubernetes-Ingress
+konfigurierte externe Portalhost ist erreichbar. Sein ausgeliefertes JavaScript
+enthält die Adminrouten, Korrekturansicht und den vorgeschriebenen
+Bestätigungstext, aber noch nicht den neuen Menüeintrag. Der vorhandene
+Admin-Anmeldeversuch wurde mit 401 abgewiesen. Daher sind Produktionsjournal
+und angemeldete Produktionsabläufe ausdrücklich **nicht bestätigt**; weder
+Produktionsspiele noch Produktionsschema wurden verändert. Entwicklungstests
+sind kein Nachweis einer bereits erfolgten Kubernetes-Auslieferung.
+
+Für den Produktionsnachweis muss der bestehende Init-Container erfolgreich
+durchgelaufen sein. Auf der tatsächlichen Produktionsdatenbank ist anschließend
+unter anderem diese reine Leseabfrage möglich:
+
+```sql
+SELECT hash, created_at
+FROM drizzle.__drizzle_migrations
+WHERE created_at = 1792310400000; -- Journalzeitpunkt von 0012
+SELECT to_regclass('public.admin_game_edits'),
+       to_regclass('public.spiel_spieler_hidden'),
+       to_regclass('public.v_spiele_visible'),
+       to_regclass('public.v_teilnahmen_visible'),
+       to_regclass('public.v_ergebnisse_visible');
+```
+
+Keine Migration von Hand einspielen und kein DDL beim API-Start ergänzen:
+Auslieferung weiterhin ausschließlich über den vorhandenen Init-Container.
+
 ## Abweichungen und widersprüchliche Vorgaben
 
 1. **4-KiB-Live-Nutzlast:** Ein vollständiger Stand für sechs Spieler und bis zu

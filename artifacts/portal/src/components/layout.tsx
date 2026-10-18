@@ -24,7 +24,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       { href: "/admin/mail", label: "Mailserver & Live-Seite", icon: Mail },
       { href: "/admin/terminal-config", label: "Terminal-Backups", icon: Settings2 },
       { href: "/admin/terminal-logs", label: "Terminal-Logs", icon: ScrollText },
-      { href: "/admin/game-reconciliation", label: "Spiele-Abgleich", icon: GitCompareArrows, ListChecks },
+      { href: "/admin/game-reconciliation", label: "Spiele-Abgleich", icon: GitCompareArrows },
+      { href: "/admin/spiele", label: "Spiele verwalten", icon: ListChecks },
     ] : []),
   ];
 
