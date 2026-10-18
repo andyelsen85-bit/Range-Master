@@ -20,6 +20,17 @@ silently change where their existing OTA images and persisted cache data live.
 paths. Apply size optimization to non-hot-path modules through build options
 that also take effect with an existing sdkconfig; do not require deleting it.
 
+The user explicitly approved removing the unused factory app and enlarging
+the two OTA slots, but requires the existing FAT offset/size and other data
+partitions to stay unchanged. Never erase or format storage for this migration.
+
+**Why:** FAT holds unsynced game-journal data, not merely rebuildable cache.
+
+**How to apply:** First synchronize all games, then use full USB flashing of
+the new table and matching app/initial OTA metadata, never app-only OTA or
+erase-flash. Preserve NVS/PHY/FAT; verify the generated flash plan and at least
+500 KiB app headroom with the native build before delivering changes.
+
 Host tests that extract production functions must preserve helper declaration
 order or explicitly check forward declarations. Avoid supplying early mock
 definitions for real helpers whose placement matters to C++ compilation.

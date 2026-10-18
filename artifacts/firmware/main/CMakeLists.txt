@@ -77,9 +77,9 @@ idf_component_register(
         esp_event
 )
 
-# Keep the existing 0x220000 app slots and storage offsets. These control/UI
-# and network modules are not display/DMA hot paths; use size optimization rather than
-# moving partitions or changing the project's performance optimization globally.
+# Keep size headroom in the 0x330000 OTA slots without changing storage offsets.
+# These control/UI and network modules are not display/DMA hot paths; use scoped
+# size optimization without changing performance optimization globally.
 # Per-source options are emitted after the sdkconfig-selected -O2, so this also
 # applies to existing builds without deleting sdkconfig or terminal data.
 set_source_files_properties(

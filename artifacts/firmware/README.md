@@ -33,10 +33,54 @@ ESP-IDF 5.3.x + LVGL v9 firmware for the **Guition JC8012P4A1C-I-W-Y** clay-shoo
 # install ESP-IDF 5.3.x (5.3.5 recommended for this board)
 . $IDF_PATH/export.sh
 cd artifacts/firmware
+# First checkout only; skip set-target when retaining an existing ESP32-P4 sdkconfig:
 idf.py set-target esp32p4
 idf.py build
+# Before flashing an existing terminal, follow the mandatory migration steps below.
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
+
+### First USB flash with the OTA-only partition table
+
+**Synchronize all games to the portal and confirm there are no unacknowledged
+games before the first flash with this table.** Stop play during migration.
+The FAT partition contains the unsynced game journal, not just disposable cache.
+
+The unused factory app has been removed. The only app slots are:
+
+| Partition | Offset | Size |
+|-----------|--------|------|
+| `ota_0` | `0x20000` | `0x330000` |
+| `ota_1` | `0x350000` | `0x330000` |
+
+`nvs` (`0x9000` / `0x6000`), `otadata` (`0xf000` / `0x2000`),
+`phy_init` (`0x11000` / `0x1000`) and **`storage` (`0x680000` /
+`0x980000`) remain unchanged**. Neither app slot overlaps storage.
+No factory app is required: erased OTA metadata selects the first OTA slot.
+
+1. Export the pinned ESP-IDF 5.3.5 tools and open `artifacts/firmware`.
+   For an existing ESP32-P4 checkout, keep its `sdkconfig`; do not reset it.
+2. Run `idf.py reconfigure` and `idf.py build`. Check `menuconfig` if an old
+   configuration enabled factory-reset/test-app boot: both must be disabled,
+   with the custom `partitions.csv` selected at `0x8000`. Defaults disable both.
+3. Run `python tests/test_partitions.py build` (use your `-B` directory instead
+   of `build` if different). This checks the generated partition binary,
+   flash file boundaries, boot settings and at least **500 KiB** app headroom.
+4. Connect by **USB** and run `idf.py -p /dev/ttyUSB0 flash monitor`
+   (Windows example: `idf.py -p COM5 flash monitor`). Use the full **`flash`**
+   target, not `app-flash`: the partition table and initial OTA metadata must
+   be written together with the app. The initial OTA metadata resets app-slot
+   selection, so the new image boots from `ota_0` at `0x20000`.
+5. Confirm boot and portal connectivity, journal status and saved settings
+   before resuming play. Subsequent app-only OTA updates can use these slots.
+
+**Never run `erase-flash` / `erase_flash`, erase or format FAT, or write a merged
+whole-flash image for this migration.** Do not use OTA for the first update:
+ordinary app OTA cannot migrate the table, and old app offsets are incompatible.
+Only the bootloader, partition table, initial OTA metadata and app are flashed;
+NVS, PHY data and the storage FAT contents must not be touched.
+See [diagnostics/recovery](DIAGNOSTICS_RECOVERY.md) for the remaining acceptance
+checks. No flashing is performed by the regression test.
 
 ## Project layout
 
@@ -68,10 +112,12 @@ After mounting, logs show total/free bytes and a 16-byte self-test, with separat
 return values and immediately captured `errno` for open, write, fsync and close.
 A zero/tiny capacity or a failed probe on a fresh/empty cache triggers one
 explicitly logged **unmount → config-preserving format → remount** fallback.
-This erases only the rebuildable FAT snapshots; NVS settings and operational
-outboxes are not erased. An established cache with normal capacity is not
-automatically reformatted merely because its probe fails. Failed initialization
-is latched until reboot to avoid mount/format loops.
+This initialization fallback is disabled once the game-journal protection marker
+exists: FAT then contains unsynced games as well as snapshots, and must not be
+formatted. NVS settings and operational outboxes are not erased. An established
+cache with normal capacity is not automatically reformatted merely because its
+probe fails. Failed initialization is latched until reboot to avoid mount/format
+loops. Partition-table migration never calls for a format or erase.
 
 Cache failures do not invalidate successful server pulls. The terminal keeps
 the pulled data in RAM, performs its existing NVS operational saves, and reports

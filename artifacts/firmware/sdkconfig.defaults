@@ -140,6 +140,9 @@ CONFIG_LOG_MASTER_LEVEL=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
+# OTA-only layout: no factory/test app and no GPIO-triggered factory reset.
+CONFIG_BOOTLOADER_FACTORY_RESET=n
+CONFIG_BOOTLOADER_APP_TEST=n
 
 # ── Stack sizes ───────────────────────────────────────────────────────────
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

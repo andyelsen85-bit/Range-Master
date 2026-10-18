@@ -96,11 +96,49 @@ python artifacts/firmware/tests/test_sync_batch.py
 python artifacts/firmware/tests/test_fire_link.py
 ```
 
-The full ESP32-P4 target build was checked with ESP-IDF 5.3.5, the resolved
-managed-component lockfile and the existing `0x220000` slots. SDK/control/layout
-size optimization preserves pixel renderers, DMA/PPA, radio and cryptography
-optimization. No storage offsets changed. Export the SDK tools normally,
-including the ROM ELF directory, before building.
+Build the full ESP32-P4 target with ESP-IDF 5.3.5 and the resolved
+managed-component lockfile. The OTA-only table has `ota_0` at `0x20000` and
+`ota_1` at `0x350000`, each `0x330000` bytes. There is no factory app.
+SDK/control/layout size optimization preserves pixel renderers, DMA/PPA, radio
+and cryptography optimization. NVS, OTA metadata, PHY data and storage offsets
+and sizes are unchanged; FAT remains `0x680000` / `0x980000`.
+Export the SDK tools normally, including the ROM ELF directory, before building.
+
+Verified full ESP-IDF 5.3.5 build: `app_check_size` passes with an image of
+`0x226e40` (2,256,448 bytes) and **`0x1091c0` (1,085,888 bytes) free per OTA
+slot**, exceeding the 500 KiB requirement. The generated binary table, app and
+bootloader configuration, erased initial OTA metadata and four-file USB flash
+plan also pass `tests/test_partitions.py`. This is build verification only;
+no device was flashed or erased.
+
+### Mandatory partition-table migration (USB only)
+
+**Synchronize every game and verify zero unacknowledged games before the first
+flash with this new table.** The FAT partition holds the unsynced journal:
+never format or move it. Stop play while migrating.
+
+From `artifacts/firmware`, with the SDK exported and the existing ESP32-P4
+configuration retained:
+
+```sh
+idf.py reconfigure
+idf.py build
+python tests/test_partitions.py build
+# USB-connected device only; substitute your serial port:
+idf.py -p /dev/ttyUSB0 flash monitor
+```
+
+Use **`flash`, never `erase-flash` / `erase_flash`**. Do not use `app-flash`,
+OTA, a full-flash erase or a merged whole-flash image for this first update.
+The full flash target writes the new table, bootloader, initial (erased) OTA
+metadata and app at `0x20000`. It does not write NVS, PHY data or storage.
+Erased OTA metadata makes the bootloader select the first OTA slot; factory
+reset and test-app boot must be disabled in any retained `sdkconfig` too.
+The regression check verifies those settings, the generated table and flash
+boundaries, and requires at least **500 KiB (512,000 bytes)** free per app slot.
+After USB flashing, confirm boot, saved settings, journal and portal status
+before resuming play or using ordinary app OTA.
+See [README flash steps](README.md#first-usb-flash-with-the-ota-only-partition-table).
 
 Run all host scripts in `artifacts/firmware/tests` and `artifacts/lora-gateway/tests`.
 Protocol tests use real SHA-256 HMAC. If native mbedTLS has no `mbedcrypto.pc`,
