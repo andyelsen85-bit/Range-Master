@@ -61,7 +61,10 @@ int main(int argc,char **argv) {
  record.reserved=game;record.count=1;record.events[0]={17,1,"11111111-1111-4111-8111-111111111111"};
  record.checksum=portal_queue_checksum(record);assert(portal_queue_valid(record));
  std::string first=std::string(argv[1])+"/queue0.bin",second=std::string(argv[1])+"/queue1.bin";
+ QueueRepairInspection proof{};
+ assert(portal_queue_inspect_repair_files(argv[1],&proof)&&!proof.present&&!proof.unreadable&&!proof.non_empty);
  assert(portal_queue_write_file(first.c_str(),record));
+ assert(!portal_queue_inspect_repair_files(argv[1],&proof)&&proof.present==1&&proof.non_empty&&!proof.unreadable);
  assert(!portal_queue_repair_safe_files(argv[1]));
  PortalQueueRecord rebooted={};assert(portal_queue_read_file(first.c_str(),&rebooted));
  assert(!memcmp(&record,&rebooted,sizeof(record)));
@@ -69,6 +72,7 @@ int main(int argc,char **argv) {
  assert(portal_queue_write_file(second.c_str(),record));
  FILE *f=fopen(second.c_str(),"r+b");assert(f);assert(fseek(f,24,SEEK_SET)==0);fputc(0xff,f);fclose(f);
  assert(!portal_queue_read_file(second.c_str(),&rebooted));assert(portal_queue_read_file(first.c_str(),&rebooted));
+ assert(!portal_queue_inspect_repair_files(argv[1],&proof)&&proof.present==2&&proof.unreadable==1);
  assert(rebooted.count==1&&!memcmp(&immutable,&rebooted.events[0],sizeof(immutable))); // lost ACK safely replays
  record.reserved={};record.count=0;record.generation++;record.checksum=portal_queue_checksum(record);
  assert(portal_queue_write_file(second.c_str(),record)&&portal_queue_repair_safe_files(argv[1]));

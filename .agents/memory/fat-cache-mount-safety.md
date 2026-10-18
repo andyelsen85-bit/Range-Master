@@ -76,3 +76,15 @@ rejected in favor of refusing repair.
 empty-volume repair authorization before destruction and block new writes until
 it is safely cleared, including on failure/reboot. Fsync/chunking reduces FAT
 power-cut exposure but must never be described as a proof of zero orphan clusters.
+
+Empty-media proof must not depend on allocating record-sized buffers, and a
+volatile "last active checkpoint" latch alone is not proof of a live game.
+
+**Why:** The user reported that an empty FAT still refused repair. Unconditional
+buffer allocation could fabricate uncertainty/presence under memory pressure;
+a stale latch could independently veto genuinely empty storage.
+
+**How to apply:** Establish actual file presence before allocating records. Only
+discard a stale latch when file inspection succeeds with no active files and RAM
+also has no active game. Report journal, active and queue failures separately;
+never weaken the guard for real pending, unreadable or live RAM data.

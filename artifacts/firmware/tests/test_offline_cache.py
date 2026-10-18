@@ -42,6 +42,7 @@ STUBS = r"""
 #include <dirent.h>
 #include <sys/stat.h>
 #include "game_store.h"
+#include "storage_repair.h"
 #include "offline_cache.h"
 #include "game_journal.h"
 #include "storage_budget.h"
@@ -80,6 +81,17 @@ uint32_t esp_rom_crc32_le(uint32_t h,const uint8_t *p,size_t n) {for(size_t i=0;
 static int64_t clock_us=0;
 int64_t esp_timer_get_time(){return clock_us;}
 static bool active_safe=true,queue_safe=true;
+static bool active_latch=false;
+bool active_game_inspect_repair_locked(ActiveGameRepairInspection *out) {
+    *out={};out->had_active=active_latch;out->unreadable=!active_safe;
+    out->ram_active=g_store.harakiriOrdersReady||g_store.screen==SCREEN_SPIEL;
+    out->stale_latch=active_latch&&active_safe&&!out->ram_active;
+    if(out->stale_latch)active_latch=false;
+    return active_safe&&!out->ram_active;
+}
+bool portal_queue_inspect_repair_locked(QueueRepairInspection *out) {
+    *out={};out->non_empty=!queue_safe;return queue_safe;
+}
 bool active_game_repair_safe_locked(){return active_safe;}
 bool portal_queue_repair_safe_locked(){return queue_safe;}
 size_t active_game_record_size(){return 8084;}
@@ -291,6 +303,7 @@ void reset() {
     g_store = {}; s_mounted = s_mount_attempted = false; s_wl = WL_INVALID_HANDLE;
     s_census_done=false;s_cleaning=false;s_storage_blocked=false;s_disk_pending=0;
     s_repair_pending=false;repair_intent=0;active_safe=queue_safe=true;clock_us=0;
+    active_latch=false;
     memset(s_saved_known,0,sizeof(s_saved_known));
     memset(s_attempted,0,sizeof(s_attempted));orphan_bytes=0;
     journal_pending=journal_uncertain=0;
@@ -448,6 +461,24 @@ int main() {
     assert(!offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd==writes_before);
     assert(!offline_cache_set_manifest_token(OFFLINE_CACHE_BILLS,"not-durable"));
     clock_us+=300000000LL;assert(offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd>writes_before);
+    // Exact reported empty-image regression: 2,394 allocated, unreachable
+    // clusters, one reachable root cluster, no directory entries or pending data.
+    reset();total_bytes=9842688;orphan_bytes=2394u*4096;
+    free_bytes=total_bytes-orphan_bytes-4096;active_latch=true;
+    assert(files.empty());
+    assert(offline_cache_mount()&&formats==1&&free_bytes>total_bytes*80/100);
+    assert(logged("lost_clusters=2394 (>95%)")&&logged("FAT proof journal: proven=1"));
+    assert(logged("FAT proof active: present=0 unreadable=0")&&logged("FAT proof queue: present=0 unreadable=0"));
+    StorageRepairStatus status{};offline_cache_repair_status(&status);
+    assert(status.allowed&&status.pending==0&&offline_cache_pending_games()==0);
+    assert(strstr(status.checks,"Journal:")&&strstr(status.checks,"Aktives Spiel:")&&strstr(status.checks,"Warteschlange:"));
+    active_safe=false;offline_cache_repair_status(&status);
+    assert(!status.allowed&&strstr(status.reason,"Aktives Spiel: Datei nicht lesbar"));
+    active_safe=true;queue_safe=false;offline_cache_repair_status(&status);
+    assert(!status.allowed&&strstr(status.reason,"Warteschlange: Reservierung"));
+    queue_safe=true;journal_uncertain=1;offline_cache_repair_status(&status);
+    assert(!status.allowed&&strstr(status.reason,"Spieljournal nicht prüfbar"));
+    std::puts("PASS empty FAT: 2394 lost clusters, boot auto-repair, all three named checks, confirmation allowed; individual failures explained");
     // Model old FAT writes interrupted after allocation, before directory commit.
     reset();
     for(int cut=0;cut<80&&free_bytes;cut++) {
@@ -488,6 +519,12 @@ int main() {
 
 
 if __name__ == "__main__":
+    cache_source=(ROOT/"main/store/offline_cache.cpp").read_text()
+    for kind,level in re.findall(r'terminal_log_add\("([^"]+)","([^"]+)"',cache_source):
+        assert kind in {"fire_trace","gateway_trace","sync","data_loss_risk","ui_commit","wifi"},kind
+        assert kind!="data_loss_risk" or level=="ERROR","Portal rejects non-ERROR data_loss_risk entries"
+    ui_source=(ROOT/"main/ui/screen_einstellungen.cpp").read_text()
+    assert "if(s_storage_proof.allowed)" in ui_source and "s_storage_proof.reason" in ui_source
     cache = (ROOT / "main/store/offline_cache.cpp").read_text()
     sync = (ROOT / "main/net/http_sync.cpp").read_text()
     cache_body = re.sub(r"^#include.*\n", "", cache, flags=re.MULTILINE)

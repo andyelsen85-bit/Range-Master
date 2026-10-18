@@ -92,6 +92,13 @@
       "when": 1792310400000,
       "tag": "0012_queue_kiosk_live",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792324800000,
+      "tag": "0013_gameday_queue_eligibility",
+      "breakpoints": true
     }
   ]
 }

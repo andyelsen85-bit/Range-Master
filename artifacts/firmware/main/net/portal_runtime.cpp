@@ -30,8 +30,12 @@ static std::atomic<unsigned> appliedGeneration{0};
 static PortalQueueGame requested;
 static bool requestedMerge;
 bool portal_queue_repair_safe_locked() {
- if(taking.load())return false;
- return portal_queue_repair_safe_files("/fatfs");
+ QueueRepairInspection result{};
+ return portal_queue_inspect_repair_locked(&result);
+}
+bool portal_queue_inspect_repair_locked(QueueRepairInspection *out) {
+ bool safe=portal_queue_inspect_repair_files("/fatfs",out);
+ out->busy=taking.load();return safe&&!out->busy;
 }
 static std::atomic<bool> requestPending{false};
 static std::atomic<uint64_t> liveVersion{0};

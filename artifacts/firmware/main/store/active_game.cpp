@@ -10,6 +10,9 @@
 #include <cerrno>
 #include <atomic>
 #include <unistd.h>
+#include <dirent.h>
+#include <strings.h>
+#include <sys/stat.h>
 
 #ifndef ACTIVE_GAME_ROOT
 #define ACTIVE_GAME_ROOT "/fatfs"
@@ -100,6 +103,8 @@ static bool read(int slot,ActiveRecord *out,bool *present,bool strict=false) {
     snprintf(temp,sizeof(temp),"%s.tmp",name);
     bool bin_present=false,tmp_present=false;
     bool ok=read_file(name,out,&bin_present);
+    struct stat st{};errno=0;
+    if(stat(temp,&st)!=0&&errno==ENOENT){*present=bin_present;return ok;}
     auto *candidate=(ActiveRecord*)heap_caps_malloc(sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!candidate){*present=true;return false;}
     bool tmp_ok=read_file(temp,candidate,&tmp_present);
@@ -110,16 +115,42 @@ static bool read(int slot,ActiveRecord *out,bool *present,bool strict=false) {
 }
 size_t active_game_record_size(){return sizeof(ActiveRecord);}
 bool active_game_repair_safe_locked() {
-    auto *r=(ActiveRecord*)heap_caps_malloc(sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if(!r)return false;
-    bool safe=true,found=false,active=false;uint32_t generation=0;
-    for(int s=0;s<2;s++) {
+    ActiveGameRepairInspection result{};
+    return active_game_inspect_repair_locked(&result);
+}
+bool active_game_inspect_repair_locked(ActiveGameRepairInspection *out) {
+    *out={};out->had_active=had_active.load();
+    out->ram_active=g_store.harakiriOrdersReady||g_store.screen==SCREEN_SPIEL;
+    DIR *dir=opendir(ACTIVE_GAME_ROOT);
+    if(!dir){out->unreadable=1;out->error=errno;return false;}
+    ActiveRecord *r=nullptr;bool found=false;uint32_t generation=0;
+    for(;;) {
+        errno=0;auto *entry=readdir(dir);
+        if(!entry){if(errno){++out->unreadable;out->error=errno;}break;}
+        const char *n=entry->d_name;
+        if(strcasecmp(n,"active0.bin")&&strcasecmp(n,"active1.bin")&&
+           strcasecmp(n,"active0.bin.tmp")&&strcasecmp(n,"active1.bin.tmp"))continue;
+        ++out->present;
+        // Empty roots need no PSRAM at all. Allocation failure is uncertainty
+        // only when a real record exists, never synthetic "present=true".
+        if(!r)r=(ActiveRecord*)heap_caps_malloc(sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!r){++out->unreadable;out->error=ENOMEM;continue;}
+        char file[384];snprintf(file,sizeof(file),ACTIVE_GAME_ROOT "/%.255s",n);
         bool present=false;
-        if(read(s,r,&present,true)) {
-            if(!found || r->generation>generation){found=true;generation=r->generation;active=r->active;}
-        } else if(present)safe=false;
+        if(read_file(file,r,&present)) {
+            if(!found||r->generation>generation){found=true;generation=r->generation;out->active=r->active;}
+        } else {++out->unreadable;out->error=errno?errno:EBADMSG;}
     }
-    heap_caps_free(r);return safe&&!active&&!had_active.load();
+    if(closedir(dir)!=0){++out->unreadable;out->error=errno;}
+    heap_caps_free(r);
+    out->stale_latch=out->had_active&&!out->present&&!out->unreadable&&!out->ram_active;
+    // This is only a volatile cache of the last successful checkpoint. It is
+    // not evidence of pending work when BOTH disk and live RAM are empty.
+    if(out->stale_latch) {
+        had_active=false;
+        terminal_log_add("sync","INFO","Aktives Spiel gemerkt (had_active), aber Dateien und RAM leer: veraltete Markierung zurückgesetzt");
+    }
+    return !out->unreadable&&!out->active&&!out->ram_active&&(!out->had_active||out->stale_latch);
 }
 static void remap_record(ActiveRecord *r) {
     if(!r->active)return;
@@ -205,6 +236,15 @@ bool active_game_checkpoint() {
 }
 
 bool active_game_restore() {
+    ActiveGameRepairInspection initial{};
+    (void)active_game_inspect_repair_locked(&initial);
+    if(!initial.present&&!initial.unreadable&&!initial.ram_active) {
+        // No checkpoint files is a normal boot, not a reason to allocate two
+        // large records and latch an OOM storage error on an empty filesystem.
+        initialized=true;blocked=false;had_active=false;committed_slot=-1;
+        committed_generation=next_generation=0;g_store.activeGameStorageError=false;
+        return true;
+    }
     auto *r=(ActiveRecord*)heap_caps_malloc(sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     auto *best=(ActiveRecord*)heap_caps_calloc(1,sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!r||!best){
@@ -222,6 +262,7 @@ bool active_game_restore() {
         any|=present;
     }
     blocked=any&&best_slot<0;initialized=true;
+    if(!any&&!g_store.harakiriOrdersReady&&g_store.screen!=SCREEN_SPIEL)had_active=false;
     if(blocked) {
         g_store.activeGameStorageError=true;
         snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),

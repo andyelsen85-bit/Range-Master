@@ -18,7 +18,7 @@ class DurableGames(unittest.TestCase):
             for folder in ("sdk/freertos", "volume", "nvs"):
                 (temp / folder).mkdir(parents=True)
             headers = {
-                "portal_runtime.h": "#pragma once\ninline bool portal_queue_repair_safe_locked(){return true;}\n",
+                "portal_runtime.h": '#pragma once\n#include "storage_repair.h"\ninline bool portal_queue_repair_safe_locked(){return true;}\ninline bool portal_queue_inspect_repair_locked(QueueRepairInspection *out){*out={};return true;}\n',
                 "ui_manager.h": """
                     #pragma once
                     inline bool ui_manager_snapshot_lock(bool *acquired){*acquired=false;return true;}
@@ -94,8 +94,9 @@ class DurableGames(unittest.TestCase):
                     #include <cstdlib>
                     #define MALLOC_CAP_SPIRAM 1
                     #define MALLOC_CAP_8BIT 2
-                    inline void *heap_caps_malloc(size_t n,int){return malloc(n);}
-                    inline void *heap_caps_calloc(size_t n,size_t s,int){return calloc(n,s);}
+                    inline bool host_fail_alloc=false;
+                    inline void *heap_caps_malloc(size_t n,int){return host_fail_alloc?nullptr:malloc(n);}
+                    inline void *heap_caps_calloc(size_t n,size_t s,int){return host_fail_alloc?nullptr:calloc(n,s);}
                     inline void heap_caps_free(void *p){free(p);}
                 """,
                 "esp_random.h": """
@@ -189,6 +190,7 @@ class DurableGames(unittest.TestCase):
                 content = (ROOT / source).read_text().replace('"/fatfs', '"' + str(temp / "volume"))
                 if source=="game_journal.cpp":
                     content=content.replace("rename(", "fat_rename(").replace("fwrite(", "fat_fwrite(").replace("fsync(", "fat_fsync(")
+                if source=="active_game.cpp":content+="\nvoid host_latch_active(){had_active=true;}\n"
                 (temp / source).write_text(content)
             # Instrument the real chunk writer too: faults must not bypass its
             # fsync/write calls merely because they moved into a shared header.
@@ -202,11 +204,14 @@ class DurableGames(unittest.TestCase):
                 #include "esp_log.h"
                 #include "esp_vfs_fat.h"
                 #include "esp_timer.h"
+                #include "esp_heap_caps.h"
+                #include "active_game.h"
                 #include <cassert>
                 #include <cstdio>
                 #include <cstring>
                 #include <filesystem>
                 GameStore g_store;
+                void host_latch_active();
                 bool store_sync_commit_begin(){return true;}
                 void store_sync_commit_end(){}
                 void store_rebuild_bill_projection(){}
@@ -218,7 +223,7 @@ class DurableGames(unittest.TestCase):
                 }
                 int main(int argc,char**argv) {
                     assert(argc==2);terminal_logs_init();g_store.offlineCacheHealthy=true;
-                    if(!strcmp(argv[1],"capacity") || !strcmp(argv[1],"write-errors") || !strcmp(argv[1],"rate-limit")) {
+                    if(!strcmp(argv[1],"empty-proof")||!strcmp(argv[1],"capacity") || !strcmp(argv[1],"write-errors") || !strcmp(argv[1],"rate-limit")) {
                         std::filesystem::remove_all(VOLUME);
                         std::filesystem::create_directory(VOLUME);
                     }
@@ -227,6 +232,24 @@ class DurableGames(unittest.TestCase):
                         std::filesystem::remove_all(VOLUME);std::filesystem::create_directory(VOLUME);
                     }
                     bool mounted=offline_cache_mount();
+                    if(!strcmp(argv[1],"empty-proof")) {
+                        assert(mounted);host_fail_alloc=true;
+                        GameJournalInspection journal{};
+                        assert(game_journal_inspect_locked(&journal)&&!journal.uncertain&&!journal.pending);
+                        host_latch_active();ActiveGameRepairInspection active{};
+                        assert(active_game_inspect_repair_locked(&active));
+                        assert(active.had_active&&active.stale_latch&&!active.present&&!active.unreadable);
+                        assert(active_game_restore()); // Empty boot needs no record allocations.
+                        g_store.harakiriOrdersReady=true;host_latch_active();
+                        assert(!active_game_inspect_repair_locked(&active)&&active.ram_active&&active.had_active);
+                        g_store.harakiriOrdersReady=false;
+                        FILE*f=fopen(VOLUME "/g_uncertain","wb");assert(f);fputc(1,f);fclose(f);
+                        assert(!game_journal_inspect_locked(&journal)&&journal.uncertain>0);
+                        host_fail_alloc=false;
+                        assert(unlink(VOLUME "/g_uncertain")==0);
+                        printf("PASS real empty journal/active: no allocations, stale had_active cleared; actual RAM game and unreadable journal stay blocked\\n");
+                        return 0;
+                    }
                     if(prepare) {
                         assert(mounted && game_journal_init());
                         FinishedGame game{};strcpy(game.base.externalId,"protected-game");
@@ -394,6 +417,7 @@ class DurableGames(unittest.TestCase):
                 str(temp / "active_game.cpp"),
                 str(temp / "harness.cpp"), "-o", str(exe),
             ], check=True)
+            subprocess.run([str(exe), "empty-proof"], check=True)
             subprocess.run([str(exe), "write"], check=True)
             subprocess.run([str(exe), "restart"], check=True)
             subprocess.run([str(exe), "capacity"], check=True)

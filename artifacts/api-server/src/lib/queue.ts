@@ -2,6 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { publicName } from "@workspace/scorecard";
+import {queueEligibility,cancelIneligibleQueue} from "./queue-eligibility";
 export class PortalConflict extends Error { constructor(message:string,public status=409){super(message);} }
 export type Tx=Parameters<Parameters<typeof db.transaction>[0]>[0];
 export const queueLock=async(tx:Tx)=>{await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('portal-queue',0))`);};
@@ -25,7 +26,7 @@ export async function queueSnapshot(full=false,owner?:string) {
   const map=new Map<number,any>();
   for(const r of rows) {
     if(!map.has(r.id))map.set(r.id,{queueGameId:r.id,position:r.position,modus:r.modus,status:r.status,players:[]});
-    if(r.entryId)map.get(r.id).players.push({entryId:r.entryId,spielerId:r.spielerId,name:full?r.name:publicName(r.name,settings?.name_mode??"INITIAL"),groupId:r.groupId});
+    if(r.entryId)map.get(r.id).players.push({entryId:r.entryId,spielerId:r.spielerId,name:r.name,groupId:r.groupId});
   }
   const games=settings?.queue_enabled?[...map.values()].map(g=>({...g,free:6-g.players.length})):[];
   return {version:createHash("sha256").update(JSON.stringify({games,settings})).digest("hex"),games,
@@ -48,11 +49,15 @@ export async function signupQueue(ids:number[],modus:string,context:any={},group
     const list=sql.join(ids.map(id=>sql`${id}`),sql`,`);
     const players=(await tx.execute(sql`SELECT id,name FROM spieler WHERE id IN(${list}) AND aktiv ORDER BY id`)).rows as any[];
     if(players.length!==ids.length)throw new PortalConflict("Ein Spieler ist nicht mehr aktiv.");
+     const eligibility=await queueEligibility(tx,ids);
+     const ineligible=eligibility.filter(p=>!p.registered||p.available<1);
+     if(ineligible.length)throw new PortalConflict(ineligible.map(p=>!p.registered
+       ?`${p.name} ist heute nicht eingetragen.`:`${p.name} hat keine Credits gebucht.`).join(" "),403);
     const blockers=(await tx.execute(sql`SELECT s.name,g.status FROM queue_entries e JOIN spieler s ON s.id=e.spieler_id
       JOIN queue_games g ON g.id=e.queue_game_id WHERE e.spieler_id IN(${list}) AND e.status IN('OPEN','TAKEN')`)).rows as any[];
     if(blockers.length)throw new PortalConflict(blockers.map(p=>p.status==="STARTED"
-      ?`${publicName(p.name,settings.name_mode)} schießt gerade. Erneut einschreiben ist nach dem Ergebnis möglich.`
-      :`${publicName(p.name,settings.name_mode)} hat noch einen offenen Eintrag.`).join(" "));
+       ?`${p.name} schießt gerade. Erneut einschreiben ist nach dem Ergebnis möglich.`
+       :`${p.name} hat noch einen offenen Eintrag.`).join(" "));
     const [count]=(await tx.execute(sql`SELECT count(*)::int n FROM queue_entries WHERE status IN('OPEN','TAKEN')`)).rows as any[];
     if(count.n+ids.length>40)throw new PortalConflict("Die Warteschlange ist voll.");
     const [available]=(await tx.execute(sql`SELECT g.id FROM queue_games g WHERE g.status='OPEN' AND g.modus::text=${modus}
@@ -94,6 +99,10 @@ export async function mutateQueue(kind:"take"|"release"|"started",body:any,keyId
       if(JSON.stringify(ids)!==JSON.stringify([...body.entryIds].sort((a:number,b:number)=>a-b)))throw new PortalConflict("Die Spieler wurden inzwischen geändert.");
       if(game.status==="LOCKED"&&game.terminal_id===owner)return {success:true};
       if(game.status!=="OPEN"||!ids.length)throw new PortalConflict("Dieses Spiel wird bereits aufgesetzt.");
+       const playerIds=(await tx.execute(sql`SELECT spieler_id FROM queue_entries WHERE queue_game_id=${game.id} AND status='OPEN'`)).rows.map((r:any)=>r.spieler_id);
+       const eligible=await queueEligibility(tx,playerIds);
+       if(eligible.length!==playerIds.length||eligible.some(p=>!p.registered||p.available<1))
+         throw new PortalConflict("Die Berechtigung wurde geändert. Tagesliste und Credits erneut synchronisieren.");
       await tx.execute(sql`UPDATE queue_games SET status='LOCKED',locked_at=now(),terminal_id=${owner} WHERE id=${game.id}`);
       await tx.execute(sql`UPDATE queue_entries SET status='TAKEN' WHERE queue_game_id=${game.id} AND status='OPEN'`);
     } else {
@@ -119,6 +128,7 @@ export async function mutateQueue(kind:"take"|"release"|"started",body:any,keyId
 }
 export async function closeQueueEntries(tx:Tx,spielId:number,externalId:string,completed:boolean) {
   await queueLock(tx);
+     await cancelIneligibleQueue(tx);
   // Result-bearing manual games close OPEN entries, never another terminal's reservation.
   await tx.execute(sql`UPDATE queue_entries e SET status='DONE',spiel_id=${spielId}
     WHERE e.status IN('OPEN','TAKEN') AND (

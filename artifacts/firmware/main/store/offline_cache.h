@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "storage_repair.h"
 
 // FAT-backed, replace-only snapshots of portal data.  This deliberately does
 // not contain outboxes: idempotent local actions remain in NVS.
@@ -29,6 +30,7 @@ bool offline_cache_repair(void); // format only after CRC proof: no durable pend
 bool offline_cache_cleanup_busy(void);
 bool offline_cache_storage_warning(char *out, size_t size);
 int offline_cache_pending_games(void); // max(RAM,disk), -1 when proof is uncertain
+void offline_cache_repair_status(StorageRepairStatus *out);
 
 // Host/unit builds can expose the pure count validator without mounting FAT.
 #ifdef TM_OFFLINE_CACHE_TEST_HOOKS

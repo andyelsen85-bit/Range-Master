@@ -49,14 +49,15 @@ void game_journal_storage_unlock() { xSemaphoreGive(s_lock); }
 size_t game_journal_record_size() { return sizeof(Record); }
 bool game_journal_inspect_locked(GameJournalInspection *out) {
     *out={};
-    Record *record=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if(!record) {out->uncertain=1;return false;}
+    Record *record=nullptr;
     DIR *dir=opendir("/fatfs");
     if(!dir) {heap_caps_free(record);out->uncertain=1;return false;}
     for(;;) {
         errno=0;struct dirent *entry=readdir(dir);
         if(!entry) {if(errno) ++out->uncertain;break;}
         if(strncasecmp(entry->d_name,"g_",2)) continue;
+        if(!record)record=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!record){++out->uncertain;continue;}
         char file[320];int n=snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
         if(n<0 || (size_t)n>=sizeof(file) || !read_record(file,record)) {++out->uncertain;continue;}
         out->bytes+=sizeof(Record);

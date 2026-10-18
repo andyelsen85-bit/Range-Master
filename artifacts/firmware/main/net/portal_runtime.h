@@ -1,4 +1,6 @@
 #pragma once
+#include "../store/storage_repair.h"
+bool portal_queue_inspect_repair_locked(QueueRepairInspection *out);
 bool portal_queue_repair_safe_locked(); // CRC-verified files, no state-lock inversion
 #include "portal_model.h"
 void portal_runtime_init();

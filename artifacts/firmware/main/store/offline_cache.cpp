@@ -217,7 +217,7 @@ static bool format_empty_locked(const esp_vfs_fat_mount_config_t &cfg) {
     memset(s_saved_known,0,sizeof(s_saved_known));
     memset(s_attempted,0,sizeof(s_attempted));
     ESP_LOGW(TAG,"FAT neu formatiert wegen verwaister Cluster, keine offenen Spiele");
-    terminal_log_add("data_loss_risk","INFO","FAT neu formatiert wegen verwaister Cluster, keine offenen Spiele");
+    terminal_log_add("sync","INFO","FAT neu formatiert wegen verwaister Cluster, keine offenen Spiele");
     return true;
 }
 static bool remove_cache_files_locked() {
@@ -237,22 +237,61 @@ static bool remove_cache_files_locked() {
     if(unlink("/fatfs/probe.tmp")!=0 && errno!=ENOENT) ok=false;
     return ok;
 }
-static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *refused=nullptr,bool allow_format=false) {
+static void repair_proof_locked(StorageRepairStatus *out,bool log) {
+    *out={};GameJournalInspection journal{};ActiveGameRepairInspection active{};QueueRepairInspection queue{};
+    // Independent checks: short-circuiting hides the actual failing guard.
+    bool journal_ok=game_journal_inspect_locked(&journal);
+    bool active_ok=active_game_inspect_repair_locked(&active);
+    bool queue_ok=portal_queue_inspect_repair_locked(&queue);
+    s_disk_pending=journal.pending;
+    out->pending=journal.pending>g_store.pendingGamesCount?journal.pending:g_store.pendingGamesCount;
+    snprintf(out->checks,sizeof(out->checks),
+        "Journal: geprüft=%d, offen=%d, unklar=%d\n"
+        "Aktives Spiel: Dateien=%d, unlesbar=%d, had_active=%d%s, aktiv=%d, RAM=%d\n"
+        "Warteschlange: Dateien=%d, unlesbar=%d, nicht leer=%d, beschäftigt=%d",
+        journal_ok,journal.pending,journal.uncertain,active.present,active.unreadable,
+        active.had_active,active.stale_latch?" (veraltet, gelöscht)":"",active.active,active.ram_active,
+        queue.present,queue.unreadable,queue.non_empty,queue.busy);
+    const char *reason="Alle Sicherheitsprüfungen bestanden.";
+    if(s_wl==WL_INVALID_HANDLE)reason="FAT ist nicht eingehängt.";
+    else if(!journal_ok)reason="Spieljournal nicht prüfbar (uncertain); Reparatur gesperrt.";
+    else if(out->pending)reason="Nicht übertragene Spiele im Journal oder RAM.";
+    else if(active.unreadable)reason="Aktives Spiel: Datei nicht lesbar oder ungültig.";
+    else if(active.active)reason="Aktives Spiel: gespeicherter Spielstand aktiv.";
+    else if(active.ram_active)reason=active.had_active?"Aktives Spiel gemerkt (had_active); RAM-Spiel aktiv.":"Aktives Spiel im RAM.";
+    else if(!active_ok)reason="Aktives Spiel gemerkt (had_active); nicht freigegeben.";
+    else if(queue.unreadable)reason="Warteschlange: Datei nicht lesbar oder ungültig.";
+    else if(queue.non_empty)reason="Warteschlange: Reservierung oder Ereignisse offen.";
+    else if(queue.busy)reason="Warteschlange: Übernahme läuft noch.";
+    else if(!queue_ok)reason="Warteschlange nicht freigegeben.";
+    out->allowed=s_wl!=WL_INVALID_HANDLE&&journal_ok&&active_ok&&queue_ok&&!out->pending;
+    snprintf(out->reason,sizeof(out->reason),"%s",reason);
+    if(log) {
+        char line[192];
+        snprintf(line,sizeof(line),"FAT proof journal: proven=%d pending=%d uncertain=%d accepted=%d RAM_pending=%d",
+            journal_ok,journal.pending,journal.uncertain,journal.accepted,g_store.pendingGamesCount);
+        ESP_LOGI(TAG,"%s",line);terminal_log_add("sync","INFO",line);
+        snprintf(line,sizeof(line),"FAT proof active: present=%d unreadable=%d had_active=%d active=%d ram_active=%d stale_latch=%d errno=%d",
+            active.present,active.unreadable,active.had_active,active.active,active.ram_active,active.stale_latch,active.error);
+        ESP_LOGI(TAG,"%s",line);terminal_log_add("sync","INFO",line);
+        snprintf(line,sizeof(line),"FAT proof queue: present=%d unreadable=%d non_empty=%d busy=%d errno=%d",
+            queue.present,queue.unreadable,queue.non_empty,queue.busy,queue.error);
+        ESP_LOGI(TAG,"%s",line);terminal_log_add("sync","INFO",line);
+        if(!out->allowed){ESP_LOGW(TAG,"%s",out->reason);terminal_log_add("sync","WARN",out->reason);}
+    }
+}
+static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *refused=nullptr,bool allow_format=false,bool boot=false) {
     game_journal_storage_lock();
     volume_usage("recovery before proof");
-    GameJournalInspection inspection{};
-    bool proven=game_journal_inspect_locked(&inspection);
-    s_disk_pending=inspection.pending;
-    if(!proven || inspection.pending || g_store.pendingGamesCount ||
-       g_store.screen==SCREEN_SPIEL || !active_game_repair_safe_locked() || !portal_queue_repair_safe_locked()) {
+    StorageRepairStatus proof{};repair_proof_locked(&proof,true);
+    if(!proof.allowed) {
         if(refused) *refused=true;
-        ESP_LOGW(TAG,"FAT cleanup refused: RAM pending=%d disk pending=%d uncertain=%d; nothing deleted",
-            g_store.pendingGamesCount,inspection.pending,inspection.uncertain);
-        terminal_log_add("data_loss_risk","WARN","Speicher voll: nicht übertragene oder ungeprüfte Spiele; Bereinigung gesperrt");
+        ESP_LOGW(TAG,"FAT cleanup refused: %s; nothing deleted",proof.reason);
+        terminal_log_add("sync","WARN",proof.reason);
         game_journal_storage_unlock();return false;
     }
     ESP_LOGW(TAG,"FAT cache-only cleanup: no pending games; journal/NVS untouched (layout marker ignored)");
-    terminal_log_add("data_loss_risk","WARN","Speicherbereinigung: nur Portal-Cache; keine offenen Spiele, Spielarchiv und NVS bleiben erhalten");
+    terminal_log_add("sync","WARN","Speicherbereinigung: nur Portal-Cache; keine offenen Spiele, Spielarchiv und NVS bleiben erhalten");
     bool ok=remove_cache_files_locked();
     auto usage=volume_usage("after cache cleanup");
     bool needs_format=usage.proven&&usage.total&&
@@ -263,8 +302,19 @@ static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *ref
         if(g_store.pendingKreditEventCount||g_store.pendingVerkaufEventCount||
            g_store.pendingPaymentEventCount||!removable_root_only_locked()) {
             if(refused)*refused=true;
-            terminal_log_add("data_loss_risk","WARN","Speicherreparatur gesperrt: offene Ereignisse oder unbekannte Dateien; nichts formatiert");
+            terminal_log_add("sync","WARN","Speicherreparatur gesperrt: offene Ereignisse oder unbekannte Dateien; nichts formatiert");
             game_journal_storage_unlock();return false;
+        }
+        Census census{};census_directory("/fatfs",&census,false);
+        if(!census.complete) {
+            if(refused)*refused=true;
+            terminal_log_add("sync","WARN","FAT-Dateiliste unvollständig; nichts formatiert");
+            game_journal_storage_unlock();return false;
+        }
+        if(boot&&!census.files&&usage.lost*CACHE_ALLOCATION_UNIT>usage.total*95/100) {
+            ESP_LOGW(TAG,"FAT boot auto-repair: files=0 lost_clusters=%llu (>95%%), all guards proven",
+                (unsigned long long)usage.lost);
+            terminal_log_add("sync","WARN","Leeres FAT mit >95% verwaisten Clustern: automatische Reparatur nach Einzelprüfungen");
         }
         ok=format_empty_locked(cfg);formatted=ok;
     }
@@ -622,7 +672,7 @@ bool offline_cache_mount(void) {
              (int)empty_cache, (int)fresh_volume);
     bool bad_capacity = false;
     bool usable = inspect_volume(&bad_capacity);
-    if (!usable && recover_cache_locked(cfg,nullptr,true)) usable=inspect_volume(&bad_capacity);
+    if (!usable && recover_cache_locked(cfg,nullptr,true,true)) usable=inspect_volume(&bad_capacity);
     if (!usable) {
         // Keep a readable mount: journal recovery/upload must work even when
         // optional snapshots or the write probe fail. Pending work forbids format.
@@ -659,10 +709,9 @@ bool offline_cache_mount(void) {
 bool offline_cache_storage_available(void) {return s_wl!=WL_INVALID_HANDLE;}
 bool offline_cache_storage_writable(void){return s_mounted&&!s_storage_blocked&&!s_repair_pending;}
 bool offline_cache_cleanup_busy(void) {return s_cleaning.load();}
-int offline_cache_pending_games(void) {
+void offline_cache_repair_status(StorageRepairStatus *out) {
     lock_cache();
     game_journal_storage_lock();
-    GameJournalInspection inspection{};
     if(s_wl==WL_INVALID_HANDLE) {
         // A deliberate user retry may remount read-only-to-the-application for
         // proof even after the automatic attempt was latched. Never format.
@@ -670,11 +719,22 @@ int offline_cache_pending_games(void) {
         cfg.max_files=12;cfg.allocation_unit_size=CACHE_ALLOCATION_UNIT;
         (void)esp_vfs_fat_spiflash_mount_rw_wl("/fatfs","storage",&cfg,&s_wl);
     }
-    bool known=s_wl!=WL_INVALID_HANDLE && game_journal_inspect_locked(&inspection)&&
-        active_game_repair_safe_locked()&&portal_queue_repair_safe_locked();
-    s_disk_pending=inspection.pending;
+    repair_proof_locked(out,true);
+    if(out->allowed&&(g_store.pendingKreditEventCount||g_store.pendingVerkaufEventCount||g_store.pendingPaymentEventCount)) {
+        out->allowed=false;snprintf(out->reason,sizeof(out->reason),"Offene Kredit-, Verkauf- oder Zahlungsereignisse; erst synchronisieren.");
+    }
+    if(out->allowed&&!removable_root_only_locked()) {
+        out->allowed=false;snprintf(out->reason,sizeof(out->reason),"Unbekannte oder ungeprüfte Dateien auf FAT.");
+    }
+    if(out->allowed&&g_store.syncStatus==SYNC_RUNNING) {
+        out->allowed=false;snprintf(out->reason,sizeof(out->reason),"Synchronisierung läuft; bitte zuerst beenden lassen.");
+    }
+    if(!out->allowed){ESP_LOGW(TAG,"%s",out->reason);terminal_log_add("sync","WARN",out->reason);}
     game_journal_storage_unlock();unlock_cache();
-    return known?(inspection.pending>g_store.pendingGamesCount?inspection.pending:g_store.pendingGamesCount):-1;
+}
+int offline_cache_pending_games(void) {
+    StorageRepairStatus proof{};offline_cache_repair_status(&proof);
+    return proof.allowed||proof.pending>0?proof.pending:-1;
 }
 bool offline_cache_storage_warning(char *out,size_t size) {
     if(!s_storage_blocked && !s_cleaning) return false;
@@ -698,7 +758,7 @@ static bool cleanup_storage(bool repair) {
     const bool was_mounted=s_mounted,was_blocked=s_storage_blocked.load();
     if(g_store.pendingGamesCount>0 || g_store.syncStatus==SYNC_RUNNING) {
         unlock_cache();s_cleaning=false;
-        terminal_log_add("data_loss_risk","WARN","Speicherbereinigung gesperrt: offene Spiele oder Synchronisierung");
+        terminal_log_add("sync","WARN","Speicherbereinigung gesperrt: offene Spiele oder Synchronisierung");
         return false;
     }
     // Never remount underneath an active sync; the UI worker rechecks here.
@@ -724,7 +784,7 @@ static bool cleanup_storage(bool repair) {
     if(ok) ok=game_journal_resume_after_cleanup();
     if(!ok) s_storage_blocked=true;
     s_cleaning=false;
-    if(!ok) terminal_log_add("data_loss_risk","WARN","Speicherbereinigung abgelehnt oder fehlgeschlagen; offene/ungeprüfte Spiele und NVS bleiben erhalten");
+    if(!ok) terminal_log_add("sync","WARN","Speicherbereinigung abgelehnt oder fehlgeschlagen; offene/ungeprüfte Spiele und NVS bleiben erhalten");
     return ok;
 }
 bool offline_cache_cleanup(void){return cleanup_storage(false);}

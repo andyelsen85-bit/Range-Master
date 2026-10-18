@@ -1414,10 +1414,15 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
 
 static std::atomic<int> s_storage_phase{0},s_storage_pending{-1};
 static bool s_storage_repair;
+static StorageRepairStatus s_storage_proof;
 static lv_obj_t *s_storage_confirm;
 static void storage_worker(void *argument) {
-    if(argument) s_storage_phase=(s_storage_repair?offline_cache_repair():offline_cache_cleanup())?4:5;
-    else {s_storage_pending=offline_cache_pending_games();s_storage_phase=2;}
+    if(argument) {
+        bool ok=s_storage_repair?offline_cache_repair():offline_cache_cleanup();
+        if(!ok)offline_cache_repair_status(&s_storage_proof);
+        s_storage_phase=ok?4:5;
+    }
+    else {offline_cache_repair_status(&s_storage_proof);s_storage_pending=s_storage_proof.pending;s_storage_phase=2;}
     vTaskDelete(nullptr);
 }
 static bool start_storage_worker(bool clean) {
@@ -1436,12 +1441,10 @@ static void storage_confirmation() {
     lv_obj_t *title=lv_msgbox_add_title(s_storage_confirm,s_storage_repair?"Speicher reparieren":"Speicher bereinigen");
     lv_obj_set_style_text_color(title,lv_color_hex(CLR_PRIMARY),0);
     lv_obj_set_style_text_font(title,UI_FONT_20,0);
-    char message[384];
-    if(pending<0)
-        snprintf(message,sizeof(message),"Nicht übertragene Spiele: RAM %d. Archiv, aktives Spiel oder Warteschlange nicht freigegeben.\n"
-            "Erst synchronisieren. Bereinigung und Reparatur gesperrt; Journal und NVS bleiben erhalten.",g_store.pendingGamesCount);
-    else snprintf(message,sizeof(message),"Nicht übertragene Spiele: %d.\n%s",pending,
-        pending?"Erst alle Spiele mit dem Portal synchronisieren. Bereinigung gesperrt.":
+    char message[1024];
+    snprintf(message,sizeof(message),"Nicht übertragene Spiele: %d.\n%.511s\n%.159s\n%.300s",pending,
+        s_storage_proof.checks,s_storage_proof.reason,
+        !s_storage_proof.allowed?"Reparatur gesperrt. Journal und NVS bleiben erhalten.":
         s_storage_repair?"Bei verwaisten Clustern FAT neu formatieren? Nur ohne offene Spiele, aktives Spiel oder Queue-Ereignisse. Bereits übertragene lokale Archive und Cache werden neu vom Portal geladen. Einstellungen und NVS bleiben erhalten.":
         "Nur wiederherstellbare Portal-Cache-Dateien löschen und FAT neu einhängen? "
         "Keine Formatierung. Spielarchiv, Einstellungen und NVS bleiben erhalten.");
@@ -1450,7 +1453,7 @@ static void storage_confirmation() {
     lv_obj_t *cancel=lv_msgbox_add_footer_button(s_storage_confirm,"Abbrechen");
     lv_obj_add_style(cancel,&g_style_btn_secondary,0);
     lv_obj_add_event_cb(cancel,[](lv_event_t*){lv_msgbox_close(s_storage_confirm);},LV_EVENT_CLICKED,nullptr);
-    if(pending==0) {
+    if(s_storage_proof.allowed) {
         lv_obj_t *confirm=lv_msgbox_add_footer_button(s_storage_confirm,s_storage_repair?"Jetzt reparieren":"Jetzt bereinigen");
         lv_obj_add_style(confirm,&g_style_btn_primary,0);
         lv_obj_add_event_cb(confirm,[](lv_event_t*) {
@@ -1495,9 +1498,9 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
         if(phase==2) {s_storage_phase=0;storage_confirmation();}
         if(phase==3) lv_label_set_text(label,"Speicher wird bereinigt …");
         if(phase==4 || phase==5) {
-            lv_label_set_text(label,phase==4?"Speicher bereit. Einstellungen und NVS erhalten; Portal-Cache wird neu geladen.":
-                "Bereinigung gesperrt oder fehlgeschlagen. Offene/ungeprüfte Spiele bleiben erhalten; "
-                "laufende Synchronisierung zuerst beenden. Details im Terminal-Protokoll.");
+            if(phase==4)lv_label_set_text(label,"Speicher bereit. Einstellungen und NVS erhalten; Portal-Cache wird neu geladen.");
+            else lv_label_set_text_fmt(label,"Speicherreparatur gesperrt oder fehlgeschlagen: %s",
+                s_storage_proof.allowed?"FAT/NVS-Fehler; Details im Terminal-Protokoll.":s_storage_proof.reason);
             s_storage_phase=0;
         }
     },200,storage_status);

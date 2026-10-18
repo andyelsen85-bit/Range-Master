@@ -308,6 +308,22 @@ substitute for these tests.
 
 ## Full FAT with few visible files: orphan-chain recovery
 
+The confirmation reports each guard independently: journal proven/pending/
+uncertain; active files present/unreadable, `had_active`, saved active state and
+RAM activity; queue files present/unreadable, non-empty state and an in-flight
+takeover. It shows the specific refusal reason, including after a failed
+confirmed attempt. Serial `FAT proof journal`, `FAT proof active` and `FAT proof
+queue` lines are also uploaded using the portal-supported `sync` log category.
+
+An empty directory needs no journal/active-record PSRAM allocations. A failed
+allocation must never fabricate file presence. A stale `had_active` latch is
+cleared only when a successful scan finds no active files and there is no active
+game in RAM. Existing unreadable files and real RAM games remain blockers.
+Boot recovery explicitly logs the automatic case when no files/pending work are
+present and more than 95% of the usable volume consists of lost clusters. The host
+regression models the reported 2,394 lost clusters and checks every named guard,
+the enabled confirmation state, and successful empty-volume recovery.
+
 The census now reports `FAT lost clusters`, bytes, used/reachable clusters and
 free space at mount and each recovery step. Reachable space includes rounded
 file allocations and estimated directory allocations. This is an **estimate**,
