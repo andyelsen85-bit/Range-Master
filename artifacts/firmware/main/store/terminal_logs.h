@@ -1,6 +1,13 @@
 #pragma once
 #include <stddef.h>
 #include "cJSON.h"
+#include <cstring>
+#include <initializer_list>
+inline const char *terminal_log_wire_type(const char *type) {
+    for(const char *known:{"fire_trace","gateway_trace","sync","data_loss_risk","ui_commit","wifi"})
+        if(type&&!strcmp(type,known))return known;
+    return "sync";
+}
 
 // Diagnostic data is separate from game/sales outboxes, FAT caches and backups.
 struct TerminalLogEntry {

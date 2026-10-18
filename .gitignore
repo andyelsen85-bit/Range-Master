@@ -55,6 +55,7 @@ attached_assets/
 /artifacts/firmware/managed_components/
 /artifacts/firmware/build/
 /generated-artifacts/
+/artifacts/firmware/sdkconfig
 /artifacts/lora-gateway/TrapMasterGateway.local.h
 /artifacts/lora-relay/TrapMasterRelay.local.h
 /artifacts/lora-gateway/TrapMasterGateway/TrapMasterGateway.local.h

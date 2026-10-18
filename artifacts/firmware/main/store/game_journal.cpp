@@ -19,6 +19,7 @@
 #include "esp_heap_caps.h"
 #include "esp_vfs_fat.h"
 #include "nvs.h"
+#include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -34,6 +35,49 @@ static std::atomic<bool> s_ready{false},s_has_unloaded{false};
 static bool s_protected;
 static int64_t s_retry_at;
 static unsigned s_retry_attempt;
+static EXT_RAM_BSS_ATTR char s_slot_ids[STORAGE_JOURNAL_SLOTS][40];
+static EXT_RAM_BSS_ATTR char s_portal_acks[STORAGE_JOURNAL_SLOTS][40];
+static int s_ack_count;
+static bool s_index_built,s_acks_loaded,s_acks_valid=true;
+// Only this compatibility recognizer knows the old layout. Never create a
+// legacy name: it is read/migrated, or retained as uncertain evidence.
+static int journal_kind(const char *name) {
+    if(!strncasecmp(name,"g_",2))return 4;
+    if(strlen(name)!=8 || (name[0]!='J'&&name[0]!='j') ||
+       strspn(name+1,"0123456789")!=3 || name[4]!='.')return 0;
+    int slot=(name[1]-'0')*100+(name[2]-'0')*10+name[3]-'0';
+    if(slot>=(int)STORAGE_JOURNAL_SLOTS)return 0;
+    return !strcasecmp(name+5,"REC")?1:!strcasecmp(name+5,"PRT")?2:!strcasecmp(name+5,"BAK")?3:0;
+}
+bool game_journal_is_file(const char *name){return journal_kind(name)!=0;}
+static void sibling_path(const char *file,const char *extension,char *out,size_t size) {
+    snprintf(out,size,"%s",file);
+    char *dot=strrchr(out,'.');
+    if(dot)snprintf(dot,size-(size_t)(dot-out),".%s",extension);
+}
+static bool portal_known(const char *id) {
+    for(int i=0;i<s_ack_count;i++)if(!strcmp(s_portal_acks[i],id))return true;
+    return false;
+}
+static bool load_acks_locked() {
+    if(s_acks_loaded)return s_acks_valid;
+    s_acks_loaded=true;nvs_handle_t n;
+    if(nvs_open("tm_cache",NVS_READWRITE,&n)!=ESP_OK)return s_acks_valid=false;
+    size_t bytes=sizeof(s_portal_acks);
+    esp_err_t err=nvs_get_blob(n,"game_acks",s_portal_acks,&bytes);nvs_close(n);
+    if(err==ESP_ERR_NVS_NOT_FOUND)return true;
+    if(err!=ESP_OK || bytes%40 || bytes>sizeof(s_portal_acks))return s_acks_valid=false;
+    s_ack_count=bytes/40;
+    for(int i=0;i<s_ack_count;i++)if(!s_portal_acks[i][0]||s_portal_acks[i][39])return s_acks_valid=false;
+    return true;
+}
+static bool persist_acks_locked() {
+    nvs_handle_t n;if(nvs_open("tm_cache",NVS_READWRITE,&n)!=ESP_OK)return false;
+    esp_err_t err=s_ack_count?nvs_set_blob(n,"game_acks",s_portal_acks,s_ack_count*40):
+        nvs_erase_key(n,"game_acks");
+    bool ok=(err==ESP_OK||err==ESP_ERR_NVS_NOT_FOUND)&&nvs_commit(n)==ESP_OK;
+    nvs_close(n);return ok;
+}
 // Called under the journal lock. Distinct failing stages each retain their first
 // diagnostic, without flooding diagnostics/NVS on repeated syncs.
 static void journal_failure(const char *step,const char *file,int error) {
@@ -61,10 +105,45 @@ static uint32_t checksum(const FinishedGame &game,bool accepted=false) {
     for(size_t i=0;i<sizeof(game);i++) hash=(hash^bytes[i])*16777619u;
     return hash;
 }
-static bool filename(const char *id,char *out,size_t size) {
+static bool read_record(const char *file,Record *record);
+static bool trim_archive_locked(unsigned reserve);
+static bool filename(const char *id,char *out,size_t size,bool create=true) {
     size_t length=strnlen(id,40);
     if(!length || length>=40 || strspn(id,"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-")!=length) return false;
-    return snprintf(out,size,"/fatfs/g_%s",id)>0;
+    if(!s_index_built) {
+        auto *record=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        DIR *dir=record?opendir("/fatfs"):nullptr;
+        if(!dir){heap_caps_free(record);return false;}
+        struct dirent *entry;
+        while((entry=readdir(dir))) {
+            int kind=journal_kind(entry->d_name);
+            if(!kind||kind==4)continue;
+            char path[48];snprintf(path,sizeof(path),"/fatfs/%.8s",entry->d_name);
+            if(read_record(path,record)) {
+                int slot=(entry->d_name[1]-'0')*100+(entry->d_name[2]-'0')*10+entry->d_name[3]-'0';
+                snprintf(s_slot_ids[slot],40,"%.39s",record->game.base.externalId);
+            }
+        }
+        closedir(dir);heap_caps_free(record);s_index_built=true;
+    }
+    for(unsigned i=0;i<STORAGE_JOURNAL_SLOTS;i++)if(!strcmp(s_slot_ids[i],id))
+        return snprintf(out,size,"/fatfs/J%03u.REC",i)>0;
+    if(!create)return false;
+    for(int pass=0;pass<2;pass++) {
+        for(unsigned i=0;i<STORAGE_JOURNAL_SLOTS;i++) {
+            bool occupied=false;char path[48];
+            for(const char *ext:{"REC","PRT","BAK"}) {
+                snprintf(path,sizeof(path),"/fatfs/J%03u.%s",i,ext);
+                struct stat st{};
+                if(stat(path,&st)==0 || errno!=ENOENT){occupied=true;break;}
+            }
+            if(occupied)continue;
+            snprintf(s_slot_ids[i],40,"%.39s",id);
+            return snprintf(out,size,"/fatfs/J%03u.REC",i)>0;
+        }
+        if(!trim_archive_locked(1))break;
+    }
+    errno=ENOSPC;return false;
 }
 static bool read_record(const char *file,Record *record);
 static int fallback_locked(Record *record);
@@ -78,19 +157,20 @@ void game_journal_storage_unlock() { xSemaphoreGive(s_lock); }
 size_t game_journal_record_size() { return sizeof(Record); }
 bool game_journal_inspect_locked(GameJournalInspection *out) {
     *out={};
+    if(!load_acks_locked())++out->uncertain;
     Record *record=nullptr;
     DIR *dir=opendir("/fatfs");
     if(!dir) {heap_caps_free(record);out->uncertain=1;return false;}
     for(;;) {
         errno=0;struct dirent *entry=readdir(dir);
         if(!entry) {if(errno) ++out->uncertain;break;}
-        if(strncasecmp(entry->d_name,"g_",2)) continue;
+        if(!journal_kind(entry->d_name)) continue;
         if(!record)record=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
         if(!record){++out->uncertain;continue;}
         char file[320];int n=snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
         if(n<0 || (size_t)n>=sizeof(file) || !read_record(file,record)) {++out->uncertain;continue;}
         out->bytes+=sizeof(Record);
-        if(record->accepted) ++out->accepted;else ++out->pending;
+        if(record->accepted||portal_known(record->game.base.externalId)) ++out->accepted;else ++out->pending;
     }
     if(closedir(dir)!=0) ++out->uncertain;
     // The emergency NVS slot is durable pending work too. Do not let a boot
@@ -98,14 +178,16 @@ bool game_journal_inspect_locked(GameJournalInspection *out) {
     int fallback=fallback_locked(nullptr);
     if(fallback==1) {
         if(!record)record=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-        if(record && fallback_locked(record)==1)++out->pending;
+        if(record && fallback_locked(record)==1) {
+            if(portal_known(record->game.base.externalId))++out->accepted;else ++out->pending;
+        }
         else ++out->uncertain;
     } else if(fallback<0)++out->uncertain;
     heap_caps_free(record);
     return out->uncertain==0;
 }
 static bool replace_record(const char *temp,const char *file) {
-    char backup[326];snprintf(backup,sizeof(backup),"%.319s.bak",file);
+    char backup[326];sibling_path(file,"BAK",backup,sizeof(backup));
     bool moved=false;
     if(access(file,F_OK)==0) {
         // FatFs does not replace an existing rename destination.
@@ -121,7 +203,7 @@ static bool replace_record(const char *temp,const char *file) {
     return true;
 }
 static bool write_record(const char *file,const Record *record) {
-    char temp[326]; snprintf(temp,sizeof(temp),"%.319s.part",file);
+    char temp[326]; sibling_path(file,"PRT",temp,sizeof(temp));
     FILE *fp=fopen(temp,"wb");
     if(!fp) {journal_failure("fopen(.part)",file,errno);return false;}
     bool complete=false;
@@ -182,7 +264,10 @@ bool game_journal_ready() {
         free_bytes>=total*STORAGE_FREE_PERCENT/100+storage_allocated(sizeof(Record))*2;
 }
 int game_journal_contains(const char *id) {
-    char file[96];if(!filename(id,file,sizeof(file)))return -1;
+    game_journal_storage_lock();
+    char file[96];bool found_name=filename(id,file,sizeof(file),false);
+    game_journal_storage_unlock();
+    if(!found_name)return 0;
     struct stat st{};
     if(stat(file,&st)!=0)return errno==ENOENT?0:-1;
     auto *record=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -203,7 +288,7 @@ static bool trim_archive_locked(unsigned reserve) {
     for(;;) {
         errno=0;struct dirent *entry=readdir(dir);
         if(!entry) {if(errno){journal_failure("trim/readdir",nullptr,errno);ok=false;}break;}
-        if(strncmp(entry->d_name,"g_",2) || strchr(entry->d_name,'.')) continue;
+        if(journal_kind(entry->d_name)!=1) continue;
         char path[96];int n=snprintf(path,sizeof(path),"/fatfs/%s",entry->d_name);
         ++total;
         if(n<0 || (size_t)n>=sizeof(path) || !read_record(path,record)) {
@@ -213,7 +298,7 @@ static bool trim_archive_locked(unsigned reserve) {
             journal_failure("trim/read_record",path,errno?errno:EILSEQ);
             s_ready=false;continue;
         }
-        if(!record->accepted) continue;
+        if(!record->accepted&&!portal_known(record->game.base.externalId)) continue;
         unsigned oldest=0;
         for(unsigned i=1;i<count;i++) if(strcmp(kept[i].stamp,kept[oldest].stamp)<0) oldest=i;
         if(count==STORAGE_ARCHIVE_SLOTS) {
@@ -250,7 +335,7 @@ static bool save_record_locked(const char *file,const Record *record) {
 }
 bool game_journal_save(const FinishedGame *game) {
     if(!s_lock || !game) return false;
-    char file[96]; if(!filename(game->base.externalId,file,sizeof(file))) return false;
+    char file[96]{};
     Record *record=(Record *)heap_caps_calloc(1,sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!record) {
         game_journal_storage_lock();journal_failure("allocation",file,ENOMEM);game_journal_storage_unlock();
@@ -259,6 +344,10 @@ bool game_journal_save(const FinishedGame *game) {
     record->magic=MAGIC;record->version=1;record->bytes=sizeof(FinishedGame);
     record->game=*game;record->checksum=checksum(record->game);
     xSemaphoreTake(s_lock,portMAX_DELAY);
+    if(!filename(game->base.externalId,file,sizeof(file))) {
+        journal_failure("trim/capacity",game->base.externalId,errno);
+        xSemaphoreGive(s_lock);heap_caps_free(record);s_ready=false;return false;
+    }
     // A finish may race the disk-first identity remap. Future writes must use
     // the mapped IDs even before the roster's short RAM publication window.
     for(int r=0;r<s_remap_count;r++) {
@@ -304,12 +393,23 @@ bool game_journal_hold_pending(const FinishedGame *game) {
 }
 bool game_journal_ack(const char *id) {
     if(!s_lock) return false;
-    char file[96];if(!filename(id,file,sizeof(file))) return false;
     Record *record=(Record *)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!record) return false;
     xSemaphoreTake(s_lock,portMAX_DELAY);
+    if(!load_acks_locked()){xSemaphoreGive(s_lock);heap_caps_free(record);return false;}
+    if(!portal_known(id)) {
+        if(s_ack_count>=(int)STORAGE_JOURNAL_SLOTS) {
+            xSemaphoreGive(s_lock);heap_caps_free(record);return false;
+        }
+        snprintf(s_portal_acks[s_ack_count++],40,"%.39s",id);
+    }
+    // Persist the portal's exact acceptance before touching any recovery copy.
+    bool proof_saved=persist_acks_locked();
+    if(!proof_saved)journal_failure("NVS fallback",id,EIO);
+    char file[96]{};
+    bool located=filename(id,file,sizeof(file),false);
     struct stat st{};
-    bool missing=stat(file,&st)!=0 && errno==ENOENT;
+    bool missing=!located || (stat(file,&st)!=0 && errno==ENOENT);
     bool ok=missing || read_record(file,record);
     if(ok && !missing) {
         record->accepted=true;record->checksum=checksum(record->game,true);
@@ -331,14 +431,35 @@ bool game_journal_ack(const char *id) {
         // record is not an ACK failure. Remove only its acknowledged recovery
         // siblings so a failed fsync/rename cannot resurrect it on the next scan.
         char sibling[104];
-        for(const char *suffix:{".part",".bak"}) {
-            snprintf(sibling,sizeof(sibling),"%s%s",file,suffix);
+        if(located)for(const char *ext:{"PRT","BAK"}) {
+            sibling_path(file,ext,sibling,sizeof(sibling));
             if(unlink(sibling)!=0 && errno!=ENOENT)ok=false;
         }
-        if(ok)ok=clear_fallback_locked(id,record);
+    }
+    // This fallback is known accepted even if an unrelated FAT archive update
+    // failed. Never let it strand the RAM queue or resurrect an active game.
+    bool fallback_ok=clear_fallback_locked(id,record);
+    if(ok&&fallback_ok) {
+        for(int i=0;i<s_ack_count;i++)if(!strcmp(s_portal_acks[i],id)) {
+            memmove(s_portal_acks+i,s_portal_acks+i+1,(s_ack_count-i-1)*40);--s_ack_count;break;
+        }
+        if(!persist_acks_locked())proof_saved=false;
     }
     xSemaphoreGive(s_lock);heap_caps_free(record);
-    return ok;
+    return ok&&fallback_ok&&proof_saved;
+}
+int game_journal_retry_acks(void) {
+    if(!s_lock)return 0;
+    int done=0;
+    for(int attempt=0;attempt<4;++attempt) {
+        char id[40]{};
+        game_journal_storage_lock();
+        if(load_acks_locked()&&s_ack_count)snprintf(id,sizeof(id),"%.39s",s_portal_acks[0]);
+        game_journal_storage_unlock();
+        if(!id[0]||!game_journal_ack(id))break;
+        ++done;
+    }
+    return done;
 }
 bool game_journal_recheck_ready() {
     if(!s_lock || !s_protected || !offline_cache_storage_writable() ||
@@ -352,10 +473,76 @@ bool game_journal_recheck_ready() {
         proof.pending+proof.accepted<=(int)STORAGE_JOURNAL_SLOTS &&
         esp_vfs_fat_info("/fatfs",&total,&available)==ESP_OK &&
         available>=total*STORAGE_FREE_PERCENT/100+storage_allocated(sizeof(Record))*2;
-    // A failed write is a transient latch, not a permanent storage diagnosis.
-    s_ready=ok;
+    bool needs_probe=ok&&!s_ready;
     if(ok)s_has_unloaded=proof.pending>MAX_PENDING_GAMES;
+    game_journal_storage_unlock();heap_caps_free(record);
+    if(needs_probe)ok=game_journal_self_test();
+    s_ready=ok;return ok;
+}
+bool game_journal_self_test() {
+    auto *record=(Record*)heap_caps_calloc(1,sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!record){journal_failure("self-test/alloc","/fatfs",ENOMEM);return false;}
+    game_journal_storage_lock();
+    char path[96]{};
+    bool ok=filename("__journal_selftest__",path,sizeof(path));
+    record->magic=MAGIC;record->version=1;record->bytes=sizeof(FinishedGame);record->accepted=true;
+    snprintf(record->game.base.externalId,40,"__journal_selftest__");
+    record->checksum=checksum(record->game,true);
+    if(ok)ok=write_record(path,record);
+    if(ok&&!read_record(path,record)){journal_failure("self-test/read",path,errno);ok=false;}
+    if(ok&&unlink(path)!=0){journal_failure("self-test/unlink",path,errno);ok=false;}
+    if(!ok)journal_failure("self-test/slot",path,errno?errno:EIO);
+    else ESP_LOGI("game_journal","Journal-Selbsttest: 8.3 PRT write/fsync/rename REC/read/delete OK");
     game_journal_storage_unlock();heap_caps_free(record);return ok;
+}
+bool game_journal_read(const char *id,FinishedGame *out) {
+    if(!id||!out||!s_lock)return false;
+    auto *r=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!r)return false;
+    game_journal_storage_lock();char file[96]{},sibling[104];
+    bool found=false;
+    if(filename(id,file,sizeof(file),false))for(const char *ext:{"REC","PRT","BAK"}) {
+        sibling_path(file,ext,sibling,sizeof(sibling));
+        if(read_record(sibling,r)&&!strcmp(r->game.base.externalId,id)){found=true;break;}
+    }
+    if(!found)found=fallback_locked(r)==1&&!strcmp(r->game.base.externalId,id);
+    if(found)*out=r->game;
+    game_journal_storage_unlock();heap_caps_free(r);return found;
+}
+bool game_journal_discard(const char *id) {
+    if(!s_lock||!id)return false;
+    auto *r=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!r)return false;
+    game_journal_storage_lock();char file[96]{},sibling[104];bool ok=true;
+    if(filename(id,file,sizeof(file),false))for(const char *ext:{"REC","PRT","BAK"}) {
+        sibling_path(file,ext,sibling,sizeof(sibling));
+        if(unlink(sibling)!=0&&errno!=ENOENT)ok=false;
+    }
+    if(!clear_fallback_locked(id,r))ok=false;
+    game_journal_storage_unlock();heap_caps_free(r);
+    if(ok){active_game_retry_finished_checkpoint();(void)game_journal_recheck_ready();}
+    return ok;
+}
+int game_journal_pending_ids(char (*ids)[40],int capacity) {
+    if(!s_lock||!ids||capacity<=0)return -1;
+    auto *r=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!r)return -1;
+    game_journal_storage_lock();int count=0;DIR *dir=opendir("/fatfs");
+    auto add=[&](){
+        if(r->accepted||portal_known(r->game.base.externalId))return;
+        for(int i=0;i<count;i++)if(!strcmp(ids[i],r->game.base.externalId))return;
+        if(count<capacity)snprintf(ids[count++],40,"%.39s",r->game.base.externalId);
+    };
+    if(dir) {
+        struct dirent *entry;while((entry=readdir(dir))) {
+            if(!journal_kind(entry->d_name))continue;
+            char file[320];snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
+            if(read_record(file,r))add();
+        }
+        closedir(dir);
+    }
+    if(fallback_locked(r)==1)add();
+    game_journal_storage_unlock();heap_caps_free(r);return dir?count:-1;
 }
 void game_journal_maintenance() {
     if(!s_lock || !s_protected || offline_cache_cleanup_busy())return;
@@ -399,14 +586,28 @@ static int scan(unsigned days,bool recover,int old_id=0,int new_id=0) {
     if(!dir) { xSemaphoreGive(s_lock);heap_caps_free(record);return -1; }
     time_t now=time(nullptr); struct dirent *entry;
     while((entry=readdir(dir))) {
-        if(strncmp(entry->d_name,"g_",2)) continue;
+        int kind=journal_kind(entry->d_name);
+        if(!kind) continue;
         char file[320];snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
-        if(strstr(entry->d_name,".part")) {
+        if(kind==4) {
+            // Old LFN volumes are migrated without ever creating an LFN.
+            if(access(file,F_OK)!=0&&errno==ENOENT)continue;
+            char legacy[320];snprintf(legacy,sizeof(legacy),"%s",file);
+            char *dot=strchr(legacy+7,'.');if(dot)*dot=0;
+            char part[326],backup[326];
+            snprintf(part,sizeof(part),"%s.part",legacy);snprintf(backup,sizeof(backup),"%s.bak",legacy);
+            if(!read_record(part,record)&&!read_record(legacy,record)&&!read_record(backup,record)) {corrupt=true;continue;}
+            char target[96];
+            if(!filename(record->game.base.externalId,target,sizeof(target))||!write_record(target,record)) {corrupt=true;continue;}
+            (void)unlink(part);(void)unlink(legacy);(void)unlink(backup);
+            snprintf(file,sizeof(file),"%s",target);kind=1;
+        }
+        if(kind==2) {
             // A power cut may have happened after fsync but before rename.
             // Recover complete temporary records; preserve incomplete evidence.
             char final_file[320];snprintf(final_file,sizeof(final_file),"%s",file);
-            char *suffix=strstr(final_file,".part");*suffix=0;
-            char backup[326];snprintf(backup,sizeof(backup),"%s.bak",final_file);
+            sibling_path(file,"REC",final_file,sizeof(final_file));
+            char backup[326];sibling_path(file,"BAK",backup,sizeof(backup));
             if(!read_record(file,record)) {
                 if(read_record(final_file,record)||read_record(backup,record)) {
                     // An interrupted update still has its previous good copy.
@@ -417,11 +618,11 @@ static int scan(unsigned days,bool recover,int old_id=0,int new_id=0) {
             if(read_record(final_file,record)) (void)unlink(backup);
             if(!replace_record(file,final_file)) {corrupt=true;continue;}
             snprintf(file,sizeof(file),"%s",final_file);
-        } else if(strstr(entry->d_name,".bak")) {
+        } else if(kind==3) {
             if(!read_record(file,record)) {corrupt=true;continue;}
             char final_file[320];snprintf(final_file,sizeof(final_file),"%s",file);
-            *strstr(final_file,".bak")=0;
-            char temp[326];snprintf(temp,sizeof(temp),"%s.part",final_file);
+            sibling_path(file,"REC",final_file,sizeof(final_file));
+            char temp[326];sibling_path(file,"PRT",temp,sizeof(temp));
             if(read_record(temp,record)) continue; // New complete copy wins.
             if(read_record(final_file,record)) {(void)unlink(file);continue;}
             if(access(final_file,F_OK)==0 && unlink(final_file)!=0) {corrupt=true;continue;}
@@ -429,6 +630,10 @@ static int scan(unsigned days,bool recover,int old_id=0,int new_id=0) {
             snprintf(file,sizeof(file),"%s",final_file);
         }
         if(!read_record(file,record)) { corrupt=true;continue; }
+        if(portal_known(record->game.base.externalId))record->accepted=true;
+        if(!strcmp(record->game.base.externalId,"__journal_selftest__")&&record->accepted) {
+            (void)unlink(file);continue;
+        }
         struct tm utc{};time_t finished=0;
         const char *stamp=record->game.finishedAt;
         if(strptime(stamp,"%Y-%m-%dT%H:%M:%S",&utc)) {
@@ -525,6 +730,10 @@ bool game_journal_init() {
     if(!protected_volume) return false;
     s_protected=true;
     s_ready=true;
+    game_journal_storage_lock();
+    bool acks_ok=load_acks_locked();
+    game_journal_storage_unlock();
+    if(!acks_ok){s_ready=false;return false;}
     bool scanned=scan(0,false)>=0;
     xSemaphoreTake(s_lock,portMAX_DELAY);
     bool bounded=trim_archive_locked(0);
@@ -543,12 +752,17 @@ bool game_journal_init() {
         bool present=false;
         for(int i=0;i<g_store.pendingGamesCount;i++)
             if(!strcmp(g_store.pendingGames[i].externalId,fallback->game.base.externalId))present=true;
-        if(!present && g_store.pendingGamesCount<MAX_PENDING_GAMES)
+        if(!present && !portal_known(fallback->game.base.externalId) && g_store.pendingGamesCount<MAX_PENDING_GAMES)
             g_store.pendingGames[g_store.pendingGamesCount++]=fallback->game.base;
         if(!present && g_store.pendingGamesCount>=MAX_PENDING_GAMES)s_has_unloaded=true;
-        s_ready=false;s_retry_attempt=0;s_retry_at=esp_timer_get_time()+1000000;
+        if(!portal_known(fallback->game.base.externalId))s_ready=false;
+        s_retry_attempt=0;s_retry_at=esp_timer_get_time()+1000000;
     } else if(state<0)s_ready=false;
     game_journal_storage_unlock();heap_caps_free(fallback);
+    bool tested=game_journal_self_test();
+    if(!tested)s_ready=false;
+    // A failed write probe blocks new games, not reading/uploading durable
+    // pending work from an otherwise readable full volume.
     return scanned && state>=0;
 }
 bool game_journal_resume_after_cleanup() {
@@ -618,7 +832,9 @@ int game_journal_resolve_player_locked(int id) {
     return id;
 }
 int game_journal_reload_pending() {
-    if(!s_ready) return -1;
+    // Read-only recovery/draining must continue while write readiness is
+    // latched off. Portal-known IDs are excluded by scan().
+    if(!s_lock||!offline_cache_storage_available()||offline_cache_cleanup_busy())return -1;
     int queued=scan(0,false);
     if(queued<0) return queued;
     xSemaphoreTake(s_lock,portMAX_DELAY);
@@ -634,7 +850,7 @@ int game_journal_manifest(const char *day,char (*ids)[40],int capacity) {
     DIR *dir=opendir("/fatfs");int count=0;struct dirent *entry;
     if(dir) {
         while((entry=readdir(dir)) && count<capacity) {
-            if(strncmp(entry->d_name,"g_",2) || strstr(entry->d_name,".part")) continue;
+            if(journal_kind(entry->d_name)!=1) continue;
             char file[320];snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
             if(read_record(file,record) && !strcmp(record->game.base.datum,day))
                 snprintf(ids[count++],40,"%.39s",record->game.base.externalId);

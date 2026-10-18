@@ -166,7 +166,7 @@ static bool removable_root_only_locked() {
         if(stat(full,&st)!=0){ok=false;continue;}
         if(!strcasecmp(n,"tmcache")){if(!S_ISDIR(st.st_mode))ok=false;continue;}
         if(!S_ISREG(st.st_mode)){ok=false;continue;}
-        if(!strcasecmp(n,"tmcache")||!strncasecmp(n,"g_",2)||!strcasecmp(n,"probe.tmp")||
+        if(!strcasecmp(n,"tmcache")||game_journal_is_file(n)||!strcasecmp(n,"probe.tmp")||
            !strcasecmp(n,"active0.bin")||!strcasecmp(n,"active1.bin")||
            !strcasecmp(n,"active0.bin.tmp")||!strcasecmp(n,"active1.bin.tmp")||
            !strcasecmp(n,"queue0.bin")||!strcasecmp(n,"queue1.bin"))continue;

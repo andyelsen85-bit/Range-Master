@@ -17,6 +17,9 @@
 #include "game_store.h"
 #include "day_inventory.h"
 #include "terminal_logs.h"
+#include "storage_admin.h"
+#include "storage_budget.h"
+#include <atomic>
 #include "game_journal.h"
 #include "game_participations.h"
 #include <atomic>
@@ -940,7 +943,7 @@ static void contract_error_message(const char *path,int status,bool log) {
             cJSON_AddStringToObject(details,"endpoint",path);
             cJSON_AddNumberToObject(details,"httpStatus",status);
         }
-        terminal_log_add("diagnostic","ERROR",message,details);
+        terminal_log_add("sync","ERROR",message,details);
         if(details)cJSON_Delete(details);
     }
 }
@@ -1175,12 +1178,12 @@ static void http_probe_portal_build(void)
             portEXIT_CRITICAL(&s_http_failure_lock);
             char message[160];snprintf(message,sizeof(message),"Portal-Build %.64s; Sync-Schnittstellen: %d",
                 last_commit,cJSON_GetArraySize(routes));
-            ESP_LOGI(TAG,"%s",message);terminal_log_add("diagnostic","INFO",message,nullptr);
+            ESP_LOGI(TAG,"%s",message);terminal_log_add("sync","INFO",message,nullptr);
         }
     } else if(now>=next_warning) {
         next_warning=now+3600000000LL;
         ESP_LOGW(TAG,"Portal-Build nicht prüfbar: GET /api/health HTTP %d",s_last_http_status);
-        terminal_log_add("diagnostic","WARN","Portal-Build nicht prüfbar: /api/health fehlt oder ist ungültig",nullptr);
+        terminal_log_add("sync","WARN","Portal-Build nicht prüfbar: /api/health fehlt oder ist ungültig",nullptr);
     }
     if(root)cJSON_Delete(root);
 }
@@ -1238,10 +1241,196 @@ static cJSON *pending_game_to_json(const PendingGame *g)
     return obj;
 }
 
+namespace {
+static std::atomic_flag s_network_cycle_busy=ATOMIC_FLAG_INIT;
+static int s_pending_push_accepted,s_pending_push_failed;
+struct RecoveryReceipt {char id[40];uint32_t checksum;int portalState;};
+static EXT_RAM_BSS_ATTR RecoveryReceipt s_exports[STORAGE_JOURNAL_SLOTS];
+static portMUX_TYPE s_recovery_lock=portMUX_INITIALIZER_UNLOCKED;
+static char s_discard_id[40],s_discard_token[24];
+static uint32_t s_discard_checksum;
+static int64_t s_discard_until;
+static uint32_t record_hash(const FinishedGame *game) {
+    uint32_t hash=2166136261u;const auto *bytes=(const uint8_t*)game;
+    for(size_t i=0;i<sizeof(*game);i++)hash=(hash^bytes[i])*16777619u;
+    return hash;
+}
+static bool pending_record(const char *id,FinishedGame *game) {
+    if(game_journal_read(id,game))return true;
+    if(!store_sync_commit_begin())return false;
+    bool found=false;
+    for(int i=0;i<g_store.pendingGamesCount;i++)if(!strcmp(id,g_store.pendingGames[i].externalId)) {
+        *game={};game->base=g_store.pendingGames[i];
+        if(g_store.hasLastFinished&&!strcmp(g_store.lastFinished.base.externalId,id))*game=g_store.lastFinished;
+        else for(int j=0;j<g_store.historyCount;j++)if(!strcmp(g_store.history[j].base.externalId,id)){*game=g_store.history[j];break;}
+        found=true;break;
+    }
+    if(found&&game->spieler_count<=0) {
+        for(int i=0;i<game->base.teilnahmen_count&&i<MAX_SPIELER;i++) {
+            int id=game->base.teilnahmen[i].spielerId,index=game->spieler_count++;
+            game->spielerIds[index]=id;
+            snprintf(game->spielerNamen[index],sizeof(game->spielerNamen[index]),"Spieler-ID %d",id);
+            for(int k=0;k<g_store.spielerCount;k++)if(g_store.spieler[k].id==id) {
+                memcpy(game->spielerNamen[index],g_store.spieler[k].name,sizeof(game->spielerNamen[index]));
+                game->spielerNamen[index][sizeof(game->spielerNamen[index])-1]=0;break;
+            }
+        }
+        snprintf(game->finishedAt,sizeof(game->finishedAt),"%.31s",game->base.finishedAt);
+    }
+    store_sync_commit_end();return found;
+}
+static int pending_ids(char (*ids)[40]) {
+    int count=game_journal_pending_ids(ids,STORAGE_JOURNAL_SLOTS);
+    if(count<0)count=0; // RAM is still exportable when the FAT cannot be read.
+    if(!store_sync_commit_begin())return -1;
+    for(int i=0;i<g_store.pendingGamesCount&&count<(int)STORAGE_JOURNAL_SLOTS;i++) {
+        bool found=false;
+        for(int j=0;j<count;j++)if(!strcmp(ids[j],g_store.pendingGames[i].externalId))found=true;
+        if(!found)snprintf(ids[count++],40,"%.39s",g_store.pendingGames[i].externalId);
+    }
+    store_sync_commit_end();return count;
+}
+static bool remove_ram_pending(const char *id) {
+    TickType_t started;
+    if(!sync_commit_begin("pending-game-ack",&started))return false;
+    for(int i=0;i<g_store.pendingGamesCount;i++)if(!strcmp(id,g_store.pendingGames[i].externalId)) {
+        memmove(g_store.pendingGames+i,g_store.pendingGames+i+1,(g_store.pendingGamesCount-i-1)*sizeof(PendingGame));
+        --g_store.pendingGamesCount;break;
+    }
+    sync_commit_end("pending-game-ack",started);game_store_save();return true;
+}
+}
+char *http_pending_games_json() {
+    auto *ids=(char(*)[40])heap_caps_calloc(STORAGE_JOURNAL_SLOTS,40,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    auto *game=(FinishedGame*)heap_caps_calloc(1,sizeof(FinishedGame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!ids||!game){heap_caps_free(ids);heap_caps_free(game);return nullptr;}
+    int count=pending_ids(ids);cJSON *root=cJSON_CreateObject(),*items=cJSON_AddArrayToObject(root,"games");
+    for(int i=0;i<count;i++) {
+        bool full=pending_record(ids[i],game);cJSON *item=cJSON_CreateObject();
+        cJSON_AddStringToObject(item,"externalId",ids[i]);cJSON_AddStringToObject(item,"date",full?game->base.datum:"unbekannt");
+        int journal=game_journal_contains(ids[i]);cJSON_AddStringToObject(item,"state",journal==1?"im Journal":journal<0?"Journal unlesbar":"nur RAM/NVS-Fallback");
+        int portal_state=0;portENTER_CRITICAL(&s_recovery_lock);
+        for(const auto &entry:s_exports)if(!strcmp(entry.id,ids[i]))portal_state=entry.portalState;
+        portEXIT_CRITICAL(&s_recovery_lock);
+        cJSON_AddStringToObject(item,"portal",portal_state==2?"Portal bestätigt":portal_state==1?
+            "nicht im Portal (letzter Abgleich)":"unbekannt – Mit Portal abgleichen");
+        cJSON *names=cJSON_AddArrayToObject(item,"players");
+        if(full)for(int j=0;j<game->spieler_count&&j<MAX_SPIELER;j++)cJSON_AddItemToArray(names,cJSON_CreateString(game->spielerNamen[j]));
+        cJSON_AddItemToArray(items,item);
+    }
+    char *json=count>=0?cJSON_PrintUnformatted(root):nullptr;cJSON_Delete(root);
+    heap_caps_free(ids);heap_caps_free(game);return json;
+}
+char *http_pending_game_export(const char *id,const char *pin) {
+    if(!storage_admin_verify(pin))return nullptr;
+    auto *game=(FinishedGame*)heap_caps_calloc(1,sizeof(FinishedGame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!game)return nullptr;
+    if(!pending_record(id,game)){heap_caps_free(game);return nullptr;}
+    cJSON *root=cJSON_CreateObject();cJSON_AddStringToObject(root,"externalId",id);
+    cJSON_AddNumberToObject(root,"recordBytes",sizeof(*game));cJSON_AddNumberToObject(root,"recordChecksum",record_hash(game));
+    cJSON_AddItemToObject(root,"game",pending_game_to_json(&game->base));
+    cJSON *names=cJSON_AddArrayToObject(root,"playerNames");
+    for(int i=0;i<game->spieler_count&&i<MAX_SPIELER;i++)cJSON_AddItemToArray(names,cJSON_CreateString(game->spielerNamen[i]));
+    char *hex=(char*)heap_caps_malloc(sizeof(*game)*2+1,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!hex){cJSON_Delete(root);heap_caps_free(game);return nullptr;}
+    static const char digits[]="0123456789abcdef";const auto *bytes=(const uint8_t*)game;
+    for(size_t i=0;i<sizeof(*game);i++){hex[2*i]=digits[bytes[i]>>4];hex[2*i+1]=digits[bytes[i]&15];}
+    hex[sizeof(*game)*2]=0;cJSON_AddStringToObject(root,"finishedGameRecordHex",hex);
+    char *json=cJSON_PrintUnformatted(root);heap_caps_free(hex);heap_caps_free(game);cJSON_Delete(root);return json;
+}
+void http_pending_game_export_delivered(const char *id,uint32_t checksum) {
+    portENTER_CRITICAL(&s_recovery_lock);
+    RecoveryReceipt *slot=nullptr;
+    for(auto &entry:s_exports)if(!strcmp(entry.id,id)){slot=&entry;break;}
+    if(!slot)for(auto &entry:s_exports)if(!entry.id[0]){slot=&entry;break;}
+    static unsigned next_receipt;
+    if(!slot)slot=&s_exports[next_receipt++%STORAGE_JOURNAL_SLOTS];
+    if(strcmp(slot->id,id))*slot={};
+    snprintf(slot->id,40,"%.39s",id);slot->checksum=checksum;
+    portEXIT_CRITICAL(&s_recovery_lock);
+}
+static esp_err_t reconcile_pending_impl() {
+    auto *ids=(char(*)[40])heap_caps_calloc(STORAGE_JOURNAL_SLOTS,40,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!ids)return ESP_ERR_NO_MEM;
+    int count=pending_ids(ids);if(count<=0){heap_caps_free(ids);return count==0?ESP_OK:ESP_FAIL;}
+    cJSON *root=cJSON_CreateObject(),*array=cJSON_AddArrayToObject(root,"externalIds");
+    for(int i=0;i<count;i++)cJSON_AddItemToArray(array,cJSON_CreateString(ids[i]));
+    char *body=cJSON_PrintUnformatted(root);cJSON_Delete(root);
+    auto *response=(char*)heap_caps_malloc(16384,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!body||!response){cJSON_free(body);heap_caps_free(response);heap_caps_free(ids);return ESP_ERR_NO_MEM;}
+    esp_err_t err=http_post_json("/api/sync/spiele/status",body,response,16384);cJSON_free(body);
+    cJSON *reply=err==ESP_OK?cJSON_Parse(response):nullptr;
+    cJSON *known=reply?cJSON_GetObjectItem(reply,"knownIds"):nullptr;
+    if(err==ESP_OK&&!cJSON_IsArray(known))err=ESP_ERR_INVALID_RESPONSE;
+    if(err==ESP_OK)for(int i=0;i<count;i++) {
+        bool accepted=false;cJSON *item;
+        cJSON_ArrayForEach(item,known)if(cJSON_IsString(item)&&!strcmp(item->valuestring,ids[i]))accepted=true;
+        portENTER_CRITICAL(&s_recovery_lock);
+        for(auto &entry:s_exports)if(!entry.id[0]||!strcmp(entry.id,ids[i])) {
+            snprintf(entry.id,40,"%.39s",ids[i]);entry.portalState=accepted?2:1;break;
+        }
+        portEXIT_CRITICAL(&s_recovery_lock);
+        if(!accepted)continue;
+        bool local=game_journal_ack(ids[i]);
+        if(!remove_ram_pending(ids[i])){err=ESP_ERR_TIMEOUT;break;}
+        ESP_LOGI(TAG,"pending-game-ack id=%s portal=status-known journal_ack=%d commit=done",ids[i],local);
+        if(!local)terminal_log_add("data_loss_risk","ERROR","Portal kennt Spiel; lokale Archivbestätigung wird erneut versucht");
+    }
+    cJSON_Delete(reply);heap_caps_free(response);heap_caps_free(ids);
+    game_journal_maintenance();(void)game_journal_recheck_ready();return err;
+}
+static esp_err_t http_run_sync_cycle(const char *cycle_name,esp_err_t (*sync_impl)(void));
+esp_err_t http_pending_games_reconcile(const char *pin) {
+    if(!storage_admin_verify(pin)||g_store.syncStatus==SYNC_RUNNING)return ESP_ERR_INVALID_STATE;
+    return http_run_sync_cycle("pending-check",reconcile_pending_impl);
+}
+bool http_pending_game_prepare_discard(const char *id,const char *pin,char *token,size_t size) {
+    if(!storage_admin_verify(pin)||g_store.syncStatus==SYNC_RUNNING)return false;
+    auto *game=(FinishedGame*)heap_caps_calloc(1,sizeof(FinishedGame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!game)return false;
+    bool found=pending_record(id,game);uint32_t hash=record_hash(game);heap_caps_free(game);
+    bool exported=false;portENTER_CRITICAL(&s_recovery_lock);
+    for(const auto &entry:s_exports)if(!strcmp(entry.id,id)&&entry.checksum==hash)exported=true;
+    if(found&&exported) {
+        snprintf(s_discard_id,sizeof(s_discard_id),"%.39s",id);s_discard_checksum=hash;
+        snprintf(s_discard_token,sizeof(s_discard_token),"%08lx%08lx",(unsigned long)esp_random(),(unsigned long)esp_random());
+        s_discard_until=esp_timer_get_time()+60000000;snprintf(token,size,"%s",s_discard_token);
+    }
+    portEXIT_CRITICAL(&s_recovery_lock);return found&&exported;
+}
+bool http_pending_game_discard(const char *id,const char *pin,const char *token,const char *confirmation) {
+    if(!storage_admin_verify(pin)||g_store.syncStatus==SYNC_RUNNING||offline_cache_cleanup_busy())return false;
+    if(g_store.screen==SCREEN_SPIEL)return false;
+    if(s_network_cycle_busy.test_and_set())return false;
+    struct Release {~Release(){s_network_cycle_busy.clear();}} release;
+    char expected[64];snprintf(expected,sizeof(expected),"VERWERFEN %.39s",id);
+    if(strcmp(expected,confirmation))return false;
+    auto *game=(FinishedGame*)heap_caps_calloc(1,sizeof(FinishedGame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!game)return false;
+    bool found=pending_record(id,game);uint32_t hash=record_hash(game);heap_caps_free(game);
+    portENTER_CRITICAL(&s_recovery_lock);
+    bool confirmed=found&&!strcmp(s_discard_id,id)&&!strcmp(s_discard_token,token)&&
+        token[0]&&esp_timer_get_time()<s_discard_until&&hash==s_discard_checksum;
+    if(confirmed){s_discard_token[0]=0;s_discard_until=0;}
+    portEXIT_CRITICAL(&s_recovery_lock);
+    if(!confirmed)return false;
+    cJSON *audit=cJSON_CreateObject();cJSON_AddStringToObject(audit,"externalId",id);
+    cJSON_AddNumberToObject(audit,"exportedRecordChecksum",hash);cJSON_AddBoolToObject(audit,"fullRecordExported",true);
+    terminal_log_add("data_loss_risk","ERROR","Spiel nach JSON-Sicherung: Verwerfen vom Speicher-Admin ausdrücklich angefordert",audit);
+    terminal_logs_flush_critical();cJSON_Delete(audit);ESP_LOGE(TAG,"Datenverlust bestätigt: Spiel %s verwerfen",id);
+    // Publish the RAM removal before deleting its durable source. A UI-lock
+    // timeout must never leave an uploadable RAM copy of an already discarded
+    // record. On filesystem failure the surviving journal remains recoverable.
+    if(!remove_ram_pending(id))return false;
+    if(!game_journal_discard(id)){(void)game_journal_reload_pending();return false;}
+    game_journal_maintenance();(void)game_journal_recheck_ready();return true;
+}
 // ── http_push_pending_games ────────────────────────────────────
 esp_err_t http_push_pending_games(void)
 {
-    if (g_store.pendingGamesCount == 0) return ESP_OK;
+    (void)game_journal_retry_acks();
+    s_pending_push_accepted=0;s_pending_push_failed=0;
+    if (g_store.pendingGamesCount == 0) {(void)game_journal_recheck_ready();return ESP_OK;}
 
     char *resp = (char *)malloc(HTTP_BUF_SIZE);
     if (!resp) return ESP_ERR_NO_MEM;
@@ -1293,21 +1482,25 @@ esp_err_t http_push_pending_games(void)
 
         esp_err_t err = http_post_json("/api/sync/spiele", body, resp, HTTP_BUF_SIZE);
         free(body);
-        bool accepted=false;
+        bool accepted=false;char portal_status[24]="unreadable";
         cJSON *reply=err==ESP_OK?cJSON_Parse(resp):nullptr;
         cJSON *results=reply?cJSON_GetObjectItem(reply,"results"):nullptr;
         cJSON *item;
         cJSON_ArrayForEach(item,results) {
             cJSON *id=cJSON_GetObjectItem(item,"externalId"),*status=cJSON_GetObjectItem(item,"status");
-            if(cJSON_IsString(id)&&cJSON_IsString(status)&&!strcmp(id->valuestring,snapshot[i].externalId))
+            if(cJSON_IsString(id)&&cJSON_IsString(status)&&!strcmp(id->valuestring,snapshot[i].externalId)) {
+                snprintf(portal_status,sizeof(portal_status),"%.23s",status->valuestring);
                 accepted=!strcmp(status->valuestring,"created")||!strcmp(status->valuestring,"skipped");
+            }
         }
         cJSON_Delete(reply);
         if(accepted) {
-            if(!game_journal_ack(snapshot[i].externalId)) {
-                overall=ESP_FAIL;
+            ++s_pending_push_accepted;
+            bool journal_ack=game_journal_ack(snapshot[i].externalId);
+            ESP_LOGI(TAG,"pending-game-ack id=%s HTTP=%d portal=%s journal_ack=%d",
+                snapshot[i].externalId,s_last_http_status,portal_status,journal_ack);
+            if(!journal_ack) {
                 terminal_log_add("data_loss_risk","ERROR","Portal-ACK gespeichert; lokale Journal-Bestätigung fehlgeschlagen");
-                continue;
             }
             TickType_t started;
             if(!sync_commit_begin("pending-game-ack",&started)) { overall=ESP_ERR_TIMEOUT; continue; }
@@ -1319,7 +1512,11 @@ esp_err_t http_push_pending_games(void)
             }
             sync_commit_end("pending-game-ack",started);
             game_store_save();
+            ESP_LOGI(TAG,"pending-game-ack id=%s commit=done RAM_pending=%d",snapshot[i].externalId,g_store.pendingGamesCount);
         } else {
+            ++s_pending_push_failed;
+            ESP_LOGE(TAG,"pending-game-push id=%s HTTP=%d portal=%s retained=1",
+                snapshot[i].externalId,s_last_http_status,portal_status);
             cJSON *data=cJSON_CreateObject();
             cJSON_AddStringToObject(data,"externalId",snapshot[i].externalId);
             cJSON_AddNumberToObject(data,"errorCode",err);
@@ -2588,8 +2785,9 @@ static void upload_terminal_logs()
                 strftime(entries[i].ts,sizeof(entries[i].ts),"%Y-%m-%dT%H:%M:%S.000Z",&utc);
             }
             cJSON_AddStringToObject(entry,"ts",entries[i].ts);
-            cJSON_AddStringToObject(entry,"type",entries[i].type);
-            cJSON_AddStringToObject(entry,"level",entries[i].level);
+            const char *type=terminal_log_wire_type(entries[i].type);
+            cJSON_AddStringToObject(entry,"type",type);
+            cJSON_AddStringToObject(entry,"level",!strcmp(type,"data_loss_risk")?"ERROR":entries[i].level);
             cJSON_AddStringToObject(entry,"msg",entries[i].msg);
             cJSON *data=cJSON_Parse(entries[i].data);
             cJSON_AddItemToObject(entry,"data",data?data:cJSON_CreateObject());
@@ -2633,6 +2831,9 @@ static void upload_game_manifest()
 static esp_err_t http_run_sync_cycle(const char *cycle_name,
                                      esp_err_t (*sync_impl)(void))
 {
+    if(s_network_cycle_busy.test_and_set())return ESP_ERR_INVALID_STATE;
+    struct Release {~Release(){s_network_cycle_busy.clear();}} release;
+    s_pending_push_accepted=0;s_pending_push_failed=0;
     TickType_t started = xTaskGetTickCount();
     http_session_t session;
     esp_err_t err = http_session_open(&session);
@@ -2700,9 +2901,9 @@ static esp_err_t http_run_sync_cycle(const char *cycle_name,
     http_session_deactivate(&session);
     http_session_close(&session);
     TickType_t elapsed = xTaskGetTickCount() - started;
-    ESP_LOGI(TAG, "%s sync cycle duration=%ums result=%s", cycle_name,
+    ESP_LOGI(TAG, "%s sync cycle duration=%ums result=%s pending_push accepted=%d failed=%d remaining=%d", cycle_name,
              (unsigned)(elapsed * portTICK_PERIOD_MS),
-             esp_err_to_name(sync_err));
+             esp_err_to_name(sync_err),s_pending_push_accepted,s_pending_push_failed,g_store.pendingGamesCount);
     return sync_err;
 }
 

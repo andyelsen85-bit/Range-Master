@@ -37,6 +37,12 @@ jobs:
       - run: corepack enable && corepack prepare pnpm@10.26.1 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @workspace/api-server test:sync-contract
+      - name: Check durable game recovery and storage authorization
+        run: |
+          python3 artifacts/firmware/tests/test_game_journal.py
+          python3 artifacts/firmware/tests/test_storage_admin.py
+          python3 artifacts/firmware/tests/test_storage_recovery.py
+          python3 artifacts/firmware/tests/test_http_failure_policy.py
 
   build-and-push:
     name: Build & Push

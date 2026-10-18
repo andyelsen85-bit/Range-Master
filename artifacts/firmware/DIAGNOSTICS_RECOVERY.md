@@ -431,7 +431,85 @@ Host regression:
 finish/upload functions, journal, chunk writer, NVS shim and recovery modules.
 It covers created/skipped with no file, 7,072-byte second-fsync failure,
 1/5/30-second retries, process restart, player remapping, archive retention,
-and refusing to drain an existing record on a real ACK-rewrite error.
+and draining portal-accepted RAM entries even on a real ACK-rewrite error.
 `test_offline_cache.py` covers healthy deferral, dirty flush and token safety.
 These tests and the full target build do not replace physical power-cut testing.
 Do this on a test terminal; do not risk live unsynchronized games.
+
+## 8.3 journal names and PIN-protected pending-game recovery
+
+The journal uses only `J000.REC` through `J199.REC`; `.PRT` and `.BAK`
+are the corresponding atomic-write/recovery siblings. The UUID stays inside
+the unchanged checksummed `Record`, not in the filename. FatFs without LFN
+rejects the old `g_<uuid>.part` names with `EINVAL` even on an empty volume.
+The RAM index is rebuilt from validated records. Readable legacy `g_*`
+records are migrated only after a validated replacement is committed.
+Corrupt or unidentified files are retained and prevent destructive repair.
+
+At boot, the journal tests an actual record through write, flush, fsync,
+rename, validated read and unlink. Failures name the operation, errno,
+free bytes and threshold in console and terminal diagnostics. An unwritable
+journal blocks new games, **not reading/uploading already durable games**.
+The partition table, storage offset/size, NVS and journal record ABI are unchanged.
+Do not run `erase-flash`, erase NVS, or roll back to a firmware that cannot
+read the `Jddd.REC` layout while any games remain pending.
+
+Deploy the API changes before this firmware: authenticated
+`POST /api/sync/spiele/status` accepts `{externalIds:[uuid,...]}` and returns
+`{knownIds:[...]}` without creating/modifying games. It accepts at most 200 IDs.
+The terminal's existing API key is required; do not put it in browser requests.
+Terminal-log batches validate each entry independently; valid neighboring
+entries receive `acceptedIds`, invalid ones receive indexed `errors`.
+Wire categories are normalized to the existing six portal categories;
+`data_loss_risk` is always ERROR. Log-upload errors do not change a completed
+game/credit sync result.
+
+### Operator procedure
+
+1. In **Einstellungen → System**, physically provision a separate
+   **Speicher-Admin-PIN** (4–16 digits). It is not the Catering PIN or the
+   portal password. Changes require the old PIN. Salted PBKDF2-SHA256 is
+   stored in NVS; five failed attempts impose a 30-second cooldown, with
+   failed attempts retained across reboot. NVS/authentication failures deny access.
+2. Open **Speicher bereinigen/reparieren**. Pending games show date, names,
+   externalId, journal versus RAM/NVS, and the last portal-check result.
+   **Mit Portal abgleichen** requires the PIN and checks existence only.
+   Portal-confirmed IDs leave the RAM queue even if the local archive ACK
+   write fails; a separate NVS proof prevents them being treated as unsent.
+   The sync worker retries bounded local ACK maintenance.
+3. For a genuinely unaccepted game, open the terminal's existing web
+   configuration on a **trusted local network**, then **Offene Spiele prüfen
+   und als Datei sichern** (`/pending`). Enter the storage PIN there.
+   Do not expose this plain-HTTP device page to the public Internet.
+   **Als Datei sichern** downloads full JSON, names and a lossless hexadecimal
+   copy of the complete `FinishedGame`, including byte count/checksum.
+   Verify the downloaded file before continuing.
+4. Only if discarding is intended: choose **Verwerfen (Datenverlust)** and
+   confirm the exact `VERWERFEN <externalId>` phrase in the second dialog.
+   The server requires the PIN again, a delivered export of the unchanged
+   record and a one-use, record-bound challenge valid for 60 seconds.
+   No export, wrong PIN, stale/forged challenge, changed record, active sync
+   or failed RAM publication prevents deletion. An ERROR `data_loss_risk`
+   audit records the externalId and full-export checksum before deletion.
+   This does **not** refund credits or alter billing, sales or daily close.
+5. Retry storage repair only when every durable pending game, active game,
+   queue and financial outbox check is proven safe. Exporting alone is not
+   acknowledgement and never makes an unsent game repairable.
+
+### Verification and device checks
+
+Host tests enforce 8.3 names on actual journal writes, retain 200 pending
+games and exercise `.PRT`/`.BAK` recovery, process restart, full volumes,
+NVS fallback, `created`/`skipped`, and failed ACK rewrites. Separate tests
+execute the real PIN/recovery state machines, including UI-lock failure
+before deletion, failed deletion rollback, missing export, changed records,
+challenge expiry/replay and receipt-cache exhaustion. The API contract test
+checks all firmware sync paths, known/unknown IDs, every normalized log
+type/level combination and a mixed valid/invalid batch. CI runs these guards.
+
+Physical validation remains required: finish a game offline, reboot, download
+and verify the export, reconnect and confirm exactly one portal game. On a
+test device, interrupt power during `.PRT` creation, backup rename and ACK;
+the game must remain recoverable or already portal-confirmed. Also check PIN
+entry and both confirmations on the real touch display. Never use live
+unsynchronized games for destructive/power-cut testing.

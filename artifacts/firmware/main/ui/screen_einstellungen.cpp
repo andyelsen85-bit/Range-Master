@@ -18,6 +18,8 @@ static SnapshotWidgetRef s_latency_label;
 #include "lora_stub.h"
 #include "button_events.h"
 #include "offline_cache.h"
+#include "storage_admin.h"
+#include "cJSON.h"
 #include <atomic>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -1416,18 +1418,117 @@ static std::atomic<int> s_storage_phase{0},s_storage_pending{-1};
 static bool s_storage_repair;
 static StorageRepairStatus s_storage_proof;
 static lv_obj_t *s_storage_confirm;
+static char *s_storage_games;
+static char s_storage_pin[17],s_storage_new_pin[17],s_storage_target[40],s_storage_token[24],s_storage_typed[64];
+static char s_storage_result[200];
+static void storage_discard_confirmation();
 static void storage_worker(void *argument) {
-    if(argument) {
+    intptr_t operation=(intptr_t)argument;
+    if(operation>=2) {
+        bool ok=operation==2?http_pending_games_reconcile(s_storage_pin)==ESP_OK:
+            operation==3?storage_admin_set(s_storage_pin,s_storage_new_pin):
+            operation==4?http_pending_game_prepare_discard(s_storage_target,s_storage_pin,s_storage_token,sizeof(s_storage_token)):
+            http_pending_game_discard(s_storage_target,s_storage_pin,s_storage_token,s_storage_typed);
+        if(operation!=4||!ok)memset(s_storage_pin,0,sizeof(s_storage_pin));
+        memset(s_storage_new_pin,0,sizeof(s_storage_new_pin));
+        snprintf(s_storage_result,sizeof(s_storage_result),"%s",ok?
+            operation==3?"Speicher-Admin-PIN gespeichert.":operation==4?"Zweite Bestätigung erforderlich.":
+            "Offene Spiele aktualisiert. Speicherprüfung erneut öffnen.":
+            "Nicht freigegeben: Admin-PIN falsch/gesperrt, Sync läuft oder zuerst vollständige JSON-Datei sichern.");
+        s_storage_phase=operation==4&&ok?6:ok?4:5;
+    } else if(argument) {
         bool ok=s_storage_repair?offline_cache_repair():offline_cache_cleanup();
         if(!ok)offline_cache_repair_status(&s_storage_proof);
         s_storage_phase=ok?4:5;
     }
-    else {offline_cache_repair_status(&s_storage_proof);s_storage_pending=s_storage_proof.pending;s_storage_phase=2;}
+    else {
+        offline_cache_repair_status(&s_storage_proof);s_storage_pending=s_storage_proof.pending;
+        if(s_storage_games)cJSON_free(s_storage_games);
+        s_storage_games=http_pending_games_json();s_storage_phase=2;
+    }
     vTaskDelete(nullptr);
 }
 static bool start_storage_worker(bool clean) {
+    s_storage_result[0]=0;
     return xTaskCreate(storage_worker,"storage_clean",6144,
         clean?(void*)1:nullptr,2,nullptr)==pdPASS;
+}
+static bool start_recovery_worker(int operation) {
+    s_storage_phase=3;s_storage_result[0]=0;
+    bool ok=xTaskCreate(storage_worker,"storage_resolve",8192,(void*)(intptr_t)operation,2,nullptr)==pdPASS;
+    if(!ok){memset(s_storage_pin,0,sizeof(s_storage_pin));s_storage_phase=5;}
+    return ok;
+}
+static lv_obj_t *s_storage_keyboard;
+static lv_obj_t *storage_pin_input(lv_obj_t *parent,const char *placeholder,int length=16) {
+    lv_obj_t *input=lv_textarea_create(parent);lv_textarea_set_one_line(input,true);
+    lv_textarea_set_password_mode(input,length==16);lv_textarea_set_max_length(input,length);
+    if(length==16)lv_textarea_set_accepted_chars(input,"0123456789");
+    lv_textarea_set_placeholder_text(input,placeholder);lv_obj_set_width(input,LV_PCT(95));
+    lv_obj_add_event_cb(input,[](lv_event_t *event) {
+        if(!s_storage_keyboard) {
+            s_storage_keyboard=lv_keyboard_create(lv_layer_top());
+            lv_obj_add_event_cb(s_storage_keyboard,[](lv_event_t *e) {
+                if(s_storage_keyboard==(lv_obj_t*)lv_event_get_target(e))s_storage_keyboard=nullptr;
+            },LV_EVENT_DELETE,nullptr);
+            lv_obj_add_event_cb(s_storage_keyboard,[](lv_event_t *e) {
+                lv_obj_t *keyboard=(lv_obj_t*)lv_event_get_target(e);
+                lv_keyboard_set_textarea(keyboard,nullptr);
+                if(s_storage_keyboard==keyboard)s_storage_keyboard=nullptr;
+                lv_obj_delete_async(keyboard);
+            },LV_EVENT_READY,nullptr);
+            lv_obj_add_event_cb(s_storage_keyboard,[](lv_event_t *e) {
+                lv_obj_t *keyboard=(lv_obj_t*)lv_event_get_target(e);
+                lv_keyboard_set_textarea(keyboard,nullptr);
+                if(s_storage_keyboard==keyboard)s_storage_keyboard=nullptr;
+                lv_obj_delete_async(keyboard);
+            },LV_EVENT_CANCEL,nullptr);
+        }
+        lv_obj_t *input=(lv_obj_t*)lv_event_get_target(event);
+        lv_keyboard_set_mode(s_storage_keyboard,lv_textarea_get_password_mode(input)?
+            LV_KEYBOARD_MODE_NUMBER:LV_KEYBOARD_MODE_TEXT_UPPER);
+        lv_keyboard_set_textarea(s_storage_keyboard,input);
+    },LV_EVENT_CLICKED,nullptr);
+    lv_obj_add_event_cb(input,[](lv_event_t *event) {
+        if(s_storage_keyboard&&lv_keyboard_get_textarea(s_storage_keyboard)==lv_event_get_target(event)) {
+            lv_obj_t *keyboard=s_storage_keyboard;s_storage_keyboard=nullptr;
+            lv_keyboard_set_textarea(keyboard,nullptr);lv_obj_delete_async(keyboard);
+        }
+    },LV_EVENT_DELETE,nullptr);
+    return input;
+}
+static void storage_capture_pin() {
+    s_storage_pin[0]=0;if(!s_storage_confirm)return;
+    lv_obj_t *content=lv_msgbox_get_content(s_storage_confirm);
+    for(uint32_t i=0;i<lv_obj_get_child_count(content);i++) {
+        lv_obj_t *child=lv_obj_get_child(content,i);
+        if(lv_obj_check_type(child,&lv_textarea_class)) {
+            snprintf(s_storage_pin,sizeof(s_storage_pin),"%.16s",lv_textarea_get_text(child));break;
+        }
+    }
+}
+static void storage_discard_confirmation() {
+    s_storage_confirm=lv_msgbox_create(nullptr);
+    lv_obj_add_event_cb(s_storage_confirm,[](lv_event_t*){s_storage_confirm=nullptr;},LV_EVENT_DELETE,nullptr);
+    lv_obj_set_style_bg_color(s_storage_confirm,lv_color_hex(CLR_CARD),0);
+    lv_obj_set_style_text_color(s_storage_confirm,lv_color_hex(CLR_TEXT),0);
+    lv_msgbox_add_title(s_storage_confirm,"Zweite Bestätigung: Datenverlust");
+    char text[300];snprintf(text,sizeof(text),
+        "Vollständige JSON-Datei wirklich gespeichert und geprüft? Das lokale Spiel wird gelöscht. Credits und Portal-Daten bleiben unverändert.\nExakt eingeben: VERWERFEN %.39s",s_storage_target);
+    lv_msgbox_add_text(s_storage_confirm,text);
+    storage_pin_input(lv_msgbox_get_content(s_storage_confirm),"VERWERFEN Spiel-ID",63);
+    lv_obj_t *cancel=lv_msgbox_add_footer_button(s_storage_confirm,"Abbrechen");
+    lv_obj_add_event_cb(cancel,[](lv_event_t*){memset(s_storage_pin,0,sizeof(s_storage_pin));lv_msgbox_close(s_storage_confirm);},LV_EVENT_CLICKED,nullptr);
+    lv_obj_t *confirm=lv_msgbox_add_footer_button(s_storage_confirm,"Endgültig verwerfen");
+    lv_obj_add_event_cb(confirm,[](lv_event_t*) {
+        lv_obj_t *content=lv_msgbox_get_content(s_storage_confirm);
+        for(uint32_t i=0;i<lv_obj_get_child_count(content);i++) {
+            lv_obj_t *child=lv_obj_get_child(content,i);
+            if(lv_obj_check_type(child,&lv_textarea_class))
+                snprintf(s_storage_typed,sizeof(s_storage_typed),"%.63s",lv_textarea_get_text(child));
+        }
+        lv_msgbox_close(s_storage_confirm);start_recovery_worker(5);
+    },LV_EVENT_CLICKED,nullptr);
 }
 static void storage_confirmation() {
     if(s_storage_confirm) return;
@@ -1453,6 +1554,46 @@ static void storage_confirmation() {
     lv_obj_t *cancel=lv_msgbox_add_footer_button(s_storage_confirm,"Abbrechen");
     lv_obj_add_style(cancel,&g_style_btn_secondary,0);
     lv_obj_add_event_cb(cancel,[](lv_event_t*){lv_msgbox_close(s_storage_confirm);},LV_EVENT_CLICKED,nullptr);
+    cJSON *games=s_storage_games?cJSON_Parse(s_storage_games):nullptr;
+    cJSON *list=games?cJSON_GetObjectItem(games,"games"):nullptr;
+    if(cJSON_IsArray(list)&&cJSON_GetArraySize(list)>0) {
+        lv_obj_t *content=lv_msgbox_get_content(s_storage_confirm);
+        storage_pin_input(content,"Speicher-Admin-PIN");
+        char help[200];snprintf(help,sizeof(help),"JSON-Sicherung: http://%.39s/pending\nErst Portal prüfen oder Datei sichern, dann ausdrücklich verwerfen.",g_store.wifiIp);
+        lv_msgbox_add_text(s_storage_confirm,help);
+        cJSON *game;cJSON_ArrayForEach(game,list) {
+            cJSON *id=cJSON_GetObjectItem(game,"externalId"),*date=cJSON_GetObjectItem(game,"date"),
+                *state=cJSON_GetObjectItem(game,"state"),*portal=cJSON_GetObjectItem(game,"portal"),*players=cJSON_GetObjectItem(game,"players");
+            if(!cJSON_IsString(id))continue;
+            lv_obj_t *row=lv_obj_create(content);lv_obj_set_width(row,LV_PCT(95));lv_obj_set_height(row,LV_SIZE_CONTENT);
+            lv_obj_set_flex_flow(row,LV_FLEX_FLOW_COLUMN);lv_obj_set_style_text_color(row,lv_color_hex(CLR_TEXT),0);
+            lv_obj_t *identity=lv_label_create(row);lv_label_set_text(identity,id->valuestring);
+            lv_obj_t *details=lv_label_create(row);char names[256]="";cJSON *name;
+            cJSON_ArrayForEach(name,players)if(cJSON_IsString(name)) {
+                size_t used=strlen(names);snprintf(names+used,sizeof(names)-used,"%s%.48s",used?", ":"",name->valuestring);
+            }
+            lv_label_set_text_fmt(details,"%s\n%s | %s\nPortal: %s",names[0]?names:"Spielernamen nicht verfügbar",
+                cJSON_IsString(date)?date->valuestring:"Datum unbekannt",cJSON_IsString(state)?state->valuestring:"Status unbekannt",
+                cJSON_IsString(portal)?portal->valuestring:"unbekannt");
+            lv_obj_set_width(details,LV_PCT(95));
+            lv_obj_t *save=lv_button_create(row);lv_label_set_text(lv_label_create(save),"Als Datei sichern");
+            lv_obj_add_event_cb(save,[](lv_event_t*) {
+                lv_msgbox_add_text(s_storage_confirm,"Im Browser die oben angegebene /pending-Adresse öffnen, Admin-PIN eingeben und beim passenden Spiel „Als Datei sichern“ wählen. Danach erst Verwerfen bestätigen.");
+            },LV_EVENT_CLICKED,nullptr);
+            lv_obj_t *discard=lv_button_create(row);lv_label_set_text(lv_label_create(discard),"Verwerfen (Datenverlust)");
+            lv_obj_add_event_cb(discard,[](lv_event_t *event) {
+                lv_obj_t *row=lv_obj_get_parent((lv_obj_t*)lv_event_get_target(event));
+                snprintf(s_storage_target,sizeof(s_storage_target),"%.39s",lv_label_get_text(lv_obj_get_child(row,0)));
+                storage_capture_pin();lv_msgbox_close(s_storage_confirm);
+                start_recovery_worker(4);
+            },LV_EVENT_CLICKED,nullptr);
+        }
+        lv_obj_t *check=lv_msgbox_add_footer_button(s_storage_confirm,"Mit Portal abgleichen");
+        lv_obj_add_event_cb(check,[](lv_event_t*) {
+            storage_capture_pin();lv_msgbox_close(s_storage_confirm);start_recovery_worker(2);
+        },LV_EVENT_CLICKED,nullptr);
+    }
+    cJSON_Delete(games);
     if(s_storage_proof.allowed) {
         lv_obj_t *confirm=lv_msgbox_add_footer_button(s_storage_confirm,s_storage_repair?"Jetzt reparieren":"Jetzt bereinigen");
         lv_obj_add_style(confirm,&g_style_btn_primary,0);
@@ -1465,6 +1606,23 @@ static void storage_confirmation() {
 }
 static lv_obj_t *build_system_tab(lv_obj_t *parent)
 {
+    lv_obj_t *pin_form=lv_obj_create(parent);lv_obj_set_width(pin_form,LV_PCT(95));lv_obj_set_height(pin_form,LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(pin_form,LV_FLEX_FLOW_COLUMN);
+    lv_label_set_text(lv_label_create(pin_form),"Speicher-Admin-PIN (4–16 Ziffern, getrennt von Catering)");
+    storage_pin_input(pin_form,"Bisherige Admin-PIN (bei Einrichtung leer)");
+    storage_pin_input(pin_form,"Neue Speicher-Admin-PIN");
+    lv_obj_t *set_pin=lv_button_create(pin_form);lv_label_set_text(lv_label_create(set_pin),"Admin-PIN speichern");
+    lv_obj_add_event_cb(set_pin,[](lv_event_t *event) {
+        if(s_storage_phase.load()!=0)return;
+        lv_obj_t *form=lv_obj_get_parent((lv_obj_t*)lv_event_get_target(event));int index=0;
+        for(uint32_t i=0;i<lv_obj_get_child_count(form);i++) {
+            lv_obj_t *child=lv_obj_get_child(form,i);
+            if(!lv_obj_check_type(child,&lv_textarea_class))continue;
+            char *target=index++==0?s_storage_pin:s_storage_new_pin;
+            snprintf(target,17,"%.16s",lv_textarea_get_text(child));lv_textarea_set_text(child,"");
+        }
+        start_recovery_worker(3);
+    },LV_EVENT_CLICKED,nullptr);
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 16, 0);
     lv_obj_set_style_pad_row(parent, 8, 0);
@@ -1496,9 +1654,11 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
         int phase=s_storage_phase.load();
         if(phase==1) lv_label_set_text(label,"Offene Spiele werden geprüft …");
         if(phase==2) {s_storage_phase=0;storage_confirmation();}
-        if(phase==3) lv_label_set_text(label,"Speicher wird bereinigt …");
+        if(phase==3) lv_label_set_text(label,"Speichervorgang läuft …");
+        if(phase==6){s_storage_phase=0;storage_discard_confirmation();}
         if(phase==4 || phase==5) {
-            if(phase==4)lv_label_set_text(label,"Speicher bereit. Einstellungen und NVS erhalten; Portal-Cache wird neu geladen.");
+            if(s_storage_result[0])lv_label_set_text(label,s_storage_result);
+            else if(phase==4)lv_label_set_text(label,"Speicher bereit. Einstellungen und NVS erhalten; Portal-Cache wird neu geladen.");
             else lv_label_set_text_fmt(label,"Speicherreparatur gesperrt oder fehlgeschlagen: %s",
                 s_storage_proof.allowed?"FAT/NVS-Fehler; Details im Terminal-Protokoll.":s_storage_proof.reason);
             s_storage_phase=0;

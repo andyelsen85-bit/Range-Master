@@ -9,6 +9,13 @@
 
 /** POST /api/sync/spiele — push all pending games. */
 esp_err_t http_push_pending_games(void);
+// Recovery callers authenticate through storage_admin and never log the PIN.
+char *http_pending_games_json(); // heap JSON; caller frees
+char *http_pending_game_export(const char *id,const char *pin); // full record and readable JSON
+void http_pending_game_export_delivered(const char *id,uint32_t checksum);
+esp_err_t http_pending_games_reconcile(const char *pin); // read-only portal query, exact ACKs
+bool http_pending_game_prepare_discard(const char *id,const char *pin,char *token,size_t size);
+bool http_pending_game_discard(const char *id,const char *pin,const char *token,const char *confirmation);
 /** Next full sync requeues completed, archived games from the last seven days. */
 void http_request_game_recovery(void);
 

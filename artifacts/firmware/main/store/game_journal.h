@@ -1,4 +1,5 @@
 #pragma once
+int game_journal_retry_acks(void); // bounded maintenance, sync worker only
 #include "game_store.h"
 bool game_journal_init();
 bool game_journal_save(const FinishedGame *game);
@@ -21,3 +22,9 @@ bool game_journal_resume_after_cleanup(); // read-only journal validation, no pr
 bool game_journal_hold_pending(const FinishedGame *game); // bounded emergency NVS slot
 bool game_journal_recheck_ready(); // clears transient failure only after a fresh proof
 void game_journal_maintenance(); // worker context, 1s/5s/30s retry; never LVGL timer
+bool game_journal_is_file(const char *name);
+bool game_journal_self_test();
+bool game_journal_read(const char *id,FinishedGame *out);
+// Only the authenticated, exported and twice-confirmed recovery path may call.
+bool game_journal_discard(const char *id);
+int game_journal_pending_ids(char (*ids)[40],int capacity);

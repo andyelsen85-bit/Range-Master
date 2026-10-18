@@ -36,6 +36,7 @@ class DurableGames(unittest.TestCase):
                 """,
                 "esp_vfs_fat.h": """
                     #pragma once
+                    #include <cassert>
                     #include "esp_err.h"
                     #include <sys/statvfs.h>
                     #include <cstdint>
@@ -56,7 +57,14 @@ class DurableGames(unittest.TestCase):
                     inline bool fat_open_fail=false;
                     inline int fat_open_attempts=0;
                     inline FILE *fat_fopen(const char *path,const char *mode) {
-                        if(strstr(path,".part") && !strcmp(mode,"wb")) {
+                        if(!strcmp(mode,"wb")) {
+                            const char *name=strrchr(path,'/');name=name?name+1:path;
+                            const char *dot=strchr(name,'.');
+                            bool short_name=dot&&dot>name&&(dot-name)<=8&&strlen(dot+1)<=3&&
+                                !strchr(dot+1,'.')&&strspn(name,"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")==strlen(name);
+                            if(!short_name){errno=EINVAL;assert(!"FatFs create is not 8.3");return nullptr;}
+                        }
+                        if(strstr(path,".PRT") && !strcmp(mode,"wb")) {
                             ++fat_open_attempts;
                             if(fat_open_fail){errno=EIO;return nullptr;}
                         }
@@ -262,6 +270,7 @@ class DurableGames(unittest.TestCase):
                 void store_rebuild_bill_projection(){}
                 void store_reconcile_lineup_after_cache_load(){}
                 static int save_calls=0,pushed_games=0;
+                static int s_pending_push_accepted=0,s_pending_push_failed=0,s_last_http_status=200;
                 static const char *TAG="test";
                 using TickType_t=uint32_t;
                 constexpr size_t HTTP_BUF_SIZE=65536;
@@ -331,7 +340,7 @@ class DurableGames(unittest.TestCase):
                         if(clean) {
                             assert(mounted && game_journal_init() && game_journal_ready());
                             assert(!std::filesystem::exists(VOLUME "/tmcache/history.tmp"));
-                            assert(std::filesystem::exists(VOLUME "/g_protected-game"));
+                            assert(std::filesystem::exists(VOLUME "/J000.REC"));
                         } else {
                             assert(!mounted && offline_cache_storage_available());
                             assert(!offline_cache_cleanup());
@@ -373,7 +382,7 @@ class DurableGames(unittest.TestCase):
                         g_store.screen=SCREEN_SPIEL;
                         bool normal=!strcmp(argv[1],"finish-normal")||!strcmp(argv[1],"finish-ack-rewrite");
                         bool fsync_failure=!strcmp(argv[1],"finish-fsync-ack");
-                        fat_open_fail=!normal&&!fsync_failure;
+                        fat_open_attempts=0;fat_open_fail=!normal&&!fsync_failure;
                         fat_sync_fail=fsync_failure;fat_sync_calls=0;
                         _store_finish_game();
                         assert(g_store.pendingGamesCount==1 && save_calls==1);
@@ -420,8 +429,10 @@ class DurableGames(unittest.TestCase):
                         host_status=!strcmp(argv[1],"finish-skipped")?"skipped":"created";
                         if(!strcmp(argv[1],"finish-ack-rewrite")) {
                             fat_open_fail=true;
-                            assert(http_push_pending_games()==ESP_FAIL && g_store.pendingGamesCount==1);
-                            assert(!pushed_games && save_calls==1 && game_journal_contains("finished-recovery")==1);
+                            assert(http_push_pending_games()==ESP_OK && !g_store.pendingGamesCount);
+                            assert(pushed_games==1 && save_calls==2 && game_journal_contains("finished-recovery")==1);
+                            GameJournalInspection accepted{};
+                            assert(game_journal_inspect_locked(&accepted)&&accepted.pending==0&&accepted.accepted==1);
                             host_status="skipped";
                         }
                         fat_open_fail=false;fat_sync_fail=false;
@@ -429,7 +440,7 @@ class DurableGames(unittest.TestCase):
                         assert(!g_store.pendingGamesCount && pushed_games==1 && save_calls==2);
                         assert(game_journal_ready());
                         size_t bytes=0;assert(nvs_get_blob(2,"finish_pending",nullptr,&bytes)==ESP_ERR_NVS_NOT_FOUND);
-                        assert(!std::filesystem::exists(VOLUME "/g_finished-recovery.part"));
+                        assert(!std::filesystem::exists(VOLUME "/J000.PRT"));
                         assert(game_journal_reload_pending()==0 && !g_store.pendingGamesCount);
                         GameJournalInspection proof{};assert(game_journal_inspect_locked(&proof) && !proof.pending);
                         assert(proof.accepted==((normal||!strcmp(argv[1],"finish-retry")||!strcmp(argv[1],"finish-remap"))?1:0));
@@ -452,7 +463,8 @@ class DurableGames(unittest.TestCase):
                         assert(terminal_logs_snapshot(entries,20)==first+2);
                         terminal_log_add("unsupported_glyph","WARN","unsupported glyph: 1");
                         terminal_log_add("unsupported_glyph","WARN","unsupported glyph: 4");
-                        assert(terminal_logs_snapshot(entries,20)==first+3);
+                            int after_hour=terminal_logs_snapshot(entries,20);
+                            assert(after_hour==first+3);
                         host_now_us+=3600000000LL;
                         terminal_log_add("unsupported_glyph","WARN","unsupported glyph: 8");
                         assert(terminal_logs_snapshot(entries,20)==first+4);
@@ -462,18 +474,18 @@ class DurableGames(unittest.TestCase):
                         FinishedGame game{};strcpy(game.base.externalId,"sync-failed");
                         fat_sync_fail=true;fat_sync_calls=0;
                         assert(!game_journal_save(&game));
-                        assert(std::filesystem::exists(VOLUME "/g_sync-failed.part"));
+                        assert(std::filesystem::exists(VOLUME "/J000.PRT"));
                         g_store.pendingGamesCount=0;
                         assert(!offline_cache_cleanup()); // valid unacknowledged .part is protected
                         fat_sync_fail=false;
                         assert(game_journal_init() && g_store.pendingGamesCount==1);
-                        assert(std::filesystem::exists(VOLUME "/g_sync-failed"));
+                        assert(std::filesystem::exists(VOLUME "/J000.REC"));
                         assert(fat_sync_calls>=2); // real 7072-byte writer: 512 + 6560 bytes
-                        FILE *broken=fopen(VOLUME "/g_broken","wb");assert(broken);fputc('x',broken);fclose(broken);
+                        FILE *broken=fopen(VOLUME "/J199.REC","wb");assert(broken);fputc('x',broken);fclose(broken);
                         strcpy(game.base.externalId,"separate-game");
                         assert(game_journal_save(&game)); // corrupt unrelated entry cannot strand this finish
                         bool named=false;for(auto &line:host_logs)if(line.find("trim/read_record")!=std::string::npos)named=true;
-                        assert(named && std::filesystem::exists(VOLUME "/g_broken"));
+                        assert(named && std::filesystem::exists(VOLUME "/J199.REC"));
                         assert(!game_journal_ready()); // unknown game evidence still fails closed
                         printf("PASS complete unsynced temp survives fsync failure and reload\\n");
                         return 0;
@@ -546,12 +558,12 @@ class DurableGames(unittest.TestCase):
                     assert(game_journal_manifest("2026-10-14",ids,4)==1);
                     assert(!strcmp(ids[0],"reboot-game"));
                     // Complete fsynced temporary file, power cut before rename.
-                    std::filesystem::rename(VOLUME "/g_reboot-game",VOLUME "/g_reboot-game.part");
+                    std::filesystem::rename(VOLUME "/J000.REC",VOLUME "/J000.PRT");
                     g_store.pendingGamesCount=0;
                     assert(game_journal_reload_pending()==1);
-                    assert(std::filesystem::exists(VOLUME "/g_reboot-game"));
+                    assert(std::filesystem::exists(VOLUME "/J000.REC"));
                     // Corruption is latched and cannot silently enable new games.
-                    FILE*f=fopen(VOLUME "/g_reboot-game","wb");fputs("truncated",f);fclose(f);
+                    FILE*f=fopen(VOLUME "/J000.REC","wb");fputs("truncated",f);fclose(f);
                     assert(game_journal_reload_pending()==-1);
                     assert(!game_journal_ready());
                 }

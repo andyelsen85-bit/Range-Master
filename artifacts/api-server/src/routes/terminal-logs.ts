@@ -18,9 +18,20 @@ function rateLimit(req: any, res: any, next: any) {
   return next();
 }
 router.post("/sync/terminal-logs", requireApiKey, rateLimit, async (req,res) => {
-  const parsed = z.object({ terminalId: terminalIdentity.refine(isAttributableTerminal), entries: z.array(logEntry).max(100) }).strict().safeParse(req.body);
+  const parsed = z.object({ terminalId: terminalIdentity.refine(isAttributableTerminal), entries: z.array(z.unknown()).max(100) }).strict().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Ungültige Diagnoseeinträge", details: parsed.error.issues });
-  const { terminalId, entries } = parsed.data;
+  const { terminalId } = parsed.data;
+  const entries: z.infer<typeof logEntry>[]=[];
+  const errors: {index:number;id?:string;error:string}[]=[];
+  parsed.data.entries.forEach((raw,index)=>{
+    const result=logEntry.safeParse(raw);
+    if(result.success)entries.push(result.data);
+    else {
+      const id=raw&&typeof raw==="object"&&"id" in raw?
+        terminalIdentity.safeParse(raw.id):null;
+      errors.push({index,...(id?.success?{id:id.data}:{}),error:"Ungültiger Diagnoseeintrag"});
+    }
+  });
   await db.transaction(async tx => {
     if (entries.length) await tx.insert(terminalLogTable).values(entries.map(e => ({
       terminalId, entryId: e.id, ts: new Date(e.ts), type: e.type, level: e.level, msg: e.msg,
@@ -29,7 +40,7 @@ router.post("/sync/terminal-logs", requireApiKey, rateLimit, async (req,res) => 
     }))).onConflictDoNothing();
   });
   // Duplicate gateway rows uploaded by a second terminal are also acknowledged.
-  return res.json({ acceptedIds: entries.map(e => e.id) });
+  return res.json({ acceptedIds: entries.map(e => e.id), errors });
 });
 
 const filters = z.object({

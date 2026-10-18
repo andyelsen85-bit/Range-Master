@@ -351,6 +351,13 @@ export async function recentGamesPayload(limit: number, database = db) {
 }
 
 // GET /api/sync/spiele?limit=N — pull recent games to terminal (newest first)
+router.post("/spiele/status", requireApiKey, async (req,res) => {
+  const parsed=z.object({externalIds:z.array(z.string().uuid()).min(1).max(200)}).strict().safeParse(req.body);
+  if(!parsed.success)return res.status(400).json({error:"Ungültige Spiel-IDs"});
+  const rows=await db.select({externalId:spieleTable.externalId}).from(spieleTable)
+    .where(inArray(spieleTable.externalId,parsed.data.externalIds));
+  return res.json({knownIds:rows.map(row=>row.externalId)});
+});
 router.get("/spiele", requireApiKey, async (req, res) => {
   const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
   return res.json(await recentGamesPayload(limit));

@@ -76,6 +76,9 @@ void terminal_logs_init() {
     xTaskCreate(diagnostics_worker,"diagnostics",4096,nullptr,3,nullptr);
 }
 void terminal_log_add(const char *type,const char *level,const char *message,const cJSON *data) {
+    const char *local_type=type;
+    type=terminal_log_wire_type(type);
+    if(type&&!strcmp(type,"data_loss_risk"))level="ERROR";
     if(!s_lock) return;
     TerminalLogEntry entry{};
     time_t now=time(nullptr); struct tm utc; gmtime_r(&now,&utc);
@@ -90,7 +93,7 @@ void terminal_log_add(const char *type,const char *level,const char *message,con
     const bool archive_error=message && strstr(message,"Spielarchiv") &&
         strstr(message,"nicht") && (strstr(message,"verfügbar") || strstr(message,"geladen"));
     const bool identity_error=message && strstr(message,"Terminal-ID nicht verfügbar");
-    const bool glyph_error=type && !strcmp(type,"unsupported_glyph");
+    const bool glyph_error=local_type && !strcmp(local_type,"unsupported_glyph");
     HourlyLogGate *gate=archive_error?&archive_errors:(identity_error?&identity_errors:(glyph_error?&glyph_errors:nullptr));
     if(gate && !gate->admit(esp_timer_get_time())) {xSemaphoreGive(s_lock);return;}
     snprintf(entry.id,sizeof(entry.id),"%08x%08x-%08x",s_boot_hi,s_boot_lo,++s_sequence);

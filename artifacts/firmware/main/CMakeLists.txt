@@ -8,6 +8,7 @@ idf_component_register(
         "store/day_inventory.cpp"
         "store/terminal_logs.cpp"
         "store/game_journal.cpp"
+        "store/storage_admin.cpp"
         "store/active_game.cpp"
         "ui/screen_inventory.cpp"
         "store/offline_cache.cpp"

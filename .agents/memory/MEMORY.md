@@ -48,3 +48,4 @@
 - [Isolated PostgreSQL test cleanup](postgres-test-pool-cleanup.md) — mixed module loaders can create multiple pools; close every test-owned pool before dropping the temporary database.
 - [Multi-run scoring compatibility](multi-run-scoring.md) — expand per-run rows on the wire, not the persisted journal ABI; retain aggregate-only legacy history.
 - [Sync build verification](sync-build-verification.md) — embedded build identity and authenticated production probes; an image push or 401 is not rollout proof.
+- [Storage recovery boundaries](storage-recovery-boundaries.md) — preserve 8.3 compatibility and separate offline recovery authorization from catering and portal login.

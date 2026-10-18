@@ -6,3 +6,4 @@
 /artifacts/firmware/managed_components/
 /artifacts/firmware/build/
 /generated-artifacts/
+/artifacts/firmware/sdkconfig

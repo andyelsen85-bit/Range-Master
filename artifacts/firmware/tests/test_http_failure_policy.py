@@ -37,7 +37,7 @@ void cJSON_AddStringToObject(cJSON *data,const char*,const char *value){data->en
 void cJSON_AddNumberToObject(cJSON *data,const char*,int value){data->status=value;}
 void cJSON_Delete(cJSON *data){delete data;}
 void terminal_log_add(const char *category,const char *level,const char *message,const cJSON *details) {
- assert(!strcmp(category,"diagnostic")&&!strcmp(level,"ERROR"));
+ assert(!strcmp(category,"sync")&&!strcmp(level,"ERROR"));
  assert(details && !details->endpoint.empty() && (details->status==404||details->status==405));diagnostic=message;diagnostic_errors++;
 }
 #define portENTER_CRITICAL(...) ((void)0)

@@ -2191,7 +2191,7 @@ bool store_start_spiel(void)
     if(g_store.pendingGamesCount>=MAX_PENDING_GAMES || !game_journal_ready()) {
         snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),
             "SPIELSPEICHER VOLL ODER NICHT VERFÜGBAR. BITTE SYNCHRONISIEREN.");
-        terminal_log_add("data_loss_risk","ERROR","Neues Spiel gesperrt: Speicher voll oder Spielarchiv nicht verfügbar");
+        terminal_log_add("data_loss_risk","ERROR","Neues Spiel gesperrt: Spielarchiv nicht bereit. Einstellungen > System: Speicher prüfen und offene Spiele klären.");
         return false;
     }
     if(g_store.pendingGamesCount>=MAX_PENDING_GAMES*8/10)
