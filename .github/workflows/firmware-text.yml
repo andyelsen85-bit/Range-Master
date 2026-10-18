@@ -1,0 +1,13 @@
+name: Firmware text and font coverage
+on:
+  push:
+    paths: ["artifacts/firmware/**", ".github/workflows/firmware-text.yml"]
+  pull_request:
+    paths: ["artifacts/firmware/**", ".github/workflows/firmware-text.yml"]
+jobs:
+  font-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit firmware literals, font coverage and synced display text
+        run: python3 artifacts/firmware/tests/test_font_coverage.py

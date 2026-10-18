@@ -36,8 +36,13 @@ STUBS = r"""
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <atomic>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "game_store.h"
 #include "offline_cache.h"
+#include "game_journal.h"
+#include "storage_budget.h"
 GameStore g_store = {};
 using esp_err_t = int;
 constexpr int ESP_OK = 0, ESP_FAIL = -1, ESP_ERR_NVS_NOT_FOUND = 1;
@@ -85,6 +90,38 @@ static int mount_error = 0, format_error = 0, unmount_error = 0;
 static int write_error = 0, fsync_error = 0, close_error = 0;
 static int mounts = 0, formats = 0, unmounts = 0, nvs_saves = 0;
 static std::map<std::string, std::vector<uint8_t>> files;
+static int journal_pending=0,journal_uncertain=0;
+void game_journal_storage_lock() {}
+void game_journal_storage_unlock() {}
+size_t game_journal_record_size() {return sizeof(FinishedGame)+20;}
+bool game_journal_init() {return true;}
+bool game_journal_resume_after_cleanup() {return true;}
+bool game_journal_inspect_locked(GameJournalInspection *out) {
+    *out={journal_pending,0,journal_uncertain,0};return !journal_uncertain;
+}
+void terminal_log_add(const char*,const char*,const char*) {}
+struct FakeDir {std::vector<std::string> entries;size_t index=0;struct dirent entry{};};
+DIR *tm_opendir(const char *path) {
+    auto *d=new FakeDir;std::string prefix=std::string(path)+"/";
+    for(const auto &item:files) if(item.first.rfind(prefix,0)==0) {
+        std::string child=item.first.substr(prefix.size());child=child.substr(0,child.find('/'));
+        if(std::find(d->entries.begin(),d->entries.end(),child)==d->entries.end()) d->entries.push_back(child);
+    }
+    return reinterpret_cast<DIR*>(d);
+}
+struct dirent *tm_readdir(DIR *dir) {
+    auto *d=reinterpret_cast<FakeDir*>(dir);
+    if(d->index==d->entries.size()) return nullptr;
+    snprintf(d->entry.d_name,sizeof(d->entry.d_name),"%s",d->entries[d->index++].c_str());return &d->entry;
+}
+int tm_closedir(DIR *dir) {delete reinterpret_cast<FakeDir*>(dir);return 0;}
+int tm_stat(const char *path,struct stat *st) {
+    auto item=files.find(path);memset(st,0,sizeof(*st));
+    if(item!=files.end()) {st->st_mode=S_IFREG;st->st_size=item->second.size();return 0;}
+    std::string prefix=std::string(path)+"/";
+    for(const auto &value:files) if(value.first.rfind(prefix,0)==0) {st->st_mode=S_IFDIR;return 0;}
+    errno=ENOENT;return -1;
+}
 static std::map<int, std::string> descriptors;
 static int next_fd = 1;
 int nvs_open(const char *, int, int *handle) { *handle = 1; return ESP_OK; }
@@ -105,6 +142,7 @@ int esp_vfs_fat_spiflash_mount_rw_wl(const char *, const char *label,
     assert(cfg->allocation_unit_size == 4096 && cfg->max_files == 12);
     ++mounts; operations.push_back("mount");
     if (mount_error) return mount_error;
+    if(mounts>1 && !probe_fails) free_bytes=0x900000;
     *handle = 9; return ESP_OK;
 }
 int esp_vfs_fat_spiflash_unmount_rw_wl(const char *, int handle) {
@@ -143,7 +181,7 @@ int tm_close(int fd) {
     if (close_error) { errno = close_error; return -1; }
     return 0;
 }
-int tm_unlink(const char *path) { files.erase(path); errno = EINVAL; return 0; }
+int tm_unlink(const char *path) { files.erase(path); errno = ENOENT; return 0; }
 int tm_access(const char *path, int) {
     if (files.count(path)) return 0;
     errno = ENOENT; return -1;
@@ -171,6 +209,10 @@ void store_apply_portal_roster(const PortalSpieler *players, int count) {
 #define access tm_access
 #define rename tm_rename
 #define mkdir tm_mkdir
+#define opendir tm_opendir
+#define readdir tm_readdir
+#define closedir tm_closedir
+#define stat(...) tm_stat(__VA_ARGS__)
 """
 
 SYNC_STUBS = r"""
@@ -188,7 +230,6 @@ int stage_dataset(const char*,OfflineCacheSection section,std::function<void()> 
 static std::atomic<bool> s_recovery_requested{false};
 int game_journal_recover(unsigned) {return 0;}
 int game_journal_reload_pending() {return 0;}
-void terminal_log_add(const char*,const char*,const char*) {}
 using TickType_t = uint32_t;
 static char s_last_error[128];
 struct SyncManifest { bool available; char token[OFFLINE_CACHE_SECTION_COUNT][CACHE_MANIFEST_TOKEN_LEN]; };
@@ -233,6 +274,8 @@ bool logged(const std::string &text) {
 }
 void reset() {
     g_store = {}; s_mounted = s_mount_attempted = false; s_wl = WL_INVALID_HANDLE;
+    s_census_done=false;s_cleaning=false;s_storage_blocked=false;s_disk_pending=0;
+    journal_pending=journal_uncertain=0;
     s_failed_sections = 0; s_metadata_failed = false;
     total_bytes = 0x970000; free_bytes = 0x900000;
     fresh = true; probe_fails = repaired_probe_fails = false;
@@ -256,36 +299,62 @@ int main() {
     for (bool is_fresh : {false, true}) {
         reset(); fresh = is_fresh; total_bytes = free_bytes = 0;
         g_store.pendingKreditEventCount = 7;
-        assert(offline_cache_mount() && formats == 1 && mounts == 2);
-        assert((operations == std::vector<std::string>{"mount","unmount","format","mount"}));
-        assert(logged("Deliberate FAT cache rebuild") && logged("write(16): ret=16 errno=0"));
+        assert(!offline_cache_mount() && formats == 0 && mounts == 2);
+        assert((operations == std::vector<std::string>{"mount","unmount","mount"}));
+        assert(logged("cache-only cleanup"));
         assert(g_store.pendingKreditEventCount == 7);
     }
     reset(); total_bytes = 8192; free_bytes = 4096;
-    assert(offline_cache_mount() && formats == 1);
-    reset(); free_bytes = 0; assert(offline_cache_mount() && formats == 1);
+    assert(!offline_cache_mount() && formats == 0);
+    reset(); free_bytes = 0;
+    files["/fatfs/tmcache/history.tmp"]={1};
+    files["/fatfs/tmcache/history.bak"]={1};
+    files["/fatfs/unknown.tmp"]={2};
+    assert(offline_cache_mount() && formats == 0 && mounts==2);
+    assert(!files.count("/fatfs/tmcache/history.tmp") && !files.count("/fatfs/tmcache/history.bak"));
+    assert(files.count("/fatfs/unknown.tmp"));
+    assert(logged("FAT census file=/fatfs/tmcache/history.tmp"));
+    assert(logged("FinishedGame=") && logged("cache total="));
+    reset(); free_bytes=0;journal_pending=1;
+    files["/fatfs/tmcache/history.bin"]={3};
+    assert(!offline_cache_mount() && mounts==1 && formats==0);
+    assert(files.count("/fatfs/tmcache/history.bin") && offline_cache_storage_available());
+    char warning[256];assert(offline_cache_storage_warning(warning,sizeof(warning)));
+    assert(strstr(warning,"Offene Spiele"));
+    reset(); free_bytes=0;g_store.pendingGamesCount=1;
+    assert(!offline_cache_mount() && mounts==1 && formats==0);
+    reset(); free_bytes=0;journal_uncertain=1;
+    files["/fatfs/tmcache/roster.bin"]={3};
+    assert(!offline_cache_mount() && mounts==1 && files.count("/fatfs/tmcache/roster.bin"));
+    assert(offline_cache_pending_games()==-1);
+    reset();assert(offline_cache_mount());
+    g_store.pendingGamesCount=1;assert(!offline_cache_cleanup());
+    g_store.pendingGamesCount=0;journal_pending=1;assert(!offline_cache_cleanup());
+    journal_pending=0;journal_uncertain=1;assert(!offline_cache_cleanup());
+    journal_uncertain=0;assert(offline_cache_cleanup());
+    assert(offline_cache_pending_games()==0);
     reset(); probe_fails = true;
-    assert(offline_cache_mount() && formats == 1);
+    assert(!offline_cache_mount() && formats == 0);
     assert(logged("write(16): ret=-1 errno=28") && logged("fsync: ret=0 errno=0"));
     reset(); fresh = false; probe_fails = true;
     files["/fatfs/tmcache/roster.bin"] = {1}; // genuinely established cache
     assert(!offline_cache_mount() && formats == 0 && !g_store.offlineCacheHealthy);
-    assert(!offline_cache_mount() && mounts == 1);
+    assert(!offline_cache_mount() && mounts == 2);
     reset(); fresh = false; probe_fails = true; // old marker but every snapshot write failed
-    assert(offline_cache_mount() && formats == 1);
+    assert(!offline_cache_mount() && formats == 0);
     assert(logged("empty_cache=1 fresh_volume=1"));
     reset(); probe_fails = repaired_probe_fails = true;
-    assert(!offline_cache_mount() && formats == 1 && mounts == 2);
-    assert(!offline_cache_mount() && formats == 1);
+    assert(!offline_cache_mount() && formats == 0 && mounts == 2);
+    assert(!offline_cache_mount() && formats == 0);
     for (bool fail_close : {false, true}) {
         reset();
         if (fail_close) close_error = EBADF; else fsync_error = EIO;
-        assert(!offline_cache_mount() && formats == 1);
+        assert(!offline_cache_mount() && formats == 0);
         assert(logged(fail_close ? "FAT self-test close: ret=-1 errno=9" :
                                   "FAT self-test fsync: ret=-1 errno=5"));
     }
     reset(); total_bytes = 0; format_error = ESP_FAIL;
-    assert(!offline_cache_mount() && formats == 1 && mounts == 1);
+    assert(!offline_cache_mount() && formats == 0 && mounts == 2);
     reset(); total_bytes = 0; unmount_error = ESP_FAIL;
     assert(!offline_cache_mount() && formats == 0);
     reset(); fresh = false; mount_error = ESP_FAIL;
@@ -347,9 +416,17 @@ int main() {
     assert(http_sync_all_impl() == ESP_FAIL); // actual server failures still fail
     reset(); probe_fails = repaired_probe_fails = true;
     assert(http_sync_all_impl() == ESP_OK && !g_store.offlineCacheHealthy);
-    assert(g_store.portalSpielerCount == 1 && mounts == 2 && formats == 1);
-    std::puts("PASS: capacity + 16-byte diagnostics; fresh recovery; no healthy-volume erase or mount storms");
-    std::puts("PASS: write/fsync/close errors captured separately; atomic replacement; section/metadata health");
+    assert(g_store.portalSpielerCount == 1 && mounts == 2 && formats == 0);
+    reset();assert(offline_cache_mount());free_bytes=total_bytes/5;
+    assert(!offline_cache_save(OFFLINE_CACHE_HISTORY));
+    assert(!files.count("/fatfs/tmcache/history.tmp"));
+    assert(logged("25% cache / 20% free budget"));
+    assert(cache_budget_bytes()<total_bytes/4);
+    std::printf("PASS budget: FinishedGame=%zu Record=%zu journal allocated=%zu cache allocated=%zu\\n",
+        sizeof(FinishedGame),game_journal_record_size(),
+        storage_allocated(game_journal_record_size())*(STORAGE_JOURNAL_SLOTS+2),cache_budget_bytes());
+    std::puts("PASS: census, cache-only remount recovery, pending/uncertain guards, no format/NVS erase");
+    std::puts("PASS: write/fsync/close cleanup, single-copy snapshots, 25%/20% budget, section/metadata health");
     std::puts("PASS: failed FAT leaves roster/history applied + NVS save, full/billing sync succeed; server errors fail");
 }
 """

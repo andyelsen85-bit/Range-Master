@@ -16,7 +16,9 @@ STUBS = r"""
 #include <cstdlib>
 #include <cstring>
 #include <set>
+#include <random>
 #include "game_store.h"
+static uint32_t esp_random(){static std::mt19937 rng(81374);return rng();}
 GameStore g_store = {};
 static int finished = 0;
 void game_store_save(void) {}

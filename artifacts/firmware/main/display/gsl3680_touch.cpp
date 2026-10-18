@@ -106,6 +106,8 @@ static void gsl3680_load_firmware(void)
 // Reads one touch point, converts to physical coords, updates cache.
 static void gsl3680_hw_read(void)
 {
+    static bool gesture_logged=false;
+    static uint32_t gesture_count=0;
     // Status register
     uint8_t reg    = GSL3680_REG_STATUS;
     uint8_t status[4] = {0};
@@ -114,6 +116,8 @@ static void gsl3680_hw_read(void)
         &reg, 1, status, 4, pdMS_TO_TICKS(10));
 
     if (err != ESP_OK || (status[0] & 0x0F) == 0) {
+        // A transient bus error is not a new physical gesture.
+        if(err==ESP_OK)gesture_logged=false;
         // No touch or I²C error — mark released
         xSemaphoreTake(s_touch_mux, portMAX_DELAY);
         s_cached_pressed = false;
@@ -155,12 +159,13 @@ static void gsl3680_hw_read(void)
     if (phys_y < 0)              phys_y = 0;
     if (phys_y >= DISPLAY_V_RES) phys_y = DISPLAY_V_RES - 1;
 
-    // Periodic logging for calibration verification
-    static uint32_t s_touch = 0;
-    ++s_touch;
-    if (s_touch <= 50 || s_touch % 50 == 0) {
-        ESP_LOGI(TAG, "TOUCH #%lu  raw(%u,%u) -> phys(%ld,%ld)",
-                 (unsigned long)s_touch,
+    // Calibration diagnostics: one DEBUG line at the first point, not one INFO
+    // line per poll. Keep the latch until a confirmed zero-contact status.
+    if (!gesture_logged) {
+        gesture_logged=true;
+        ++gesture_count;
+        ESP_LOGD(TAG, "TOUCH gesture #%lu  raw(%u,%u) -> phys(%ld,%ld)",
+                 (unsigned long)gesture_count,
                  (unsigned)raw_x, (unsigned)raw_y,
                  (long)phys_x, (long)phys_y);
     }

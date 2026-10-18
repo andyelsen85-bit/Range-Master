@@ -19,3 +19,18 @@ Spielverlauf and explicitly said this must not happen.
 **How to apply:** Keep the selected finished game independent of cache indices.
 Refresh the list only when its data changes. Enrich missing clay data by stable
 game identity without hiding the card, changing player rows, or losing scroll.
+
+LVGL's `lv_obj_is_valid()` is not a safe lifetime probe for a captured widget
+pointer after a screen refresh. Deleted objects must invalidate any outstanding
+snapshot references before their storage is released; a recreated row is not
+necessarily the same player, even if it occupies the same position or address.
+
+**Why:** A real terminal crashed with a load-access fault while opening Spieler
+des Tages after boot sync; the freed pointer contained a `0x55` poison pattern.
+Deferring sync during active input prevented interrupted touches but did not
+make retained pointers safe across later rebuilds.
+
+**How to apply:** Track deletion under the shared LVGL lock; restore only
+surviving objects. Drop focus for deleted rows rather than guessing which new
+row should inherit it. Test both deletion and survival under the host LVGL
+AddressSanitizer build, then verify on hardware when available.

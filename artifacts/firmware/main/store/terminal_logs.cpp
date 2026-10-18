@@ -1,4 +1,6 @@
 #include "terminal_logs.h"
+#include "hourly_log_gate.h"
+#include "esp_timer.h"
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -84,6 +86,13 @@ void terminal_log_add(const char *type,const char *level,const char *message,con
     if(json && strlen(json)>500) { cJSON_free(json); return; }
     copy(entry.data,sizeof(entry.data),json?json:"{}"); cJSON_free(json);
     xSemaphoreTake(s_lock,portMAX_DELAY);
+    static HourlyLogGate archive_errors,identity_errors,glyph_errors;
+    const bool archive_error=message && strstr(message,"Spielarchiv") &&
+        strstr(message,"nicht") && (strstr(message,"verfügbar") || strstr(message,"geladen"));
+    const bool identity_error=message && strstr(message,"Terminal-ID nicht verfügbar");
+    const bool glyph_error=type && !strcmp(type,"unsupported_glyph");
+    HourlyLogGate *gate=archive_error?&archive_errors:(identity_error?&identity_errors:(glyph_error?&glyph_errors:nullptr));
+    if(gate && !gate->admit(esp_timer_get_time())) {xSemaphoreGive(s_lock);return;}
     snprintf(entry.id,sizeof(entry.id),"%08x%08x-%08x",s_boot_hi,s_boot_lo,++s_sequence);
     if(s_count==RAM_CAP) { memmove(s_ring,s_ring+1,(RAM_CAP-1)*sizeof(entry)); --s_count; }
     s_ring[s_count++]=entry;

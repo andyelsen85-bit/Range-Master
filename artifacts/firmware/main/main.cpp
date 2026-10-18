@@ -37,6 +37,7 @@
 #include "ui_manager.h"
 #include "game_store.h"
 #include "game_journal.h"
+#include "active_game.h"
 #include "terminal_logs.h"
 #include "offline_cache.h"
 #include "coprocessor.h"
@@ -315,6 +316,9 @@ extern "C" void app_main(void)
     offline_cache_load();
     if(!game_journal_init())
         terminal_log_add("data_loss_risk","ERROR","Spielarchiv nicht verfügbar; neue Spiele bleiben gesperrt");
+    (void)offline_cache_recheck(); // acknowledged archive pruning may have freed space
+    if(!active_game_restore())
+        terminal_log_add("data_loss_risk","ERROR","Offenes Harakiri-Spiel konnte nicht geladen werden");
 
     // ── Backlight ─────────────────────────────────────────────
     backlight_init();

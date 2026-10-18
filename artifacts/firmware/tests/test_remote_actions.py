@@ -19,9 +19,13 @@ enum SpielActionResult { SPIEL_ACTION_OK,SPIEL_ACTION_IGNORED,SPIEL_ACTION_SCORE
 enum {SCREEN_SPIEL,SCREEN_DASHBOARD,MASCHINE_H=7};
 struct SequenzEintrag { bool isPair,isDoublette;int maschine,partner,delayMs; };
 struct {int taubeIndex=0,sequenzLen=2,ergebnisseCount=0,spielerCount=1,screen=SCREEN_SPIEL;
+    int spielerIndex=0;
+    bool activeGameStorageError=false,harakiriOrdersReady=false;
     bool currentFireSent=false,remoteButtonsEnabled=true;
     SequenzEintrag sequenz[2]{};char gatewayUrl[256]="http://gateway",gatewayToken[256]="synthetic-auth-key";
 } g_store;
+template<class Store> static const SequenzEintrag *store_sequence_entry(const Store *s,int,int c){return &s->sequenz[c];}
+void game_store_save(){}
 static bool busy=false,queueOk=true;static unsigned launches=0,scores=0,repeats=0,skips=0,refreshes=0,clicks=0;
 bool lora_request_busy(){return busy;}
 bool lora_fire_machine_game(int){if(queueOk) ++launches;return queueOk;}

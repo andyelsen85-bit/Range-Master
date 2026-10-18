@@ -1,5 +1,27 @@
 # Terminal diagnostics and completed-game recovery
 
+## Active Harakiri games
+
+`/fatfs/active0.bin` and `/fatfs/active1.bin` are durable game data, **not cache**.
+Do not delete them during cache maintenance, format FAT, or erase NVS to recover
+an open game. Each bounded slot is 8,084 bytes (8,192 allocated), with version,
+generation and checksum. The newest valid slot wins; interrupted replacements
+retain the previous slot and emit a warning. If neither slot can be validated,
+new starts are blocked rather than silently generating another sequence.
+
+After reboot inspect the last launch before scoring/skipping or deliberately
+repeating it. A restart never authorizes a duplicate FIRE by itself. A verified
+finished journal record takes precedence over stale active state; an unreadable
+journal is not treated as proof that a game never finished. Configuration restore
+is refused while a Harakiri game is open. Finish/cancel the active game before
+installing firmware that changes its checkpoint format.
+
+Host checks: `python3 artifacts/firmware/tests/test_harakiri_players.py` exercises
+both Harakiri modes, all valid active-machine subsets, 2–6 players, mid-pair
+restart, scoring, repeat/skip/undo, failed/interrupted writes, and terminal
+scorecard alignment under ASan/UBSan. Physical power-cut timing remains a
+hardware check; none of these tests flashes or erases a terminal.
+
 ## Status: integrated software — hardware acceptance required
 
 Portal/API diagnostics, recovery, coherent sync publication and the fire
@@ -24,11 +46,74 @@ The hardware acceptance work below remains mandatory before installation.
   still requires the physical tests below.
 - Completed games have checksummed, versioned FAT records, temporary-file
   recovery and exact per-game acknowledgement. Unsynced records do not expire.
-  Accepted records remain recoverable for seven days. The queue has 200 slots;
+  Accepted records remain recoverable for up to seven days, capped at the
+  newest 20 accepted games and 200 total journal slots (pending always wins).
+  The pending queue has 200 slots;
   new games are blocked when the archive is unavailable/full, and occupancy
   above 80% warns the operator.
 - FAT formatting is prohibited once the partition contains durable game data.
   Never treat that partition as a disposable cache.
+
+### Full FAT: diagnosis and safe recovery
+
+The previous seven-day accepted archive had no count cap: a busy terminal or
+an unset clock could accumulate unlimited acknowledged records. Failed journal
+writes could also leave partial files. Both growth paths are now bounded.
+Failed incomplete writes are removed; complete checksummed journal temporaries
+survive failed fsync/close and remain protected/recoverable, never treated as cache.
+The actual contents of an affected physical terminal are not available to a
+host build; its next boot prints a once-per-mount census of every `/fatfs` file,
+size/cluster allocation, file count and byte sum. It also prints usable/free
+capacity, raw-minus-usable WL/FAT overhead, every cache section size,
+`sizeof(FinishedGame)` and journal `Record` size/capacity. Unknown files are
+reported but never treated as disposable.
+
+The current structures budget 7,052 bytes per `FinishedGame`, 7,072 per journal
+record, rounded to 8,192 on FAT. The 200 slots plus two atomic-replacement
+scratch records need **1,654,784 bytes** (about 16.8% of 9,842,688 usable bytes).
+All cache sections, including metadata and the 20-game history, need
+**364,544 allocated bytes** (about 3.7%). Runtime limits require journal ≤50%,
+cache ≤25%, and ≥20% free, with additional journal write scratch reserved.
+The boot census supplies the exact sizes for the installed build.
+
+Rebuildable snapshots use a single copy: the old section is discarded before
+writing its replacement; failed writes remove temporary files. A missing
+snapshot invalidates its old revision token on reload, forcing a portal pull.
+Journal atomic replacements still preserve complete recoverable copies; a
+failed remap/requeue stops at the first write failure rather than leaving
+one temp file per game. Only acknowledged history can expire or be evicted;
+unsynced games never expire or get evicted.
+
+When full/unwritable, cleanup requires both RAM pending count zero AND a
+read-only, checksum/version-verified scan proving no unacknowledged journal
+records. Corrupt, unreadable or incomplete records fail closed, including
+`.part`/`.bak` evidence. Under the cache and journal locks it removes ONLY the
+known cache `.bin`/`.bak`/`.tmp` files and probe file, then remounts WITHOUT
+formatting. Journal records, unknown files, NVS and replay counters survive.
+The old `fat_layout` marker cannot veto this safe cache-only recovery.
+Recovery/refusal is a WARN in serial output and a terminal log entry.
+
+A readable-but-unwritable mount remains available for journal recovery/upload;
+optional cache health no longer prevents journal initialization. With pending
+games, no cache cleanup is performed and new games remain blocked until safe
+space is available. An exact portal ACK can release ONLY its acknowledged
+record if ENOSPC prevents retaining an archive copy, allowing a full journal
+to drain without deleting any game awaiting acknowledgement.
+
+**Einstellungen → System → Speicher bereinigen** first checks and displays the
+pending-game count, then asks for confirmation. Pending/uncertain journal data
+refuses cleanup; the worker rechecks at execution time and serializes against
+writers. A running sync must finish first. Filesystem work runs off the LVGL
+thread. Start-screen warnings explain that games are preserved and must be
+synchronized. No erase-flash, FAT format or NVS reset is part of this procedure.
+
+Host checks compile the real journal/cache/log modules together with a
+quota-backed filesystem shim: full-cache healing, pending on disk with RAM
+empty, corrupt partial refusal, exact-ACK ENOSPC draining, NVS sentinel
+preservation, 250 acknowledged games capped to 20, and 200 pending records.
+Separate cache tests cover 512/4096-byte WL geometry, census, failed writes,
+single-copy replacement and budget enforcement. These do not replace physical
+flash/power-cut acceptance tests.
 - Local-player games remain queued. The API rejects unknown players per game,
   rather than rejecting unrelated games. Inactive players' completed historical
   games are accepted only through the transaction-scoped historical import
@@ -83,6 +168,58 @@ The hardware acceptance work below remains mandatory before installation.
 
 ## Checks and acceptance
 
+### P4 chip identity and legacy UNKNOWN records
+
+All identity-bearing requests now use the P4 factory eFuse MAC, read with
+`esp_efuse_mac_get_default`, formatted as `ESP32-P4-XXXXXXXXXXXX` (uppercase).
+The WiFi STA MAC is not a valid P4 identity source: WiFi is on the C6.
+Failed reads, zero/all-FF MACs and insufficient output buffers return failure
+with an empty output. There is no shared or random fallback. Backup, restore,
+inventory, diagnostics and game-manifest callers refuse submission on failure.
+HTTP session creation also refuses, making full/billing sync fail visibly
+with “Chip-ID nicht lesbar; Übertragung gesperrt”. Credentials, local external
+event/game IDs, NVS and FAT are not reset or regenerated.
+
+**Legacy policy: retention only, no terminal-ID alias and no automatic rewrite.**
+`ESP32-P4-UNKNOWN` could refer to several physical devices and cannot safely
+be assigned to one chip or API key:
+
+- Existing configuration backups remain under the old ID, under the existing
+  retention/protection rules. New per-chip backups are separate records. An
+  administrator can explicitly select a verified old backup and authorize it
+  for the real replacement ID plus that replacement's active terminal key.
+  Previous snapshot contents already overwritten by the shared-ID daily
+  collision cannot be reconstructed by this firmware fix.
+- Existing restore approvals keep their exact old target/key binding. They
+  are never silently retargeted or consumed as a result of the ID change.
+  Approval for `UNKNOWN` cannot be used by the new chip ID; revoke/reissue it
+  for the correct chip and key. The normal reauthorization action revokes the
+  selected backup's previous unused approvals. New `UNKNOWN` targets are refused.
+- Existing inventory source fields, immutable event receipts, billing rows,
+  logs and manifests retain their original attribution. No migration merges,
+  relabels or deletes them. Log filtering/export still accepts the historical
+  `UNKNOWN` value; normal retention policies continue to apply.
+- A queued inventory/gameday event may have been applied before upgrade but
+  lost its ACK. The portal accepts an **ACK-only duplicate** when its external
+  ID and complete payload hash match the old receipt with ONLY the terminal
+  ID substituted back to `UNKNOWN`, and the incoming ID is a concrete P4 ID.
+  It neither reapplies stock/maîtres nor rewrites the old receipt/source.
+  Any content mismatch or identity change between two concrete terminals still
+  conflicts; the terminal retains the event rather than silently dropping it.
+- Game, credit, sale and payment idempotency remains based on the existing
+  immutable external IDs and authenticated terminal key, not a renamed MAC.
+  No financial or game history is reassigned by this fix.
+
+The portal rejects new `UNKNOWN` identity-bearing writes/restore targets while
+keeping historical records readable. Deploy the matching API changes before
+updating terminals that may have an unacknowledged legacy inventory receipt.
+
+Repeated journal-unavailable/load-failed messages share a mutex-protected,
+monotonic hourly gate in the diagnostics queue: first occurrence per boot,
+then no more than one per hour across startup, sync and start-game variants.
+SNTP/timezone changes do not reopen the window. Other errors remain unaffected.
+Identity-read failures have a separate hourly gate.
+
 Software checks:
 
 ```sh
@@ -105,7 +242,7 @@ and sizes are unchanged; FAT remains `0x680000` / `0x980000`.
 Export the SDK tools normally, including the ROM ELF directory, before building.
 
 Verified full ESP-IDF 5.3.5 build: `app_check_size` passes with an image of
-`0x226e40` (2,256,448 bytes) and **`0x1091c0` (1,085,888 bytes) free per OTA
+`0x27acc0` (2,600,128 bytes) and **`0xb5340` (742,208 bytes) free per OTA
 slot**, exceeding the 500 KiB requirement. The generated binary table, app and
 bootloader configuration, erased initial OTA metadata and four-file USB flash
 plan also pass `tests/test_partitions.py`. This is build verification only;

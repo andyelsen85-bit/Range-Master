@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { authenticate, requireAdmin, requireApiKey } from "./auth";
 import { csvCell, logEntry, terminalIdentity } from "../lib/terminal-logs";
+import { isAttributableTerminal } from "../lib/terminal-identity";
 
 const router = Router();
 const limits = new Map<number, { start: number; count: number }>();
@@ -17,7 +18,7 @@ function rateLimit(req: any, res: any, next: any) {
   return next();
 }
 router.post("/sync/terminal-logs", requireApiKey, rateLimit, async (req,res) => {
-  const parsed = z.object({ terminalId: terminalIdentity, entries: z.array(logEntry).max(100) }).strict().safeParse(req.body);
+  const parsed = z.object({ terminalId: terminalIdentity.refine(isAttributableTerminal), entries: z.array(logEntry).max(100) }).strict().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Ungültige Diagnoseeinträge", details: parsed.error.issues });
   const { terminalId, entries } = parsed.data;
   await db.transaction(async tx => {
@@ -107,7 +108,7 @@ router.get("/admin/terminal-logs/export", authenticate, requireAdmin, async (req
 });
 
 router.post("/sync/game-manifest", requireApiKey, rateLimit, async (req,res) => {
-  const parsed = z.object({ terminalId: terminalIdentity, datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  const parsed = z.object({ terminalId: terminalIdentity.refine(isAttributableTerminal), datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     externalIds: z.array(terminalIdentity).max(2000) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Ungültiger Spiele-Abgleich" });
   const {terminalId,datum,externalIds} = parsed.data;

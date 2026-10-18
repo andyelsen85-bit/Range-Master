@@ -3,9 +3,11 @@ import { db, ammoInventoryDayTable, gamedayMaitreTable, gamedayEventTable, spiel
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { daySchema } from "./local-day";
 import { z } from "zod";
+import { isAttributableTerminal, isConcreteP4Terminal, LEGACY_UNKNOWN_TERMINAL } from "./terminal-identity";
 
 export const inventoryInput = z.object({
-  externalId: z.string().min(8).max(100), terminalId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  externalId: z.string().min(8).max(100), terminalId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
+    .refine(isAttributableTerminal, "Terminal-ID unbekannt; Firmware aktualisieren"),
   datum: daySchema, c12: z.number().int().min(0).max(1_000_000), c20: z.number().int().min(0).max(1_000_000),
   takenOver: z.boolean().default(false), note: z.string().max(240).default(""),
 });
@@ -39,7 +41,14 @@ export async function applyDayEvent(kind: "opening" | "closing" | "gameday", inp
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`inventory:${body.datum}`},0))`);
     const [previous] = await tx.select().from(gamedayEventTable).where(eq(gamedayEventTable.externalId, body.externalId));
     if (previous) {
-      if (previous.payloadHash !== hash || previous.terminalId !== body.terminalId) throw new DayConflict("Event-ID mit verändertem Inhalt");
+      const legacyHash = createHash("sha256").update(JSON.stringify({
+        kind, ...body, terminalId: LEGACY_UNKNOWN_TERMINAL,
+      })).digest("hex");
+      // ACK-only compatibility: do not alias/relabel history or reapply stock.
+      const legacyReplay = previous.terminalId === LEGACY_UNKNOWN_TERMINAL &&
+        isConcreteP4Terminal(body.terminalId) && previous.payloadHash === legacyHash;
+      if (!legacyReplay && (previous.payloadHash !== hash || previous.terminalId !== body.terminalId))
+        throw new DayConflict("Event-ID mit verändertem Inhalt");
       return { success: true, duplicate: true };
     }
     if (kind === "gameday") {

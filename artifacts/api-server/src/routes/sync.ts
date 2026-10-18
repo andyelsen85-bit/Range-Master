@@ -19,9 +19,11 @@ import {
   TERMINAL_CONFIG_SCHEMA_VERSION,
 } from "../lib/terminal-config";
 
-const router = Router();
+import { isAttributableTerminal } from "../lib/terminal-identity";
 
-const terminalIdSchema = z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9._:-]+$/);
+const router = Router();
+const terminalIdSchema = z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9._:-]+$/)
+  .refine(isAttributableTerminal, "Terminal-ID unbekannt; Firmware aktualisieren");
 
 // POST /api/sync/config-backup — upload an encrypted, versioned configuration snapshot
 router.post("/config-backup", requireApiKey, async (req, res) => {

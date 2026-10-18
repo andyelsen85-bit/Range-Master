@@ -26,7 +26,7 @@ static inline HistoryScorecardShape history_scorecard_shape(const FinishedGame *
     return {runs, clays};
 }
 
-static inline const Ergebnis *history_scorecard_result(const FinishedGame *game,
+static inline const Ergebnis *history_scorecard_raw_result(const FinishedGame *game,
                                                        int player, int run, int clay)
 {
     const Ergebnis *found = NULL;
@@ -38,9 +38,58 @@ static inline const Ergebnis *history_scorecard_result(const FinishedGame *game,
     return found;
 }
 
+static inline bool history_scorecard_harakiri(const FinishedGame *game) {
+    return game->base.modus==MODUS_HARAKIRI || game->base.modus==MODUS_HARAKIRI_CUSTOM;
+}
+// Signature separates a single A from the A in an A/F doublette. Infer the
+// pair from each player's own adjacent ledger entries, not another player's
+// shot position or today's configuration.
+static inline int history_scorecard_key(const FinishedGame *game,const Ergebnis *r) {
+    if(!r || r->maschine<MASCHINE_A || r->maschine>=MASCHINE_COUNT)return -1;
+    const Ergebnis *next=history_scorecard_raw_result(game,r->spielerId,r->lauf,r->taube+1);
+    const Ergebnis *prev=history_scorecard_raw_result(game,r->spielerId,r->lauf,r->taube-1);
+    int role=0;
+    if(r->posten>=1 && r->posten<=6) {
+        if(next && next->posten==r->posten)role=1;
+        else if(prev && prev->posten==r->posten)role=2;
+    }
+    return role*MASCHINE_COUNT+(int)r->maschine;
+}
+static inline int history_scorecard_column_key(const FinishedGame *game,int run,int clay) {
+    bool seen[MASCHINE_COUNT*3]={};
+    for(int i=0;i<game->base.ergebnisse_count && i<MAX_ERGEBNISSE;i++) {
+        const Ergebnis *r=&game->base.ergebnisse[i];
+        if(r->lauf!=run || r->wiederholt)continue;
+        int key=history_scorecard_key(game,r);if(key>=0)seen[key]=true;
+    }
+    int column=0;
+    for(int key=0;key<MASCHINE_COUNT*3;key++)
+        if(seen[key] && ++column==clay)return key;
+    return -1;
+}
+static inline const Ergebnis *history_scorecard_result(const FinishedGame *game,int player,int run,int clay) {
+    if(!history_scorecard_harakiri(game))return history_scorecard_raw_result(game,player,run,clay);
+    int key=history_scorecard_column_key(game,run,clay);
+    const Ergebnis *found=NULL;
+    for(int i=0;i<game->base.ergebnisse_count && i<MAX_ERGEBNISSE;i++) {
+        const Ergebnis *r=&game->base.ergebnisse[i];
+        if(!r->wiederholt && r->spielerId==player && r->lauf==run &&
+           history_scorecard_key(game,r)==key && key>=0)found=r;
+    }
+    return found;
+}
+
 static inline void history_scorecard_heading(const FinishedGame *game, int run,
                                               int clay, char *text, size_t capacity)
 {
+    if(history_scorecard_harakiri(game)) {
+        int key=history_scorecard_column_key(game,run,clay);
+        if(key<0)snprintf(text,capacity,"-");
+        else if(key%MASCHINE_COUNT==MASCHINE_H && key>=MASCHINE_COUNT)
+            snprintf(text,capacity,"H%d",key/MASCHINE_COUNT);
+        else snprintf(text,capacity,"%c",'A'+key%MASCHINE_COUNT);
+        return;
+    }
     for (int i = 0; i < game->base.ergebnisse_count && i < MAX_ERGEBNISSE; ++i) {
         const Ergebnis *result = &game->base.ergebnisse[i];
         if (result->lauf == run && result->taube == clay &&
@@ -55,6 +104,10 @@ static inline void history_scorecard_heading(const FinishedGame *game, int run,
 
 static inline bool history_scorecard_pair_at(const FinishedGame *game, int run, int first_clay)
 {
+    if(history_scorecard_harakiri(game)) {
+        int key=history_scorecard_column_key(game,run,first_clay);
+        return key>=MASCHINE_COUNT && key<2*MASCHINE_COUNT;
+    }
     if (first_clay < 1 || first_clay >= MAX_SEQUENZ) return false;
     // Each player's two pair results share one physical stand. Singles
     // advance the stand, including consecutive single H targets. Inspect the

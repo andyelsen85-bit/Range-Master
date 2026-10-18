@@ -8,6 +8,7 @@
 
 #define MAX_SPIELER         6
 #define MAX_SEQUENZ         50
+#define HARAKIRI_MAX_CLAYS  9 // seven singles plus one two-clay launch unit
 #define MAX_HISTORY         20   // in-RAM cache; older games live on FAT flash
 #define MAX_PORTAL_SPIELER  200
 #define MAX_PENDING_GAMES  200   // PSRAM queue backed by the durable game journal
@@ -382,6 +383,10 @@ typedef struct {
     int     spielerIndex;
     SequenzEintrag sequenz[MAX_SEQUENZ];
     int     sequenzLen;
+    uint8_t harakiriOrder[MAX_SPIELER][HARAKIRI_MAX_CLAYS];
+    bool    harakiriOrdersReady;
+    bool    activeGameStorageError;
+    bool    activeGameResumed;
     Ergebnis ergebnisse[MAX_ERGEBNISSE];
     int      ergebnisseCount;
     char     spielId[40];
@@ -459,6 +464,38 @@ typedef struct {
     bool    remoteButtonsEnabled; // explicit opt-in; default OFF
 } GameStore;
 
+static inline const SequenzEintrag *store_sequence_entry(const GameStore *s, int player, int clay)
+{
+    if(player<0 || player>=s->spielerCount || clay<0 || clay>=s->sequenzLen)return NULL;
+    int index=clay;
+    if(s->harakiriOrdersReady) {
+        if(clay>=HARAKIRI_MAX_CLAYS)return NULL;
+        index=s->harakiriOrder[player][clay];
+    }
+    return index<s->sequenzLen ? &s->sequenz[index] : NULL;
+}
+
+static inline int store_sequence_unit(const GameStore *s,int player,int clay)
+{
+    int unit=0;
+    for(int i=0;i<clay;i++) {
+        const SequenzEintrag *entry=store_sequence_entry(s,player,i);
+        if(entry && !(entry->isPair && entry->isDoublette))unit++;
+    }
+    const SequenzEintrag *entry=store_sequence_entry(s,player,clay);
+    return unit-(entry && entry->isPair && entry->isDoublette ? 1 : 0);
+}
+
+static inline int store_sequence_clay(const GameStore *s,int player,int unit)
+{
+    for(int i=0;i<s->sequenzLen;i++) {
+        const SequenzEintrag *entry=store_sequence_entry(s,player,i);
+        if(entry && !(entry->isPair && entry->isDoublette) &&
+           store_sequence_unit(s,player,i)==unit)return i;
+    }
+    return s->sequenzLen;
+}
+
 // ── Global store instance ────────────────────────────────────
 extern GameStore g_store;
 
@@ -486,6 +523,7 @@ void store_navigate(Screen s);
 bool store_start_spiel(void);   // deducts credits, builds sequenz
 bool store_cancel_spiel(void);  // refunds this game's credits; no result is saved
 void store_eintragen(int punkte);
+void store_retry_active_game_save(void);
 void store_wiederholen(void);
 void store_skip_taube(void);
 void store_account_acknowledged_clays(int count);

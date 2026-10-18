@@ -15,6 +15,7 @@
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_maschine;
 static lv_obj_t *s_lbl_lauf;
+static lv_obj_t *s_lbl_upcoming;
 static lv_obj_t *s_lbl_taube;
 static lv_obj_t *s_player_grid;       // 5-post grid, rebuilt each refresh
 static lv_obj_t *s_lbl_active_name;   // active shooter: name
@@ -51,7 +52,9 @@ SpielActionResult spiel_action_score(int pts)
 {
     if (g_store.taubeIndex >= g_store.sequenzLen || pts < 0 || pts > 2)
         return SPIEL_ACTION_IGNORED;
-    if (pts == 1 && g_store.sequenz[g_store.taubeIndex].isPair)
+    const SequenzEintrag *entry=store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
+    if(!entry || g_store.activeGameStorageError)return SPIEL_ACTION_IGNORED;
+    if (pts == 1 && entry->isPair)
         return SPIEL_ACTION_IGNORED;
     store_eintragen(pts);
     screen_spiel_refresh();
@@ -61,7 +64,8 @@ SpielActionResult spiel_action_score(int pts)
 SpielActionResult spiel_action_fire()
 {
     if (g_store.taubeIndex >= g_store.sequenzLen) return SPIEL_ACTION_IGNORED;
-    SequenzEintrag *se = &g_store.sequenz[g_store.taubeIndex];
+    const SequenzEintrag *se = store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
+    if(!se || g_store.activeGameStorageError)return SPIEL_ACTION_IGNORED;
     if (se->isPair && se->isDoublette) return SPIEL_ACTION_SCORE_FIRST;
     if (g_store.currentFireSent) return SPIEL_ACTION_SCORE_FIRST;
     if (lora_request_busy()) return SPIEL_ACTION_RADIO_BUSY;
@@ -74,7 +78,7 @@ SpielActionResult spiel_action_fire()
         // locally by the addressed relay after its fixed system delay.
         queued = lora_fire_machine_game(se->maschine);
     }
-    if (queued) g_store.currentFireSent = true;
+    if (queued) {g_store.currentFireSent = true;game_store_save();}
     screen_spiel_refresh();
     return queued ? SPIEL_ACTION_OK : SPIEL_ACTION_RADIO_BUSY;
 }
@@ -86,7 +90,8 @@ static void fire_cb(lv_event_t *e)
 
 SpielActionResult spiel_action_repeat()
 {
-    if (g_store.ergebnisseCount <= 0) return SPIEL_ACTION_IGNORED;
+    if (g_store.ergebnisseCount <= 0 &&
+        !(g_store.harakiriOrdersReady && g_store.currentFireSent))return SPIEL_ACTION_IGNORED;
     store_wiederholen();
     screen_spiel_refresh();
     return SPIEL_ACTION_OK;
@@ -330,6 +335,11 @@ lv_obj_t *screen_spiel_create(void)
     lv_label_set_text(s_lbl_maschine, "A");
     lv_obj_set_style_text_font(s_lbl_maschine, UI_FONT_48, 0);
     lv_obj_set_style_text_color(s_lbl_maschine, lv_color_hex(CLR_PRIMARY), 0);
+    s_lbl_upcoming=lv_label_create(left);
+    lv_obj_set_width(s_lbl_upcoming,LV_PCT(100));
+    lv_obj_set_style_text_font(s_lbl_upcoming,UI_FONT_14,0);
+    lv_obj_set_style_text_color(s_lbl_upcoming,lv_color_hex(CLR_MUTED),0);
+    lv_label_set_long_mode(s_lbl_upcoming,LV_LABEL_LONG_WRAP);
 
     // ── FIRE trigger at the bottom of the control stack ────
     s_btn_fire = lv_btn_create(left);
@@ -495,7 +505,7 @@ void screen_spiel_refresh(void)
     bool isPair = false;
     bool isPairSecond = false;
     if (s->taubeIndex < s->sequenzLen) {
-        SequenzEintrag *se = &s->sequenz[s->taubeIndex];
+        const SequenzEintrag *se = store_sequence_entry(s,s->spielerIndex,s->taubeIndex);
         isHMaschine = (se->maschine == MASCHINE_H && se->isPair);
         isPair = se->isPair;
         isPairSecond = se->isPair && se->isDoublette;
@@ -504,7 +514,8 @@ void screen_spiel_refresh(void)
     int effIdx = (isPairSecond && s->taubeIndex > 0) ? s->taubeIndex - 1 : s->taubeIndex;
     int pairOffset = 0;
     for (int i = 0; i < effIdx && i < s->sequenzLen; ++i)
-        if (s->sequenz[i].isPair && s->sequenz[i].isDoublette) pairOffset++;
+        if (store_sequence_entry(s,s->spielerIndex,i)->isPair &&
+            store_sequence_entry(s,s->spielerIndex,i)->isDoublette) pairOffset++;
     int logicalIdx = effIdx - pairOffset;
 
     // Inline post formula: ((startPosten-1 + effIdx) % 5) + 1
@@ -523,7 +534,7 @@ void screen_spiel_refresh(void)
 
     // ── Machine label: single / A-G pair / H1-H2 ───────────
     if (s->taubeIndex < s->sequenzLen) {
-        SequenzEintrag *se = &s->sequenz[s->taubeIndex];
+        const SequenzEintrag *se = store_sequence_entry(s,s->spielerIndex,s->taubeIndex);
         char ml[16];
         if (isHMaschine) {
             snprintf(ml, sizeof(ml), "H%d", isPairSecond ? 2 : 1);
@@ -539,12 +550,29 @@ void screen_spiel_refresh(void)
         set_label_text_if_changed(s_lbl_maschine, ml);
     }
 
+    if(s_lbl_upcoming) {
+        int next=store_sequence_clay(s,s->spielerIndex,
+                     store_sequence_unit(s,s->spielerIndex,s->taubeIndex)+1);
+        const SequenzEintrag *upcoming=store_sequence_entry(s,s->spielerIndex,next);
+        char text[160];
+        if(s->activeGameStorageError)
+            snprintf(text,sizeof(text),"SPEICHERFEHLER: keine weitere Wertung/kein Start. Speichern wird erneut versucht.");
+        else if(s->activeGameResumed)
+            snprintf(text,sizeof(text),"NEUSTART: letzte Einheit prüfen. Werten/überspringen oder bewusst wiederholen.");
+        else if(upcoming && upcoming->isPair)
+            snprintf(text,sizeof(text),"DANACH FÜR DIESEN SPIELER: %s + %s",
+                     maschine_label(upcoming->maschine),maschine_label(upcoming->partner));
+        else if(upcoming)
+            snprintf(text,sizeof(text),"DANACH FÜR DIESEN SPIELER: %s",maschine_label(upcoming->maschine));
+        else snprintf(text,sizeof(text),"LETZTE EINHEIT DIESES LAUFS");
+        set_label_text_if_changed(s_lbl_upcoming,text);
+    }
     if (s_btn_fire && s_lbl_fire_button) {
         bool can_fire = s->taubeIndex < s->sequenzLen && !isPairSecond &&
-                        !s->currentFireSent && !lora_request_busy();
+                        !s->currentFireSent && !s->activeGameStorageError && !lora_request_busy();
         if (can_fire) {
             char fire_label[40];
-            SequenzEintrag *se = &s->sequenz[s->taubeIndex];
+            const SequenzEintrag *se = store_sequence_entry(s,s->spielerIndex,s->taubeIndex);
             if (se->isPair && se->maschine == MASCHINE_H) {
                 snprintf(fire_label, sizeof(fire_label), LV_SYMBOL_PLAY " H STARTEN (MASCHINE H2)");
             } else if (se->isPair) {
@@ -557,7 +585,9 @@ void screen_spiel_refresh(void)
             set_label_text_if_changed(s_lbl_fire_button, fire_label);
             lv_obj_clear_state(s_btn_fire, LV_STATE_DISABLED);
         } else {
-            if (isPairSecond)
+            if(s->activeGameStorageError)
+                set_label_text_if_changed(s_lbl_fire_button,"SPEICHER PRÜFEN");
+            else if (isPairSecond)
                 set_label_text_if_changed(s_lbl_fire_button, "2. ERGEBNIS - NICHT STARTEN");
             else if (s->currentFireSent)
                 set_label_text_if_changed(s_lbl_fire_button, "BEREITS GESTARTET");
@@ -710,6 +740,12 @@ void screen_spiel_tick(void)
     // The gateway worker completes asynchronously. Refresh periodically so the
     // operator sees the final success/failure rather than only "Sending...".
     static uint32_t last = 0;
+    static uint32_t last_retry=0;
+    if(g_store.harakiriOrdersReady &&
+       (g_store.activeGameStorageError || g_store.taubeIndex>=g_store.sequenzLen) &&
+       lv_tick_get()-last_retry>=5000) {
+        last_retry=lv_tick_get();store_retry_active_game_save();
+    }
     if (lv_tick_get() - last > 250) {
         last = lv_tick_get();
         screen_spiel_refresh();

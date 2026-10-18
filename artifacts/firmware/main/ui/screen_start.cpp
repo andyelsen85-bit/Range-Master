@@ -9,6 +9,7 @@
 #include "ui_manager.h"
 #include "game_store.h"
 #include "screen_start.h"
+#include "offline_cache.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_player_rows[MAX_SPIELER];
@@ -31,11 +32,12 @@ static void refresh_lineup_selections(void)
             lv_dropdown_set_selected(s_player_dropdowns[i],
                                      option_for_player_id(g_store.lineupIds[i]));
     s_refreshing_dropdowns = false;
-    char pending[96];
-    snprintf(pending,sizeof(pending),g_store.pendingGamesCount>=MAX_PENDING_GAMES*8/10
+    char pending[256];
+    if(!offline_cache_storage_warning(pending,sizeof(pending)))
+        snprintf(pending,sizeof(pending),g_store.pendingGamesCount>=MAX_PENDING_GAMES*8/10
         ? "SPIELSPEICHER FAST VOLL: %d Spiele nicht übertragen."
         : "%d Spiele noch nicht übertragen.",g_store.pendingGamesCount);
-    lv_label_set_text(s_lbl_error,g_store.pendingGamesCount?pending:"");
+    lv_label_set_text(s_lbl_error,(g_store.pendingGamesCount || offline_cache_storage_warning(pending,sizeof(pending)))?pending:"");
 }
 
 static int option_for_player_id(int id)
@@ -443,9 +445,10 @@ void screen_start_refresh(void)
         }
         lv_obj_invalidate(s_maschinen_btns[m]);
     }
-    char pending[96];
-    snprintf(pending,sizeof(pending),g_store.pendingGamesCount>=MAX_PENDING_GAMES*8/10
+    char pending[256];
+    if(!offline_cache_storage_warning(pending,sizeof(pending)))
+        snprintf(pending,sizeof(pending),g_store.pendingGamesCount>=MAX_PENDING_GAMES*8/10
         ? "SPIELSPEICHER FAST VOLL: %d Spiele nicht übertragen."
         : "%d Spiele noch nicht übertragen.",g_store.pendingGamesCount);
-    lv_label_set_text(s_lbl_error,g_store.pendingGamesCount?pending:"");
+    lv_label_set_text(s_lbl_error,(g_store.pendingGamesCount || offline_cache_storage_warning(pending,sizeof(pending)))?pending:"");
 }

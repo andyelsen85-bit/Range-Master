@@ -76,9 +76,10 @@ void day_inventory_init(nvs_handle_t h) {
 void day_inventory_snapshot(DayInventory *out) {
     if(!mutex){*out={};return;}xSemaphoreTake(mutex,portMAX_DELAY);current_day();*out=state;xSemaphoreGive(mutex);
 }
-bool day_inventory_queue(DayEventKind kind,int c12,int c20,const int *ids,int n,bool taken,const char *note) {
+bool day_inventory_queue(DayEventKind kind,int c12,int c20,const int *ids,int n,bool taken,const char *note,const char *expectedDate) {
     if(!mutex||n<0||n>4||c12<0||c20<0||c12>1000000||c20>1000000)return false;
     xSemaphoreTake(mutex,portMAX_DELAY);current_day();
+    if(expectedDate&&strcmp(expectedDate,state.datum)){xSemaphoreGive(mutex);return false;}
     if(count>=MAX_DAY_EVENTS||state.datum[0]==0||(kind==DAY_MAITRES&&n<1)||(kind==DAY_OPENING&&state.maitreCount<1)) {xSemaphoreGive(mutex);return false;}
     DayInventory old=state;DayEvent &e=pending[count];e={};e.kind=kind;e.c12=c12;e.c20=c20;e.maitreCount=n;e.takenOver=taken;
     snprintf(e.datum,sizeof(e.datum),"%s",state.datum);copy_text(e.note,sizeof(e.note),note);

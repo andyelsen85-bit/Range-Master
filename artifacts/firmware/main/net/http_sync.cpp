@@ -396,15 +396,24 @@ void http_sync_copy_last_error(char *out, size_t out_len)
     portEXIT_CRITICAL(&s_error_lock);
 }
 
-static void terminal_id(char *out, size_t out_len)
+static bool terminal_id(char *out, size_t out_len)
 {
+    if(!out || out_len<22) {if(out && out_len) out[0]=0;return false;}
+    out[0]=0;
     uint8_t mac[6] = {};
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
-        snprintf(out, out_len, "ESP32-P4-UNKNOWN");
-        return;
+    // P4 has no local WiFi MAC interface; the C6's address is not this chip's
+    // identity. Read the immutable factory eFuse directly, independently of WiFi.
+    esp_err_t error=esp_efuse_mac_get_default(mac);
+    bool all_zero=true,all_ff=true;
+    for(uint8_t byte:mac) {all_zero&=byte==0;all_ff&=byte==0xff;}
+    if(error!=ESP_OK || all_zero || all_ff) {
+        set_http_error("Terminal-ID","eFuse","Chip-ID nicht lesbar; Übertragung gesperrt");
+        terminal_log_add("sync","ERROR","Terminal-ID nicht verfügbar: eFuse-Chip-ID ungültig; Übertragung gesperrt");
+        return false; // No random, WiFi-derived or shared fallback identity.
     }
     snprintf(out, out_len, "ESP32-P4-%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return true;
 }
 
 static cJSON *config_snapshot_to_json(void)
@@ -476,7 +485,10 @@ static bool publish_backup_state(bool sync_publication, const char *status,
 static esp_err_t http_backup_config_impl(bool sync_publication)
 {
     char id[40];
-    terminal_id(id, sizeof(id));
+    if(!terminal_id(id, sizeof(id))) {
+        (void)publish_backup_state(sync_publication,"BACKUP GESPERRT: TERMINAL-ID NICHT LESBAR",NULL);
+        return ESP_ERR_INVALID_STATE;
+    }
     cJSON *root = cJSON_CreateObject();
     cJSON *cfg = config_snapshot_to_json();
     if (!root || !cfg) {
@@ -666,12 +678,20 @@ static void apply_config_snapshot(const TerminalConfigSnapshot *cfg)
 
 esp_err_t http_restore_config(const char *restore_code)
 {
+    if(g_store.harakiriOrdersReady || g_store.activeGameStorageError) {
+        snprintf(g_store.configBackupStatus,sizeof(g_store.configBackupStatus),
+                 "Offenes Harakiri-Spiel zuerst beenden oder abbrechen.");
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!restore_code || strlen(restore_code) != 12) return ESP_ERR_INVALID_ARG;
     for (const char *p = restore_code; *p; ++p)
         if (!( (*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') ||
                (*p >= 'A' && *p <= 'F') )) return ESP_ERR_INVALID_ARG;
     char id[40], path[192];
-    terminal_id(id, sizeof(id));
+    if(!terminal_id(id, sizeof(id))) {
+        snprintf(g_store.configBackupStatus,sizeof(g_store.configBackupStatus),"RESTORE GESPERRT: TERMINAL-ID NICHT LESBAR");
+        return ESP_ERR_INVALID_STATE;
+    }
     snprintf(path, sizeof(path), "/api/sync/config-restore?code=%s&terminalId=%s",
              restore_code, id);
     char *response = (char *)heap_caps_malloc(HTTP_BUF_SIZE, MALLOC_CAP_SPIRAM);
@@ -708,104 +728,7 @@ esp_err_t http_restore_config(const char *restore_code)
     return ESP_OK;
 }
 
-// ── UTF-8 → display-safe terminal text ─────────────────────────
-// The UI font chain contains these common Latin and firmware symbols as
-// UTF-8 glyphs. Preserve them for portal-provided names while degrading
-// unsupported characters to the ASCII substitutions used by older firmware.
-static bool append_display_utf8(char *dst, size_t dst_max, size_t *dst_len,
-                                const unsigned char *src, size_t src_len)
-{
-    if (*dst_len + src_len >= dst_max) return false;
-    memcpy(dst + *dst_len, src, src_len);
-    *dst_len += src_len;
-    return true;
-}
-
-static size_t utf8_sequence_len(const unsigned char *src)
-{
-    size_t len;
-    if      (src[0] < 0x80) len = 1;
-    else if (src[0] >= 0xC2 && src[0] < 0xE0) len = 2;
-    else if (src[0] >= 0xE0 && src[0] < 0xF0) len = 3;
-    else if (src[0] >= 0xF0 && src[0] < 0xF5) len = 4;
-    else return 1;
-
-    for (size_t i = 1; i < len; ++i)
-        if (!src[i] || (src[i] & 0xC0) != 0x80) return 1;
-    return len;
-}
-
-static void utf8_to_display(char *dst, const char *src, size_t dst_max)
-{
-    if (!dst || !dst_max) return;
-    if (!src) {
-        dst[0] = '\0';
-        return;
-    }
-
-    size_t di = 0;
-    const unsigned char *s = (const unsigned char *)src;
-    while (*s && di + 1 < dst_max) {
-        unsigned char c = *s;
-        if (c < 0x80) {
-            dst[di++] = (char)c;
-            s++;
-            continue;
-        }
-
-        size_t utf8_len = utf8_sequence_len(s);
-        if (utf8_len == 1) {
-            // Invalid UTF-8 lead/continuation byte: drop it safely.
-            s++;
-            continue;
-        }
-
-        bool font_supported =
-            (c == 0xC2 && (s[1] == 0xB0 || s[1] == 0xB2)) ||       // ° ²
-            (c == 0xC3 &&                                            // Latin fallback glyphs
-             (s[1] == 0x80 || s[1] == 0x84 || s[1] == 0x88 ||
-              s[1] == 0x89 || s[1] == 0x8A || s[1] == 0x96 ||
-              s[1] == 0x97 || s[1] == 0x9C || s[1] == 0x9F ||
-              s[1] == 0xA0 || s[1] == 0xA4 || s[1] == 0xA8 ||
-              s[1] == 0xA9 || s[1] == 0xAA || s[1] == 0xB6 ||
-              s[1] == 0xBB || s[1] == 0xBC)) ||
-            (c == 0xE2 &&                                           // € — → ≈ ─ ⚠
-             ((s[1] == 0x82 && s[2] == 0xAC) ||
-              (s[1] == 0x80 && s[2] == 0x94) ||
-              (s[1] == 0x86 && s[2] == 0x92) ||
-              (s[1] == 0x89 && s[2] == 0x88) ||
-              (s[1] == 0x94 && s[2] == 0x80) ||
-              (s[1] == 0x9A && s[2] == 0xA0)));
-        if (font_supported) {
-            if (!append_display_utf8(dst, dst_max, &di, s, utf8_len)) break;
-            s += utf8_len;
-        } else if (c == 0xC3) {
-            // Latin-1 Supplement block (U+00C0–U+00FF)
-            unsigned char n = s[1];
-            const char *rep = NULL;
-            if      (n==0x81||n==0xA1||n==0x82||n==0xA2||n==0x83||n==0xA3)
-                rep = "A"; // Á Â Ã á â ã
-            else if (n == 0x87 || n == 0xA7)             rep = "C"; // Ç / ç
-            else if (n==0x8B || n==0xAB)                 rep = "E"; // Ë / ë
-            else if (n==0x8C||n==0xAC||n==0x8D||n==0xAD||
-                     n==0x8E||n==0xAE||n==0x8F||n==0xAF) rep = "I"; // Ì Í Î Ï
-            else if (n == 0x91 || n == 0xB1)             rep = "N"; // Ñ / ñ
-            else if (n==0x92||n==0xB2||n==0x93||n==0xB3||
-                     n==0x94||n==0xB4||n==0x95||n==0xB5) rep = "O"; // Ò Ó Ô Õ
-            else if (n==0x99||n==0xB9||n==0x9A||n==0xBA||
-                     n==0x9B)                             rep = "U"; // Ù Ú Û
-            s += 2;
-            if (rep) {
-                for (int i = 0; rep[i] && di + 1 < dst_max; i++)
-                    dst[di++] = rep[i];
-            }
-        } else {
-            // No glyph is available for this valid multibyte sequence.
-            s += utf8_len;
-        }
-    }
-    dst[di] = '\0';
-}
+#include "display_text.h"
 
 // ── HTTP response accumulator ─────────────────────────────────
 typedef struct {
@@ -836,6 +759,8 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 static esp_err_t http_session_open(http_session_t *session)
 {
     if (!session) return ESP_ERR_INVALID_ARG;
+    char identity[40];
+    if(!terminal_id(identity,sizeof(identity))) return ESP_ERR_INVALID_STATE;
     memset(session, 0, sizeof(*session));
     int base_len = snprintf(session->base_url, sizeof(session->base_url), "%s",
                             g_store.apiUrl);
@@ -2245,12 +2170,13 @@ static esp_err_t http_sync_billing_impl(void)
 // ── http_sync_all ─────────────────────────────────────────────
 static esp_err_t http_sync_inventory()
 {
+    char id[40];
+    if(!terminal_id(id,sizeof(id))) return ESP_ERR_INVALID_STATE;
     DayEvent event;
     while(day_inventory_peek(&event)) {
         cJSON *body=cJSON_CreateObject();
         cJSON_AddStringToObject(body,"externalId",event.externalId);
         cJSON_AddStringToObject(body,"datum",event.datum);
-        char id[64];terminal_id(id,sizeof(id));
         cJSON_AddStringToObject(body,"terminalId",id);
         const char *path;
         if(event.kind==DAY_MAITRES) {
@@ -2443,6 +2369,7 @@ static esp_err_t http_sync_all_impl(void)
 
 static void upload_terminal_logs()
 {
+    char id[40];if(!terminal_id(id,sizeof(id))) return;
     time_t trusted_now=time(nullptr);
     if(trusted_now<1700000000) return; // Keep critical logs until SNTP is valid.
     TerminalLogEntry *entries=(TerminalLogEntry *)heap_caps_malloc(
@@ -2452,7 +2379,7 @@ static void upload_terminal_logs()
     for(int batch=0;batch<4;batch++) {
         int count=terminal_logs_snapshot(entries,100);if(!count) break;
         cJSON *body=cJSON_CreateObject(),*array=cJSON_AddArrayToObject(body,"entries");
-        char id[64];terminal_id(id,sizeof(id));cJSON_AddStringToObject(body,"terminalId",id);
+        cJSON_AddStringToObject(body,"terminalId",id);
         for(int i=0;i<count;i++) {
             cJSON *entry=cJSON_CreateObject();cJSON_AddItemToArray(array,entry);
             cJSON_AddStringToObject(entry,"id",entries[i].id);
@@ -2494,6 +2421,7 @@ static void upload_terminal_logs()
 }
 static void upload_game_manifest()
 {
+    char id[40];if(!terminal_id(id,sizeof(id))) return;
     time_t now=time(nullptr);if(now<1700000000) return;
     char (*external_ids)[40]=(char (*)[40])heap_caps_malloc(2000*40,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!external_ids) return;
@@ -2502,7 +2430,7 @@ static void upload_game_manifest()
         char day[11];strftime(day,sizeof(day),"%Y-%m-%d",&local);
         int count=game_journal_manifest(day,external_ids,2000);if(count<=0) continue;
         cJSON *body=cJSON_CreateObject(),*ids=cJSON_AddArrayToObject(body,"externalIds");
-        char id[64];terminal_id(id,sizeof(id));cJSON_AddStringToObject(body,"terminalId",id);
+        cJSON_AddStringToObject(body,"terminalId",id);
         cJSON_AddStringToObject(body,"datum",day);
         for(int i=0;i<count;i++) cJSON_AddItemToArray(ids,cJSON_CreateString(external_ids[i]));
         char *json=cJSON_PrintUnformatted(body);cJSON_Delete(body);

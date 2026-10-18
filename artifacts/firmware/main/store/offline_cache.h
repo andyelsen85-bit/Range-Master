@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 // FAT-backed, replace-only snapshots of portal data.  This deliberately does
 // not contain outboxes: idempotent local actions remain in NVS.
@@ -20,6 +21,12 @@ void offline_cache_load(void);
 bool offline_cache_save(OfflineCacheSection section);
 bool offline_cache_save_metadata(void);
 bool offline_cache_set_manifest_token(OfflineCacheSection section, const char *token);
+bool offline_cache_storage_available(void); // readable mount, independent of optional cache health
+bool offline_cache_recheck(void);
+bool offline_cache_cleanup(void); // cache-only; refuses pending or unverified journal records
+bool offline_cache_cleanup_busy(void);
+bool offline_cache_storage_warning(char *out, size_t size);
+int offline_cache_pending_games(void); // max(RAM,disk), -1 when proof is uncertain
 
 // Host/unit builds can expose the pure count validator without mounting FAT.
 #ifdef TM_OFFLINE_CACHE_TEST_HOOKS

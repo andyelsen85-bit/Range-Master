@@ -24,3 +24,16 @@ as H in Harakiri, rather than turning the whole mode into a fixed Custom sequenc
 
 **How to apply:** Keep the pair intact when randomizing, while keeping its two
 individual result entries and binary clay scoring.
+
+Harakiri and Harakiri Custom require an independent random launch-unit order
+for each player, not one shuffled order shared by everybody. Normal and Custom
+1–4 must retain their shared sequence.
+
+**Why:** The user reported that every player was shooting the same machine in
+each Harakiri round and explicitly requested independent permutations.
+
+**How to apply:** Shuffle whole units per player with hardware entropy; do not
+force distinct orders (coincidence is valid randomness). Keep each player's
+order fixed for the game, including both runs and restart recovery. Shared
+Harakiri scorecards must align by machine and pair role, not another player's
+shot index; a single A is distinct from A inside a custom pair.

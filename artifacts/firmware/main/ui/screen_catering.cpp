@@ -233,9 +233,10 @@ static lv_obj_t *button(lv_obj_t *p, const char *text, lv_style_t *style) {
 }
 static void rebuild(void) {
     if (!s_players) return;
-    lv_obj_clean(s_players); lv_obj_clean(s_products);
+    // Invalidate cached child pointers before deletion can dispatch events.
     memset(s_player_buttons, 0, sizeof(s_player_buttons));
     memset(s_product_qty_labels, 0, sizeof(s_product_qty_labels));
+    lv_obj_clean(s_players); lv_obj_clean(s_products);
     lv_obj_t *heading = lv_label_create(s_players);
     lv_label_set_text(heading, "SPIELER DES TAGES");
     lv_obj_set_style_text_font(heading, UI_FONT_16, 0);

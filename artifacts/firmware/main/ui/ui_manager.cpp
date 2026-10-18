@@ -3,12 +3,14 @@
 // ============================================================
 #include "freertos/FreeRTOS.h"
 #include <string.h>
+#include "offline_cache.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "lora_stub.h"
 #include "esp_log.h"
 #include "lvgl.h"
 #include "ui_fonts.h"
+#include "view_snapshot.h"
 #include "button_events.h"
 #include "click_sound.h"
 #include "esp_timer.h"
@@ -72,6 +74,8 @@ static uint32_t content_hash(Screen screen) {
         add(&g_store.historyCount,sizeof(g_store.historyCount));
         add(g_store.history,g_store.historyCount*sizeof(FinishedGame));break;
     case SCREEN_START:
+        {char warning[256]={};(void)offline_cache_storage_warning(warning,sizeof(warning));
+         add(warning,strlen(warning));}
         add(&g_store.pendingGamesCount,sizeof(g_store.pendingGamesCount));
         [[fallthrough]];
     case SCREEN_SPILLER:
@@ -88,38 +92,6 @@ static uint32_t content_hash(Screen screen) {
     }
     return hash;
 }
-struct ViewSnapshot {
-    struct Scroll {lv_obj_t *object;int32_t x,y;} scroll[32];
-    struct Text {lv_obj_t *object;char value[512];} text[8];
-    int scroll_count=0,text_count=0;
-    lv_obj_t *focused=nullptr;
-};
-static void capture_view(lv_obj_t *object,ViewSnapshot &snapshot) {
-    if(lv_obj_has_flag(object,LV_OBJ_FLAG_HIDDEN)) return;
-    if(lv_obj_has_flag(object,LV_OBJ_FLAG_SCROLLABLE) && snapshot.scroll_count<32) {
-        auto &entry=snapshot.scroll[snapshot.scroll_count++];
-        entry.object=object;entry.x=lv_obj_get_scroll_x(object);entry.y=lv_obj_get_scroll_y(object);
-    }
-    if(lv_obj_check_type(object,&lv_textarea_class) && snapshot.text_count<8) {
-        auto &entry=snapshot.text[snapshot.text_count++];entry.object=object;
-        snprintf(entry.value,sizeof(entry.value),"%.511s",lv_textarea_get_text(object));
-    }
-    for(uint32_t i=0;i<lv_obj_get_child_count(object);i++) capture_view(lv_obj_get_child(object,i),snapshot);
-}
-static void restore_view(lv_obj_t *root,const ViewSnapshot &snapshot) {
-    for(int i=0;i<snapshot.text_count;i++) {
-        const auto &entry=snapshot.text[i];
-        if(lv_obj_is_valid(entry.object) && lv_obj_check_type(entry.object,&lv_textarea_class) &&
-            strcmp(lv_textarea_get_text(entry.object),entry.value))
-            lv_textarea_set_text(entry.object,entry.value);
-    }
-    lv_obj_update_layout(root);
-    for(int i=0;i<snapshot.scroll_count;i++) {
-        const auto &entry=snapshot.scroll[i];
-        if(lv_obj_is_valid(entry.object)) lv_obj_scroll_to(entry.object,entry.x,entry.y,LV_ANIM_OFF);
-    }
-    if(snapshot.focused && lv_obj_is_valid(snapshot.focused)) lv_group_focus_obj(snapshot.focused);
-}
 static bool scrolling(lv_obj_t *object) {
     if(lv_obj_is_scrolling(object)) return true;
     for(uint32_t i=0;i<lv_obj_get_child_count(object);i++)
@@ -131,6 +103,11 @@ bool ui_manager_lock(uint32_t timeout_ms) {
         timeout_ms==UINT32_MAX?portMAX_DELAY:pdMS_TO_TICKS(timeout_ms))==pdTRUE;
 }
 void ui_manager_unlock(void) {xSemaphoreGive(s_frame_lock);}
+bool ui_manager_snapshot_lock(bool *acquired) {
+    *acquired=false;
+    if(!s_frame_lock || xSemaphoreGetMutexHolder(s_frame_lock)==xTaskGetCurrentTaskHandle())return true;
+    *acquired=ui_manager_lock(1000);return *acquired;
+}
 bool ui_manager_lock_for_sync(uint32_t timeout_ms) {
     TickType_t started=xTaskGetTickCount();
     do {
@@ -320,6 +297,8 @@ static void styles_init(void)
 // so screens come up fully styled in a single build pass.
 void screen_base_init(lv_obj_t *scr)
 {
+    lv_obj_set_style_text_font(scr,UI_FONT_18,0);
+    lv_obj_set_style_text_color(scr,lv_color_hex(CLR_TEXT),0);
     lv_obj_set_style_bg_color(scr, lv_color_hex(CLR_BG), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
@@ -332,6 +311,12 @@ void ui_manager_init(void)
     configASSERT(s_frame_lock);
     ESP_LOGI(TAG, "Building LVGL screens...");
     ui_fonts_init();
+    // Theme-owned text (keyboard keys, dropdown popups, checkbox indicators,
+    // tables) also needs the fallback; inherited screen defaults alone cannot
+    // override fonts assigned locally by the built-in theme.
+    lv_display_t *display=lv_display_get_default();
+    lv_display_set_theme(display,lv_theme_default_init(display,
+        lv_color_hex(CLR_PRIMARY),lv_color_hex(CLR_SUCCESS),true,UI_FONT_18));
     styles_init();
 
     // Create persistent WiFi worker tasks NOW, before any screen_*_create()
@@ -437,8 +422,6 @@ void ui_manager_tick(void)
             uint32_t signature=content_hash(s_current);
             if(signature!=s_content_hash[s_current]) {
                 ViewSnapshot view;
-                lv_group_t *group=lv_group_get_default();
-                if(group) view.focused=lv_group_get_focused(group);
                 capture_view(s_screens[s_current],view);
                 if(s_current!=SCREEN_SPIEL) refresh_screen(s_current);
                 restore_view(s_screens[s_current],view);

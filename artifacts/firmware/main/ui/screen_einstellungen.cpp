@@ -12,10 +12,15 @@
 #include "game_store.h"
 #include "http_sync.h"
 #include "screen_einstellungen.h"
-static lv_obj_t *s_latency_label;
+#include "view_snapshot.h"
+static SnapshotWidgetRef s_latency_label;
 #include "click_sound.h"
 #include "lora_stub.h"
 #include "button_events.h"
+#include "offline_cache.h"
+#include <atomic>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_tab_view;
@@ -1407,11 +1412,86 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
     return parent;
 }
 
+static std::atomic<int> s_storage_phase{0},s_storage_pending{-1};
+static lv_obj_t *s_storage_confirm;
+static void storage_worker(void *argument) {
+    if(argument) s_storage_phase=offline_cache_cleanup()?4:5;
+    else {s_storage_pending=offline_cache_pending_games();s_storage_phase=2;}
+    vTaskDelete(nullptr);
+}
+static bool start_storage_worker(bool clean) {
+    return xTaskCreate(storage_worker,"storage_clean",6144,
+        clean?(void*)1:nullptr,2,nullptr)==pdPASS;
+}
+static void storage_confirmation() {
+    if(s_storage_confirm) return;
+    int pending=s_storage_pending.load();
+    s_storage_confirm=lv_msgbox_create(nullptr);
+    lv_obj_set_style_bg_color(s_storage_confirm,lv_color_hex(CLR_CARD),0);
+    lv_obj_set_style_bg_opa(s_storage_confirm,LV_OPA_COVER,0);
+    lv_obj_set_style_text_color(s_storage_confirm,lv_color_hex(CLR_TEXT),0);
+    lv_obj_set_style_text_font(s_storage_confirm,UI_FONT_16,0);
+    lv_obj_add_event_cb(s_storage_confirm,[](lv_event_t*){s_storage_confirm=nullptr;},LV_EVENT_DELETE,nullptr);
+    lv_obj_t *title=lv_msgbox_add_title(s_storage_confirm,"Speicher bereinigen");
+    lv_obj_set_style_text_color(title,lv_color_hex(CLR_PRIMARY),0);
+    lv_obj_set_style_text_font(title,UI_FONT_20,0);
+    char message[384];
+    if(pending<0)
+        snprintf(message,sizeof(message),"Nicht übertragene Spiele: RAM %d, Archiv ungeprüft.\n"
+            "Bereinigung gesperrt. Journal und NVS bleiben erhalten.",g_store.pendingGamesCount);
+    else snprintf(message,sizeof(message),"Nicht übertragene Spiele: %d.\n%s",pending,
+        pending?"Erst alle Spiele mit dem Portal synchronisieren. Bereinigung gesperrt.":
+        "Nur wiederherstellbare Portal-Cache-Dateien löschen und FAT neu einhängen? "
+        "Keine Formatierung. Spielarchiv, Einstellungen und NVS bleiben erhalten.");
+    lv_obj_t *body=lv_msgbox_add_text(s_storage_confirm,message);
+    lv_obj_set_style_text_color(body,lv_color_hex(CLR_TEXT),0);
+    lv_obj_t *cancel=lv_msgbox_add_footer_button(s_storage_confirm,"Abbrechen");
+    lv_obj_add_style(cancel,&g_style_btn_secondary,0);
+    lv_obj_add_event_cb(cancel,[](lv_event_t*){lv_msgbox_close(s_storage_confirm);},LV_EVENT_CLICKED,nullptr);
+    if(pending==0) {
+        lv_obj_t *confirm=lv_msgbox_add_footer_button(s_storage_confirm,"Jetzt bereinigen");
+        lv_obj_add_style(confirm,&g_style_btn_primary,0);
+        lv_obj_add_event_cb(confirm,[](lv_event_t*) {
+            lv_msgbox_close(s_storage_confirm);
+            s_storage_phase=3;
+            if(!start_storage_worker(true)) s_storage_phase=5;
+        },LV_EVENT_CLICKED,nullptr);
+    }
+}
 static lv_obj_t *build_system_tab(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 16, 0);
     lv_obj_set_style_pad_row(parent, 8, 0);
+    lv_obj_t *storage_status=lv_label_create(parent);
+    lv_obj_set_width(storage_status,LV_PCT(95));
+    lv_obj_set_style_text_color(storage_status,lv_color_hex(CLR_TEXT),0);
+    lv_label_set_text(storage_status,"Speicherbereinigung prüft zuerst alle nicht übertragenen Spiele.");
+    lv_obj_t *clean=lv_button_create(parent);
+    lv_obj_add_style(clean,&g_style_btn_secondary,0);
+    lv_obj_t *clean_label=lv_label_create(clean);
+    lv_label_set_text(clean_label,"Speicher bereinigen");
+    lv_obj_add_event_cb(clean,[](lv_event_t*) {
+        if(s_storage_phase.load()!=0 || s_storage_confirm) return;
+        s_storage_phase=1;
+        if(!start_storage_worker(false)) s_storage_phase=5;
+    },LV_EVENT_CLICKED,nullptr);
+    lv_timer_t *storage_timer=lv_timer_create([](lv_timer_t *timer) {
+        auto *label=(lv_obj_t*)lv_timer_get_user_data(timer);
+        int phase=s_storage_phase.load();
+        if(phase==1) lv_label_set_text(label,"Offene Spiele werden geprüft …");
+        if(phase==2) {s_storage_phase=0;storage_confirmation();}
+        if(phase==3) lv_label_set_text(label,"Speicher wird bereinigt …");
+        if(phase==4 || phase==5) {
+            lv_label_set_text(label,phase==4?"Speicher bereinigt. Spielarchiv und NVS unverändert.":
+                "Bereinigung gesperrt oder fehlgeschlagen. Offene/ungeprüfte Spiele bleiben erhalten; "
+                "laufende Synchronisierung zuerst beenden. Details im Terminal-Protokoll.");
+            s_storage_phase=0;
+        }
+    },200,storage_status);
+    lv_obj_add_event_cb(storage_status,[](lv_event_t *event) {
+        lv_timer_delete((lv_timer_t*)lv_event_get_user_data(event));
+    },LV_EVENT_DELETE,storage_timer);
 
     // ── Click-sound toggle ────────────────────────────────────
     lv_obj_t *snd_row = lv_obj_create(parent);
@@ -1563,7 +1643,7 @@ lv_obj_t *screen_einstellungen_create(void)
 
     build_api_tab(tab_conn);
     lv_obj_t *latency=lv_label_create(tab_conn);
-    s_latency_label=latency;
+    s_latency_label.reset(latency);
     lv_obj_set_width(latency,LV_PCT(95));
     lv_obj_set_style_text_color(latency,lv_color_hex(CLR_TEXT),0);
     char latency_text[256];lora_copy_latency_text(latency_text,sizeof(latency_text));
@@ -1736,10 +1816,10 @@ void screen_einstellungen_refresh(void)
 
 void screen_einstellungen_tick(void)
 {
-    if(s_latency_label&&lv_obj_is_valid(s_latency_label)) {
+    if(lv_obj_t *latency=s_latency_label.get()) {
         static uint32_t last=0;
         if(lv_tick_get()-last>=1000) {
-            last=lv_tick_get();lv_obj_send_event(s_latency_label,LV_EVENT_REFRESH,nullptr);
+            last=lv_tick_get();lv_obj_send_event(latency,LV_EVENT_REFRESH,nullptr);
         }
     }
     if (s_remote_status) {

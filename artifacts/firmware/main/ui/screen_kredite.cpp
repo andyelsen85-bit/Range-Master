@@ -445,8 +445,10 @@ static void add_player_cb(lv_event_t *e)
 // ── Build player list ─────────────────────────────────────────
 static void build_player_list(void)
 {
-    lv_obj_clean(s_player_list);
+    // DELETE/child-change callbacks must not see the previous row cache.
     s_row_ref_count = 0;
+    memset(s_row_refs,0,sizeof(s_row_refs));
+    lv_obj_clean(s_player_list);
     const bool day_ready = store_prepare_current_day();
 
     int count = 0;

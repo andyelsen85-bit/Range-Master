@@ -21,7 +21,7 @@ struct DayInventory {
 };
 void day_inventory_init(nvs_handle_t handle);
 void day_inventory_snapshot(DayInventory *out);
-bool day_inventory_queue(DayEventKind kind,int c12,int c20,const int *maitres,int count,bool takenOver,const char *note);
+bool day_inventory_queue(DayEventKind kind,int c12,int c20,const int *maitres,int count,bool takenOver,const char *note,const char *expectedDate=nullptr);
 bool day_inventory_peek(DayEvent *out);
 bool day_inventory_ack(const char *id);
 bool day_inventory_apply(cJSON *root,const char *requestedDate=nullptr);

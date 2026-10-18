@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { db, pool, spielerTable, spieleTable, saleEventsTable, productsTable, productPriceRevisionsTable,terminalConfigBackupsTable,terminalRestoreAuthorizationsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
-import { applyDayEvent, DayConflict, inventoryState } from "./inventory";
+import { applyDayEvent, DayConflict, inventoryState, inventoryInput } from "./inventory";
 import { buildDailyReport, dailyReportMessage } from "./daily-report";
 import { sendDailyReport, catchupDays } from "./daily-scheduler";
 import { localDay, shiftDay, daySchema } from "./local-day";
@@ -43,6 +43,22 @@ test("inventory and daily delivery integration: replay, LWW, zero, server sales,
     assert.equal((await applyDayEvent("opening",opening)).duplicate,false);
     assert.equal((await applyDayEvent("opening",opening)).duplicate,true);
     await assert.rejects(()=>applyDayEvent("opening",{...opening,c12:11}),DayConflict);
+    await assert.rejects(()=>applyDayEvent("opening",{...opening,terminalId:"TEST-B"}),DayConflict);
+    assert.equal(inventoryInput.safeParse({...opening,terminalId:"ESP32-P4-UNKNOWN"}).success,false);
+    // Simulate a pre-fix accepted event; replay ACK must not rewrite its source
+    // or apply its inventory value again, even after another terminal's update.
+    const legacy={externalId:`${prefix}-legacy`,terminalId:"ESP32-P4-UNKNOWN",datum:day,
+      c12:999,c20:0,takenOver:false,note:""};
+    const legacyHash=createHash("sha256").update(JSON.stringify({kind:"closing",...legacy})).digest("hex");
+    await db.execute(sql`INSERT INTO gameday_event(external_id,terminal_id,payload_hash)
+      VALUES(${legacy.externalId},${legacy.terminalId},${legacyHash})`);
+    const fixed={...legacy,terminalId:"ESP32-P4-102030405060"};
+    assert.deepEqual(await applyDayEvent("closing",fixed),{success:true,duplicate:true});
+    await assert.rejects(()=>applyDayEvent("closing",{...fixed,c12:998}),DayConflict);
+    const [retained]=(await db.execute(sql`SELECT terminal_id,payload_hash FROM gameday_event
+      WHERE external_id=${legacy.externalId}`)).rows;
+    assert.equal(retained.terminal_id,legacy.terminalId);assert.equal(retained.payload_hash,legacyHash);
+    assert.equal((await inventoryState(day)).today.closing,null);
     const [product]=await db.select().from(productsTable).where(eq(productsTable.category,"AMMO_CAL12")).limit(1);
     const [price]=await db.select().from(productPriceRevisionsTable).where(eq(productPriceRevisionsTable.productId,product.id)).limit(1);
     await db.insert(saleEventsTable).values({externalId:prefix,spielerId:player,datum:day,productId:product.id,priceRevisionId:price.id,

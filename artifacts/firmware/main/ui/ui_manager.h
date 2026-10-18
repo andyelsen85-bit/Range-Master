@@ -4,6 +4,11 @@
 // ============================================================
 #include "game_store.h"
 #include "app_config.h"    // DISPLAY_LOGICAL_W/H, CLUB_NAME, APP_VERSION, etc.
+#include "lvgl.h"
+
+// Take the shared UI lock only when the caller doesn't already own it.
+// Before UI initialization the single-threaded boot path needs no lock.
+bool ui_manager_snapshot_lock(bool *acquired);
 
 /** Create all LVGL screens and show the dashboard. */
 void ui_manager_init(void);
@@ -29,7 +34,6 @@ void ui_manager_tick(void);
 void screen_base_init(lv_obj_t *scr);
 
 // ── Shared style helpers ─────────────────────────────────────
-#include "lvgl.h"
 
 extern lv_style_t g_style_card;
 extern lv_style_t g_style_btn_primary;

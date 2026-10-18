@@ -28,3 +28,59 @@ mtime_ms = 1791108497162
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/3fd80e64-24da-48b3-b111-1804af0367d0/7aa256d3-4cbd-42e9-8c85-b2cbe8ca174b"
 storage_version_token = "1791108519225780"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "4PZk2PPvKlOjNyVudl78L"
+uri = "file://generated-artifacts/inventory/01-empty.png"
+type = "image"
+title = "Inventar & Tag — empty state"
+description = "Actual 1280×800 LVGL rendering: both columns, no selected Maîtres or confirmed previous stock."
+logical_id = "a717e1bd-f1e7-4cb7-a553-04e1ddee8198"
+content_hash = "sha256:59ac958a3948a6964c1858b847ffd2f0cb628365986d3044311196a50d77b6ca"
+size = 40392
+mtime_ms = 1792317956552
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/a717e1bd-f1e7-4cb7-a553-04e1ddee8198/d506893c-ab90-4c91-b3fb-0a2ec802844c"
+storage_version_token = "1792318304750154"
+content_type = "image/png"
+
+[[outputs]]
+id = "sLGw0t0OsdjmqeLdiF_B8"
+uri = "file://generated-artifacts/inventory/02-chosen.png"
+type = "image"
+title = "Inventar & Tag — selected Maîtres"
+description = "Actual LVGL rendering with José Muñoz, Zoë, François and Çağlar."
+logical_id = "7b952d52-3d9b-430b-bbe9-0ad91b01ab9a"
+content_hash = "sha256:d1e59e040346b8efa9dfbaea577362d8bbcc416232d1ab476fc50dad24d8b523"
+size = 42295
+mtime_ms = 1792317956570
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/7b952d52-3d9b-430b-bbe9-0ad91b01ab9a/cb11d27f-dcae-4d72-8681-13591a56ba7f"
+storage_version_token = "1792318305477950"
+content_type = "image/png"
+
+[[outputs]]
+id = "v7ZXI0qzkL2Qod_a3FOLL"
+uri = "file://generated-artifacts/inventory/03-carry-over.png"
+type = "image"
+title = "Inventar & Tag — carry-over enabled"
+description = "Confirmed closing stock carried over; opening inputs are locked."
+logical_id = "9c205063-68ac-4b3c-8b01-27b8000f1f27"
+content_hash = "sha256:4a5f7a5fae65f40fda24a427283a8ff8ef28b2beda30f9f66035e60c7888359c"
+size = 43681
+mtime_ms = 1792317956584
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/9c205063-68ac-4b3c-8b01-27b8000f1f27/d5b4ddda-e7af-4c36-b867-a7ef94ad8806"
+storage_version_token = "1792318306009899"
+content_type = "image/png"
+
+[[outputs]]
+id = "TvI0xGNUlppsi2X4TlPQJ"
+uri = "file://generated-artifacts/inventory/04-end-of-day-difference.png"
+type = "image"
+title = "Inventar & Tag — end-of-day difference"
+description = "Closing column highlighted, stock difference and shutdown-only action visible."
+logical_id = "b0e6e308-1a10-4fbc-b63d-fcbca4806984"
+content_hash = "sha256:9e7bd278cd734ca4e1d68490a2661cf16bbffaddb0a3f3528e47e78b88cde59c"
+size = 48187
+mtime_ms = 1792317956599
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/b0e6e308-1a10-4fbc-b63d-fcbca4806984/e81de69a-4c66-4e31-bcf8-428b6a308e89"
+storage_version_token = "1792318306562736"
+content_type = "image/png"

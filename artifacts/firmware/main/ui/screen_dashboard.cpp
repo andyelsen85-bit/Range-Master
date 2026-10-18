@@ -11,6 +11,7 @@
 #include "ui_time_fmt.h"
 #include "lvgl.h"
 #include "ui_fonts.h"
+#include "display_text.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "ui_manager.h"
@@ -280,7 +281,8 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *club_lbl = lv_label_create(header);
-    lv_label_set_text(club_lbl, CLUB_NAME);
+    char club_display[192];utf8_to_display(club_display,CLUB_NAME,sizeof(club_display));
+    lv_label_set_text(club_lbl,club_display);
     lv_obj_set_style_text_font(club_lbl, UI_FONT_20, 0);
     lv_obj_set_style_text_color(club_lbl, lv_color_hex(CLR_PRIMARY), 0);
     lv_obj_align(club_lbl, LV_ALIGN_LEFT_MID, 0, 0);

@@ -15,6 +15,7 @@
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
 #include "esp_random.h"
+#include "active_game.h"
 #include "mbedtls/md.h"
 #include "mbedtls/pkcs5.h"
 #include "nvs_flash.h"
@@ -1521,9 +1522,11 @@ const char *modus_label(Modus m)
 // ── Sequence generation (mirrors generateSequenz in TS) ──────
 static void shuffle(Maschine *arr, int n)
 {
-    // Fisher-Yates with rand()
+    // Rejection sampling avoids modulo bias; ESP entropy has no srand/boot seed.
     for (int i = n - 1; i > 0; i--) {
-        int j = rand() % (i + 1);
+        uint32_t bound=(uint32_t)i+1,threshold=(uint32_t)(-bound)%bound,value;
+        do {value=esp_random();} while(value<threshold);
+        int j=(int)(value%bound);
         Maschine tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
     }
 }
@@ -1602,6 +1605,28 @@ static int generate_sequenz(SequenzEintrag *out, Modus modus,
 }
 
 // ── Credit helpers ────────────────────────────────────────────
+static void generate_player_orders(GameStore *s)
+{
+    s->harakiriOrdersReady=false;
+    memset(s->harakiriOrder,0,sizeof(s->harakiriOrder));
+    if(s->modus!=MODUS_HARAKIRI && s->modus!=MODUS_HARAKIRI_CUSTOM)return;
+    if(s->sequenzLen<1 || s->sequenzLen>HARAKIRI_MAX_CLAYS)return;
+    for(int p=0;p<s->spielerCount;p++) {
+        Maschine starts[MASCHINE_COUNT];int units=0;
+        for(int i=0;i<s->sequenzLen;i++)
+            if(!(s->sequenz[i].isPair && s->sequenz[i].isDoublette))
+                starts[units++]=(Maschine)i;
+        shuffle(starts,units);
+        int clay=0;
+        for(int u=0;u<units;u++) {
+            int index=(int)starts[u];
+            s->harakiriOrder[p][clay++]=(uint8_t)index;
+            if(s->sequenz[index].isPair)s->harakiriOrder[p][clay++]=(uint8_t)(index+1);
+        }
+    }
+    s->harakiriOrdersReady=true;
+}
+
 static bool credit_day_is_current(void)
 {
     time_t now = time(NULL);
@@ -2106,6 +2131,11 @@ bool store_adjust_kredite(int spieler_id, int delta)
 // ── store_start_spiel ────────────────────────────────────────
 bool store_start_spiel(void)
 {
+    if(g_store.harakiriOrdersReady || g_store.activeGameStorageError) {
+        snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),
+                 "Offenes Harakiri-Spiel oder Speicherfehler: zuerst fortsetzen, prüfen oder abbrechen.");
+        return false;
+    }
     if(g_store.pendingGamesCount>=MAX_PENDING_GAMES || !game_journal_ready()) {
         snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),
             "SPIELSPEICHER VOLL ODER NICHT VERFÜGBAR. BITTE SYNCHRONISIEREN.");
@@ -2223,6 +2253,8 @@ bool store_start_spiel(void)
     }
     s->sequenzLen = generate_sequenz(s->sequenz, s->modus,
                                      s->maschinenAktiv, cseq, clen);
+    generate_player_orders(s);
+    s->activeGameResumed=false;
 
     // Reset game state
     s->lauf         = 1;
@@ -2310,6 +2342,9 @@ bool store_cancel_spiel(void)
     clear_active_game_credit_tracking(s);
     memset(s->spieler, 0, sizeof(s->spieler));
     memset(s->sequenz, 0, sizeof(s->sequenz));
+    memset(s->harakiriOrder,0,sizeof(s->harakiriOrder));
+    s->harakiriOrdersReady=false;
+    s->activeGameResumed=false;
     memset(s->ergebnisse, 0, sizeof(s->ergebnisse));
     s->spielerCount = 0;
     s->sequenzLen = 0;
@@ -2332,7 +2367,8 @@ bool store_cancel_spiel(void)
 static int count_h2_before(const GameStore *s, int before) {
     int n = 0;
     for (int i = 0; i < before && i < s->sequenzLen; i++)
-        if (s->sequenz[i].isPair && s->sequenz[i].isDoublette) n++;
+        if (store_sequence_entry(s,s->spielerIndex,i)->isPair &&
+            store_sequence_entry(s,s->spielerIndex,i)->isDoublette) n++;
     return n;
 }
 
@@ -2348,9 +2384,12 @@ static int count_h2_before(const GameStore *s, int before) {
 void store_eintragen(int punkte)
 {
     GameStore *s = &g_store;
+    if(s->activeGameStorageError)return;
     if (s->taubeIndex >= s->sequenzLen) return;
 
-    SequenzEintrag *se = &s->sequenz[s->taubeIndex];
+    const SequenzEintrag *se = store_sequence_entry(s,s->spielerIndex,s->taubeIndex);
+    if(!se || punkte<0 || punkte>2)return;
+    if(s->harakiriOrdersReady && s->ergebnisseCount>=MAX_ERGEBNISSE)return;
     // Every doublette clay is one hit/miss decision worth 2/0 points.
     // Enforce below the UI as well, including H and replayed callers.
     if (se->isPair && punkte != 0 && punkte != 2) return;
@@ -2385,6 +2424,7 @@ void store_eintragen(int punkte)
         e.schuss2 = (punkte == 1);
     }
     sp->punkte += punkte;
+    s->activeGameResumed=false;
 
     if (s->ergebnisseCount < MAX_ERGEBNISSE)
         s->ergebnisse[s->ergebnisseCount++] = e;
@@ -2417,7 +2457,21 @@ void store_eintragen(int punkte)
         return true;
     };
 
-    if (isPairFirst) {
+    if(s->harakiriOrdersReady) {
+        if(isPairFirst) {
+            // A physical pair stays with this player through both results.
+            s->taubeIndex++;
+        } else {
+            int unit=store_sequence_unit(s,s->spielerIndex,s->taubeIndex);
+            s->spielerIndex++;
+            if(s->spielerIndex>=s->spielerCount) {
+                s->spielerIndex=0;unit++;
+            }
+            s->taubeIndex=store_sequence_clay(s,s->spielerIndex,unit);
+            s->currentFireSent=false;
+            if(s->taubeIndex>=s->sequenzLen && finish_lauf_or_game())return;
+        }
+    } else if (isPairFirst) {
         // Same player shoots the second result immediately — only advance index.
         s->taubeIndex++;
 
@@ -2511,8 +2565,14 @@ static void _store_finish_game(void)
     // The full record must be durable before reporting the game as finished.
     fg.base.finishedAt[0]='\0';
     snprintf(fg.base.finishedAt,sizeof(fg.base.finishedAt),"%.31s",fg.finishedAt);
+    if(s->harakiriOrdersReady && !active_game_checkpoint()) {
+        s->activeGameStorageError=true;return;
+    }
     if(!game_journal_save(&fg)) {
         terminal_log_add("data_loss_risk","ERROR","Fertiges Spiel noch nicht dauerhaft gespeichert");
+        if(s->harakiriOrdersReady) {
+            s->activeGameStorageError=true;return;
+        }
         // Keep the complete game in the RAM outbox too. Further starts are
         // blocked by the latched journal failure, not by a broken live-game UI.
     }
@@ -2535,6 +2595,8 @@ static void _store_finish_game(void)
         s->pendingGames[s->pendingGamesCount++] = fg.base;
     }
 
+    s->harakiriOrdersReady=false;
+    memset(s->harakiriOrder,0,sizeof(s->harakiriOrder));
     s->lastFinished   = fg;
     s->hasLastFinished = true;
     clear_active_game_credit_tracking(s);
@@ -2553,6 +2615,41 @@ void store_dismiss_resultate(void)
 
 void store_wiederholen(void)
 {
+    if(g_store.harakiriOrdersReady) {
+        if(g_store.activeGameStorageError)return;
+        const SequenzEintrag *current=store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
+        if(current && g_store.currentFireSent && !current->isDoublette) {
+            // Deliberately repeat the current unscored launch, including the
+            // uncertain pre-reboot launch. Do not undo another player's score.
+            g_store.currentFireSent=false;g_store.activeGameResumed=false;
+            game_store_save();return;
+        }
+        g_store.activeGameResumed=false;
+        if(g_store.ergebnisseCount<=0)return;
+        // Undo the last whole launch unit. In a completed pair both clay
+        // results must be removed before a deliberate physical repeat.
+        Ergebnis last=g_store.ergebnisse[g_store.ergebnisseCount-1];
+        int player=-1;
+        for(int i=0;i<g_store.spielerCount;i++)
+            if(g_store.spieler[i].id==last.spielerId)player=i;
+        if(player<0)return;
+        const SequenzEintrag *entry=store_sequence_entry(&g_store,player,last.taube-1);
+        int remove=entry && entry->isPair && entry->isDoublette ? 2 : 1;
+        if(g_store.lauf>last.lauf) {
+            int units=store_sequence_unit(&g_store,player,g_store.sequenzLen);
+            for(int i=0;i<g_store.spielerCount;i++)
+                g_store.spieler[i].startPosten=((g_store.spieler[i].startPosten-1-units)%5+5)%5+1;
+        }
+        for(int n=0;n<remove && g_store.ergebnisseCount>0;n++) {
+            const Ergebnis &old=g_store.ergebnisse[--g_store.ergebnisseCount];
+            g_store.spieler[player].punkte-=old.punkte;
+        }
+        g_store.lauf=last.lauf;
+        g_store.spielerIndex=player;
+        g_store.taubeIndex=last.taube-remove;
+        g_store.currentFireSent=false;
+        game_store_save();return;
+    }
     // Mark current entry as wiederholt and re-enter it
     if (g_store.ergebnisseCount > 0) {
         g_store.ergebnisse[g_store.ergebnisseCount - 1].wiederholt = true;
@@ -2571,6 +2668,13 @@ void store_wiederholen(void)
 void store_skip_taube(void)
 {
     store_eintragen(0);
+}
+
+void store_retry_active_game_save(void)
+{
+    g_store.activeGameStorageError=!active_game_checkpoint();
+    if(!g_store.activeGameStorageError && g_store.harakiriOrdersReady &&
+       g_store.taubeIndex>=g_store.sequenzLen)_store_finish_game();
 }
 
 // ── Navigation ───────────────────────────────────────────────
@@ -3331,6 +3435,7 @@ void game_store_save(void)
         nvs_set_i32(s_nvs, "sp_up_cnt", g_store.spielerUpdateCount);
     nvs_commit(s_nvs);
     nvs_unlock();
+    (void)active_game_checkpoint();
 }
 
 // ── Init ─────────────────────────────────────────────────────

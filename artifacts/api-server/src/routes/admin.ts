@@ -10,6 +10,7 @@ import { catalogue, daySalesReport, ensureSystemProducts } from "../lib/products
 import { createRestoreCode, hashRestoreCode } from "../lib/terminal-config";
 import { activityDays, billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSettlement, periodBillSummary } from "../lib/bills";
 import { buildDailyReport } from "../lib/daily-report";
+import { isAttributableTerminal } from "../lib/terminal-identity";
 
 const router = Router();
 
@@ -41,7 +42,8 @@ router.post("/terminal-config/backups/:id/authorize-restore", async (req, res) =
   const id = z.coerce.number().int().positive().safeParse(req.params.id);
   if (!id.success) return res.status(400).json({ error: "Ungültige Backup-ID" });
   const target = z.object({
-    targetTerminalId: z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9._:-]+$/),
+    targetTerminalId: z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9._:-]+$/)
+      .refine(isAttributableTerminal, "Reale Terminal-ID erforderlich; UNKNOWN ist kein Ersatzterminal"),
     targetApiKeyId: z.number().int().positive(),
   }).safeParse(req.body);
   if (!target.success) return res.status(400).json({ error: "Ersatzterminal an API-Schlëssel sinn obligatoresch" });

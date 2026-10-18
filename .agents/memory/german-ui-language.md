@@ -14,3 +14,13 @@ The terminal's built-in Montserrat fonts only contain basic ASCII and LVGL symbo
 **Why:** Raw accented text otherwise renders as tiny missing-glyph boxes, while blanket ASCII transliteration damages German labels and names.
 
 **How to apply:** Add any newly required non-ASCII glyph to every enabled fallback size and to the inbound display sanitizer together, then verify firmware image size and rendering on hardware.
+
+Keep French, German, Portuguese and Italian names accented rather than
+transliterating them or silently dropping unsupported characters.
+
+**Why:** The user describes these names as normal in the Luxembourg club;
+German interface language does not imply ASCII-only member or product names.
+
+**How to apply:** Prefer sufficient shared glyph coverage. Unsupported input
+must remain visible as `?` with counted, rate-limited diagnostics, not boxes.
+Remember that a theme-owned font can override an inherited screen font.

@@ -57,7 +57,10 @@ int nvs_set_blob(unsigned,const char*,const void *p,size_t n){if(failWrite)retur
 int nvs_commit(unsigned){if(failCommit)return 1;disk=staged;return 0;}
 int nvs_get_blob(unsigned,const char*,void *p,size_t *n){if(disk.empty()||*n<disk.size())return 1;memcpy(p,disk.data(),disk.size());*n=disk.size();return 0;}
 int main(){
- day_inventory_init(1);int ids[]={7};assert(day_inventory_queue(DAY_MAITRES,0,0,ids,1,false,""));
+ day_inventory_init(1);int ids[]={7};
+ assert(!day_inventory_queue(DAY_MAITRES,0,0,ids,1,false,"","1900-01-01"));assert(disk.empty());
+ assert(day_inventory_queue(DAY_MAITRES,0,0,ids,1,false,""));
+ assert(!day_inventory_queue(DAY_OPENING,0,0,nullptr,0,false,"","1900-01-01"));
  assert(day_inventory_queue(DAY_OPENING,0,0,nullptr,0,false,""));
  assert(!day_inventory_queue(DAY_CLOSING,-1,0,nullptr,0,false,""));
  DayEvent first;assert(day_inventory_peek(&first));assert(first.kind==DAY_MAITRES);
