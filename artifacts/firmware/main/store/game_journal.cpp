@@ -3,6 +3,7 @@
 #include "offline_cache.h"
 #include "storage_budget.h"
 #include "active_game.h"
+#include "storage_write.h"
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -55,7 +56,7 @@ bool game_journal_inspect_locked(GameJournalInspection *out) {
     for(;;) {
         errno=0;struct dirent *entry=readdir(dir);
         if(!entry) {if(errno) ++out->uncertain;break;}
-        if(strncmp(entry->d_name,"g_",2)) continue;
+        if(strncasecmp(entry->d_name,"g_",2)) continue;
         char file[320];int n=snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
         if(n<0 || (size_t)n>=sizeof(file) || !read_record(file,record)) {++out->uncertain;continue;}
         out->bytes+=sizeof(Record);
@@ -83,9 +84,8 @@ static bool replace_record(const char *temp,const char *file) {
 static bool write_record(const char *file,const Record *record) {
     char temp[326]; snprintf(temp,sizeof(temp),"%.319s.part",file);
     FILE *fp=fopen(temp,"wb"); if(!fp) return false;
-    bool complete=fwrite(record,1,sizeof(*record),fp)==sizeof(*record);
-    bool ok=complete;
-    if(ok) ok=fflush(fp)==0 && fsync(fileno(fp))==0;
+    bool complete=false;
+    bool ok=storage_write_committed(fp,record,sizeof(*record),&complete);
     if(fclose(fp)!=0) ok=false;
     if(!ok) {
         // Remove only our incomplete failed write. A complete checksummed
@@ -107,7 +107,7 @@ static bool read_record(const char *file,Record *record) {
 }
 bool game_journal_ready() {
     uint64_t total=0,free_bytes=0;
-    return s_ready && !s_has_unloaded && !offline_cache_cleanup_busy() &&
+    return s_ready && !s_has_unloaded && offline_cache_storage_writable() && !offline_cache_cleanup_busy() &&
         esp_vfs_fat_info("/fatfs",&total,&free_bytes)==ESP_OK &&
         free_bytes>=total*STORAGE_FREE_PERCENT/100+storage_allocated(sizeof(Record))*2;
 }

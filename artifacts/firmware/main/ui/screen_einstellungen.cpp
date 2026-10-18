@@ -1413,9 +1413,10 @@ static lv_obj_t *build_catering_tab(lv_obj_t *parent)
 }
 
 static std::atomic<int> s_storage_phase{0},s_storage_pending{-1};
+static bool s_storage_repair;
 static lv_obj_t *s_storage_confirm;
 static void storage_worker(void *argument) {
-    if(argument) s_storage_phase=offline_cache_cleanup()?4:5;
+    if(argument) s_storage_phase=(s_storage_repair?offline_cache_repair():offline_cache_cleanup())?4:5;
     else {s_storage_pending=offline_cache_pending_games();s_storage_phase=2;}
     vTaskDelete(nullptr);
 }
@@ -1432,15 +1433,16 @@ static void storage_confirmation() {
     lv_obj_set_style_text_color(s_storage_confirm,lv_color_hex(CLR_TEXT),0);
     lv_obj_set_style_text_font(s_storage_confirm,UI_FONT_16,0);
     lv_obj_add_event_cb(s_storage_confirm,[](lv_event_t*){s_storage_confirm=nullptr;},LV_EVENT_DELETE,nullptr);
-    lv_obj_t *title=lv_msgbox_add_title(s_storage_confirm,"Speicher bereinigen");
+    lv_obj_t *title=lv_msgbox_add_title(s_storage_confirm,s_storage_repair?"Speicher reparieren":"Speicher bereinigen");
     lv_obj_set_style_text_color(title,lv_color_hex(CLR_PRIMARY),0);
     lv_obj_set_style_text_font(title,UI_FONT_20,0);
     char message[384];
     if(pending<0)
-        snprintf(message,sizeof(message),"Nicht übertragene Spiele: RAM %d, Archiv ungeprüft.\n"
-            "Bereinigung gesperrt. Journal und NVS bleiben erhalten.",g_store.pendingGamesCount);
+        snprintf(message,sizeof(message),"Nicht übertragene Spiele: RAM %d. Archiv, aktives Spiel oder Warteschlange nicht freigegeben.\n"
+            "Erst synchronisieren. Bereinigung und Reparatur gesperrt; Journal und NVS bleiben erhalten.",g_store.pendingGamesCount);
     else snprintf(message,sizeof(message),"Nicht übertragene Spiele: %d.\n%s",pending,
         pending?"Erst alle Spiele mit dem Portal synchronisieren. Bereinigung gesperrt.":
+        s_storage_repair?"Bei verwaisten Clustern FAT neu formatieren? Nur ohne offene Spiele, aktives Spiel oder Queue-Ereignisse. Bereits übertragene lokale Archive und Cache werden neu vom Portal geladen. Einstellungen und NVS bleiben erhalten.":
         "Nur wiederherstellbare Portal-Cache-Dateien löschen und FAT neu einhängen? "
         "Keine Formatierung. Spielarchiv, Einstellungen und NVS bleiben erhalten.");
     lv_obj_t *body=lv_msgbox_add_text(s_storage_confirm,message);
@@ -1449,7 +1451,7 @@ static void storage_confirmation() {
     lv_obj_add_style(cancel,&g_style_btn_secondary,0);
     lv_obj_add_event_cb(cancel,[](lv_event_t*){lv_msgbox_close(s_storage_confirm);},LV_EVENT_CLICKED,nullptr);
     if(pending==0) {
-        lv_obj_t *confirm=lv_msgbox_add_footer_button(s_storage_confirm,"Jetzt bereinigen");
+        lv_obj_t *confirm=lv_msgbox_add_footer_button(s_storage_confirm,s_storage_repair?"Jetzt reparieren":"Jetzt bereinigen");
         lv_obj_add_style(confirm,&g_style_btn_primary,0);
         lv_obj_add_event_cb(confirm,[](lv_event_t*) {
             lv_msgbox_close(s_storage_confirm);
@@ -1473,8 +1475,18 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_label_set_text(clean_label,"Speicher bereinigen");
     lv_obj_add_event_cb(clean,[](lv_event_t*) {
         if(s_storage_phase.load()!=0 || s_storage_confirm) return;
+        s_storage_repair=false;
         s_storage_phase=1;
         if(!start_storage_worker(false)) s_storage_phase=5;
+    },LV_EVENT_CLICKED,nullptr);
+    lv_obj_t *repair=lv_button_create(parent);
+    lv_obj_add_style(repair,&g_style_btn_secondary,0);
+    lv_obj_t *repair_label=lv_label_create(repair);
+    lv_label_set_text(repair_label,"Speicher reparieren");
+    lv_obj_add_event_cb(repair,[](lv_event_t*) {
+        if(s_storage_phase.load()!=0||s_storage_confirm)return;
+        s_storage_repair=true;s_storage_phase=1;
+        if(!start_storage_worker(false))s_storage_phase=5;
     },LV_EVENT_CLICKED,nullptr);
     lv_timer_t *storage_timer=lv_timer_create([](lv_timer_t *timer) {
         auto *label=(lv_obj_t*)lv_timer_get_user_data(timer);
@@ -1483,7 +1495,7 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
         if(phase==2) {s_storage_phase=0;storage_confirmation();}
         if(phase==3) lv_label_set_text(label,"Speicher wird bereinigt …");
         if(phase==4 || phase==5) {
-            lv_label_set_text(label,phase==4?"Speicher bereinigt. Spielarchiv und NVS unverändert.":
+            lv_label_set_text(label,phase==4?"Speicher bereit. Einstellungen und NVS erhalten; Portal-Cache wird neu geladen.":
                 "Bereinigung gesperrt oder fehlgeschlagen. Offene/ungeprüfte Spiele bleiben erhalten; "
                 "laufende Synchronisierung zuerst beenden. Details im Terminal-Protokoll.");
             s_storage_phase=0;

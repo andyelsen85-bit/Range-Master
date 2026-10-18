@@ -1,4 +1,5 @@
 #pragma once
+bool portal_queue_repair_safe_locked(); // CRC-verified files, no state-lock inversion
 #include "portal_model.h"
 void portal_runtime_init();
 void portal_queue_refresh();

@@ -305,3 +305,67 @@ Required before flashing:
 
 Do not erase NVS, format FAT, reset replay counters, publish or flash as a
 substitute for these tests.
+
+## Full FAT with few visible files: orphan-chain recovery
+
+The census now reports `FAT lost clusters`, bytes, used/reachable clusters and
+free space at mount and each recovery step. Reachable space includes rounded
+file allocations and estimated directory allocations. This is an **estimate**,
+not an fsck allocation-chain traversal; a small directory discrepancy is not
+evidence of lost games. WL/FAT overhead is excluded from the usable total.
+
+Deletion of cache files cannot reclaim orphaned cluster chains. When the gap
+exceeds 5% or free space remains below the safe journal reserve, boot can
+reformat **only a proven-empty-of-pending-work volume**. CRC inspection must
+find no pending/uncertain journal, active game or queue events/reservation.
+Pending credit, sale/payment events and unknown files also refuse formatting.
+Already portal-accepted local archives and rebuildable cache can be removed;
+NVS/settings, partition offsets and replay counters are never erased.
+
+On-device: **Einstellungen > System > Speicher reparieren**. The dialog first
+shows pending-game status and explains the possible format. **Speicher
+bereinigen** remains cache-only. Both recheck the protection conditions in the
+worker under the storage locks. A readable full filesystem remains readable so
+pending games can upload. If proof fails, synchronize or investigate: never use
+an erase command as a workaround.
+
+A small NVS repair-intent marker is committed before destruction. New durable
+work is blocked until formatting, remount, validation (>80% free) and marker
+clear succeed. After a reset this permits resuming **only the previously
+authorized empty-volume repair**. No pending games are staged in volatile PSRAM
+to authorize their destruction.
+
+Cache envelopes are committed before payload growth; writes are <=16 KiB with
+fsync between chunks. Journal/active/queue writes commit an initial <=512 bytes
+then bounded chunks. Complete CRC-valid journal/active temporaries survive a
+failed final flush/rename and are recovered, never discarded as stale cache.
+Active-game replacement uses a recoverable temporary plus two slots within
+24 KiB. Stale cache temporaries are removed only after empty-work proof.
+Per-section snapshots compare their content CRC and perform at most one write
+attempt per five minutes. Deferred/failed writes do not advance durable manifest
+tokens; successful portal fetches still apply in RAM.
+
+`http_post_json` logs a rate-limited, credential-redacted response excerpt
+(at most 200 bytes) for non-2xx. HTTP 400 has no immediate retry and pauses only
+that endpoint for ten minutes; queued data remains pending. Other endpoints
+continue. The factory eFuse terminal ID is used, with a once-per-boot
+`Terminal-ID=ESP32-P4-... (P4 factory eFuse)` serial message. An unreadable eFuse
+blocks sending instead of using `ESP32-P4-UNKNOWN`.
+
+Additional host checks:
+
+```sh
+python tests/test_offline_cache.py
+python tests/test_game_journal.py
+python tests/test_http_failure_policy.py
+python tests/test_portal_runtime.py
+python tests/test_harakiri_players.py
+```
+
+The fake FAT test simulates allocation without directory publication, verifies
+free-space recovery, pending/unknown guards and reset during an authorized
+empty repair. These tests do **not** prove physical flash atomicity. FatFs
+fsync reduces but cannot eliminate the allocation/directory power-cut window.
+Required device acceptance remains: serial boot census with >80% free after
+repair, and 20 real power cuts during snapshot writes with logs at every reboot.
+Do this on a test terminal; do not risk live unsynchronized games.

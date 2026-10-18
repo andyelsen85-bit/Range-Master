@@ -73,8 +73,11 @@ HTTP-Zeitlimit. Bei Offlinebetrieb, Hauptsync oder FIRE-Belegung wird übersprun
 Es gibt keine Live-Nutzdaten-Outbox und keine Wiederholung alter Zwischenstände.
 Ein abgeschlossener Spielsync entfernt den Live-Stand ebenfalls.
 
-**Kein Formatieren, `erase-flash` oder Löschen von NVS/FAT erforderlich.** Die
-Partitionstabelle und das bestehende Spieljournal bleiben unverändert. Vor einem
+**Kein `erase-flash` oder Löschen von NVS erforderlich.** Die
+Partitionstabelle und das bestehende Spieljournalformat bleiben unverändert.
+Die gesonderte Aktion **Speicher reparieren** darf bei verwaisten Clustern nur
+nach Nachweis, dass keine offenen Spiele/Queue-Ereignisse oder ungeprüften Daten
+existieren, ein leeres Arbeitsvolumen neu formatieren. Vor einem
 Firmwarewechsel wie üblich alle Spiele synchronisieren; die vorhandenen
 USB-/OTA-Flashanweisungen und Hinweise zum Partitionstabellenwechsel beachten.
 

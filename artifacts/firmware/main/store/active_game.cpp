@@ -3,6 +3,7 @@
 #include "game_journal.h"
 #include "terminal_logs.h"
 #include "ui_manager.h"
+#include "storage_write.h"
 #include "esp_heap_caps.h"
 #include <cstdio>
 #include <cstring>
@@ -32,7 +33,7 @@ struct ActiveRecord {
     bool active;
     ActiveData data;
 };
-static_assert(sizeof(ActiveRecord)<=12288,"Two active-game slots must fit in 24 KiB");
+static_assert(sizeof(ActiveRecord)<=8192,"Two active-game slots plus scratch must fit in 24 KiB");
 static bool initialized=false,blocked=false;
 static std::atomic<bool> had_active{false};
 static std::atomic<uint32_t> next_generation{0};
@@ -85,8 +86,8 @@ static bool valid(const ActiveRecord &r) {
     }
     return true;
 }
-static bool read(int slot,ActiveRecord *out,bool *present) {
-    char name[96];path(slot,name,sizeof(name));errno=0;
+static bool read_file(const char *name,ActiveRecord *out,bool *present) {
+    errno=0;
     FILE *f=fopen(name,"rb");
     if(!f){*present=errno!=ENOENT;return false;}
     *present=true;
@@ -94,7 +95,32 @@ static bool read(int slot,ActiveRecord *out,bool *present) {
     if(fclose(f)!=0)ok=false;
     return ok&&valid(*out);
 }
+static bool read(int slot,ActiveRecord *out,bool *present,bool strict=false) {
+    char name[96],temp[104];path(slot,name,sizeof(name));
+    snprintf(temp,sizeof(temp),"%s.tmp",name);
+    bool bin_present=false,tmp_present=false;
+    bool ok=read_file(name,out,&bin_present);
+    auto *candidate=(ActiveRecord*)heap_caps_malloc(sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!candidate){*present=true;return false;}
+    bool tmp_ok=read_file(temp,candidate,&tmp_present);
+    if(tmp_ok&&(!ok||candidate->generation>=out->generation))*out=*candidate;
+    heap_caps_free(candidate);*present=bin_present||tmp_present;
+    if(strict&&((bin_present&&!ok)||(tmp_present&&!tmp_ok)))return false;
+    return ok||tmp_ok;
+}
 size_t active_game_record_size(){return sizeof(ActiveRecord);}
+bool active_game_repair_safe_locked() {
+    auto *r=(ActiveRecord*)heap_caps_malloc(sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!r)return false;
+    bool safe=true,found=false,active=false;uint32_t generation=0;
+    for(int s=0;s<2;s++) {
+        bool present=false;
+        if(read(s,r,&present,true)) {
+            if(!found || r->generation>generation){found=true;generation=r->generation;active=r->active;}
+        } else if(present)safe=false;
+    }
+    heap_caps_free(r);return safe&&!active&&!had_active.load();
+}
 static void remap_record(ActiveRecord *r) {
     if(!r->active)return;
     for(int i=0;i<r->data.spielerCount;i++)
@@ -106,14 +132,16 @@ static void remap_record(ActiveRecord *r) {
 }
 static bool write_slot(int slot,ActiveRecord *r) {
     r->checksum=hash(*r);
-    char name[96];path(slot,name,sizeof(name));
-    FILE *f=fopen(name,"wb");bool ok=f!=nullptr;
+    char name[96],temp[104];path(slot,name,sizeof(name));
+    snprintf(temp,sizeof(temp),"%s.tmp",name);
+    FILE *f=fopen(temp,"wb");bool ok=f!=nullptr,complete=false;
     if(f) {
-        ok=fwrite(r,1,sizeof(*r),f)==sizeof(*r);
-        if(ok)ok=fflush(f)==0 && fsync(fileno(f))==0;
+        ok=storage_write_committed(f,r,sizeof(*r),&complete);
         if(fclose(f)!=0)ok=false;
     }
-    if(!ok)(void)unlink(name); // only the older/replacement slot
+    if(!ok){if(!complete)(void)unlink(temp);return false;}
+    if(unlink(name)!=0&&errno!=ENOENT)return false;
+    ok=rename(temp,name)==0; // Complete temp remains recoverable if rename fails.
     return ok;
 }
 bool active_game_remap() {
@@ -201,6 +229,14 @@ bool active_game_restore() {
         terminal_log_add("data_loss_risk","ERROR",g_store.lineupWarning);
     }
     if(best_slot>=0) {
+        // A complete temporary can be the newest durable checkpoint after a
+        // reset between unlink and rename. Canonicalize it before the next save.
+        char name[96],temp[104];path(best_slot,name,sizeof(name));
+        snprintf(temp,sizeof(temp),"%s.tmp",name);
+        bool present=false;
+        if(read_file(temp,r,&present)&&r->generation==best->generation) {
+            if((unlink(name)!=0&&errno!=ENOENT)||rename(temp,name)!=0)invalid=true;
+        }
         committed_generation=next_generation=best->generation;committed_slot=best_slot;had_active=best->active;
         // A crash between final-journal commit and active tombstone must not
         // resurrect an already finished (possibly already accepted) game.

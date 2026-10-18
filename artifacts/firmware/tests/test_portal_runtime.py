@@ -62,6 +62,7 @@ int main(int argc,char **argv) {
  record.checksum=portal_queue_checksum(record);assert(portal_queue_valid(record));
  std::string first=std::string(argv[1])+"/queue0.bin",second=std::string(argv[1])+"/queue1.bin";
  assert(portal_queue_write_file(first.c_str(),record));
+ assert(!portal_queue_repair_safe_files(argv[1]));
  PortalQueueRecord rebooted={};assert(portal_queue_read_file(first.c_str(),&rebooted));
  assert(!memcmp(&record,&rebooted,sizeof(record)));
  auto immutable=rebooted.events[0];record.generation++;record.count=0;record.checksum=portal_queue_checksum(record);
@@ -69,6 +70,8 @@ int main(int argc,char **argv) {
  FILE *f=fopen(second.c_str(),"r+b");assert(f);assert(fseek(f,24,SEEK_SET)==0);fputc(0xff,f);fclose(f);
  assert(!portal_queue_read_file(second.c_str(),&rebooted));assert(portal_queue_read_file(first.c_str(),&rebooted));
  assert(rebooted.count==1&&!memcmp(&immutable,&rebooted.events[0],sizeof(immutable))); // lost ACK safely replays
+ record.reserved={};record.count=0;record.generation++;record.checksum=portal_queue_checksum(record);
+ assert(portal_queue_write_file(second.c_str(),record)&&portal_queue_repair_safe_files(argv[1]));
  assert(!portal_queue_write_file("/no-such-terminal-directory/queue.bin",record));
  LiveCopy s={};s.seq=17;s.state=1;s.mode=0;s.run=1;s.clays=9;s.started=1792310400;
  s.currentId=1;s.currentClay=2;s.count=2;s.resultCount=3;

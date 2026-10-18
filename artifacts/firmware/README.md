@@ -317,3 +317,14 @@ The corresponding Heltec Wireless Stick V3 sketches are in:
 - `artifacts/lora-common/` — AES-128-GCM frame, authentication, nonce, and replay format
 
 Read their hardware and safety checklists before connecting a relay to a trap.
+
+### Full storage despite a small file census
+
+Use **Einstellungen > System > Speicher reparieren** for orphaned FAT clusters,
+not `erase-flash`. Formatting is allowed only after verified absence of pending
+games, an active game, queue reservations/events and other outstanding actions;
+unknown/corrupt evidence refuses repair. The confirmation shows pending status.
+Accepted local archives/cache may be rebuilt from the portal; settings and NVS
+are preserved. **Speicher bereinigen** remains cache-only. See
+[DIAGNOSTICS_RECOVERY.md](DIAGNOSTICS_RECOVERY.md#full-fat-with-few-visible-files-orphan-chain-recovery)
+for safeguards, serial diagnostics, HTTP-400 backoff and hardware acceptance.

@@ -38,9 +38,10 @@ NVS partition. Reusing the FAT partition for durable games changes the earlier
 cache-only rebuild assumption; formatting would now delete unacknowledged games.
 
 **How to apply:** Distinguish optional snapshot failures from journal failures.
-Never auto-format a journal-bearing volume. Keep saved games recoverable and
-block new games when safe storage is unavailable rather than silently dropping
-records.
+Never auto-format a volume with pending or unverified durable work. A later user-
+approved exception permits verified-empty orphan-cluster repair; see below.
+Keep saved games recoverable and block new games when safe storage is unavailable
+rather than silently dropping records.
 
 Cache-only cleanup is permitted only when RAM and a read-only verified journal
 scan both prove no pending games. Corrupt/partial/unreadable evidence fails
@@ -60,3 +61,18 @@ replacement scratch and a free-space reserve; do not budget from raw flash.
 Failed fsync/close does not authorize deleting a complete checksummed journal
 temporary: it may be the only recoverable copy. Remove only incomplete writes
 whose live source is retained; keep complete unsynced temporaries protected.
+
+The user selected: **"Refuse repair until all durable pending data is synced."**
+Only a proven-empty-of-pending-work FAT may be reformatted to reclaim orphan
+chains. Active games, queue reservations/events, financial outboxes, unknown files
+and uncertain evidence refuse destructive repair. NVS/settings are retained.
+
+**Why:** The device reported nearly all FAT clusters allocated while visible files
+used only a few hundred KiB; deleting cache files cannot free unreachable chains.
+PSRAM staging cannot protect pending data across a power cut and was explicitly
+rejected in favor of refusing repair.
+
+**How to apply:** Verify durable records rather than trusting RAM counts. Persist
+empty-volume repair authorization before destruction and block new writes until
+it is safely cleared, including on failure/reboot. Fsync/chunking reduces FAT
+power-cut exposure but must never be described as a proof of zero orphan clusters.

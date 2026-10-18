@@ -27,6 +27,8 @@ STUBS = r"""
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
+#include <initializer_list>
 #include <ctime>
 #include <cerrno>
 #include <cstdint>
@@ -74,7 +76,14 @@ void heap_caps_free(void *p) { free(p); }
 size_t heap_caps_get_free_size(int) { return 1000000; }
 size_t heap_caps_get_largest_free_block(int) { return 1000000; }
 const char *esp_err_to_name(int err) { return err == ESP_OK ? "ESP_OK" : "ESP_FAIL"; }
-uint32_t esp_rom_crc32_le(uint32_t, const uint8_t *, size_t) { return 1; }
+uint32_t esp_rom_crc32_le(uint32_t h,const uint8_t *p,size_t n) {for(size_t i=0;i<n;i++)h=(h^p[i])*16777619u;return h;}
+static int64_t clock_us=0;
+int64_t esp_timer_get_time(){return clock_us;}
+static bool active_safe=true,queue_safe=true;
+bool active_game_repair_safe_locked(){return active_safe;}
+bool portal_queue_repair_safe_locked(){return queue_safe;}
+size_t active_game_record_size(){return 8084;}
+void portal_queue_refresh(){}
 struct esp_vfs_fat_mount_config_t {
     bool format_if_mount_failed; int max_files; size_t allocation_unit_size;
 };
@@ -126,14 +135,20 @@ static std::map<int, std::string> descriptors;
 static int next_fd = 1;
 int nvs_open(const char *, int, int *handle) { *handle = 1; return ESP_OK; }
 static bool protected_journal=false;
+static uint8_t repair_intent=0;
+static uint64_t orphan_bytes=0;
 int nvs_get_u8(int, const char *key, uint8_t *value) {
+    if(!strcmp(key,"fat_repair")){*value=repair_intent;return ESP_OK;}
     if(!std::strcmp(key,"game_journal")) {
         *value=protected_journal?1:0;
         return protected_journal?ESP_OK:ESP_ERR_NVS_NOT_FOUND;
     }
     *value = 3; return fresh ? ESP_ERR_NVS_NOT_FOUND : ESP_OK;
 }
-int nvs_set_u8(int, const char *, uint8_t value) { assert(value == 3); return ESP_OK; }
+int nvs_set_u8(int, const char *key, uint8_t value) {
+    if(!strcmp(key,"fat_repair")){repair_intent=value;return ESP_OK;}
+    assert(value == 3);return ESP_OK;
+}
 int nvs_commit(int) { return ESP_OK; }
 void nvs_close(int) {}
 int esp_vfs_fat_spiflash_mount_rw_wl(const char *, const char *label,
@@ -142,7 +157,7 @@ int esp_vfs_fat_spiflash_mount_rw_wl(const char *, const char *label,
     assert(cfg->allocation_unit_size == 4096 && cfg->max_files == 12);
     ++mounts; operations.push_back("mount");
     if (mount_error) return mount_error;
-    if(mounts>1 && !probe_fails) free_bytes=0x900000;
+    if(mounts>1 && !probe_fails&&!orphan_bytes) free_bytes=formats?total_bytes-4096:0x900000;
     *handle = 9; return ESP_OK;
 }
 int esp_vfs_fat_spiflash_unmount_rw_wl(const char *, int handle) {
@@ -154,7 +169,7 @@ int esp_vfs_fat_spiflash_format_cfg_rw_wl(const char *, const char *label,
     assert(cfg->allocation_unit_size == 4096 && cfg->max_files == 12);
     ++formats; operations.push_back("format");
     if (format_error) return format_error;
-    files.clear(); total_bytes = 0x970000; free_bytes = 0x900000;
+    files.clear();orphan_bytes=0;total_bytes = 0x970000; free_bytes = total_bytes-4096;
     probe_fails = repaired_probe_fails; return ESP_OK;
 }
 int esp_vfs_fat_info(const char *, uint64_t *total, uint64_t *available) {
@@ -275,6 +290,9 @@ bool logged(const std::string &text) {
 void reset() {
     g_store = {}; s_mounted = s_mount_attempted = false; s_wl = WL_INVALID_HANDLE;
     s_census_done=false;s_cleaning=false;s_storage_blocked=false;s_disk_pending=0;
+    s_repair_pending=false;repair_intent=0;active_safe=queue_safe=true;clock_us=0;
+    memset(s_saved_known,0,sizeof(s_saved_known));
+    memset(s_attempted,0,sizeof(s_attempted));orphan_bytes=0;
     journal_pending=journal_uncertain=0;
     s_failed_sections = 0; s_metadata_failed = false;
     total_bytes = 0x970000; free_bytes = 0x900000;
@@ -305,12 +323,12 @@ int main() {
         assert(g_store.pendingKreditEventCount == 7);
     }
     reset(); total_bytes = 8192; free_bytes = 4096;
-    assert(!offline_cache_mount() && formats == 0);
+    assert(offline_cache_mount() && formats == 1);
     reset(); free_bytes = 0;
     files["/fatfs/tmcache/history.tmp"]={1};
     files["/fatfs/tmcache/history.bak"]={1};
     files["/fatfs/unknown.tmp"]={2};
-    assert(offline_cache_mount() && formats == 0 && mounts==2);
+    assert(!offline_cache_mount() && formats == 0 && mounts==1);
     assert(!files.count("/fatfs/tmcache/history.tmp") && !files.count("/fatfs/tmcache/history.bak"));
     assert(files.count("/fatfs/unknown.tmp"));
     assert(logged("FAT census file=/fatfs/tmcache/history.tmp"));
@@ -384,6 +402,7 @@ int main() {
     assert(g_store.cacheManifestTokens[OFFLINE_CACHE_ROSTER][0] == '\0');
     write_error = 0;
     assert(offline_cache_save(OFFLINE_CACHE_PRODUCTS) && !g_store.offlineCacheHealthy);
+    clock_us+=300000000LL;
     assert(offline_cache_save(OFFLINE_CACHE_ROSTER) && g_store.offlineCacheHealthy);
     fsync_error = EIO; assert(!offline_cache_save_metadata() && !g_store.offlineCacheHealthy);
     fsync_error = 0;
@@ -422,10 +441,46 @@ int main() {
     assert(!files.count("/fatfs/tmcache/history.tmp"));
     assert(logged("25% cache / 20% free budget"));
     assert(cache_budget_bytes()<total_bytes/4);
+    reset();assert(offline_cache_mount());assert(offline_cache_save(OFFLINE_CACHE_BILLS));
+    int writes_before=next_fd;
+    assert(offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd==writes_before);
+    g_store.billDayBaseline.playerCount=1;
+    assert(!offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd==writes_before);
+    assert(!offline_cache_set_manifest_token(OFFLINE_CACHE_BILLS,"not-durable"));
+    clock_us+=300000000LL;assert(offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd>writes_before);
+    // Model old FAT writes interrupted after allocation, before directory commit.
+    reset();
+    for(int cut=0;cut<80&&free_bytes;cut++) {
+        uint64_t allocated=std::min<uint64_t>(storage_allocated(165000),free_bytes);
+        orphan_bytes+=allocated;free_bytes-=allocated;
+        files.erase("/fatfs/tmcache/bills.tmp");
+    }
+    files["/fatfs/tmcache/bills.tmp"]={};
+    assert(free_bytes==0&&orphan_bytes>total_bytes/2);
+    assert(offline_cache_mount()&&formats==1&&free_bytes>total_bytes*80/100);
+    assert(!repair_intent&&logged("FAT lost clusters=0")&&logged("FAT neu formatiert"));
+    for(int guard=0;guard<6;guard++) {
+        reset();free_bytes=0;orphan_bytes=total_bytes;
+        if(guard==0)journal_pending=1;
+        if(guard==1)journal_uncertain=1;
+        if(guard==2)active_safe=false;
+        if(guard==3)queue_safe=false;
+        if(guard==4)g_store.pendingKreditEventCount=1;
+        if(guard==5)files["/fatfs/unknown.tmp"]={7};
+        assert(!offline_cache_mount()&&formats==0&&!repair_intent);
+    }
+    reset();free_bytes=0;orphan_bytes=total_bytes;format_error=ESP_FAIL;
+    assert(!offline_cache_mount()&&formats==1&&repair_intent==1);
+    // Reboot: RAM flags vanish, durable authorization survives; no pending data
+    // was ever staged in RAM or sacrificed. The next boot finishes empty repair.
+    s_mount_attempted=s_mounted=false;s_wl=WL_INVALID_HANDLE;format_error=0;
+    assert(offline_cache_mount()&&formats==2&&!repair_intent&&!s_repair_pending);
+    reset();assert(offline_cache_mount());free_bytes=0;orphan_bytes=total_bytes;
+    assert(offline_cache_repair()&&formats==1&&offline_cache_storage_writable());
     std::printf("PASS budget: FinishedGame=%zu Record=%zu journal allocated=%zu cache allocated=%zu\\n",
         sizeof(FinishedGame),game_journal_record_size(),
         storage_allocated(game_journal_record_size())*(STORAGE_JOURNAL_SLOTS+2),cache_budget_bytes());
-    std::puts("PASS: census, cache-only remount recovery, pending/uncertain guards, no format/NVS erase");
+    std::puts("PASS: lost clusters repaired only when empty; pending/uncertain/active/queue/unknown guards; authorized repair survives reboot; no NVS erase");
     std::puts("PASS: write/fsync/close cleanup, single-copy snapshots, 25%/20% budget, section/metadata health");
     std::puts("PASS: failed FAT leaves roster/history applied + NVS save, full/billing sync succeed; server errors fail");
 }

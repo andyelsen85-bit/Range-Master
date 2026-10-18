@@ -22,8 +22,10 @@ bool offline_cache_save(OfflineCacheSection section);
 bool offline_cache_save_metadata(void);
 bool offline_cache_set_manifest_token(OfflineCacheSection section, const char *token);
 bool offline_cache_storage_available(void); // readable mount, independent of optional cache health
+bool offline_cache_storage_writable(void); // admission gate, including incomplete repair
 bool offline_cache_recheck(void);
 bool offline_cache_cleanup(void); // cache-only; refuses pending or unverified journal records
+bool offline_cache_repair(void); // format only after CRC proof: no durable pending work
 bool offline_cache_cleanup_busy(void);
 bool offline_cache_storage_warning(char *out, size_t size);
 int offline_cache_pending_games(void); // max(RAM,disk), -1 when proof is uncertain

@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include "esp_timer.h"
+#include "http_failure_policy.h"
 #include "ui_time_fmt.h"
 #include "app_config.h"
 #include "coprocessor.h"
@@ -415,6 +416,8 @@ static bool terminal_id(char *out, size_t out_len)
     }
     snprintf(out, out_len, "ESP32-P4-%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    static std::atomic<bool> logged{false};
+    if(!logged.exchange(true))ESP_LOGI(TAG,"Terminal-ID=%s (P4 factory eFuse)",out);
     return true;
 }
 
@@ -905,6 +908,26 @@ esp_err_t http_optional_json(const char *path,const char *body,char *out,size_t 
 }
 
 // ── Generic POST helper (with retry) ─────────────────────────
+static HttpFailurePolicy s_http_failures;
+static portMUX_TYPE s_http_failure_lock=portMUX_INITIALIZER_UNLOCKED;
+static bool post_blocked(const char *path) {
+    portENTER_CRITICAL(&s_http_failure_lock);
+    bool blocked=s_http_failures.blocked(path,esp_timer_get_time());
+    portEXIT_CRITICAL(&s_http_failure_lock);return blocked;
+}
+static bool post_failure_log(const char *path,int status) {
+    portENTER_CRITICAL(&s_http_failure_lock);
+    bool log=s_http_failures.failure(path,status,esp_timer_get_time());
+    portEXIT_CRITICAL(&s_http_failure_lock);return log;
+}
+static void http_error_excerpt(const char *body,char out[201]) {
+    snprintf(out,201,"%.200s",body?body:"");
+    for(char *p=out;*p;p++)if((unsigned char)*p<32)*p=' ';
+    char lower[201];snprintf(lower,sizeof(lower),"%s",out);
+    for(char *p=lower;*p;p++)if(*p>='A'&&*p<='Z')*p=(char)(*p-'A'+'a');
+    for(const char *s:{"token","password","secret","authorization","api_key"})
+        if(strstr(lower,s)){snprintf(out,201,"%s","[sensitive response redacted]");break;}
+}
 static esp_err_t http_post_json(const char *path, const char *body,
                                 char *resp_buf, size_t resp_cap)
 {
@@ -914,6 +937,11 @@ static esp_err_t http_post_json(const char *path, const char *body,
     if (!path || !body || (resp_buf && resp_cap < 2)) {
         set_http_error("POST", diagnostic_path, "invalid arguments");
         return ESP_ERR_INVALID_ARG;
+    }
+    if(post_blocked(diagnostic_path)) {
+        s_last_http_status=400;
+        set_http_error("POST",diagnostic_path,"HTTP 400: endpoint paused for 10 minutes");
+        return ESP_ERR_INVALID_STATE;
     }
     http_session_t owned_session;
     http_session_t *session = http_active_session_for_current_task();
@@ -929,6 +957,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
 
     esp_err_t err = ESP_FAIL;
     for (int attempt = 1; attempt <= 3; attempt++) {
+        bool non_retryable=false;
         if (resp_buf) resp_buf[0] = '\0';
         http_acc_t acc = { .buf = resp_buf, .len = 0, .cap = (int)resp_cap,
                            .truncated = false };
@@ -945,7 +974,11 @@ static esp_err_t http_post_json(const char *path, const char *body,
             int status = esp_http_client_get_status_code(session->client);
             s_last_http_status=status;
             if (status < 200 || status >= 300) {
-                ESP_LOGW(TAG, "POST %s → HTTP %d", diagnostic_path, status);
+                if(post_failure_log(diagnostic_path,status)) {
+                    char excerpt[201];http_error_excerpt(resp_buf,excerpt);
+                    ESP_LOGW(TAG,"POST %s -> HTTP %d response=%.200s",diagnostic_path,status,excerpt);
+                }
+                non_retryable=status>=400&&status<500&&status!=408&&status!=429;
                 char reason[32];
                 snprintf(reason, sizeof(reason), "HTTP %d", status);
                 set_http_error("POST", diagnostic_path, reason);
@@ -960,6 +993,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
             err = ESP_ERR_INVALID_SIZE;
         }
         if (err == ESP_OK) break;
+        if(non_retryable)break;
         if (transport_error && (!owns_session || attempt < 3)) {
             esp_err_t reopen_err = http_session_reopen(session);
             if (reopen_err != ESP_OK) {

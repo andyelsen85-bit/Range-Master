@@ -18,6 +18,7 @@ class DurableGames(unittest.TestCase):
             for folder in ("sdk/freertos", "volume", "nvs"):
                 (temp / folder).mkdir(parents=True)
             headers = {
+                "portal_runtime.h": "#pragma once\ninline bool portal_queue_repair_safe_locked(){return true;}\n",
                 "ui_manager.h": """
                     #pragma once
                     inline bool ui_manager_snapshot_lock(bool *acquired){*acquired=false;return true;}
@@ -37,6 +38,7 @@ class DurableGames(unittest.TestCase):
                     struct esp_vfs_fat_mount_config_t {bool format_if_mount_failed=false;int max_files=0;size_t allocation_unit_size=0;};
                     inline int esp_vfs_fat_spiflash_mount_rw_wl(const char*,const char*,const esp_vfs_fat_mount_config_t*,int*h){*h=1;return 0;}
                     inline int esp_vfs_fat_spiflash_unmount_rw_wl(const char*,int){return 0;}
+                    inline int esp_vfs_fat_spiflash_format_cfg_rw_wl(const char*,const char*,esp_vfs_fat_mount_config_t*){return -1;}
                     inline int fat_rename(const char*a,const char*b) {
                         if(access(b,F_OK)==0) {errno=EEXIST;return -1;}
                         return std::rename(a,b);
@@ -53,8 +55,9 @@ class DurableGames(unittest.TestCase):
                         return fwrite(p,s,n,f);
                     }
                     inline bool fat_sync_fail=false;
+                    inline int fat_sync_calls=0;
                     inline int fat_fsync(int fd) {
-                        if(fat_sync_fail) {errno=EIO;return -1;}
+                        if(fat_sync_fail&&++fat_sync_calls>=2) {errno=EIO;return -1;}
                         return fsync(fd);
                     }
                 """,
@@ -187,6 +190,10 @@ class DurableGames(unittest.TestCase):
                 if source=="game_journal.cpp":
                     content=content.replace("rename(", "fat_rename(").replace("fwrite(", "fat_fwrite(").replace("fsync(", "fat_fsync(")
                 (temp / source).write_text(content)
+            # Instrument the real chunk writer too: faults must not bypass its
+            # fsync/write calls merely because they moved into a shared header.
+            (temp/"storage_write.h").write_text('#include "esp_vfs_fat.h"\n'+
+                (ROOT/"storage_write.h").read_text().replace("fwrite(","fat_fwrite(").replace("fsync(","fat_fsync("))
             harness = r'''
                 #include "game_journal.h"
                 #include "terminal_logs.h"
@@ -379,7 +386,7 @@ class DurableGames(unittest.TestCase):
             exe = temp / "test"
             subprocess.run([
                 "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
-                "-I" + str(temp / "sdk"), "-I" + str(ROOT),
+                "-I" + str(temp / "sdk"), "-I" + str(ROOT), "-I" + str(ROOT.parent/"net"),
                 '-DNVS_DIR=std::string("' + str(temp / "nvs") + '/")',
                 '-DVOLUME="' + str(temp / "volume") + '"',
                 str(temp / "game_journal.cpp"), str(temp / "terminal_logs.cpp"),

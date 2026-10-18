@@ -4,6 +4,8 @@
 #include "http_sync.h"
 #include "game_store.h"
 #include "game_journal.h"
+#include "offline_cache.h"
+#include <errno.h>
 #include "ui_manager.h"
 #include "display_text.h"
 #include "terminal_logs.h"
@@ -27,6 +29,10 @@ static std::atomic<bool> refresh{true},taking{false};
 static std::atomic<unsigned> appliedGeneration{0};
 static PortalQueueGame requested;
 static bool requestedMerge;
+bool portal_queue_repair_safe_locked() {
+ if(taking.load())return false;
+ return portal_queue_repair_safe_files("/fatfs");
+}
 static std::atomic<bool> requestPending{false};
 static std::atomic<uint64_t> liveVersion{0};
 static std::atomic<int> liveState{0};
@@ -45,7 +51,7 @@ static bool save(PortalQueueRecord next) {
  next.magic=0x51554555;next.version=1;next.generation=record.generation+1;next.checksum=portal_queue_checksum(next);
  int target=slot==0?1:0;char path[48];filePath(target,path);
  game_journal_storage_lock();
- bool ok=portal_queue_write_file(path,next);
+ bool ok=offline_cache_storage_writable()&&portal_queue_write_file(path,next);
  game_journal_storage_unlock();
  if(ok){record=next;slot=target;}
  return ok;
@@ -93,6 +99,7 @@ void portal_queue_status(char *out,size_t size) {
  if(stateLock&&xSemaphoreTake(stateLock,0)==pdTRUE){snprintf(out,size,"%s",statusText);xSemaphoreGive(stateLock);}
 }
 bool portal_queue_take(const PortalQueueGame *game,bool merge) {
+ if(offline_cache_cleanup_busy()||!offline_cache_storage_writable())return false;
  if(!game||!cop_wifi_is_connected()||taking.exchange(true))return false;
  bool allowed=false;
  if(stateLock&&xSemaphoreTake(stateLock,0)==pdTRUE) {

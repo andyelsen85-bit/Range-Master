@@ -25,6 +25,10 @@
 #include "active_game.h"
 #include "terminal_logs.h"
 #include "storage_budget.h"
+#include "portal_runtime.h"
+#include "esp_timer.h"
+#include <strings.h>
+#include <initializer_list>
 
 static const char *TAG = "offline_cache";
 static const char *ROOT = "/fatfs/tmcache";
@@ -35,6 +39,11 @@ static bool s_mount_attempted;
 static uint32_t s_failed_sections;
 static bool s_metadata_failed;
 static bool s_census_done;
+static uint32_t s_saved_hash[OFFLINE_CACHE_SECTION_COUNT];
+static int64_t s_saved_at[OFFLINE_CACHE_SECTION_COUNT];
+static bool s_saved_known[OFFLINE_CACHE_SECTION_COUNT];
+static bool s_attempted[OFFLINE_CACHE_SECTION_COUNT];
+static std::atomic<bool> s_repair_pending{false};
 static std::atomic<bool> s_cleaning{false},s_storage_blocked{false};
 static std::atomic<int> s_disk_pending{0};
 static constexpr size_t CACHE_ALLOCATION_UNIT = 4096;
@@ -103,6 +112,21 @@ static void census_directory(const char *root,Census *out,bool log_files,unsigne
     }
     if(closedir(dir)!=0) out->complete=false;
 }
+struct VolumeUsage {uint64_t total=0,free=0,used=0,reachable=0,lost=0;bool proven=false;};
+static VolumeUsage volume_usage(const char *step,bool log=true) {
+    VolumeUsage u;Census c;census_directory("/fatfs",&c,false);
+    u.proven=c.complete&&esp_vfs_fat_info("/fatfs",&u.total,&u.free)==ESP_OK&&u.free<=u.total;
+    if(u.proven) {
+        u.used=(u.total-u.free)/CACHE_ALLOCATION_UNIT;
+        u.reachable=c.allocated/CACHE_ALLOCATION_UNIT+c.dirs;
+        u.lost=u.used>u.reachable?u.used-u.reachable:0;
+    }
+    if(log)ESP_LOGW(TAG,"FAT lost clusters=%llu (%llu bytes) used_clusters=%llu reachable_clusters=%llu total=%llu free=%llu step=%s proven=%d (directory allocation estimated)",
+        (unsigned long long)u.lost,(unsigned long long)(u.lost*CACHE_ALLOCATION_UNIT),
+        (unsigned long long)u.used,(unsigned long long)u.reachable,(unsigned long long)u.total,
+        (unsigned long long)u.free,step,(int)u.proven);
+    return u;
+}
 static void log_census_once() {
     if(s_census_done) return;
     s_census_done=true;
@@ -122,11 +146,79 @@ static void log_census_once() {
             (unsigned long long)storage_allocated(sizeof(CacheEnvelope)+payload_size((OfflineCacheSection)i)));
     ESP_LOGI(TAG,"FAT budget cache total=%llu history cap=%u accepted archive cap=%u",
         (unsigned long long)cache_budget_bytes(),(unsigned)MAX_HISTORY,STORAGE_ARCHIVE_SLOTS);
-    ESP_LOGI(TAG,"FAT budget active Harakiri game: record=%u x2 allocated=%llu (cap=24576); retained during cleanup",
+    ESP_LOGI(TAG,"FAT budget active Harakiri game: record=%u x2 + scratch allocated=%llu (cap=24576); retained during cleanup",
         (unsigned)active_game_record_size(),
-        (unsigned long long)(2*storage_allocated(active_game_record_size())));
+        (unsigned long long)(3*storage_allocated(active_game_record_size())));
     ESP_LOGI(TAG,"FAT budget meta payload=%u; raw-minus-usable WL/FAT overhead=%llu bytes",
         (unsigned)sizeof(MetaPayload),(unsigned long long)(total<=0x980000?0x980000-total:0));
+    volume_usage("mount census");
+}
+static bool removable_root_only_locked() {
+    DIR *d=opendir("/fatfs");if(!d)return false;
+    bool ok=true;
+    for(;;) {
+        errno=0;auto *e=readdir(d);if(!e){if(errno)ok=false;break;}
+        const char *n=e->d_name;
+        if(!strcmp(n,".")||!strcmp(n,".."))continue;
+        char full[384];snprintf(full,sizeof(full),"/fatfs/%s",n);struct stat st{};
+        if(stat(full,&st)!=0){ok=false;continue;}
+        if(!strcasecmp(n,"tmcache")){if(!S_ISDIR(st.st_mode))ok=false;continue;}
+        if(!S_ISREG(st.st_mode)){ok=false;continue;}
+        if(!strcasecmp(n,"tmcache")||!strncasecmp(n,"g_",2)||!strcasecmp(n,"probe.tmp")||
+           !strcasecmp(n,"active0.bin")||!strcasecmp(n,"active1.bin")||
+           !strcasecmp(n,"active0.bin.tmp")||!strcasecmp(n,"active1.bin.tmp")||
+           !strcasecmp(n,"queue0.bin")||!strcasecmp(n,"queue1.bin"))continue;
+        ok=false;
+    }
+    if(closedir(d)!=0)ok=false;
+    d=opendir(ROOT);if(!d)return ok&&errno==ENOENT;
+    for(;;) {
+        errno=0;auto *e=readdir(d);if(!e){if(errno)ok=false;break;}
+        if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
+        char full[384];snprintf(full,sizeof(full),"%s/%s",ROOT,e->d_name);struct stat st{};
+        if(stat(full,&st)!=0||!S_ISREG(st.st_mode)){ok=false;continue;}
+        bool known=false;
+        for(unsigned i=0;i<=OFFLINE_CACHE_SECTION_COUNT;i++)for(const char *ext:{"bin","bak","tmp"}) {
+            char name[40];snprintf(name,sizeof(name),"%s.%s",i<OFFLINE_CACHE_SECTION_COUNT?names[i]:"meta",ext);
+            if(!strcasecmp(name,e->d_name))known=true;
+        }
+        if(!known)ok=false;
+    }
+    if(closedir(d)!=0)ok=false;
+    return ok;
+}
+static bool repair_marker(uint8_t intent) {
+    nvs_handle_t h=0;
+    if(nvs_open("tm_cache",NVS_READWRITE,&h)!=ESP_OK)return false;
+    bool ok=nvs_set_u8(h,"fat_repair",intent)==ESP_OK;
+    if(ok&&!intent)ok=nvs_set_u8(h,"fat_layout",CACHE_FAT_LAYOUT)==ESP_OK;
+    if(ok)ok=nvs_commit(h)==ESP_OK;
+    nvs_close(h);return ok;
+}
+static bool format_empty_locked(const esp_vfs_fat_mount_config_t &cfg) {
+    // Persist authorization BEFORE destruction; resume only this proven-empty
+    // operation after reset. New games remain blocked until the intent clears.
+    s_repair_pending=true;
+    s_mounted=false;s_storage_blocked=true;
+    if(!repair_marker(1))return false;
+    volume_usage("before empty-volume format");
+    if(s_wl!=WL_INVALID_HANDLE) {
+        if(esp_vfs_fat_spiflash_unmount_rw_wl("/fatfs",s_wl)!=ESP_OK)return false;
+        s_wl=WL_INVALID_HANDLE;
+    }
+    auto format=cfg;format.format_if_mount_failed=true;
+    if(esp_vfs_fat_spiflash_format_cfg_rw_wl("/fatfs","storage",&format)!=ESP_OK)return false;
+    auto safe=cfg;safe.format_if_mount_failed=false;
+    if(esp_vfs_fat_spiflash_mount_rw_wl("/fatfs","storage",&safe,&s_wl)!=ESP_OK)return false;
+    if(mkdir(ROOT,0755)!=0&&errno!=EEXIST)return false;
+    auto u=volume_usage("after empty-volume format");
+    if(!u.proven||!u.total||u.free<=u.total*80/100||!repair_marker(0))return false;
+    s_repair_pending=false;
+    memset(s_saved_known,0,sizeof(s_saved_known));
+    memset(s_attempted,0,sizeof(s_attempted));
+    ESP_LOGW(TAG,"FAT neu formatiert wegen verwaister Cluster, keine offenen Spiele");
+    terminal_log_add("data_loss_risk","INFO","FAT neu formatiert wegen verwaister Cluster, keine offenen Spiele");
+    return true;
 }
 static bool remove_cache_files_locked() {
     // Strict allow-list. Unknown files and ALL g_* records/parts/backups survive.
@@ -136,18 +228,23 @@ static bool remove_cache_files_locked() {
         const char *name=i<OFFLINE_CACHE_SECTION_COUNT?names[i]:"meta";
         for(const char *extension:extensions) {
             char path[64];snprintf(path,sizeof(path),"%s/%s.%s",ROOT,name,extension);
+            bool present=access(path,F_OK)==0;
+            if(present)volume_usage(path);
             if(unlink(path)!=0 && errno!=ENOENT) ok=false;
+            if(present)volume_usage("after cache unlink");
         }
     }
     if(unlink("/fatfs/probe.tmp")!=0 && errno!=ENOENT) ok=false;
     return ok;
 }
-static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *refused=nullptr) {
+static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *refused=nullptr,bool allow_format=false) {
     game_journal_storage_lock();
+    volume_usage("recovery before proof");
     GameJournalInspection inspection{};
     bool proven=game_journal_inspect_locked(&inspection);
     s_disk_pending=inspection.pending;
-    if(!proven || inspection.pending || g_store.pendingGamesCount) {
+    if(!proven || inspection.pending || g_store.pendingGamesCount ||
+       g_store.screen==SCREEN_SPIEL || !active_game_repair_safe_locked() || !portal_queue_repair_safe_locked()) {
         if(refused) *refused=true;
         ESP_LOGW(TAG,"FAT cleanup refused: RAM pending=%d disk pending=%d uncertain=%d; nothing deleted",
             g_store.pendingGamesCount,inspection.pending,inspection.uncertain);
@@ -157,7 +254,21 @@ static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *ref
     ESP_LOGW(TAG,"FAT cache-only cleanup: no pending games; journal/NVS untouched (layout marker ignored)");
     terminal_log_add("data_loss_risk","WARN","Speicherbereinigung: nur Portal-Cache; keine offenen Spiele, Spielarchiv und NVS bleiben erhalten");
     bool ok=remove_cache_files_locked();
-    if(ok) {
+    auto usage=volume_usage("after cache cleanup");
+    bool needs_format=usage.proven&&usage.total&&
+        (usage.lost*CACHE_ALLOCATION_UNIT>usage.total/20 ||
+         usage.free<usage.total*STORAGE_FREE_PERCENT/100+2*storage_allocated(game_journal_record_size()));
+    bool formatted=false;
+    if(ok&&needs_format&&allow_format) {
+        if(g_store.pendingKreditEventCount||g_store.pendingVerkaufEventCount||
+           g_store.pendingPaymentEventCount||!removable_root_only_locked()) {
+            if(refused)*refused=true;
+            terminal_log_add("data_loss_risk","WARN","Speicherreparatur gesperrt: offene Ereignisse oder unbekannte Dateien; nichts formatiert");
+            game_journal_storage_unlock();return false;
+        }
+        ok=format_empty_locked(cfg);formatted=ok;
+    }
+    if(ok&&!formatted) {
         esp_err_t err=esp_vfs_fat_spiflash_unmount_rw_wl("/fatfs",s_wl);
         if(err==ESP_OK) {
             s_wl=WL_INVALID_HANDLE;
@@ -167,10 +278,13 @@ static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *ref
         ok=err==ESP_OK;
     }
     if(ok) {
+        memset(s_saved_known,0,sizeof(s_saved_known));
+        memset(s_attempted,0,sizeof(s_attempted));
         s_failed_sections=0;s_metadata_failed=false;g_store.offlineCacheLoaded=false;
         memset(g_store.cacheManifestTokens,0,sizeof(g_store.cacheManifestTokens));
         g_store.cacheManifestDailyDate[0]=0;
     }
+    volume_usage("after recovery");
     game_journal_storage_unlock();
     return ok;
 }
@@ -206,7 +320,7 @@ static bool write_all(int fd, const void *p, size_t n, const char *name,
     const uint8_t *b = (const uint8_t *)p;
     while (n) {
         errno = 0;
-        ssize_t r = write(fd, b, n);
+        ssize_t r = write(fd, b, n>16384?16384:n);
         const int write_errno = errno;
         if (r < 0 && write_errno == EINTR) continue;
         if (r <= 0) {
@@ -216,6 +330,10 @@ static bool write_all(int fd, const void *p, size_t n, const char *name,
         }
         b += r;
         n -= (size_t)r;
+        if(fsync(fd)!=0) {
+            ESP_LOGE(TAG,"Cache %s fsync failed: ret=-1 errno=%d",name,errno);
+            return false;
+        }
     }
     return true;
 }
@@ -388,7 +506,9 @@ static bool inspect_volume(bool *bad_capacity) {
     const bool geometry_ok = sector != 0 && CACHE_ALLOCATION_UNIT >= sector &&
                              CACHE_ALLOCATION_UNIT % sector == 0;
     const bool writable = cache_self_test();
-    return info_err == ESP_OK && !*bad_capacity && geometry_ok && writable;
+    const auto usage=volume_usage("validation",false);
+    const bool lost=usage.proven&&usage.total&&usage.lost*CACHE_ALLOCATION_UNIT>usage.total/20;
+    return info_err == ESP_OK && !*bad_capacity && geometry_ok && writable&&!lost;
 }
 
 static bool cache_volume_is_empty(void) {
@@ -430,13 +550,18 @@ bool offline_cache_mount(void) {
         : nvs_err;
     uint8_t journal_protected=0;
     esp_err_t journal_marker_err=nvs_err==ESP_OK?nvs_get_u8(n,"game_journal",&journal_protected):nvs_err;
+    uint8_t repair_intent=0;
+    bool resume_repair=nvs_err==ESP_OK&&nvs_get_u8(n,"fat_repair",&repair_intent)==ESP_OK&&
+        repair_intent==1&&g_store.pendingGamesCount==0&&!g_store.pendingKreditEventCount&&
+        !g_store.pendingVerkaufEventCount&&!g_store.pendingPaymentEventCount;
+    s_repair_pending=repair_intent==1;
     const bool may_initialize = !journal_protected && g_store.pendingGamesCount==0 &&
         journal_marker_err==ESP_ERR_NVS_NOT_FOUND && nvs_err == ESP_OK &&
         (marker_err == ESP_ERR_NVS_NOT_FOUND ||
          (marker_err == ESP_OK && initialized_layout == 2u));
 
     esp_vfs_fat_mount_config_t cfg = {};
-    cfg.format_if_mount_failed = may_initialize;
+    cfg.format_if_mount_failed = may_initialize||resume_repair;
     cfg.max_files = 12;
     cfg.allocation_unit_size = CACHE_ALLOCATION_UNIT;
     const esp_partition_t *partition = esp_partition_find_first(
@@ -467,16 +592,40 @@ bool offline_cache_mount(void) {
     }
 
     log_census_once();
+    // These names are exclusively rebuildable snapshots, never game/outbox data.
+    game_journal_storage_lock();
+    GameJournalInspection startup{};
+    bool may_clean_temps=game_journal_inspect_locked(&startup)&&!startup.pending&&
+        !g_store.pendingGamesCount&&active_game_repair_safe_locked()&&portal_queue_repair_safe_locked();
+    if(may_clean_temps)for(unsigned i=0;i<=OFFLINE_CACHE_SECTION_COUNT;i++) {
+        char temp[64];snprintf(temp,sizeof(temp),"%s/%s.tmp",ROOT,i<OFFLINE_CACHE_SECTION_COUNT?names[i]:"meta");
+        if(access(temp,F_OK)==0) {
+            volume_usage("before stale cache temporary");
+            if(unlink(temp)!=0)ESP_LOGW(TAG,"Stale cache temporary retained: errno=%d",errno);
+            volume_usage("after stale cache temporary");
+        }
+    }
+    game_journal_storage_unlock();
+    if(resume_repair) {
+        game_journal_storage_lock();
+        bool repaired=format_empty_locked(cfg);
+        game_journal_storage_unlock();
+        if(!repaired) {
+            g_store.offlineCacheHealthy=false;s_storage_blocked=true;
+            if(nvs_err==ESP_OK)nvs_close(n);
+            unlock_cache();return false;
+        }
+    }
     const bool empty_cache = cache_volume_is_empty();
     const bool fresh_volume = may_initialize || empty_cache;
     ESP_LOGI(TAG, "FAT validation: empty_cache=%d fresh_volume=%d",
              (int)empty_cache, (int)fresh_volume);
     bool bad_capacity = false;
     bool usable = inspect_volume(&bad_capacity);
-    if (!usable && recover_cache_locked(cfg)) usable=inspect_volume(&bad_capacity);
+    if (!usable && recover_cache_locked(cfg,nullptr,true)) usable=inspect_volume(&bad_capacity);
     if (!usable) {
         // Keep a readable mount: journal recovery/upload must work even when
-        // optional snapshots or the write probe fail. Never format this volume.
+        // optional snapshots or the write probe fail. Pending work forbids format.
         ESP_LOGW(TAG,"FAT cache unavailable; readable journal retained, new games blocked until space is safe");
         s_storage_blocked=true;
         g_store.offlineCacheHealthy = false;
@@ -508,6 +657,7 @@ bool offline_cache_mount(void) {
     return true;
 }
 bool offline_cache_storage_available(void) {return s_wl!=WL_INVALID_HANDLE;}
+bool offline_cache_storage_writable(void){return s_mounted&&!s_storage_blocked&&!s_repair_pending;}
 bool offline_cache_cleanup_busy(void) {return s_cleaning.load();}
 int offline_cache_pending_games(void) {
     lock_cache();
@@ -520,7 +670,8 @@ int offline_cache_pending_games(void) {
         cfg.max_files=12;cfg.allocation_unit_size=CACHE_ALLOCATION_UNIT;
         (void)esp_vfs_fat_spiflash_mount_rw_wl("/fatfs","storage",&cfg,&s_wl);
     }
-    bool known=s_wl!=WL_INVALID_HANDLE && game_journal_inspect_locked(&inspection);
+    bool known=s_wl!=WL_INVALID_HANDLE && game_journal_inspect_locked(&inspection)&&
+        active_game_repair_safe_locked()&&portal_queue_repair_safe_locked();
     s_disk_pending=inspection.pending;
     game_journal_storage_unlock();unlock_cache();
     return known?(inspection.pending>g_store.pendingGamesCount?inspection.pending:g_store.pendingGamesCount):-1;
@@ -530,7 +681,7 @@ bool offline_cache_storage_warning(char *out,size_t size) {
     if(s_cleaning) snprintf(out,size,"Speicher wird geprüft und bereinigt. Bitte warten.");
     else if(s_disk_pending>0 || g_store.pendingGamesCount>0)
         snprintf(out,size,"Speicher nicht beschreibbar. Offene Spiele bleiben erhalten. Erst mit dem Portal synchronisieren; Bereinigung gesperrt.");
-    else snprintf(out,size,"Spielarchiv nicht verfügbar. Einstellungen > System > Speicher bereinigen. Ungeprüfte Spiele werden niemals gelöscht.");
+    else snprintf(out,size,"Spielarchiv nicht verfügbar. Einstellungen > System > Speicher reparieren. Offene oder ungeprüfte Daten werden niemals gelöscht.");
     return true;
 }
 bool offline_cache_recheck(void) {
@@ -541,7 +692,7 @@ bool offline_cache_recheck(void) {
     s_mounted=ok;s_storage_blocked=!ok;update_health();
     unlock_cache();return ok;
 }
-bool offline_cache_cleanup(void) {
+static bool cleanup_storage(bool repair) {
     if(s_cleaning.exchange(true)) return false;
     lock_cache();
     const bool was_mounted=s_mounted,was_blocked=s_storage_blocked.load();
@@ -557,7 +708,7 @@ bool offline_cache_cleanup(void) {
     if(ok && s_wl==WL_INVALID_HANDLE)
         ok=esp_vfs_fat_spiflash_mount_rw_wl("/fatfs","storage",&cfg,&s_wl)==ESP_OK;
     bool refused=false;
-    if(ok) ok=recover_cache_locked(cfg,&refused);
+    if(ok) ok=recover_cache_locked(cfg,&refused,repair);
     if(refused) {
         s_mounted=was_mounted;s_storage_blocked=was_blocked;update_health();
         unlock_cache();s_cleaning=false;return false;
@@ -576,6 +727,8 @@ bool offline_cache_cleanup(void) {
     if(!ok) terminal_log_add("data_loss_risk","WARN","Speicherbereinigung abgelehnt oder fehlgeschlagen; offene/ungeprüfte Spiele und NVS bleiben erhalten");
     return ok;
 }
+bool offline_cache_cleanup(void){return cleanup_storage(false);}
+bool offline_cache_repair(void){return cleanup_storage(true);}
 bool offline_cache_save(OfflineCacheSection s) {
     size_t n = payload_size(s);
     if (!n) return false;
@@ -585,8 +738,18 @@ bool offline_cache_save(OfflineCacheSection s) {
     lock_cache();
     bool ok = false;
     if (p) {
+        memset(p,0,n);
         snapshot(s, p);
-        ok = valid(s, p) && write_file(names[s], s, p, n);
+        const uint32_t hash=esp_rom_crc32_le(0,(const uint8_t*)p,n);
+        const int64_t now=esp_timer_get_time();
+        if(valid(s,p)) {
+            if(s_saved_known[s]&&s_saved_hash[s]==hash)ok=true;
+            else if(!s_attempted[s]||now-s_saved_at[s]>=300000000LL) {
+                s_attempted[s]=true;s_saved_at[s]=now;s_saved_known[s]=false;
+                ok=write_file(names[s],s,p,n);
+                if(ok){s_saved_known[s]=true;s_saved_hash[s]=hash;s_saved_at[s]=now;}
+            } else ESP_LOGD(TAG,"Cache %s deferred: content changed, five-minute write interval",names[s]);
+        }
     }
     if (ok) {
         s_failed_sections &= ~(1u << s);
