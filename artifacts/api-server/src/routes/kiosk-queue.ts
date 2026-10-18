@@ -22,7 +22,7 @@ router.get("/public/queue/players",async(req,res)=>{
     LEFT JOIN queue_games g ON g.id=e.queue_game_id
     WHERE s.aktiv AND s.name ILIKE ${`%${q.replace(/[\\%_]/g,"\\$&")}%`} ORDER BY s.name,s.id LIMIT 20`)).rows as any[];
   res.json({players:rows.map(r=>{
-    return {id:r.id,displayName:r.name,available:r.available,canSignup:r.available>=1,
+    return {id:r.id,displayName:r.name,canSignup:r.available>=1,
        eligibilityHint:r.available<1?"Credits am Stand buchen":null,
       activeSignup:!!r.status,running:r.gameStatus==="STARTED"};
   })});

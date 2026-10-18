@@ -11,7 +11,6 @@ export interface KioskPickerPlayer {
   displayName: string;
   activeSignup: boolean;
   running: boolean;
-  available?: number;
   canSignup?: boolean;
   eligibilityHint?: string | null;
 }
