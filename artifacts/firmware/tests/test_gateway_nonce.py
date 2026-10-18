@@ -30,6 +30,8 @@ enum GatewayReachability { GATEWAY_NOT_CONFIGURED, GATEWAY_CHECKING,
 static std::string status;
 void set_status(const char *text) { status = text; }
 using esp_err_t = int;
+void network_trace_begin(const char*,const char*,unsigned){}
+void network_trace_end(esp_err_t,int){}
 constexpr int ESP_OK = 0, ESP_ERR_TIMEOUT = -1, HTTP_EVENT_ON_DATA = 1;
 constexpr int HTTP_EVENT_ON_HEADER=2,HTTP_EVENT_HEADERS_SENT=3;
 struct esp_http_client_event_t { int event_id, data_len; void *data, *user_data; };

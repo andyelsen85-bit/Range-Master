@@ -406,6 +406,7 @@ typedef struct {
     uint64_t liveSequence; // durable scalar only; never persist a live snapshot
     int64_t  liveStartedAt;
     bool     currentFireSent; // one physical gateway request per launch unit
+    bool     repeatCurrentLaunch;
     int      activeAcknowledgedClays;
     // Exact USE events charged when this game started. They let a canceled
     // game safely remove unsynced charges or compensate charges already sent.

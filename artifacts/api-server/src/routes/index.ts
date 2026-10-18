@@ -7,6 +7,7 @@ import statistikRouter from "./statistik";
 import syncRouter from "./sync";
 import adminRouter from "./admin";
 import gamedayRouter from "./gameday";
+import gamedayPlayersRouter from "./gameday-players";
 import terminalLogsRouter from "./terminal-logs";
 import { requireKiosk } from "../lib/kiosk";
 import kioskQueueRouter from "./kiosk-queue";
@@ -22,6 +23,7 @@ router.use("/public",requireKiosk);
 router.use(kioskQueueRouter);
 router.use(managedGamesRouter);
 router.use(gamedayRouter);
+router.use(gamedayPlayersRouter);
 router.use(terminalLogsRouter);
 router.use("/auth", authRouter);
 router.use("/spieler", spielerRouter);
@@ -34,6 +36,7 @@ configureSyncRoutes([
   {router:syncRouter,prefix:"/api/sync"},
   {router:kioskQueueRouter,prefix:"/api"},
   {router:gamedayRouter,prefix:"/api"},
+  {router:gamedayPlayersRouter,prefix:"/api"},
   {router:terminalLogsRouter,prefix:"/api"},
 ]);
 

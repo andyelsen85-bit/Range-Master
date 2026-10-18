@@ -50,6 +50,9 @@ bool cop_wifi_is_connected(void);
 CopWifiState cop_wifi_state(void);
 void cop_wifi_copy_status(char *out, size_t out_len);
 const char *cop_wifi_state_label(CopWifiState state);
+int network_rssi();
+int network_disconnect_reason();
+void cop_firmware_version(char *out,size_t capacity);
 
 // ── BLE HID keyboard ────────────────────────────────────────
 

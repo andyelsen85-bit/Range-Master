@@ -1,3 +1,47 @@
+# Terminal controls and day-player synchronization
+
+The authoritative palette is `main/ui/score_colors.h`; the game buttons and
+the shared live/history/result scorecard use these constants:
+
+| Action | Colour | Label |
+|---|---|---|
+| 0 | black `#000000` | white, light border |
+| 1 | yellow | black |
+| 2 | green | black |
+| START | red | white |
+| WDH | blue | white |
+| SKIP | white | black |
+
+Use the same colours when labelling the six-button wireless remote. A doublette
+is two separate 0/2 scores, maximum four points. WDH first releases an unscored
+launch without changing position or scores; a second WDH undoes the previous
+complete unit. A half-scored pair must be completed before undoing both results.
+The explicit stage survives reboot. Legacy or damaged checkpoints conservatively
+require an operator decision before another launch. Do not downgrade firmware
+with an unfinished game; older firmware cannot read the new active-checkpoint
+version. Finished-game journal records and partition layout have not changed.
+
+Day-player ADD/REMOVE events use a bounded, checksummed two-slot FAT outbox
+(`dayp0.bin`, `dayp1.bin`, 128 events, under 24 KiB total), not a rebuildable cache.
+Never delete it to free space. Local negative player IDs wait for portal identity
+assignment. Delivery is in full and automatic billing syncs; rejected 4xx events
+remain stored and require an explicit manual sync after correcting the cause.
+Reconciliation only removes registrations owned by this terminal.
+
+Deploy the API/portal update before flashing terminals. If a terminal already
+received a 404 for the new endpoint, run manual synchronization once after the
+API update; automatic retries intentionally do not repeat rejected events.
+
+Portal connections are retained between syncs, including optional log/manifest
+requests. For an existing local `sdkconfig`, enable
+`CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS=y` for TLS session resumption after a
+reconnect; new configurations inherit this from `sdkconfig.defaults`.
+The boot cycle has a 19.5-second network deadline and leaves a short publication
+allowance. DNS ownership and socket waits obey that deadline; large rebuildable
+cache writes are deferred to a later worker sync. Live UI does not wait for
+network completion. Flash, radio, real-network timing and layout still require
+device verification.
+
 # TrapMaster ESP32-P4 Firmware
 
 ## Inventar & Tag: Oberfläche und Schriftprüfung

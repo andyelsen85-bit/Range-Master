@@ -39,6 +39,8 @@ jobs:
       - run: pnpm --filter @workspace/api-server test:sync-contract
       - name: Check PIN and persistent stand-PC access
         run: pnpm --filter @workspace/api-server test:kiosk
+      - name: Check queue eligibility and durable day-player delivery
+        run: pnpm --filter @workspace/api-server test:queue
       - name: Check durable game recovery and storage authorization
         run: |
           python3 artifacts/firmware/tests/test_game_journal.py

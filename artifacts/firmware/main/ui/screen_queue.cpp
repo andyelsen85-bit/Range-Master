@@ -53,19 +53,28 @@ static void open(lv_event_t*) {
  for(int i=0;i<shown.count;i++)if(!shown.games[i].status||(reserved&&shown.games[i].id==own.id)){choice=i;break;}
  modalTaking=false;portal_queue_status(lastMessage,sizeof(lastMessage));
  portal_queue_refresh();
- modal=lv_obj_create(lv_layer_top());lv_obj_set_size(modal,900,650);lv_obj_center(modal);
+ modal=lv_obj_create(lv_layer_top());
+ lv_obj_set_size(modal,900,LV_SIZE_CONTENT);
+ lv_obj_set_style_max_height(modal,lv_obj_get_height(lv_layer_top())-100,0);
+ lv_obj_center(modal);
  lv_obj_set_style_bg_color(modal,lv_color_hex(0x172133),0);lv_obj_set_style_text_color(modal,lv_color_hex(0xffffff),0);
  lv_obj_set_layout(modal,LV_LAYOUT_FLEX);lv_obj_set_flex_flow(modal,LV_FLEX_FLOW_COLUMN);
  lv_obj_add_event_cb(modal,deleted,LV_EVENT_DELETE,nullptr);
- auto *title=lv_label_create(modal);lv_label_set_text(title,"Warteschlange – freiwillige Übernahme");
+ lv_obj_set_style_text_font(modal,UI_FONT_18,0);
+ auto *title=lv_label_create(modal);lv_label_set_text(title,"Warteschlange - freiwillige Übernahme");
+ lv_obj_set_style_text_font(title,UI_FONT_20,0);
  message=lv_label_create(modal);lv_obj_set_width(message,840);lv_label_set_text(message,"Spiel auswählen. Unbekannte Spieler zuerst synchronisieren.");
+ lv_obj_set_style_text_font(message,UI_FONT_18,0);
+ if(!shown.count)lv_label_set_text(message,"Warteschlange leer");
  for(int i=0;i<shown.count;i++) {
   const auto &g=shown.games[i];char text[420];int offset=snprintf(text,sizeof(text),"%d. %s: ",i+1,modus_label((Modus)g.mode));
   for(int p=0;p<g.count&&offset<(int)sizeof(text)-1;p++)
    offset+=snprintf(text+offset,sizeof(text)-offset,"%s%.63s",p?", ":"",g.players[p].name);
   auto *b=button(modal,text,select,(void*)(intptr_t)i);lv_obj_set_width(b,840);
   if(g.status&&(!reserved||own.id!=g.id))lv_obj_add_state(b,LV_STATE_DISABLED);
-  lv_obj_set_width(lv_obj_get_child(b,0),810);lv_label_set_long_mode(lv_obj_get_child(b,0),LV_LABEL_LONG_DOT);
+  lv_obj_set_height(b,LV_SIZE_CONTENT);
+  lv_obj_set_width(lv_obj_get_child(b,0),810);
+  lv_label_set_long_mode(lv_obj_get_child(b,0),LV_LABEL_LONG_WRAP);
  }
  auto *actions=lv_obj_create(modal);lv_obj_set_size(actions,850,88);lv_obj_set_layout(actions,LV_LAYOUT_FLEX);
  button(actions,"Ersetzen",apply);button(actions,"Ergänzen",apply,(void*)1);button(actions,"Schließen",close);
@@ -76,7 +85,20 @@ void screen_queue_button(lv_obj_t *screen) {
  int index=buttons[0]?1:0;
  if(buttons[index])return;
  buttons[index]=button(screen,"Warteschlange",open);labels[index]=lv_obj_get_child(buttons[index],0);
- lv_obj_add_flag(buttons[index],LV_OBJ_FLAG_FLOATING);lv_obj_align(buttons[index],LV_ALIGN_TOP_RIGHT,-100,12);
+ lv_obj_add_flag(buttons[index],LV_OBJ_FLAG_FLOATING);
+ auto *header=lv_obj_get_child(screen,0);
+ if(header&&lv_obj_get_style_flex_flow(header,LV_PART_MAIN)==LV_FLEX_FLOW_ROW) {
+  lv_obj_set_parent(buttons[index],header);
+  lv_obj_clear_flag(buttons[index],LV_OBJ_FLAG_FLOATING);
+  lv_obj_clear_flag(buttons[index],LV_OBJ_FLAG_IGNORE_LAYOUT);
+  int last=lv_obj_get_child_count(header)-1;
+  if(last>0)lv_obj_move_to_index(buttons[index],last-1);
+ }
+ lv_obj_set_width(buttons[index],210);
+ lv_obj_set_style_text_font(labels[index],UI_FONT_16,0);
+ // The rightmost 190px belong exclusively to Back; queue never covers it.
+ lv_obj_align(buttons[index],LV_ALIGN_TOP_RIGHT,-200,8);
+ lv_obj_set_height(buttons[index],52);
  lv_obj_add_event_cb(buttons[index],deleted,LV_EVENT_DELETE,nullptr);
  lastCount=-1;
 }

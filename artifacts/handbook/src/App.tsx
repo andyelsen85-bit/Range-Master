@@ -1,4 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import terminalPalette from '../../firmware/main/ui/score_colors.h?raw';
+const remoteButtons = [
+  ['0', 'CLR_SCORE_0', '#FFFFFF'], ['1', 'CLR_SCORE_1', '#000000'],
+  ['2', 'CLR_SCORE_2', '#000000'], ['START', 'CLR_BTN_START', '#FFFFFF'],
+  ['WDH', 'CLR_BTN_REPEAT', '#FFFFFF'], ['SKIP', 'CLR_BTN_SKIP', '#000000'],
+] as const;
+function remoteColour(key: string) {
+  const value = terminalPalette.match(new RegExp(`${key}\\s*=\\s*0x([0-9a-fA-F]{6})`))?.[1];
+  if (!value) throw new Error(`Terminal palette is missing ${key}`);
+  return `#${value}`;
+}
 
 const BASE = import.meta.env.BASE_URL;
 const img = (name: string) => `${BASE}screenshots/${name}`;
@@ -218,6 +229,15 @@ export default function App() {
           </Step>
           <Step n={8} title="Spill starten a Resultater aginn">
             Op "STARTEN" drécken. Fir all Taube: <strong>Getraff</strong> oder <strong>Net Getraff</strong> drécken. Doublette H gëtt als 2 Tauben gezielt.
+            <span className="my-3 flex flex-wrap gap-2" aria-label="Terminal- und Fernbedienungstasten">
+              {remoteButtons.map(([label, key, color]) => (
+                <span key={key} className="rounded-lg border border-slate-300 px-4 py-2 font-bold"
+                  style={{ backgroundColor: remoteColour(key), color }}>{label}</span>
+              ))}
+            </span>
+            <span className="block">WDH gibt eine gestartete, noch ungewertete Einheit erneut frei.
+              Nochmals WDH nimmt die letzte vollständige Wertung zurück.
+              Eine Doublette besteht aus zwei 0/2-Wertungen, maximal vier Punkten.</span>
           </Step>
           <Step n={9} title="Resultater kucken">
             No dem leschten Duerchgang erschéngen d'Resultater automatesch mam Ranking vun all Schützen.

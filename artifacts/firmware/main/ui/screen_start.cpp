@@ -294,6 +294,7 @@ lv_obj_t *screen_start_create(void)
         lv_obj_set_width(pos_lbl, 32);
 
         lv_obj_t *dd = lv_dropdown_create(row);
+        lv_obj_set_width(dd,0);
         lv_dropdown_set_options(dd, opts ? opts : "-"); // safe if malloc failed
         lv_obj_set_flex_grow(dd, 1);
         lv_obj_set_height(dd, 40);

@@ -29,8 +29,10 @@ struct ActiveData {
     uint8_t harakiriOrder[MAX_SPIELER][HARAKIRI_MAX_CLAYS];
     Ergebnis ergebnisse[MAX_ERGEBNISSE];
     bool currentFireSent;
+    bool repeatCurrentLaunch; // occupies the old zeroed padding: binary size unchanged
     int customRuns;
 };
+static_assert(offsetof(ActiveData,customRuns)==offsetof(ActiveData,currentFireSent)+4,"Preserve active record ABI");
 struct ActiveRecord {
     uint32_t magic,version,bytes,checksum,generation;
     bool active;
@@ -56,16 +58,16 @@ static void path(int slot,char *out,size_t n) {
     X(modus) X(lauf) X(taubeIndex) X(spielerIndex) X(sequenzLen) X(spielerCount) \
     X(ergebnisseCount) X(activeAcknowledgedClays) X(activeGameCreditCount) \
     X(activeGameCreditPlayerIds) X(activeGameCreditUseIds) X(spielId) X(spieler) \
-    X(sequenz) X(harakiriOrder) X(ergebnisse) X(currentFireSent)
+    X(sequenz) X(harakiriOrder) X(ergebnisse) X(currentFireSent) X(repeatCurrentLaunch)
 
 static bool valid(const ActiveRecord &r) {
-    if(r.magic!=0x48414b49 || r.version!=1 || r.bytes!=sizeof(r) ||
+    if(r.magic!=0x48414b49 || (r.version!=1&&r.version!=2) || r.bytes!=sizeof(r) ||
        r.checksum!=hash(r))return false;
     if(!r.active)return true;
     const auto &d=r.data;
-    if((d.modus!=MODUS_HARAKIRI && d.modus!=MODUS_HARAKIRI_CUSTOM) ||
+    if(d.modus<MODUS_NORMAL || d.modus>MODUS_HARAKIRI_CUSTOM ||
        d.spielerCount<1 || d.spielerCount>MAX_SPIELER || d.sequenzLen<1 ||
-       d.sequenzLen>HARAKIRI_MAX_CLAYS || d.spielerIndex<0 ||
+       d.sequenzLen>MAX_SEQUENZ || d.spielerIndex<0 ||
        d.spielerIndex>=d.spielerCount || d.taubeIndex<0 || d.taubeIndex>d.sequenzLen ||
        d.lauf<1 || d.lauf>2 || d.customRuns<1 || d.customRuns>2 ||
        d.ergebnisseCount<0 || d.ergebnisseCount>MAX_ERGEBNISSE ||
@@ -73,6 +75,7 @@ static bool valid(const ActiveRecord &r) {
        !d.spielId[0] || d.spielId[39])return false;
     for(int p=0;p<d.spielerCount;p++) {
         if(d.spieler[p].name[MAX_NAME_LEN-1])return false;
+        if(d.modus!=MODUS_HARAKIRI && d.modus!=MODUS_HARAKIRI_CUSTOM)continue;
         bool seen[HARAKIRI_MAX_CLAYS]={};
         for(int c=0;c<d.sequenzLen;c++) {
             int index=d.harakiriOrder[p][c];
@@ -200,16 +203,19 @@ bool active_game_checkpoint() {
     if(!ui_manager_snapshot_lock(&acquired))return false;
     auto *r=(ActiveRecord*)heap_caps_calloc(1,sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!r){g_store.activeGameStorageError=true;if(acquired)ui_manager_unlock();return false;}
-    r->active=g_store.harakiriOrdersReady;
+    r->active=g_store.harakiriOrdersReady ||
+        (g_store.screen==SCREEN_SPIEL && g_store.spielerCount>0 && g_store.spielId[0]);
     if(!r->active&&!had_active){
         heap_caps_free(r);if(acquired)ui_manager_unlock();return true;
     }
-    r->magic=0x48414b49;r->version=1;r->bytes=sizeof(*r);r->generation=++next_generation;
+    r->magic=0x48414b49;r->version=2;r->bytes=sizeof(*r);r->generation=++next_generation;
     if(r->active) {
 #define PACK(field) memcpy(&r->data.field,&g_store.field,sizeof(r->data.field));
         ACTIVE_FIELDS(PACK)
 #undef PACK
-        r->data.customRuns=g_store.modus==MODUS_HARAKIRI_CUSTOM ? g_store.customLaeufe[4] : 2;
+        r->data.customRuns=g_store.modus==MODUS_HARAKIRI_CUSTOM ? g_store.customLaeufe[4] :
+            (g_store.modus>=MODUS_CUSTOM_1 && g_store.modus<=MODUS_CUSTOM_4 ?
+                g_store.customLaeufe[g_store.modus-MODUS_CUSTOM_1] : 2);
     }
     if(acquired)ui_manager_unlock();
     game_journal_storage_lock();
@@ -302,14 +308,19 @@ bool active_game_restore() {
 #define UNPACK(field) memcpy(&g_store.field,&best->data.field,sizeof(g_store.field));
             ACTIVE_FIELDS(UNPACK)
 #undef UNPACK
-            g_store.harakiriOrdersReady=true;
+            g_store.harakiriOrdersReady=g_store.modus==MODUS_HARAKIRI||g_store.modus==MODUS_HARAKIRI_CUSTOM;
             if(g_store.modus==MODUS_HARAKIRI_CUSTOM)g_store.customLaeufe[4]=best->data.customRuns;
+            else if(g_store.modus>=MODUS_CUSTOM_1&&g_store.modus<=MODUS_CUSTOM_4)
+                g_store.customLaeufe[g_store.modus-MODUS_CUSTOM_1]=best->data.customRuns;
             g_store.screen=SCREEN_SPIEL;
             // A physical shot may have happened just before power loss.
             // Never authorize a duplicate automatically after restart.
-            g_store.currentFireSent=true;
-            g_store.activeGameResumed=true;
-            terminal_log_add("game","WARN","Harakiri-Spiel fortgesetzt; letzte Einheit vor erneutem Auslösen prüfen");
+            // Legacy writers queued radio work before persisting the flag.
+            // Only v2's durable pre-launch reservation makes false trustworthy.
+            g_store.currentFireSent=invalid||best->version==1||best->data.currentFireSent;
+            g_store.repeatCurrentLaunch=!invalid&&best->version>=2&&best->data.repeatCurrentLaunch;
+            g_store.activeGameResumed=g_store.currentFireSent;
+            terminal_log_add("game","WARN","Spiel fortgesetzt; letzte Einheit vor erneutem Auslösen prüfen");
             if(invalid)terminal_log_add("data_loss_risk","WARN",
                 "Unvollständiger Spielstand: letzte gültige Sicherung geladen; letzte Wertung prüfen");
         } else if(best->active) {

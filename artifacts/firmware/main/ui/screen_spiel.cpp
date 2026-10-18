@@ -11,6 +11,9 @@
 #include "screen_spiel.h"
 #include "lora_stub.h"
 #include "coprocessor.h"
+#include "scorecard_render.h"
+#include "active_scorecard.h"
+#include "esp_heap_caps.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_maschine;
@@ -28,6 +31,8 @@ static lv_obj_t *s_lbl_wifi_status;
 static lv_obj_t *s_btn_fire;
 static lv_obj_t *s_lbl_fire_button;
 static lv_obj_t *s_score_table;
+static ScorecardRenderState s_scorecard_state;
+static FinishedGame *s_scorecard_projection;
 static lv_obj_t *s_btn_score[3];
 static lv_obj_t *s_quit_modal;
 static lv_obj_t *s_quit_message;
@@ -70,6 +75,12 @@ SpielActionResult spiel_action_fire()
     if (g_store.currentFireSent) return SPIEL_ACTION_SCORE_FIRST;
     if (lora_request_busy()) return SPIEL_ACTION_RADIO_BUSY;
 
+    // Reserve the launch durably BEFORE the worker can transmit it. A reboot
+    // after WDH can therefore safely preserve its explicit false fire flag.
+    g_store.currentFireSent=true;
+    g_store.repeatCurrentLaunch=false;
+    game_store_save();
+    if(g_store.activeGameStorageError)return SPIEL_ACTION_RADIO_BUSY;
     bool queued = false;
     if (se->isPair && se->maschine != MASCHINE_H) {
         queued = lora_fire_doublette_game(se->maschine, se->partner, se->delayMs);
@@ -78,7 +89,7 @@ SpielActionResult spiel_action_fire()
         // locally by the addressed relay after its fixed system delay.
         queued = lora_fire_machine_game(se->maschine);
     }
-    if (queued) {g_store.currentFireSent = true;game_store_save();}
+    if (!queued) {g_store.currentFireSent=false;game_store_save();}
     screen_spiel_refresh();
     return queued ? SPIEL_ACTION_OK : SPIEL_ACTION_RADIO_BUSY;
 }
@@ -91,7 +102,11 @@ static void fire_cb(lv_event_t *e)
 SpielActionResult spiel_action_repeat()
 {
     if (g_store.ergebnisseCount <= 0 &&
-        !(g_store.harakiriOrdersReady && g_store.currentFireSent))return SPIEL_ACTION_IGNORED;
+        !g_store.currentFireSent)return SPIEL_ACTION_IGNORED;
+    const SequenzEintrag *entry=store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
+    if(g_store.activeGameStorageError ||
+       (g_store.currentFireSent && entry && entry->isPair && entry->isDoublette))
+        return SPIEL_ACTION_IGNORED;
     store_wiederholen();
     screen_spiel_refresh();
     return SPIEL_ACTION_OK;
@@ -209,7 +224,8 @@ lv_obj_t *screen_spiel_create(void)
 {
     s_scr = lv_obj_create(NULL);
     lv_obj_set_size(s_scr, DISPLAY_LOGICAL_W, DISPLAY_LOGICAL_H);
-    screen_base_init(s_scr);   // dark bg, opaque, non-scrollable
+    screen_base_init(s_scr);
+    lv_obj_clear_flag(s_scr,LV_OBJ_FLAG_SCROLLABLE);
 
     // ── Top status bar (70px) ─────────────────────────────
     lv_obj_t *topbar = lv_obj_create(s_scr);
@@ -278,6 +294,7 @@ lv_obj_t *screen_spiel_create(void)
 
     s_btn_wiederhole = lv_btn_create(ctrl_row);
     lv_obj_add_style(s_btn_wiederhole, &g_style_btn_secondary, 0);
+    lv_obj_set_style_bg_color(s_btn_wiederhole,lv_color_hex(CLR_BTN_REPEAT),0);
     // Keep both controls within the 240px inner panel while meeting a more
     // usable touch size than the previous 112x40 targets.
     lv_obj_set_size(s_btn_wiederhole, 116, 48);
@@ -291,19 +308,20 @@ lv_obj_t *screen_spiel_create(void)
 
     lv_obj_t *skip_btn = lv_btn_create(ctrl_row);
     lv_obj_add_style(skip_btn, &g_style_btn_secondary, 0);
+    lv_obj_set_style_bg_color(skip_btn,lv_color_hex(CLR_BTN_SKIP),0);
     lv_obj_set_size(skip_btn, 116, 48);
     lv_obj_set_style_pad_hor(skip_btn, 10, 0);
     lv_obj_add_event_cb(skip_btn, skip_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *sl = lv_label_create(skip_btn);
     lv_label_set_text(sl, LV_SYMBOL_NEXT " SKIP");
     lv_obj_set_style_text_font(sl, UI_FONT_14, 0);
-    lv_obj_set_style_text_color(sl, lv_color_hex(CLR_TEXT), 0);
+    lv_obj_set_style_text_color(sl, lv_color_hex(0x000000), 0);
     lv_obj_center(sl);
 
     // ── Score buttons: 0, 1, 2 ─────────────────────────────
     static const char *sc_labels[] = {"0", "1", "2"};
     static int sc_pts[]            = {0, 1, 2};
-    static uint32_t sc_colors[]    = {CLR_DANGER, CLR_WARN, CLR_SUCCESS};
+    static uint32_t sc_colors[]    = {CLR_SCORE_0, CLR_SCORE_1, CLR_SCORE_2};
 
     for (int i = 0; i < 3; i++) {
         lv_obj_t *btn = lv_btn_create(left);
@@ -321,7 +339,9 @@ lv_obj_t *screen_spiel_create(void)
         lv_obj_t *lbl = lv_label_create(btn);
         lv_label_set_text(lbl, sc_labels[i]);
         lv_obj_set_style_text_font(lbl, UI_FONT_36, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(i==0?0xFFFFFF:0x000000), 0);
+        lv_obj_set_style_border_width(btn,1,0);
+        lv_obj_set_style_border_color(btn,lv_color_hex(0xCBD5E1),0);
         lv_obj_center(lbl);
     }
 
@@ -344,7 +364,7 @@ lv_obj_t *screen_spiel_create(void)
     // ── FIRE trigger at the bottom of the control stack ────
     s_btn_fire = lv_btn_create(left);
     lv_obj_set_size(s_btn_fire, LV_PCT(100), 64);
-    lv_obj_set_style_bg_color(s_btn_fire, lv_color_hex(CLR_PRIMARY), 0);
+    lv_obj_set_style_bg_color(s_btn_fire, lv_color_hex(CLR_BTN_START), 0);
     lv_obj_set_style_bg_opa(s_btn_fire, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_btn_fire, 10, 0);
     lv_obj_set_style_border_width(s_btn_fire, 0, 0);
@@ -375,7 +395,7 @@ lv_obj_t *screen_spiel_create(void)
 
     // ── 2. Five-post grid (children rebuilt in refresh)
     s_player_grid = lv_obj_create(right);
-    lv_obj_set_size(s_player_grid, LV_PCT(100), 128);
+    lv_obj_set_size(s_player_grid, LV_PCT(100), 148);
     lv_obj_set_style_bg_opa(s_player_grid, LV_OPA_0, 0);
     lv_obj_set_style_border_width(s_player_grid, 0, 0);
     lv_obj_set_style_pad_all(s_player_grid, 0, 0);
@@ -456,14 +476,11 @@ lv_obj_t *screen_spiel_create(void)
 
     // ── 5. Score table
     s_score_table = lv_table_create(right);
+    if(!s_scorecard_projection)s_scorecard_projection=(FinishedGame*)heap_caps_calloc(1,sizeof(FinishedGame),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    lv_obj_add_flag(s_score_table,LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+    lv_obj_add_event_cb(s_score_table,[](lv_event_t *e){scorecard_render_draw(e,&s_scorecard_state);},LV_EVENT_DRAW_TASK_ADDED,nullptr);
     lv_obj_set_width(s_score_table, LV_PCT(100));
-    lv_table_set_col_cnt(s_score_table, 3);
-    lv_table_set_col_width(s_score_table, 0, 220);
-    lv_table_set_col_width(s_score_table, 1, 90);
-    lv_table_set_col_width(s_score_table, 2, 90);
-    lv_table_set_cell_value(s_score_table, 0, 0, "SPIELER");
-    lv_table_set_cell_value(s_score_table, 0, 1, "STAND");
-    lv_table_set_cell_value(s_score_table, 0, 2, "PUNKTE");
+    lv_table_set_col_cnt(s_score_table, 2); // shared renderer supplies the real columns
     lv_obj_set_style_text_font(s_score_table, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_score_table, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_bg_color(s_score_table, lv_color_hex(CLR_CARD), 0);
@@ -557,6 +574,8 @@ void screen_spiel_refresh(void)
         char text[160];
         if(s->activeGameStorageError)
             snprintf(text,sizeof(text),"SPEICHERFEHLER: keine weitere Wertung/kein Start. Speichern wird erneut versucht.");
+        else if(s->repeatCurrentLaunch)
+            snprintf(text,sizeof(text),"Maschine erneut starten");
         else if(s->activeGameResumed)
             snprintf(text,sizeof(text),"NEUSTART: letzte Einheit prüfen. Werten/überspringen oder bewusst wiederholen.");
         else if(upcoming && upcoming->isPair)
@@ -611,8 +630,8 @@ void screen_spiel_refresh(void)
 
     // ── 5-post grid ───────────────────────────────────────
     // Column width: right panel usable width ≈ 976px. 5 cols × 186 + 4 × 6 gap ≈ 954.
-    static const int POST_W = 186;
-    static const int POST_H = 128;
+    const int POST_W = (lv_obj_get_content_width(s_player_grid)-4*8)/5;
+    static const int POST_H = 148;
 
     uint32_t grid_signature = 2166136261u;
     auto hash_grid = [&](uint32_t value) {
@@ -635,7 +654,7 @@ void screen_spiel_refresh(void)
 
         lv_obj_t *col = lv_obj_create(s_player_grid);
         lv_obj_set_size(col, POST_W, POST_H);
-        lv_obj_set_style_bg_color(col, lv_color_hex(CLR_CARD), 0);
+        lv_obj_set_style_bg_color(col, lv_color_hex(isActivePost?CLR_SCORE_2:CLR_CARD), 0);
         lv_obj_set_style_bg_opa(col, LV_OPA_COVER, 0);
         lv_obj_set_style_border_color(col,
             isActivePost ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_BORDER), 0);
@@ -653,7 +672,7 @@ void screen_spiel_refresh(void)
         lv_label_set_text(post_hdr, phdr);
         lv_obj_set_style_text_font(post_hdr, UI_FONT_12, 0);
         lv_obj_set_style_text_color(post_hdr,
-            isActivePost ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_MUTED), 0);
+            isActivePost ? lv_color_hex(0x000000) : lv_color_hex(CLR_MUTED), 0);
 
         // Players at this post
         bool anyPlayer = false;
@@ -665,7 +684,7 @@ void screen_spiel_refresh(void)
             lv_obj_t *prow = lv_obj_create(col);
             lv_obj_set_size(prow, LV_PCT(100), LV_SIZE_CONTENT);
             lv_obj_set_style_bg_color(prow,
-                isActive ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_BG), 0);
+                isActive ? lv_color_hex(CLR_SCORE_2) : lv_color_hex(CLR_BG), 0);
             lv_obj_set_style_bg_opa(prow, LV_OPA_COVER, 0);
             lv_obj_set_style_border_width(prow, 0, 0);
             lv_obj_set_style_radius(prow, 6, 0);
@@ -677,7 +696,7 @@ void screen_spiel_refresh(void)
 
             lv_obj_t *name_lbl = lv_label_create(prow);
             lv_label_set_text(name_lbl, s->spieler[i].name);
-            lv_obj_set_style_text_font(name_lbl, UI_FONT_12, 0);
+            lv_obj_set_style_text_font(name_lbl, UI_FONT_16, 0);
             lv_obj_set_style_text_color(name_lbl,
                 isActive ? lv_color_hex(0x000000) : lv_color_hex(CLR_TEXT), 0);
             lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
@@ -688,10 +707,10 @@ void screen_spiel_refresh(void)
             snprintf(pts_buf, sizeof(pts_buf), "%dp", s->spieler[i].punkte);
             lv_obj_t *pts_lbl = lv_label_create(prow);
             lv_label_set_text(pts_lbl, pts_buf);
-            lv_obj_set_style_text_font(pts_lbl, UI_FONT_12, 0);
+            lv_obj_set_style_text_font(pts_lbl, UI_FONT_18, 0);
             lv_obj_set_style_text_color(pts_lbl,
                 isActive ? lv_color_hex(0x000000) : lv_color_hex(CLR_PRIMARY), 0);
-            lv_obj_set_width(pts_lbl, 32);
+            lv_obj_set_width(pts_lbl, 48);
         }
 
         if (!anyPlayer) {
@@ -717,20 +736,11 @@ void screen_spiel_refresh(void)
     }
 
     // ── Score table: show current (rotated) position ──────
-    uint32_t table_signature = grid_signature ^ 0x9e3779b9u;
-    if (table_signature != s_table_signature) {
-        lv_table_set_row_cnt(s_score_table, s->spielerCount + 1);
-        for (int i = 0; i < s->spielerCount; i++) {
-            int cur_post = pos_of(s->spieler[i].startPosten);
-            char rb[16];
-            lv_table_set_cell_value(s_score_table, i + 1, 0, s->spieler[i].name);
-            lv_table_set_cell_ctrl(s_score_table, i + 1, 0,
-                                   LV_TABLE_CELL_CTRL_TEXT_CROP);
-            snprintf(rb, sizeof(rb), "P%d", cur_post);
-            lv_table_set_cell_value(s_score_table, i + 1, 1, rb);
-            snprintf(rb, sizeof(rb), "%d", s->spieler[i].punkte);
-            lv_table_set_cell_value(s_score_table, i + 1, 2, rb);
-        }
+    uint32_t table_signature = grid_signature ^ 0x9e3779b9u ^
+        ((uint32_t)s->ergebnisseCount<<16) ^ (uint32_t)s->lauf;
+    if (table_signature != s_table_signature&&s_scorecard_projection) {
+        int currentColumn=active_scorecard_project(s,s_scorecard_projection);
+        scorecard_render(s_score_table,s_scorecard_projection,&s_scorecard_state,true,s->spielerIndex+1,currentColumn);
         s_table_signature = table_signature;
     }
 }

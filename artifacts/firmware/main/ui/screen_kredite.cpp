@@ -63,8 +63,8 @@ static void refresh_player_values(int spieler_id)
         int available = stand->gewaehrt - stand->verbraucht;
         if (available < 0) available = 0;
         char text[80];
-        snprintf(text, sizeof(text), "%d KREDITE VERFÜGBAR  (%d/%d VERBRAUCHT)",
-                 available, stand->verbraucht, stand->gewaehrt);
+        snprintf(text, sizeof(text), "%d %s VERFÜGBAR  (%d/%d VERBRAUCHT)",
+                 available, available==1?"KREDIT":"KREDITE", stand->verbraucht, stand->gewaehrt);
         const char *current = lv_label_get_text(refs->creditLabel);
         if (!current || strcmp(current, text) != 0)
             lv_label_set_text(refs->creditLabel, text);
@@ -128,8 +128,11 @@ static bool add_action(lv_obj_t *button, lv_event_cb_t callback, int spieler_id,
 
 static void set_disabled_appearance(lv_obj_t *button)
 {
-    lv_obj_set_style_bg_color(button, lv_color_hex(CLR_MUTED), LV_STATE_DISABLED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x334155), LV_STATE_DISABLED);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_DISABLED);
+    lv_obj_set_style_text_color(button,lv_color_hex(0xFFFFFF),LV_STATE_DISABLED);
+    lv_obj_set_style_text_opa(button,LV_OPA_COVER,LV_STATE_DISABLED);
+    lv_obj_set_style_opa(button,LV_OPA_COVER,LV_STATE_DISABLED);
 }
 
 static PlayerBill *cached_bill(int spieler_id)
@@ -511,8 +514,8 @@ static void build_player_list(void)
         int avail = k->gewaehrt - k->verbraucht;
         if (avail < 0) avail = 0;
         snprintf(cred_buf, sizeof(cred_buf),
-                  "%d KREDITE VERFÜGBAR  (%d/%d VERBRAUCHT)",
-                 avail, k->verbraucht, k->gewaehrt);
+                  "%d %s VERFÜGBAR  (%d/%d VERBRAUCHT)",
+                 avail, avail==1?"KREDIT":"KREDITE", k->verbraucht, k->gewaehrt);
         lv_obj_t *cred_lbl = lv_label_create(info);
         lv_label_set_text(cred_lbl, cred_buf);
         lv_obj_set_style_text_font(cred_lbl, UI_FONT_14, 0);

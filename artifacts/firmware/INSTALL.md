@@ -216,6 +216,21 @@ W (...) transport: Version mismatch: Host [2.12.x] > Co-proc [2.3.x]
 
 Wann de Warning fort ass → WiFi-Scan funktionnéiert a puer Sekonnen.
 
+**Erwartete Slave-Version: 2.12.12**, identisch zum derzeit gepinnten
+`espressif/esp_hosted`-Host und zu `ESP_HOSTED_VERSION` im Skript.
+Auch `Co-proc [0.0.0]` ist keine passende Slave-Version. Unter
+**Einstellungen > Info** zeigt das Terminal die tatsächlich abgefragte
+C6-Version neben der Host-Version an; bei einem älteren Slave steht dort
+`UPDATE ERFORDERLICH`. Die Abfrage läuft außerhalb des UI-Threads.
+
+Nach dem Flashen über **CN5** das komplette Board neu starten und diese Anzeige
+prüfen. Keine P4-NVS-/FAT-Partition löschen und kein `erase-flash` auf CN4
+ausführen. Für die Netzwerkdiagnose in Einstellungen den **Netzwerktest (30 s)**
+starten: tatsächlicher DHCP-Router, konfiguriertes Gateway und Portal werden
+getrennt geprüft. Ein fehlendes Portal-Ping allein beweist keinen
+Internetausfall, da ICMP gesperrt sein kann. Für HTTPS zusätzlich die
+`net_timing`-Zeilen prüfen (DNS, TCP, TLS, erstes Antwortbyte, Gesamtzeit).
+
 ---
 
 ## Deel 5 — Éischte Start: WiFi a Portal-Schlëssel astellen

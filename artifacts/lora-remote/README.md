@@ -3,6 +3,16 @@
 Heltec **Wireless Stick V3, 433 MHz**, powered through USB-C. This is an
 operating remote, **not an emergency stop or safety interlock**.
 
+### Button label colours
+
+Match the terminal's authoritative `../firmware/main/ui/score_colors.h`:
+**0 black/white text/light border**, **1 yellow/black text**,
+**2 green/black text**, **START red/white text**, **WDH blue/white text**,
+**SKIP white/black text**. These are label colours, not GPIO assignments.
+WDH releases an unscored launch first; another WDH undoes the previous complete
+unit. It cannot undo a half-scored doublette. A doublette scores 0 or 2 per clay,
+maximum four points.
+
 ## Provisioning and building
 
 1. Install the official **Heltec ESP32 Dev-Boards** board package and library,

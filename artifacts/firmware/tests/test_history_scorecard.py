@@ -28,9 +28,18 @@ struct lv_draw_dsc_base_t { int part; uint32_t id1,id2; };
 struct lv_draw_fill_dsc_t { int color,opa; };
 using lv_border_side_t=int;
 constexpr int LV_BORDER_SIDE_LEFT=1,LV_BORDER_SIDE_RIGHT=2,LV_STATE_PRESSED=1;
-struct lv_draw_border_dsc_t { int side; };
+struct lv_font_t{int line_height;};
+lv_font_t ui_font_12{12},ui_font_14{14},ui_font_16{16},ui_font_18{18},ui_font_20{20},
+ ui_font_22{22},ui_font_24{24},ui_font_28{28},ui_font_36{36},ui_font_48{48};
+struct lv_draw_label_dsc_t { int color;const lv_font_t *font=nullptr; };
+struct lv_draw_border_dsc_t { int side;int width=0,color=0; };
+using lv_border_side_t=int;
+constexpr int LV_BORDER_SIDE_FULL=3,LV_OBJ_FLAG_SCROLLABLE=2,LV_TEXT_FLAG_NONE=0;
+struct lv_point_t{int x,y;};
+void lv_text_get_size(lv_point_t*p,const char*s,const lv_font_t*f,int,int,int,int){p->x=strlen(s)*f->line_height/2;p->y=f->line_height;}
 struct lv_draw_task_t { lv_draw_dsc_base_t base; lv_draw_fill_dsc_t *fill; };
 struct lv_event_t { void *data; lv_draw_task_t *task=nullptr; };
+lv_draw_label_dsc_t *lv_draw_task_get_label_dsc(lv_draw_task_t*){return nullptr;}
 constexpr int LV_PART_ITEMS=1;
 lv_draw_task_t *lv_event_get_draw_task(lv_event_t *e) { return e->task; }
 void *lv_draw_task_get_draw_dsc(lv_draw_task_t *task) { return &task->base; }
@@ -77,6 +86,11 @@ static FinishedGame s_selected_game;
 static bool s_has_selected_game, s_history_built;
 static uint32_t s_history_signature;
 void lv_obj_set_style_text_color(lv_obj_t*,int,int){}
+void lv_obj_set_style_text_font(lv_obj_t*,const lv_font_t*,int){}
+const lv_font_t *lv_obj_get_style_text_font(lv_obj_t*,int){return &ui_font_20;}
+void lv_obj_update_layout(lv_obj_t*){}
+int lv_obj_get_content_width(lv_obj_t*){return 950;}
+int lv_obj_get_content_height(lv_obj_t*){return 260;}
 static lv_obj_t *s_list, *s_lbl_empty, *s_detail_card, *s_detail_hdr, *s_detail_date, *s_detail_table;
 int table_writes=0, list_rebuilds=0;
 void lv_label_set_text(lv_obj_t *o,const char *text) { o->label=text; }
@@ -153,7 +167,7 @@ int main() {
     assert(table.rows[1][1]=="1" && table.rows[1][2]=="0" && table.rows[1][19]=="23");
     const char *headings[]={"A","B","C","D","E","F","G","H","H","A","B","C","D","E","F","G","H","H"};
     for(int col=0;col<18;++col)assert(table.rows[0][col+1]==headings[col]);
-    assert(table.rows[0][19]=="GESAMT");
+    assert(table.rows[0][19]=="TOTAL");
     for(int col=0;col<20;++col)
         assert((s_scorecard_state.pair[col]!=0)==(col==8 || col==9 || col==17 || col==18));
     // Actual draw callback: shade both headers and player cells, but never
@@ -162,8 +176,10 @@ int main() {
         lv_draw_fill_dsc_t fill{CLR_CARD,17};
         lv_draw_task_t task{{LV_PART_ITEMS,(uint32_t)row,(uint32_t)col},&fill};
         lv_event_t event{nullptr,&task};scorecard_draw_cb(&event);
-        assert(fill.color==(s_scorecard_state.pair[col] ? 0x343C49 : CLR_CARD));
-        assert(fill.opa==(s_scorecard_state.pair[col] ? LV_OPA_COVER : 17));
+        bool scored=row>0&&col>0&&col<=s_scorecard_state.columns&&s_scorecard_state.points[row-1][col-1]>=0;
+        assert((unsigned)fill.color==(scored?score_color(s_scorecard_state.points[row-1][col-1]):
+            s_scorecard_state.pair[col] ? 0x343C49 : CLR_CARD));
+        assert(fill.opa==((scored||s_scorecard_state.pair[col]) ? LV_OPA_COVER : 17));
     }
     lv_draw_fill_dsc_t ignored_fill{CLR_CARD,17};
     lv_draw_task_t other_part{{0,0,8},&ignored_fill};lv_event_t other_event{nullptr,&other_part};

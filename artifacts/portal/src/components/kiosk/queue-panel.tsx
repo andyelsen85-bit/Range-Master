@@ -210,7 +210,7 @@ export function QueuePanel({ enabled, resetSignal }: { enabled: boolean; resetSi
             {settings?.queueEnabled && !blockedRunning && !blockedActive && modeChooser}
             <div className="flex flex-wrap gap-3">
               {settings?.queueEnabled && (
-                <button type="button" disabled={busy || !!blockedRunning || !!blockedActive || selMissing}
+                <button type="button" disabled={busy || !!blockedRunning || !!blockedActive || selMissing || selPlayer?.canSignup===false}
                   onClick={() => { setMessage(null); signup.mutate({ data: { spielerId: selected.id, modus: (modes.length > 1 ? modus : modes[0]) as QueueSignupInputModus } }); }}
                   data-testid="button-kiosk-signup"
                   className="kiosk-primary h-16 px-8 rounded-xl text-2xl font-black flex items-center gap-3 disabled:opacity-40">
@@ -455,15 +455,17 @@ export function PlayerList({ players, loading, selectedIds, onTap, compact }: {
   return (
     <div className={cn("min-h-0 overflow-y-auto kiosk-scroll pr-1", compact ? "flex-1 max-h-[22rem]" : "flex-1")} data-testid="list-kiosk-players">
       {loading && <SkeletonRows />}
-      {!loading && players.length === 0 && <p className="text-xl text-muted-foreground py-6 text-center">Kein Spieler gefunden.</p>}
+      {!loading && players.length === 0 && <p className="text-xl text-muted-foreground py-6 text-center">Noch keine Spieler des Tages - bitte am Stand eintragen lassen und Credits buchen.</p>}
       <div className="grid grid-cols-2 gap-2">
         {players.map((p) => {
           const sel = selectedIds.includes(p.id);
           return (
-            <button key={p.id} type="button" onClick={() => onTap(p)} data-testid={`button-player-${p.id}`} aria-pressed={sel}
+            <button key={p.id} type="button" disabled={p.canSignup===false} onClick={() => onTap(p)} data-testid={`button-player-${p.id}`} aria-pressed={sel}
               className={cn("min-h-[56px] px-4 py-2 rounded-xl text-left text-xl font-semibold border-2 flex items-center justify-between gap-2",
                 sel ? "border-primary bg-primary/15 text-foreground" : "border-border/60 bg-background/40")}>
-              <span className="truncate">{p.displayName}</span>
+              <span className="min-w-0 break-words">{p.displayName}
+                {p.eligibilityHint&&<span className="block text-base text-muted-foreground">{p.eligibilityHint}</span>}
+              </span>
               {p.running ? <span className="text-sm font-bold uppercase tracking-wider text-destructive shrink-0">schießt</span>
                 : p.activeSignup ? <span className="text-sm font-bold uppercase tracking-wider text-muted-foreground shrink-0">eingeschr.</span>
                 : sel ? <Check size={22} className="text-primary shrink-0" /> : null}

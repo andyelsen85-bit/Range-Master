@@ -441,6 +441,8 @@ lv_obj_t *screen_spiller_create(void)
 
     // Sync status text
     s_lbl_status = lv_label_create(hdr);
+    lv_obj_set_width(s_lbl_status,130);
+    lv_label_set_long_mode(s_lbl_status,LV_LABEL_LONG_DOT);
     lv_label_set_text(s_lbl_status, "");
     lv_obj_set_style_text_font(s_lbl_status, UI_FONT_12, 0);
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(CLR_MUTED), 0);

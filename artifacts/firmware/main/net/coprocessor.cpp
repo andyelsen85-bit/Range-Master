@@ -21,11 +21,26 @@
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
 #include "coprocessor.h"
+#include <atomic>
+static std::atomic<int> s_last_disconnect_reason{0};
 #include "game_store.h"
 #include "terminal_logs.h"
 #include "esp_sntp.h"
 #include "web_config.h"
 #include "app_config.h"
+#include "esp_hosted.h"
+static constexpr uint32_t EXPECTED_C6_VERSION=ESP_HOSTED_VERSION_VAL(
+    ESP_HOSTED_VERSION_MAJOR_1,ESP_HOSTED_VERSION_MINOR_1,ESP_HOSTED_VERSION_PATCH_1);
+static std::atomic<int> s_rssi{-127};
+static portMUX_TYPE s_fw_lock=portMUX_INITIALIZER_UNLOCKED;
+static char s_fw_version[128]="C6: Version noch nicht abgefragt";
+static bool s_fw_checked=false;
+static bool s_fw_query_warned=false;
+int network_rssi(){return s_rssi.load();}
+int network_disconnect_reason(){return s_last_disconnect_reason.load();}
+void cop_firmware_version(char *out,size_t capacity) {
+    portENTER_CRITICAL(&s_fw_lock);snprintf(out,capacity,"%s",s_fw_version);portEXIT_CRITICAL(&s_fw_lock);
+}
 
 static const char *TAG = "coprocessor";
 
@@ -37,7 +52,31 @@ static TaskHandle_t s_power_save_task;
 static void disable_power_save_worker(void *)
 {
     for(;;) {
-        ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
+        ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(10000));
+        if(s_wifi_connected) {
+            wifi_ap_record_t ap{};if(esp_wifi_sta_get_ap_info(&ap)==ESP_OK)s_rssi.store(ap.rssi);
+            if(!s_fw_checked) {
+                esp_hosted_coprocessor_fwver_t version{};
+                esp_err_t version_result=esp_hosted_get_coprocessor_fwversion(&version);
+                if(version_result==ESP_OK) {
+                    bool mismatch=ESP_HOSTED_VERSION_VAL(version.major1,version.minor1,version.patch1)<EXPECTED_C6_VERSION;
+                    char label[128];snprintf(label,sizeof(label),"C6 %u.%u.%u / Host " ESP_HOSTED_VERSION_PRINTF_FMT "%s",
+                        (unsigned)version.major1,(unsigned)version.minor1,(unsigned)version.patch1,
+                        ESP_HOSTED_VERSION_PRINTF_ARGS(EXPECTED_C6_VERSION),mismatch?" - UPDATE ERFORDERLICH":" - kompatibel");
+                    portENTER_CRITICAL(&s_fw_lock);snprintf(s_fw_version,sizeof(s_fw_version),"%s",label);portEXIT_CRITICAL(&s_fw_lock);
+                    terminal_log_add("wifi",mismatch?"WARN":"INFO",label);s_fw_checked=true;
+                } else {
+                    char label[128];snprintf(label,sizeof(label),"C6 unbekannt / Host " ESP_HOSTED_VERSION_PRINTF_FMT " - RPC/WLAN prüfen",
+                        ESP_HOSTED_VERSION_PRINTF_ARGS(EXPECTED_C6_VERSION));
+                    portENTER_CRITICAL(&s_fw_lock);snprintf(s_fw_version,sizeof(s_fw_version),"%s",label);portEXIT_CRITICAL(&s_fw_lock);
+                    if(!s_fw_query_warned) {
+                        terminal_log_add("wifi","WARN",label);
+                        ESP_LOGW(TAG,"C6 version RPC failed: %s; retry in background",esp_err_to_name(version_result));
+                        s_fw_query_warned=true;
+                    }
+                }
+            }
+        }
         unsigned attempts=0;
         while(s_wifi_connected) {
             esp_err_t result=esp_wifi_set_ps(WIFI_PS_NONE);
@@ -118,6 +157,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
             case WIFI_EVENT_STA_DISCONNECTED: {
                 wifi_event_sta_disconnected_t *disc =
                     (wifi_event_sta_disconnected_t *)event_data;
+                s_last_disconnect_reason.store(disc->reason);
                 ESP_LOGW(TAG, "WiFi disconnected (reason %d)", disc->reason);
                 s_wifi_connected = false;
                 s_ip_addr[0]     = '\0';

@@ -1,3 +1,5 @@
+# Keep the portal HTTP handle and resumable TLS session across billing cycles.
+CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS=y
 # ── Target ────────────────────────────────────────────────────────────────
 CONFIG_IDF_TARGET="esp32p4"
 

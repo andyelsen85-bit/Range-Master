@@ -6,6 +6,7 @@ idf_component_register(
         "display/gsl3680_touch.cpp"
         "store/game_store.cpp"
         "store/day_inventory.cpp"
+        "store/day_player_events.cpp"
         "store/terminal_logs.cpp"
         "store/game_journal.cpp"
         "store/storage_admin.cpp"
@@ -14,6 +15,9 @@ idf_component_register(
         "store/offline_cache.cpp"
         "net/coprocessor.cpp"
         "net/http_sync.cpp"
+        "net/network_trace.cpp"
+        "net/network_test.cpp"
+        "net/bounded_dns.cpp"
         "net/portal_runtime.cpp"
         "net/portal_queue_json.cpp"
         "ui/screen_queue.cpp"
@@ -82,6 +86,14 @@ idf_component_register(
         esp_netif
         esp_event
 )
+
+# This static pass needs only Python, including on Windows (no host compiler).
+add_custom_target(ui_font_coverage ALL
+    COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/../tests/test_font_coverage.py" --check-only
+    VERBATIM)
+add_dependencies(${COMPONENT_LIB} ui_font_coverage)
+target_link_libraries(${COMPONENT_LIB} INTERFACE
+    "-Wl,--wrap=lwip_getaddrinfo,--wrap=lwip_connect,--wrap=mbedtls_ssl_handshake,--wrap=lwip_send,--wrap=lwip_recv,--wrap=lwip_select")
 
 # Keep size headroom in the 0x330000 OTA slots without changing storage offsets.
 # These control/UI and network modules are not display/DMA hot paths; use scoped

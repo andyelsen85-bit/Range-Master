@@ -42,6 +42,13 @@ router.post("/sync/gameday-players",async(req,res)=>{
    results.push({externalId:e.externalId,status:inserted.length?"accepted":"skipped"});
   }
   await cancelIneligibleQueue(tx);await compactQueue(tx);return results;
+ }).catch(error=>{
+  // Catch outside the transaction: an ID conflict rolls back the entire batch.
+  if(error?.status===409)return null;
+  throw error;
+ });
+ if(results===null)return void res.status(409).json({
+  error:"Ereignis-ID mit geändertem Inhalt.",code:"event_id_conflict"
  });
  res.json({results});
 });

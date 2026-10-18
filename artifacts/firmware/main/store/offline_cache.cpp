@@ -20,6 +20,7 @@
 #include "esp_rom_crc.h"
 #include "nvs.h"
 #include "game_store.h"
+#include "day_player_events.h"
 #include "offline_cache.h"
 #include "game_journal.h"
 #include "active_game.h"
@@ -166,6 +167,7 @@ static bool removable_root_only_locked() {
         if(stat(full,&st)!=0){ok=false;continue;}
         if(!strcasecmp(n,"tmcache")){if(!S_ISDIR(st.st_mode))ok=false;continue;}
         if(!S_ISREG(st.st_mode)){ok=false;continue;}
+        if((!strcasecmp(n,"dayp0.bin")||!strcasecmp(n,"dayp1.bin"))&&day_players_repair_safe())continue;
         if(!strcasecmp(n,"tmcache")||game_journal_is_file(n)||!strcasecmp(n,"probe.tmp")||
            !strcasecmp(n,"active0.bin")||!strcasecmp(n,"active1.bin")||
            !strcasecmp(n,"active0.bin.tmp")||!strcasecmp(n,"active1.bin.tmp")||
@@ -302,7 +304,7 @@ static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *ref
     bool formatted=false;
     if(ok&&needs_format&&allow_format) {
         if(g_store.pendingKreditEventCount||g_store.pendingVerkaufEventCount||
-           g_store.pendingPaymentEventCount||!removable_root_only_locked()) {
+           g_store.pendingPaymentEventCount||!day_players_repair_safe()||!removable_root_only_locked()) {
             if(refused)*refused=true;
             terminal_log_add("sync","WARN","Speicherreparatur gesperrt: offene Ereignisse oder unbekannte Dateien; nichts formatiert");
             game_journal_storage_unlock();return false;
@@ -648,7 +650,7 @@ bool offline_cache_mount(void) {
     game_journal_storage_lock();
     GameJournalInspection startup{};
     bool may_clean_temps=game_journal_inspect_locked(&startup)&&!startup.pending&&
-        !g_store.pendingGamesCount&&active_game_repair_safe_locked()&&portal_queue_repair_safe_locked();
+        !g_store.pendingGamesCount&&active_game_repair_safe_locked()&&portal_queue_repair_safe_locked()&&day_players_repair_safe();
     if(may_clean_temps)for(unsigned i=0;i<=OFFLINE_CACHE_SECTION_COUNT;i++) {
         char temp[64];snprintf(temp,sizeof(temp),"%s/%s.tmp",ROOT,i<OFFLINE_CACHE_SECTION_COUNT?names[i]:"meta");
         if(access(temp,F_OK)==0) {
@@ -722,6 +724,9 @@ void offline_cache_repair_status(StorageRepairStatus *out) {
         (void)esp_vfs_fat_spiflash_mount_rw_wl("/fatfs","storage",&cfg,&s_wl);
     }
     repair_proof_locked(out,true);
+    if(out->allowed&&!day_players_repair_safe()) {
+        out->allowed=false;snprintf(out->reason,sizeof(out->reason),"Offene oder ungeprüfte Spieler-des-Tages-Ereignisse; erst synchronisieren.");
+    }
     if(out->allowed&&(g_store.pendingKreditEventCount||g_store.pendingVerkaufEventCount||g_store.pendingPaymentEventCount)) {
         out->allowed=false;snprintf(out->reason,sizeof(out->reason),"Offene Kredit-, Verkauf- oder Zahlungsereignisse; erst synchronisieren.");
     }
@@ -791,7 +796,11 @@ static bool cleanup_storage(bool repair) {
 }
 bool offline_cache_cleanup(void){return cleanup_storage(false);}
 bool offline_cache_repair(void){return cleanup_storage(true);}
-bool offline_cache_save(OfflineCacheSection s) {
+bool offline_cache_save(OfflineCacheSection s, bool defer) {
+    if(defer) {
+        if((unsigned)s>=OFFLINE_CACHE_SECTION_COUNT)return false;
+        lock_cache();s_dirty_sections|=1u<<s;unlock_cache();return true;
+    }
     size_t n = payload_size(s);
     if (!n) return false;
     const bool mounted = offline_cache_mount();

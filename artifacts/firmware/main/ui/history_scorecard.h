@@ -141,7 +141,7 @@ static inline int history_scorecard_total(const FinishedGame *game, int player)
     for (int run = 1; run <= shape.runs; ++run)
         for (int clay = 1; clay <= shape.clays; ++clay) {
             const Ergebnis *result = history_scorecard_result(game, player, run, clay);
-            if (result) total += result->punkte;
+            if (result && result->punkte>=0) total += result->punkte;
         }
     return total;
 }

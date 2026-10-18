@@ -19,6 +19,13 @@
 #include "esp_log.h"
 #include "cJSON.h"
 #include "lora_stub.h"
+#include "network_trace.h"
+#include "esp_http_client.h"
+static esp_err_t gateway_timing_event(esp_http_client_event_t *event) {
+    if(event->event_id==HTTP_EVENT_ON_CONNECTED)
+        esp_http_client_set_timeout_ms(event->client,event->user_data?150:2000);
+    return ESP_OK;
+}
 #include "button_events.h"
 #include "gateway_health.h"
 #include "game_store.h"
@@ -293,7 +300,9 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
             break;
         }
         esp_http_client_set_header(client, "X-TrapMaster-Auth", mac_hex);
+        network_trace_begin(url,"gateway-command",attempt);
         esp_err_t err = esp_http_client_perform(client);
+        network_trace_end(err,err==ESP_OK?esp_http_client_get_status_code(client):0);
         if(err!=ESP_OK) s_transport_ambiguous=true;
         *last_http = esp_http_client_get_status_code(client);
         cJSON *json=cJSON_Parse(body.body);
@@ -387,13 +396,17 @@ static bool perform_health_get(const char *url, const char *mac_hex, HealthFailu
         *failure = {};
         esp_http_client_config_t cfg = {};
         cfg.url = url;
-        cfg.timeout_ms = background?150:2000;
+        cfg.timeout_ms = background?150:1500;
+        cfg.event_handler=gateway_timing_event;
+        cfg.user_data=background?(void*)1:nullptr;
         cfg.disable_auto_redirect = true;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) { failure->error = ESP_ERR_NO_MEM; return false; }
         esp_http_client_set_header(client, "X-TrapMaster-Auth", mac_hex);
+        network_trace_begin(url,"gateway-health",attempt);
         failure->error = esp_http_client_perform(client);
         failure->http_status = esp_http_client_get_status_code(client);
+        network_trace_end(failure->error,failure->http_status);
         failure->socket_errno = esp_http_client_get_errno(client);
         int tls_flags = 0;
         esp_http_client_get_and_clear_last_tls_error(client, &failure->tls_error, &tls_flags);
@@ -417,7 +430,9 @@ static void apply_health_result(bool success, const HealthFailure &failure)
         return;
     }
     bool declare_failed = s_health_history.failure();
-    ESP_LOGW(TAG, "Gateway check failed reason=%s http=%d esp=%s(%d) errno=%d tls=%d streak=%lu/3 failedSinceBoot=%lu",
+    // Per-request network traces aggregate failures; keep the streak detail
+    // available in DEBUG instead of repeating the same warning every check.
+    ESP_LOGD(TAG, "Gateway check failed reason=%s http=%d esp=%s(%d) errno=%d tls=%d streak=%lu/3 failedSinceBoot=%lu",
              health_failure_reason(failure), failure.http_status,
              esp_err_to_name(failure.error), (int)failure.error,
              failure.socket_errno, failure.tls_error,
@@ -454,7 +469,9 @@ static bool fetch_gateway_nonce(GatewayRequest *request, int *last_http, bool ba
         cfg.user_data = &response;
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) { set_status("Gateway-Nonce-Client nicht verfügbar."); return false; }
+        network_trace_begin(url,"gateway-info",attempt);
         esp_err_t err = esp_http_client_perform(client);
+        network_trace_end(err,err==ESP_OK?esp_http_client_get_status_code(client):0);
         *last_http = esp_http_client_get_status_code(client);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
@@ -498,7 +515,9 @@ static void fetch_gateway_traces(const GatewayRequest &request) {
     auto client=esp_http_client_init(&cfg);
     if(!client){heap_caps_free(bytes);return;}
     esp_http_client_set_header(client,"X-TrapMaster-Auth",auth);
+    network_trace_begin(url,"gateway-events",0);
     esp_err_t result=esp_http_client_perform(client);
+    network_trace_end(result,result==ESP_OK?esp_http_client_get_status_code(client):0);
     const int status=esp_http_client_get_status_code(client);esp_http_client_cleanup(client);
     cJSON *root=result==ESP_OK&&status==200&&!body.overflow?cJSON_Parse(bytes):nullptr;
     heap_caps_free(bytes);if(!root)return;

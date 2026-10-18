@@ -47,6 +47,10 @@ STUBS = r"""
 #include "game_journal.h"
 #include "storage_budget.h"
 GameStore g_store = {};
+bool day_players_repair_safe(){return true;}
+int http_push_day_players(){return 0;}
+int http_reconcile_day_players(){return 0;}
+int64_t s_cycle_deadline_us=0;
 bool ui_manager_snapshot_lock(bool *acquired){*acquired=false;return true;}
 void ui_manager_unlock(){}
 using esp_err_t = int;
@@ -116,6 +120,12 @@ static std::map<std::string, std::vector<uint8_t>> files;
 static int journal_pending=0,journal_uncertain=0;
 void game_journal_storage_lock() {}
 void game_journal_storage_unlock() {}
+bool game_journal_is_file(const char *name) {
+ if(!strncasecmp(name,"g_",2))return true;
+ if(strlen(name)!=8||(name[0]!='J'&&name[0]!='j')||strspn(name+1,"0123456789")!=3||name[4]!='.')return false;
+ int slot=(name[1]-'0')*100+(name[2]-'0')*10+name[3]-'0';
+ return slot<200&&(!strcasecmp(name+5,"REC")||!strcasecmp(name+5,"PRT")||!strcasecmp(name+5,"BAK"));
+}
 size_t game_journal_record_size() {return sizeof(FinishedGame)+20;}
 bool game_journal_init() {return true;}
 bool game_journal_resume_after_cleanup() {return true;}

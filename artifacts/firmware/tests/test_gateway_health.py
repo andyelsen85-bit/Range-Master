@@ -24,6 +24,7 @@ int esp_http_client_get_and_clear_last_tls_error(Client *, int *code, int *flags
 }
 const char *esp_err_to_name(int error) { return error == ESP_OK ? "ESP_OK" : "mock-error"; }
 static const char *TAG = "test";
+esp_err_t gateway_timing_event(esp_http_client_event_t*){return ESP_OK;}
 static GatewayHealthHistory s_health_history;
 static char s_health_url[MAX_URL_LEN], s_health_token[MAX_KEY_LEN];
 static GatewayReachability state = GATEWAY_CHECKING;
@@ -34,6 +35,7 @@ void log_line(const char *fmt, ...) {
     vsnprintf(text, sizeof(text), fmt, args); va_end(args); logs.emplace_back(text);
 }
 #define ESP_LOGW(tag, ...) ((void)(tag), log_line(__VA_ARGS__))
+#define ESP_LOGD(tag, ...) ((void)(tag), log_line(__VA_ARGS__))
 """
 
 MAIN = r"""
@@ -108,7 +110,7 @@ if __name__ == "__main__":
         admission = fixture.gateway.function(source, name)
         assert "lora_gateway_state(" not in admission and "GATEWAY_REACHABLE" not in admission
     stubs = fixture.STUBS.replace("assert(config->disable_auto_redirect);",
-                                  "assert(config->disable_auto_redirect && config->timeout_ms == 2000);")
+                                  "assert(config->disable_auto_redirect && config->timeout_ms == 1500);")
     with tempfile.TemporaryDirectory(prefix="tm-health-") as directory:
         path = Path(directory)
         (path / "mbedtls").mkdir()

@@ -63,3 +63,16 @@ compilation if IDF tries to validate its nonexistent default environment.
 
 **How to apply:** Reuse the installed workspace Python and SDK tools; do not
 create a virtual environment or guess a newer ROM asset version.
+
+In this workspace, a minimal native P4 build can use the existing RISC-V
+compiler and `.pythonlibs` without sourcing the SDK export script. Set
+`IDF_PYTHON_CHECK_CONSTRAINTS=no` when the SDK tries to open a nonexistent
+default constraints file; keep using the pinned SDK and installed dependencies.
+
+**Why:** The export script checks unrelated Xtensa/debugger tools that are not
+installed here, and the default constraints path can reject the valid workspace
+Python environment before compilation starts.
+
+**How to apply:** Supply the installed RISC-V compiler, Python, IDF and ROM-ELF
+paths explicitly for native P4 checks. Do not install unrelated toolchains or
+create a virtual environment just to satisfy the export script.

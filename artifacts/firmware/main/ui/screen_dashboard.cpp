@@ -16,6 +16,7 @@
 #include "esp_sleep.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "ui_time_fmt.h"
 #include "screen_dashboard.h"
 #include "screen_inventory.h"
 #include "day_inventory.h"
@@ -462,7 +463,9 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_add_event_cb(sync_btn, sync_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *sync_lbl = lv_label_create(sync_btn);
-    lv_label_set_text(sync_lbl, LV_SYMBOL_REFRESH "  ALLES SYNCHRONISIEREN");
+    lv_label_set_text(sync_lbl, LV_SYMBOL_REFRESH "  Alles synchronisieren");
+    lv_obj_set_width(sync_lbl,LV_PCT(100));
+    lv_label_set_long_mode(sync_lbl,LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(sync_lbl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(sync_lbl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(sync_lbl);
@@ -500,11 +503,16 @@ void screen_dashboard_refresh(void)
     }
 
     // Pending games
-    snprintf(buf, sizeof(buf), "%d AKTIONEN | %s | LETZTER SYNC: %lld",
+    char last_sync[32]="noch nie";
+    if(g_store.lastSuccessfulSyncAt>1700000000) {
+        struct tm local{};time_t last=g_store.lastSuccessfulSyncAt;localtime_r(&last,&local);
+        strftime(last_sync,sizeof(last_sync),"%d.%m.%Y %H:%M",&local);
+    }
+    snprintf(buf, sizeof(buf), "%d AKTIONEN - %s - LETZTER SYNC: %s",
              store_pending_action_count(),
              !g_store.offlineCacheHealthy ? "CACHE NICHT VERFÜGBAR" :
              g_store.offlineCacheLoaded ? "OFFLINE-CACHE" : "KEIN CACHE",
-             (long long)g_store.lastSuccessfulSyncAt);
+             last_sync);
     set_label_text_if_changed(s_lbl_pending, buf);
     lv_obj_set_style_text_color(s_lbl_pending,
         lv_color_hex(g_store.offlineCacheHealthy ? CLR_TEXT : CLR_WARN), 0);

@@ -11,3 +11,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Audit firmware literals, font coverage and synced display text
         run: python3 artifacts/firmware/tests/test_font_coverage.py
+      - name: Real-terminal logic regressions (no emulator)
+        run: |
+          python3 artifacts/firmware/tests/test_harakiri_players.py
+          python3 artifacts/firmware/tests/test_history_scorecard.py
+          python3 artifacts/firmware/tests/test_day_players.py
+          python3 artifacts/firmware/tests/test_day_player_reconcile.py
+          python3 artifacts/firmware/tests/test_network_policy.py

@@ -10,6 +10,9 @@
 #include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "network_test.h"
+#include "coprocessor.h"
+static lv_obj_t *s_network_test_label,*s_c6_version_label;
 #include "http_sync.h"
 #include "screen_einstellungen.h"
 #include "view_snapshot.h"
@@ -1738,6 +1741,20 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
                         LV_EVENT_VALUE_CHANGED, NULL);
 
     // ── Firmware / board info ─────────────────────────────────
+    auto *network_button=lv_btn_create(parent);
+    lv_obj_set_size(network_button,340,56);
+    auto *network_title=lv_label_create(network_button);lv_label_set_text(network_title,"Netzwerktest (30 s)");
+    lv_obj_center(network_title);
+    lv_obj_add_event_cb(network_button,[](lv_event_t*){network_test_start();},LV_EVENT_CLICKED,nullptr);
+    s_network_test_label=lv_label_create(parent);lv_obj_set_width(s_network_test_label,LV_PCT(100));
+    lv_obj_add_event_cb(s_network_test_label,[](lv_event_t*){s_network_test_label=nullptr;},LV_EVENT_DELETE,nullptr);
+    lv_obj_set_style_text_font(s_network_test_label,UI_FONT_16,0);
+    char network_status[384];network_test_status(network_status,sizeof(network_status));lv_label_set_text(s_network_test_label,network_status);
+    s_c6_version_label=lv_label_create(parent);lv_obj_set_width(s_c6_version_label,LV_PCT(100));
+    lv_obj_add_event_cb(s_c6_version_label,[](lv_event_t*){s_c6_version_label=nullptr;},LV_EVENT_DELETE,nullptr);
+    char c6_status[128];cop_firmware_version(c6_status,sizeof(c6_status));lv_label_set_text(s_c6_version_label,c6_status);
+    lv_obj_set_style_text_font(s_c6_version_label,UI_FONT_16,0);
+    lv_obj_set_style_text_color(s_c6_version_label,lv_color_hex(CLR_WARN),0);
     static const char *info_rows[] = {
         "FIRMWARE: " APP_VERSION,
         "BOARD: GUITION JC8012P4A1C-I-W-Y",
@@ -1991,6 +2008,14 @@ void screen_einstellungen_refresh(void)
 
 void screen_einstellungen_tick(void)
 {
+    if(s_network_test_label) {
+        char text[384];network_test_status(text,sizeof(text));
+        if(strcmp(lv_label_get_text(s_network_test_label),text))lv_label_set_text(s_network_test_label,text);
+    }
+    if(s_c6_version_label) {
+        char text[128];cop_firmware_version(text,sizeof(text));
+        if(strcmp(lv_label_get_text(s_c6_version_label),text))lv_label_set_text(s_c6_version_label,text);
+    }
     if(lv_obj_t *latency=s_latency_label.get()) {
         static uint32_t last=0;
         if(lv_tick_get()-last>=1000) {

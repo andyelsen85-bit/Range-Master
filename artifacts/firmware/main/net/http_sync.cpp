@@ -16,6 +16,7 @@
 #include "http_sync.h"
 #include "game_store.h"
 #include "day_inventory.h"
+#include "day_player_events.h"
 #include "terminal_logs.h"
 #include "storage_admin.h"
 #include "storage_budget.h"
@@ -32,6 +33,7 @@
 #include "coprocessor.h"
 #include "offline_cache.h"
 #include "portal_runtime.h"
+#include "network_trace.h"
 #include "ui_manager.h"
 
 static const char *TAG = "http_sync";
@@ -53,6 +55,8 @@ typedef struct {
 } http_session_t;
 
 static http_session_t *s_active_session;
+static http_session_t s_portal_session{};
+static int64_t s_cycle_deadline_us;
 static TaskHandle_t s_active_session_owner;
 static int s_last_http_status;
 static std::atomic<bool> s_recovery_requested{false};
@@ -137,6 +141,7 @@ static bool wait_for_trusted_day(void)
     // worker off the network until local dates are trustworthy so no request
     // can be sent for 1970-01-01 and yesterday's daily roster is retired first.
     for (int attempt = 0; attempt < 80; ++attempt) {
+        if(s_cycle_deadline_us&&esp_timer_get_time()>=s_cycle_deadline_us)break;
         TickType_t commit_started;
         if (sync_commit_begin("day-rollover", &commit_started)) {
             bool ready = store_prepare_current_day();
@@ -316,7 +321,7 @@ static void commit_manifest_token(const SyncManifest *manifest, OfflineCacheSect
 static void cache_pulled_section(OfflineCacheSection section)
 {
     if(batching()){s_batch->cache[section]=true;return;}
-    if (!offline_cache_save(section))
+    if (!offline_cache_save(section,s_cycle_deadline_us!=0))
         ESP_LOGW(TAG, "Cache unavailable for pulled section %d; "
                      "server data retained in RAM, sync remains successful",
                  (int)section);
@@ -340,12 +345,12 @@ static esp_err_t publish_sync_batch() {
     (void)day_inventory_persist();
     for(int i=0;i<OFFLINE_CACHE_SECTION_COUNT;++i) {
         if(s_batch->cache[i])cache_pulled_section((OfflineCacheSection)i);
-        if(s_batch->tokenSet[i])
+        if(s_batch->tokenSet[i]&&!s_cycle_deadline_us)
             (void)offline_cache_set_manifest_token((OfflineCacheSection)i,s_batch->tokens[i]);
     }
     // Also runs for manifest-unchanged syncs: dirty snapshots must not depend
     // on the server changing the section again before they can become durable.
-    offline_cache_flush_pending();
+    if(!s_cycle_deadline_us)offline_cache_flush_pending();
     // Includes idle waiting separately; not falsely reported as blocked input.
     cJSON *data=cJSON_CreateObject();
     cJSON_AddNumberToObject(data,"commitMs",s_batch->commitUs/1000.0);
@@ -788,7 +793,11 @@ static esp_err_t http_session_open(http_session_t *session)
     cfg.url               = session->base_url;
     cfg.event_handler     = http_event_handler;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    cfg.timeout_ms        = 12000;
+    cfg.timeout_ms        = 5000;
+    cfg.keep_alive_enable = true;
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+    cfg.save_client_session = true;
+#endif
     session->client = esp_http_client_init(&cfg);
     return session->client ? ESP_OK : ESP_ERR_NO_MEM;
 }
@@ -814,7 +823,11 @@ static esp_err_t http_session_reopen(http_session_t *session)
     cfg.url               = session->base_url;
     cfg.event_handler     = http_event_handler;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    cfg.timeout_ms        = 12000;
+    cfg.timeout_ms        = 5000;
+    cfg.keep_alive_enable = true;
+#if CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+    cfg.save_client_session = true;
+#endif
     session->client = esp_http_client_init(&cfg);
     return session->client ? ESP_OK : ESP_ERR_NO_MEM;
 }
@@ -861,6 +874,10 @@ static esp_err_t http_prepare_request(http_session_t *session, const char *path,
                                       const char *body, http_acc_t *acc)
 {
     if (!session || !session->client || !path || !acc) return ESP_ERR_INVALID_ARG;
+    bool budgeted=s_cycle_deadline_us&&http_active_session_for_current_task()==session;
+    int64_t remaining=budgeted?(s_cycle_deadline_us-esp_timer_get_time())/1000:5000;
+    if(remaining<=0){set_http_error("SYNC",path,"Zeitbudget aufgebraucht");return ESP_ERR_TIMEOUT;}
+    esp_http_client_set_timeout_ms(session->client,(int)(remaining<5000?remaining:5000));
     char url[256];
     int url_len = snprintf(url, sizeof(url), "%s%s", session->base_url, path);
     if (url_len < 0 || url_len >= (int)sizeof(url)) return ESP_ERR_INVALID_SIZE;
@@ -897,21 +914,36 @@ bool http_optional_ready(void) {
 }
 esp_err_t http_optional_json(const char *path,const char *body,char *out,size_t capacity) {
     if(!path||!out||capacity<2||!http_optional_ready())return ESP_ERR_INVALID_STATE;
-    http_session_t session={};
+    static std::atomic_flag busy=ATOMIC_FLAG_INIT;
+    if(busy.test_and_set())return ESP_ERR_INVALID_STATE;
+    struct Guard{std::atomic_flag &flag;~Guard(){flag.clear();}} guard{busy};
+    static http_session_t session={};
+    http_session_t requested={};
     if(!ui_manager_lock(0))return ESP_ERR_TIMEOUT;
-    snprintf(session.base_url,sizeof(session.base_url),"%.127s",g_store.apiUrl);
-    snprintf(session.api_key,sizeof(session.api_key),"%.64s",g_store.apiKey);
+    snprintf(requested.base_url,sizeof(requested.base_url),"%.127s",g_store.apiUrl);
+    snprintf(requested.api_key,sizeof(requested.api_key),"%.64s",g_store.apiKey);
     ui_manager_unlock();
-    esp_http_client_config_t cfg={};
-    cfg.url=session.base_url;cfg.event_handler=http_event_handler;
-    cfg.crt_bundle_attach=esp_crt_bundle_attach;cfg.timeout_ms=2000;
-    session.client=esp_http_client_init(&cfg);
+    if(strcmp(session.base_url,requested.base_url)||strcmp(session.api_key,requested.api_key))http_session_close(&session);
+    if(!session.client) {
+        session=requested;
+        esp_http_client_config_t cfg={};
+        cfg.url=session.base_url;cfg.event_handler=http_event_handler;
+        cfg.crt_bundle_attach=esp_crt_bundle_attach;cfg.timeout_ms=5000;cfg.keep_alive_enable=true;
+#ifdef CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS
+        cfg.save_client_session=true;
+#endif
+        session.client=esp_http_client_init(&cfg);
+    }
     if(!session.client)return ESP_ERR_NO_MEM;
     http_acc_t acc={out,0,(int)capacity,false};out[0]='\0';
     esp_err_t err=http_prepare_request(&session,path,body?HTTP_METHOD_POST:HTTP_METHOD_GET,body,&acc);
-    if(err==ESP_OK)err=esp_http_client_perform(session.client);
+    if(err==ESP_OK){
+        network_trace_begin(session.base_url,path,0,s_cycle_deadline_us);
+        err=esp_http_client_perform(session.client);
+        network_trace_end(err,err==ESP_OK?esp_http_client_get_status_code(session.client):0);
+    }
     int status=esp_http_client_get_status_code(session.client);
-    http_session_close(&session);
+    if(err!=ESP_OK)http_session_close(&session);
     return err!=ESP_OK?err:acc.truncated?ESP_ERR_INVALID_SIZE:status>=200&&status<300?ESP_OK:ESP_FAIL;
 }
 
@@ -999,7 +1031,9 @@ static esp_err_t http_post_json(const char *path, const char *body,
         err = http_prepare_request(session, path, HTTP_METHOD_POST, body, &acc);
         bool transport_error = false;
         if (err == ESP_OK) {
+            network_trace_begin(session->base_url,path,attempt-1,s_cycle_deadline_us);
             err = esp_http_client_perform(session->client);
+            network_trace_end(err,err==ESP_OK?esp_http_client_get_status_code(session->client):0);
             transport_error = err != ESP_OK;
         }
         if (session->client)
@@ -1022,7 +1056,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
                 err = ESP_FAIL;
             }
         } else {
-            ESP_LOGW(TAG, "POST %s attempt %d/3 failed: %s", diagnostic_path, attempt, esp_err_to_name(err));
+            ESP_LOGD(TAG, "POST %s attempt %d/3 failed: %s", diagnostic_path, attempt, esp_err_to_name(err));
             set_http_error("POST", diagnostic_path, esp_err_to_name(err));
         }
         if (acc.truncated) {
@@ -1039,6 +1073,7 @@ static esp_err_t http_post_json(const char *path, const char *body,
                 break;
             }
         }
+        if(s_cycle_deadline_us && esp_timer_get_time()>=s_cycle_deadline_us)break;
         if (attempt < 3) {
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
@@ -1087,7 +1122,9 @@ static esp_err_t http_get_json(const char *path,
         err = http_prepare_request(session, path, HTTP_METHOD_GET, NULL, &acc);
         bool transport_error = false;
         if (err == ESP_OK) {
+            network_trace_begin(session->base_url,path,attempt-1,s_cycle_deadline_us);
             err = esp_http_client_perform(session->client);
+            network_trace_end(err,err==ESP_OK?esp_http_client_get_status_code(session->client):0);
             transport_error = err != ESP_OK;
         }
         if (session->client)
@@ -1107,7 +1144,7 @@ static esp_err_t http_get_json(const char *path,
                 err = ESP_FAIL;
             }
         } else {
-            ESP_LOGW(TAG, "GET %s attempt %d/3 failed: %s", diagnostic_path, attempt, esp_err_to_name(err));
+            ESP_LOGD(TAG, "GET %s attempt %d/3 failed: %s", diagnostic_path, attempt, esp_err_to_name(err));
             set_http_error("GET", diagnostic_path, esp_err_to_name(err));
         }
         if (acc.truncated) {
@@ -1124,6 +1161,7 @@ static esp_err_t http_get_json(const char *path,
                 break;
             }
         }
+        if(s_cycle_deadline_us && esp_timer_get_time()>=s_cycle_deadline_us)break;
         if (attempt < 3) {
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
@@ -2511,6 +2549,84 @@ esp_err_t http_pull_verkaeufe(void)
     });
 }
 
+static esp_err_t http_push_day_players()
+{
+    if(!day_players_flush())return ESP_ERR_INVALID_STATE;
+    auto *events=(DayPlayerEvent*)heap_caps_malloc(100*sizeof(DayPlayerEvent),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    auto *reply=(char*)heap_caps_malloc(16384,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!events||!reply){heap_caps_free(events);heap_caps_free(reply);return ESP_ERR_NO_MEM;}
+    int n=day_players_snapshot(events,100);
+    if(!n){heap_caps_free(events);heap_caps_free(reply);return ESP_OK;}
+    char identity[40];if(!terminal_id(identity,sizeof(identity))){heap_caps_free(events);heap_caps_free(reply);return ESP_ERR_INVALID_STATE;}
+    cJSON *root=cJSON_CreateObject(),*items=cJSON_AddArrayToObject(root,"events");
+    for(int i=0;i<n;i++) {
+        auto &e=events[i];auto *item=cJSON_CreateObject();
+        cJSON_AddStringToObject(item,"externalId",e.externalId);cJSON_AddStringToObject(item,"terminalId",identity);
+        cJSON_AddStringToObject(item,"datum",e.datum);cJSON_AddNumberToObject(item,"spielerId",e.spielerId);
+        cJSON_AddStringToObject(item,"action",e.add?"ADD":"REMOVE");cJSON_AddStringToObject(item,"occurredAt",e.occurredAt);
+        cJSON_AddItemToArray(items,item);
+    }
+    char *json=cJSON_PrintUnformatted(root);cJSON_Delete(root);
+    esp_err_t err=json?http_post_json("/api/sync/gameday-players",json,reply,16384):ESP_ERR_NO_MEM;
+    cJSON_free(json);
+    if(err==ESP_OK) {
+        cJSON *body=cJSON_Parse(reply),*result=nullptr;
+        bool seen[100]{};int acknowledged=0;
+        cJSON_ArrayForEach(result,cJSON_GetObjectItem(body,"results")) {
+            auto *id=cJSON_GetObjectItem(result,"externalId"),*status=cJSON_GetObjectItem(result,"status");
+            if(!cJSON_IsString(id)||!cJSON_IsString(status))continue;
+            if(strcmp(status->valuestring,"accepted")&&strcmp(status->valuestring,"skipped"))continue;
+            for(int i=0;i<n;i++)if(!seen[i]&&!strcmp(id->valuestring,events[i].externalId)) {
+                seen[i]=true;acknowledged++;
+                if(!day_players_ack(id->valuestring))err=ESP_FAIL;
+            }
+        }
+        if(!body||acknowledged!=n)err=ESP_ERR_INVALID_RESPONSE;
+        cJSON_Delete(body);
+    } else if(s_last_http_status>=400&&s_last_http_status<500) {
+        for(int i=0;i<n;i++)(void)day_players_ack(events[i].externalId,true);
+        char message[180];snprintf(message,sizeof(message),
+            "Tageseinträge abgelehnt (HTTP %d): dauerhaft markiert; Portal/Spieler-ID prüfen, keine automatische Wiederholung",s_last_http_status);
+        terminal_log_add("gameday","ERROR",message);
+    }
+    heap_caps_free(events);heap_caps_free(reply);return err;
+}
+static esp_err_t http_reconcile_day_players()
+{
+    char today[11],identity[40];if(!day_inventory_today(today,sizeof(today))||!terminal_id(identity,sizeof(identity)))return ESP_ERR_INVALID_STATE;
+    char path[96];snprintf(path,sizeof(path),"/api/sync/gameday-players?datum=%s",today);
+    auto *reply=(char*)heap_caps_malloc(HTTP_BUF_SIZE,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!reply)return ESP_ERR_NO_MEM;
+    esp_err_t err=http_get_json(path,reply,HTTP_BUF_SIZE);cJSON *root=err==ESP_OK?cJSON_Parse(reply):nullptr;
+    heap_caps_free(reply);if(err!=ESP_OK)return err;
+    cJSON *players=cJSON_GetObjectItem(root,"players");
+    if(!cJSON_IsArray(players)){cJSON_Delete(root);return ESP_ERR_INVALID_RESPONSE;}
+    int local[MAX_PORTAL_SPIELER]{},count=0;TickType_t started;
+    if(!sync_commit_begin("day-player-roster-snapshot",&started)){cJSON_Delete(root);return ESP_ERR_TIMEOUT;}
+    if(!strcmp(g_store.kreditDatum,today))for(int id:g_store.kreditPlayerIds)if(id>0)local[count++]=id;
+    sync_commit_end("day-player-roster-snapshot",started);
+    int adds=0,removes=0;
+    for(int i=0;i<count;i++) {
+        if(s_cycle_deadline_us&&esp_timer_get_time()>=s_cycle_deadline_us)break;
+        bool found=false;cJSON *p=nullptr;
+        cJSON_ArrayForEach(p,players)if(cJSON_GetNumberValue(cJSON_GetObjectItem(p,"spielerId"))==local[i])found=true;
+        if(!found&&!day_players_has_event(local[i],today)&&day_players_prepare(local[i],true)){day_players_finish(true);adds++;}
+    }
+    cJSON *p=nullptr;cJSON_ArrayForEach(p,players) {
+        if(s_cycle_deadline_us&&esp_timer_get_time()>=s_cycle_deadline_us)break;
+        auto *id=cJSON_GetObjectItem(p,"spielerId"),*owner=cJSON_GetObjectItem(p,"terminalId");
+        if(!cJSON_IsNumber(id)||!cJSON_IsString(owner)||strcmp(owner->valuestring,identity))continue;
+        bool found=false;for(int i=0;i<count;i++)if(local[i]==id->valueint)found=true;
+        // A different terminal's registration is never removed by this terminal.
+        if(!found&&!day_players_has_event(id->valueint,today)&&day_players_prepare(id->valueint,false)) {
+            day_players_finish(true);removes++;
+        }
+    }
+    cJSON_Delete(root);
+    ESP_LOGI(TAG,"day-player reconciliation date=%s ADD=%d REMOVE=%d pending=%d",today,adds,removes,day_players_pending());
+    if(adds||removes)terminal_log_add("gameday","INFO","Spieler des Tages mit Portal abgeglichen");
+    return http_push_day_players();
+}
 static esp_err_t http_sync_billing_impl(void)
 {
     portENTER_CRITICAL(&s_error_lock);
@@ -2524,6 +2640,22 @@ static esp_err_t http_sync_billing_impl(void)
 
     if(batching())(void)day_inventory_today(s_batch->day,sizeof(s_batch->day));
     esp_err_t overall = ESP_OK;
+    SyncManifest billing_manifest{};
+    (void)fetch_manifest(&billing_manifest);
+    bool had_credit=g_store.pendingKreditEventCount>0;
+    bool had_sale=g_store.pendingVerkaufEventCount>0;
+    bool had_payment=g_store.pendingPaymentEventCount>0;
+    // Assign portal identities before serializing local day-player events.
+    if(g_store.spielerUpdateCount>0)overall=http_push_spieler_updates();
+    esp_err_t roster_push=http_push_day_players();
+    if(roster_push!=ESP_OK&&overall==ESP_OK)overall=roster_push;
+    static char reconciled_day[11];
+    char roster_day[11];
+    if(day_inventory_today(roster_day,sizeof(roster_day))&&strcmp(roster_day,reconciled_day)) {
+        esp_err_t roster=http_reconcile_day_players();
+        if(roster==ESP_OK)snprintf(reconciled_day,sizeof(reconciled_day),"%s",roster_day);
+        else if(overall==ESP_OK)overall=roster;
+    }
     esp_err_t credit_push = http_push_kredit_events();
     if (credit_push != ESP_OK) overall = credit_push;
     esp_err_t sale_push = http_push_verkauf_events();
@@ -2532,12 +2664,21 @@ static esp_err_t http_sync_billing_impl(void)
     if (payment_push != ESP_OK && overall == ESP_OK) overall = payment_push;
     // Cache the authoritative settlement state before applying portal credit
     // totals, so a just-paid player's settled counters cannot be restored.
-    esp_err_t err = credit_push == ESP_OK && sale_push == ESP_OK && payment_push == ESP_OK
+    bool bills_changed=had_credit||had_sale||had_payment||manifest_changed(&billing_manifest,OFFLINE_CACHE_BILLS);
+    bool pull_bills=bills_changed&&credit_push==ESP_OK&&sale_push==ESP_OK&&payment_push==ESP_OK;
+    esp_err_t err = pull_bills
         ? http_fetch_bill_day_summary() : ESP_OK;
+    if(pull_bills&&err==ESP_OK)commit_manifest_token(&billing_manifest,OFFLINE_CACHE_BILLS);
     if (err != ESP_OK && overall == ESP_OK) overall = err;
-    err = credit_push == ESP_OK ? http_pull_kredite() : ESP_OK;
+    bool credits_changed=had_credit||manifest_changed(&billing_manifest,OFFLINE_CACHE_CREDITS);
+    bool pull_credits=credit_push==ESP_OK&&credits_changed;
+    err = pull_credits ? http_pull_kredite() : ESP_OK;
+    if(pull_credits&&err==ESP_OK)commit_manifest_token(&billing_manifest,OFFLINE_CACHE_CREDITS);
     if (err != ESP_OK && overall == ESP_OK) overall = err;
-    err = sale_push == ESP_OK ? http_pull_verkaeufe() : ESP_OK;
+    bool sales_changed=had_sale||manifest_changed(&billing_manifest,OFFLINE_CACHE_SALES);
+    bool pull_sales=sale_push==ESP_OK&&sales_changed;
+    err = pull_sales ? http_pull_verkaeufe() : ESP_OK;
+    if(pull_sales&&err==ESP_OK)commit_manifest_token(&billing_manifest,OFFLINE_CACHE_SALES);
     if (err != ESP_OK && overall == ESP_OK) overall = err;
 
     if (overall == ESP_OK) {
@@ -2644,6 +2785,9 @@ static esp_err_t http_sync_all_impl(void)
     const bool had_inventory=day_inventory_peek(NULL);
     const bool had_games = g_store.pendingGamesCount > 0;
     esp_err_t pue = http_push_spieler_updates();
+    esp_err_t day_push=http_push_day_players();
+    if(day_push==ESP_OK)day_push=http_reconcile_day_players();
+    if(day_push!=ESP_OK&&pue==ESP_OK)pue=day_push;
     if (pue != ESP_OK) overall = pue;
     if (pue != ESP_OK) ESP_LOGW(TAG, "Spieler updates push failed — continuing sync");
     bool pull_products = manifest_changed(&manifest, OFFLINE_CACHE_PRODUCTS);
@@ -2835,8 +2979,10 @@ static esp_err_t http_run_sync_cycle(const char *cycle_name,
     struct Release {~Release(){s_network_cycle_busy.clear();}} release;
     s_pending_push_accepted=0;s_pending_push_failed=0;
     TickType_t started = xTaskGetTickCount();
-    http_session_t session;
-    esp_err_t err = http_session_open(&session);
+    http_session_t &session=s_portal_session;
+    if(session.client&&(strcmp(session.base_url,g_store.apiUrl)||strcmp(session.api_key,g_store.apiKey)))
+        http_session_close(&session);
+    esp_err_t err = session.client?ESP_OK:http_session_open(&session);
     if (err != ESP_OK) {
         set_http_error("SYNC", cycle_name, "client init failed");
         terminal_log_add("sync","ERROR","Synchronisierung konnte nicht starten");
@@ -2896,10 +3042,13 @@ static esp_err_t http_run_sync_cycle(const char *cycle_name,
     } else terminal_log_add("sync","INFO",message,data);
     cJSON_Delete(data);
     s_batch=nullptr;
-    upload_game_manifest();
-    upload_terminal_logs(); // Diagnostics failure never changes the sync result.
+    if(!s_cycle_deadline_us) {
+        upload_game_manifest();
+        upload_terminal_logs(); // Deferred until billing/full sync after bounded boot.
+    }
     http_session_deactivate(&session);
-    http_session_close(&session);
+    // The same worker reuses the portal's HTTP/TLS connection next cycle.
+    // Failed transports reopen explicitly; changed endpoint/key closes above.
     TickType_t elapsed = xTaskGetTickCount() - started;
     ESP_LOGI(TAG, "%s sync cycle duration=%ums result=%s pending_push accepted=%d failed=%d remaining=%d", cycle_name,
              (unsigned)(elapsed * portTICK_PERIOD_MS),
@@ -2915,4 +3064,11 @@ esp_err_t http_sync_billing(void)
 esp_err_t http_sync_all(void)
 {
     return http_run_sync_cycle("full", http_sync_all_impl);
+}
+esp_err_t http_sync_boot(void)
+{
+    s_cycle_deadline_us=esp_timer_get_time()+19500000; // leave room for publication/summary
+    esp_err_t result=http_run_sync_cycle("boot",http_sync_all_impl);
+    s_cycle_deadline_us=0;
+    return result;
 }

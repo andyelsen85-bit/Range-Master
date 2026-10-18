@@ -1430,7 +1430,10 @@ export const GetKioskPlayersResponse = zod.object({
   "id": zod.number().int(),
   "displayName": zod.string(),
   "activeSignup": zod.boolean(),
-  "running": zod.boolean()
+  "running": zod.boolean(),
+  "available": zod.number().int().optional(),
+  "canSignup": zod.boolean().optional(),
+  "eligibilityHint": zod.string().nullish()
 }))
 })
 

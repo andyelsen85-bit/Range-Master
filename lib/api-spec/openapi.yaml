@@ -1181,6 +1181,9 @@ components:
         displayName: { type: string }
         activeSignup: { type: boolean }
         running: { type: boolean }
+        available: { type: integer }
+        canSignup: { type: boolean }
+        eligibilityHint: { type: string, nullable: true }
     KioskPicker:
       type: object
       required: [players]

@@ -45,7 +45,11 @@ void terminal_log_add(const char *category,const char *level,const char *message
 #define pdMS_TO_TICKS(n) (n)
 void vTaskDelay(int ms){delays++;now+=(int64_t)ms*1000;}
 struct SyncHttpMeasurement{explicit SyncHttpMeasurement(const char*){}};
-struct http_session_t{void *client=nullptr;};
+static int64_t s_cycle_deadline_us=0;
+void network_trace_begin(const char*,const char*,unsigned,int64_t){}
+void network_trace_end(int,int){}
+#define ESP_LOGD(...) ((void)0)
+struct http_session_t{void *client=nullptr;const char *base_url="https://portal.invalid";};
 struct http_acc_t{char *buf;int len,cap;bool truncated;};
 static http_acc_t *capture;
 http_session_t *http_active_session_for_current_task(){return nullptr;}

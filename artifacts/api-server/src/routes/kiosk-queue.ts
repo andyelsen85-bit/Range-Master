@@ -16,18 +16,14 @@ router.use("/public",(req,res,next)=>rateLimit(req.method==="GET"?"read":"write"
 router.get("/public/queue",async(_req,res)=>res.json(await queueSnapshot()));
 router.get("/public/queue/players",async(req,res)=>{
   const q=z.string().max(80).parse(req.query.q??"");
-  const rows=(await db.execute(sql`SELECT s.id,s.name,e.status,g.status "gameStatus"
-    FROM spieler s LEFT JOIN queue_entries e ON e.spieler_id=s.id AND e.status IN('OPEN','TAKEN')
+  const rows=(await db.execute(sql`SELECT s.id,s.name,e.status,g.status "gameStatus",v.available::int available
+    FROM spieler s JOIN v_queue_eligibility v ON v.id=s.id AND v.registered
+    LEFT JOIN queue_entries e ON e.spieler_id=s.id AND e.status IN('OPEN','TAKEN')
     LEFT JOIN queue_games g ON g.id=e.queue_game_id
     WHERE s.aktiv AND s.name ILIKE ${`%${q.replace(/[\\%_]/g,"\\$&")}%`} ORDER BY s.name,s.id LIMIT 20`)).rows as any[];
-  const names=new Map<string,number>();
-  // Initial-name collisions must not depend on the current search or its 20-row limit.
-  const candidates=res.locals.kiosk.settings.name_mode==="INITIAL"
-    ?(await db.execute(sql`SELECT name FROM spieler WHERE aktiv`)).rows as {name:string}[]:rows;
-  for(const r of candidates){const n=publicName(r.name,res.locals.kiosk.settings.name_mode);names.set(n,(names.get(n)??0)+1);}
   res.json({players:rows.map(r=>{
-    const displayName=publicName(r.name,res.locals.kiosk.settings.name_mode);
-    return {id:r.id,displayName:names.get(displayName)!>1?`${displayName} · ${r.id.toString(36).toUpperCase()}`:displayName,
+    return {id:r.id,displayName:r.name,available:r.available,canSignup:r.available>=1,
+       eligibilityHint:r.available<1?"Credits am Stand buchen":null,
       activeSignup:!!r.status,running:r.gameStatus==="STARTED"};
   })});
 });
@@ -39,10 +35,12 @@ router.post("/public/queue/cancel",async(req,res)=>res.json(await cancelQueue(z.
 router.get("/public/groups",async(_req,res)=>{
   if(!res.locals.kiosk.settings.groups_enabled)return void res.json({groups:[]});
   const rows=(await db.execute(sql`SELECT g.id,g.name,m.spieler_id,s.name "playerName" FROM spieler_gruppen g
-    JOIN spieler_gruppen_mitglieder m ON m.gruppe_id=g.id JOIN spieler s ON s.id=m.spieler_id WHERE g.deleted_at IS NULL ORDER BY g.id,m.spieler_id`)).rows as any[];
+    JOIN spieler_gruppen_mitglieder m ON m.gruppe_id=g.id JOIN spieler s ON s.id=m.spieler_id
+    JOIN v_queue_eligibility v ON v.id=s.id AND v.registered
+    WHERE g.deleted_at IS NULL ORDER BY g.id,m.spieler_id`)).rows as any[];
   const groups=new Map<number,any>();
   for(const r of rows){if(!groups.has(r.id))groups.set(r.id,{id:r.id,name:r.name,members:[]});
-    groups.get(r.id).members.push({id:r.spieler_id,displayName:publicName(r.playerName,res.locals.kiosk.settings.name_mode)});}
+    groups.get(r.id).members.push({id:r.spieler_id,displayName:r.playerName});}
   res.json({groups:[...groups.values()]});
 });
 const groupInput=z.object({name:z.string().trim().min(1).max(80),spielerIds:z.array(id).min(2).max(6).refine(a=>new Set(a).size===a.length)});
@@ -51,8 +49,8 @@ for(const method of ["post","put"] as const)router[method](method==="post"?"/pub
   const body=groupInput.parse(req.body);
   const result=await db.transaction(async tx=>{
     await queueLock(tx);let groupId=method==="put"?id.parse((req.params as any).id):0;
-    const active=(await tx.execute(sql`SELECT id FROM spieler WHERE aktiv AND id IN(${sql.join(body.spielerIds.map(n=>sql`${n}`),sql`,`)})`)).rows;
-    if(active.length!==body.spielerIds.length)throw new PortalConflict("Ein Spieler ist nicht mehr aktiv.");
+    const active=(await tx.execute(sql`SELECT id FROM v_queue_eligibility WHERE registered AND id IN(${sql.join(body.spielerIds.map(n=>sql`${n}`),sql`,`)})`)).rows;
+    if(active.length!==body.spielerIds.length)throw new PortalConflict("Ein Spieler ist heute nicht eingetragen.",422,"queue_ineligible");
     if(groupId) {
       const updated=(await tx.execute(sql`UPDATE spieler_gruppen SET name=${body.name},updated_at=now() WHERE id=${groupId} AND deleted_at IS NULL RETURNING id`)).rows;
       if(!updated.length)throw new PortalConflict("Gruppe nicht gefunden.",404);

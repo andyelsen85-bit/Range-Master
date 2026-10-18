@@ -21,7 +21,7 @@ struct SequenzEintrag { bool isPair,isDoublette;int maschine,partner,delayMs; };
 struct {int taubeIndex=0,sequenzLen=2,ergebnisseCount=0,spielerCount=1,screen=SCREEN_SPIEL;
     int spielerIndex=0;
     bool activeGameStorageError=false,harakiriOrdersReady=false;
-    bool currentFireSent=false,remoteButtonsEnabled=true;
+    bool currentFireSent=false,remoteButtonsEnabled=true,repeatCurrentLaunch=false;
     SequenzEintrag sequenz[2]{};char gatewayUrl[256]="http://gateway",gatewayToken[256]="synthetic-auth-key";
 } g_store;
 template<class Store> static const SequenzEintrag *store_sequence_entry(const Store *s,int,int c){return &s->sequenz[c];}

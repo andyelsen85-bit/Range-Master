@@ -1,4 +1,6 @@
 #pragma once
+#include "esp_err.h"
+esp_err_t http_sync_boot(void);
 // ============================================================
 // Portal API HTTP sync client
 // Mirrors emulator gameStore.ts sync logic

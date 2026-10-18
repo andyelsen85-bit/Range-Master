@@ -22,6 +22,8 @@ STUBS=r'''
 #include "game_store.h"
 #include "active_game.h"
 #include "history_scorecard.h"
+#include "active_scorecard.h"
+#include "scorecard_layout.h"
 GameStore g_store{};
 static bool credit_cancelled=false;
 bool store_credit_game_cancelled(const char*){return credit_cancelled;}
@@ -85,6 +87,39 @@ static void verify_permutation() {
 }
 int main() {
     int games=0,different=0;
+    for(int mode:{MODUS_NORMAL,MODUS_HARAKIRI}) {
+        setup(mode,255,6);FinishedGame view{};
+        int current=active_scorecard_project(&g_store,&view);
+        auto shape=history_scorecard_shape(&view);
+        assert(shape.runs==2&&shape.clays==9&&view.spieler_count==6&&current>=1&&current<=18);
+        auto fit=scorecard_layout(950,260,6,18);
+        assert(fit.name+fit.total+18*fit.clay<=950&&7*fit.row<=260&&fit.font>=12);
+    }
+    for(int mode:{MODUS_NORMAL,MODUS_HARAKIRI}) {
+        setup(mode,127,3); // singles only: a half-scored H pair is a separate case
+        g_store.currentFireSent=true;
+        store_wiederholen();
+        assert(!g_store.currentFireSent&&g_store.repeatCurrentLaunch);
+        assert(g_store.spielerIndex==0&&g_store.taubeIndex==0&&g_store.ergebnisseCount==0);
+        store_wiederholen();
+        assert(g_store.spielerIndex==0&&g_store.ergebnisseCount==0);
+        g_store.currentFireSent=true;store_eintragen(2);
+        int player=g_store.spielerIndex,clay=g_store.taubeIndex,run=g_store.lauf;
+        g_store.currentFireSent=true;store_wiederholen();
+        assert(!g_store.currentFireSent&&g_store.ergebnisseCount==1&&g_store.spieler[0].punkte==2);
+        assert(g_store.spielerIndex==player&&g_store.taubeIndex==clay&&g_store.lauf==run);
+        store_wiederholen();
+        assert(g_store.ergebnisseCount==0&&g_store.spielerIndex==0&&g_store.spieler[0].punkte==0);
+        assert(g_store.ergebnisse[0].wiederholt);
+    }
+    setup(MODUS_CUSTOM_1,255,2);
+    g_store.currentFireSent=true;store_wiederholen();
+    assert(!g_store.currentFireSent&&g_store.taubeIndex==0&&g_store.ergebnisseCount==0);
+    g_store.currentFireSent=true;store_eintragen(2);
+    store_wiederholen();assert(g_store.ergebnisseCount==1&&g_store.currentFireSent);
+    store_eintragen(2);assert(g_store.ergebnisseCount==2&&g_store.spieler[0].punkte==4);
+    store_wiederholen();
+    assert(g_store.ergebnisseCount==0&&g_store.spielerIndex==0&&g_store.taubeIndex==0&&g_store.spieler[0].punkte==0);
     for(int players=2;players<=6;players++)for(int mode:{MODUS_HARAKIRI,MODUS_HARAKIRI_CUSTOM})
     for(int mask=1;mask<256;mask++) {
         if(mode==MODUS_HARAKIRI_CUSTOM&&((mask&33)!=33))continue;
@@ -197,7 +232,7 @@ int main() {
     assert(g_store.taubeIndex==clay&&g_store.spielerIndex==player);
     assert(!memcmp(saved,g_store.harakiriOrder,sizeof(saved)));
     assert(store_sequence_entry(&g_store,player,clay)->maschine==machine);
-    assert(g_store.currentFireSent&&g_store.activeGameResumed);
+    assert(!g_store.currentFireSent&&!g_store.activeGameResumed);
     assert(!strcmp(g_store.activeGameCreditUseIds[0],"original-use-event"));
     // A failed replacement must retain the committed slot and permutations.
     auto newest=[]() {
@@ -261,6 +296,19 @@ int main() {
     assert(!active_game_checkpoint()&&g_store.activeGameStorageError);
     assert(rmdir(name)==0);active_game_retry_finished_checkpoint();
     assert(!g_store.activeGameStorageError);
+    // Normal game: reboot between repeat stages preserves the explicit retry.
+    for(int mode:{MODUS_NORMAL,MODUS_HARAKIRI}) {
+    remapped=false;setup(mode,127,3);persist=true;int initial_player=g_store.spielerIndex;
+    g_store.currentFireSent=true;assert(active_game_checkpoint());store_eintragen(2);
+    int prior_player=g_store.spielerIndex,prior_clay=g_store.taubeIndex;
+    g_store.currentFireSent=true;assert(active_game_checkpoint());store_wiederholen();
+    memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
+    assert(g_store.harakiriOrdersReady==(mode==MODUS_HARAKIRI)&&!g_store.currentFireSent&&g_store.repeatCurrentLaunch);
+    assert(g_store.spielerIndex==prior_player&&g_store.taubeIndex==prior_clay&&g_store.ergebnisseCount==1);
+    store_wiederholen();assert(g_store.spielerIndex==initial_player&&g_store.ergebnisseCount==0&&g_store.spieler[initial_player].punkte==0);
+    g_store.currentFireSent=true;assert(active_game_checkpoint());store_wiederholen();store_wiederholen();
+    assert(g_store.repeatCurrentLaunch&&!g_store.currentFireSent&&g_store.ergebnisseCount==0&&g_store.spielerIndex==initial_player);
+    }
     // Both unrecognizable files fail closed; never replace with shared order.
     for(int slot=0;slot<2;slot++){
         char name[160];snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/active%d.bin",slot);

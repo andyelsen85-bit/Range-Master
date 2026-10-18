@@ -4,12 +4,23 @@ import importlib.util
 import re
 import subprocess
 import tempfile
+import sys
+import ast
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("generator", ROOT / "tools/generate_fonts.py")
 generator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(generator)
 required = set(range(0xA0, 0x180)) | set(map(ord, generator.SYMBOLS))
+policy = (ROOT / "main/ui/font_coverage.h").read_text()
+expression = re.search(r"return\s+(.*?);", policy, re.S)[1].replace("&&", " and ").replace("||", " or ")
+tree = ast.parse(" ".join(expression.split()), mode="eval")
+assert all(isinstance(n, (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.Compare,
+    ast.Name, ast.Load, ast.Constant, ast.GtE, ast.LtE, ast.Eq)) for n in ast.walk(tree))
+compiled_policy = compile(tree, "ui_codepoint_supported", "eval")
+def supported(cp):
+    return eval(compiled_policy, {"__builtins__": {}}, {"cp": cp})
+assert all(supported(cp) for cp in required), "font_coverage.h disagrees with generated fallback policy"
 errors = []
 tokens = re.compile(r'//[^\n]*|/\*.*?\*/|(?:u8|u|U|L)?R"(?P<delimiter>[^ ()\\\t\n]{0,16})\((?P<raw>.*?)\)(?P=delimiter)"|(?:u8|u|U|L)?"(?:[^"\\]|\\.)*"', re.S)
 for path in (ROOT / "main").rglob("*.cpp"):
@@ -20,7 +31,7 @@ for path in (ROOT / "main").rglob("*.cpp"):
         value=token.group("raw") if token.group("raw") is not None else token[0]
         value=re.sub(r'\\u([0-9a-fA-F]{4})|\\U([0-9a-fA-F]{8})',lambda m:chr(int(m[1] or m[2],16)),value)
         for char in value:
-            if ord(char) > 127 and ord(char) not in required:
+            if ord(char) > 127 and (ord(char) not in required or not supported(ord(char))):
                 errors.append(f"{path.relative_to(ROOT)}:{text.count(chr(10),0,token.start())+1}: U+{ord(char):04X} {char}")
     if path.parent.name == "ui" and path.name.startswith("screen_"):
         if "lv_font_montserrat_" in text:
@@ -47,6 +58,9 @@ for size in generator.SIZES:
     if '#include "lvgl.h"' not in text or '"lvgl/lvgl.h"' in text:
         errors.append(f"{path.name}: wrong LVGL include path")
 assert not errors, "\n".join(errors)
+if "--check-only" in sys.argv:
+    print("PASS build-time literal/font coverage")
+    sys.exit(0)
 
 cpp = r'''
 #include <cassert>

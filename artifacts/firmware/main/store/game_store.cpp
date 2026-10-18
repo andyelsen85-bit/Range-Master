@@ -23,6 +23,7 @@
 #include "cJSON.h"
 
 #include "game_store.h"
+#include "day_player_events.h"
 #include "credit_outbox.h"
 #include "portal_runtime.h"
 #include "terminal_logs.h"
@@ -1955,6 +1956,7 @@ void store_apply_portal_roster(const PortalSpieler *spieler, int count)
 void store_remap_spieler_id(int old_id, int new_id)
 {
     if (old_id == new_id || old_id == 0 || new_id == 0) return;
+    day_players_remap(old_id,new_id);
     ui_manager_remap_player_identity(old_id,new_id);
     for (int i = 0; i < s_payment_receipt_count; ++i)
         if (s_payment_receipts[i].spielerId == old_id) s_payment_receipts[i].spielerId = new_id;
@@ -2023,17 +2025,26 @@ void store_register_spieler_fuer_tag(int spieler_id)
             return;
         }
         if (g_store.kreditPlayerIds[i] == 0) {
+            if(!day_players_prepare(spieler_id,true)){
+                memcpy(g_store.kreditPlayerIds,prior_ids,sizeof(prior_ids));
+                memcpy(g_store.kredite,prior_credits,sizeof(prior_credits));
+                memcpy(g_store.munition,prior_munition,sizeof(prior_munition));
+                memcpy(g_store.kreditDatum,prior_date,sizeof(prior_date));
+                payment_state_unlock();return;
+            }
             g_store.kreditPlayerIds[i] = spieler_id;
             g_store.kredite[i] = (KreditStand){0, 0};
             // A re-added player starts a new operational session. Do not
             // expose ammunition purchased during the previous session.
             reset_munition_for_player(spieler_id);
-            if (!save_payment_state_unlocked()) {
+            bool committed=save_payment_state_unlocked();
+            if (!committed) {
                 memcpy(g_store.kreditPlayerIds, prior_ids, sizeof(prior_ids));
                 memcpy(g_store.kredite, prior_credits, sizeof(prior_credits));
                 memcpy(g_store.munition, prior_munition, sizeof(prior_munition));
                 memcpy(g_store.kreditDatum, prior_date, sizeof(prior_date));
             }
+            day_players_finish(committed);
             payment_state_unlock();
             return;
         }
@@ -2044,7 +2055,7 @@ void store_register_spieler_fuer_tag(int spieler_id)
 bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_len)
 {
     if (reason && reason_len) reason[0] = '\0';
-    if (spieler_id <= 0) {
+    if (spieler_id == 0) {
         if (reason && reason_len) snprintf(reason, reason_len, "ONGULTEGE SPILLER");
         return false;
     }
@@ -2091,6 +2102,10 @@ bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_l
         return false;
     }
     KreditStand previous = g_store.kredite[slot];
+    if(!day_players_prepare(spieler_id,false)) {
+        if(reason&&reason_len)snprintf(reason,reason_len,"Tageseintrag konnte nicht gespeichert werden");
+        kredit_events_unlock();xSemaphoreGive(s_verkauf_events_mutex);return false;
+    }
     MunitionStand prior_munition[MAX_PORTAL_SPIELER];
     int prior_lineup[MAX_SPIELER];
     memcpy(prior_munition, g_store.munition, sizeof(prior_munition));
@@ -2101,6 +2116,7 @@ bool store_remove_spieler_fuer_tag(int spieler_id, char *reason, size_t reason_l
     for (int p = 0; p < MAX_SPIELER; ++p)
         if (g_store.lineupIds[p] == spieler_id) g_store.lineupIds[p] = 0;
     bool persisted = save_payment_state_unlocked();
+    day_players_finish(persisted);
     if (!persisted) {
         g_store.kreditPlayerIds[slot] = spieler_id;
         g_store.kredite[slot] = previous;
@@ -2313,7 +2329,9 @@ bool store_start_spiel(void)
     s->taubeIndex   = 0;
     s->spielerIndex = 0;
     s->ergebnisseCount = 0;
+    memset(s->ergebnisse,0,sizeof(s->ergebnisse));
     s->currentFireSent = false;
+    s->repeatCurrentLaunch=false;
     for (int i = 0; i < s->spielerCount; i++) s->spieler[i].punkte = 0;
 
     // Generate game UUID — random, globally unique, idempotent for portal sync
@@ -2497,7 +2515,8 @@ void store_eintragen(int punkte)
     e.maschine   = se->maschine;
     e.posten     = ((base + posIdx) % 5) + 1;
     e.punkte     = punkte;
-    e.wiederholt = false;
+    // wiederholt marks the invalidated old result, never its replacement.
+    e.wiederholt=false;
 
     // Scoring rules
     if (se->isPair) {
@@ -2508,6 +2527,7 @@ void store_eintragen(int punkte)
         e.schuss2 = (punkte == 1);
     }
     sp->punkte += punkte;
+    s->repeatCurrentLaunch=false;
     s->activeGameResumed=false;
 
     if (s->ergebnisseCount < MAX_ERGEBNISSE)
@@ -2702,17 +2722,22 @@ void store_dismiss_resultate(void)
 
 void store_wiederholen(void)
 {
-    if(g_store.harakiriOrdersReady) {
+    {
         if(g_store.activeGameStorageError)return;
         const SequenzEintrag *current=store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
         if(current && g_store.currentFireSent && !current->isDoublette) {
             // Deliberately repeat the current unscored launch, including the
             // uncertain pre-reboot launch. Do not undo another player's score.
             g_store.currentFireSent=false;g_store.activeGameResumed=false;
+            g_store.repeatCurrentLaunch=true;
             game_store_save();return;
         }
-        g_store.activeGameResumed=false;
+        // A partially scored pair cannot be relaunched; finish its second
+        // result before undoing the whole unit.
+        if(g_store.currentFireSent)return;
         if(g_store.ergebnisseCount<=0)return;
+        g_store.activeGameResumed=false;
+        g_store.repeatCurrentLaunch=false;
         // Undo the last whole launch unit. In a completed pair both clay
         // results must be removed before a deliberate physical repeat.
         Ergebnis last=g_store.ergebnisse[g_store.ergebnisseCount-1];
@@ -2722,13 +2747,17 @@ void store_wiederholen(void)
         if(player<0)return;
         const SequenzEintrag *entry=store_sequence_entry(&g_store,player,last.taube-1);
         int remove=entry && entry->isPair && entry->isDoublette ? 2 : 1;
+        if(remove>g_store.ergebnisseCount)return;
         if(g_store.lauf>last.lauf) {
-            int units=store_sequence_unit(&g_store,player,g_store.sequenzLen);
+            int units=g_store.harakiriOrdersReady?
+                store_sequence_unit(&g_store,player,g_store.sequenzLen):
+                g_store.sequenzLen-count_h2_before(&g_store,g_store.sequenzLen);
             for(int i=0;i<g_store.spielerCount;i++)
                 g_store.spieler[i].startPosten=((g_store.spieler[i].startPosten-1-units)%5+5)%5+1;
         }
         for(int n=0;n<remove && g_store.ergebnisseCount>0;n++) {
-            const Ergebnis &old=g_store.ergebnisse[--g_store.ergebnisseCount];
+            Ergebnis &old=g_store.ergebnisse[--g_store.ergebnisseCount];
+            old.wiederholt=true;
             g_store.spieler[player].punkte-=old.punkte;
         }
         g_store.lauf=last.lauf;
@@ -2737,19 +2766,6 @@ void store_wiederholen(void)
         g_store.currentFireSent=false;
         game_store_save();return;
     }
-    // Mark current entry as wiederholt and re-enter it
-    if (g_store.ergebnisseCount > 0) {
-        g_store.ergebnisse[g_store.ergebnisseCount - 1].wiederholt = true;
-    }
-    g_store.currentFireSent = false;
-    // Back up one step
-    if (g_store.spielerIndex > 0) {
-        g_store.spielerIndex--;
-    } else if (g_store.taubeIndex > 0) {
-        g_store.taubeIndex--;
-        g_store.spielerIndex = g_store.spielerCount - 1;
-    }
-    game_store_save();
 }
 
 void store_skip_taube(void)
@@ -2879,8 +2895,9 @@ void store_create_workers(void)
             char sync_error[sizeof(g_store.syncError)] = {};
             // SYNC_RUNNING is deliberately not a UI pause. Individual pull
             // publications request and acknowledge their own tiny windows.
+            if(source==SYNC_REQUEST_MANUAL)(void)day_players_retry_rejected();
             esp_err_t err = sync_source_is_billing(source)
-                ? http_sync_billing() : http_sync_all();
+                ? http_sync_billing() : source==SYNC_REQUEST_BOOT?http_sync_boot():http_sync_all();
             if (err != ESP_OK && !sync_error[0]) {
                 http_sync_copy_last_error(sync_error, sizeof(sync_error));
                 if (!sync_error[0])
@@ -3208,7 +3225,7 @@ int store_pending_action_count(void)
     for(int i=0;i<g_store.pendingKreditEventCount;i++)pending_credits+=!g_store.pendingKreditEvents[i].acknowledged;
     return g_store.pendingGamesCount + g_store.spielerUpdateCount +
            pending_credits + g_store.pendingVerkaufEventCount +
-           g_store.pendingPaymentEventCount;
+           g_store.pendingPaymentEventCount+day_players_pending();
 }
 
 void store_queue_spieler_update(int spieler_id, const char *name, const char *email, bool portal_aktiv)
@@ -3583,6 +3600,7 @@ void game_store_save(void)
     nvs_commit(s_nvs);
     nvs_unlock();
     (void)active_game_checkpoint();
+    (void)day_players_flush();
 }
 
 // ── Init ─────────────────────────────────────────────────────

@@ -302,7 +302,10 @@ void screen_base_init(lv_obj_t *scr)
     lv_obj_set_style_text_color(scr,lv_color_hex(CLR_TEXT),0);
     lv_obj_set_style_bg_color(scr, lv_color_hex(CLR_BG), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    // Long forms and the dashboard remain reachable on the real panel.
+    // The active game explicitly opts out: its scorecard is fitted, not scrolled.
+    lv_obj_add_flag(scr,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(scr,LV_DIR_VER);
 }
 
 // ── ui_manager_init ───────────────────────────────────────────
