@@ -18,6 +18,7 @@
 #include "day_inventory.h"
 #include "terminal_logs.h"
 #include "game_journal.h"
+#include "game_participations.h"
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -1122,12 +1123,14 @@ static cJSON *pending_game_to_json(const PendingGame *g)
     cJSON_AddBoolToObject  (obj, "abgeschlossen",  g->abgeschlossen);
 
     cJSON *teil = cJSON_CreateArray();
-    for (int i = 0; i < g->teilnahmen_count; i++) {
+    RoundParticipation rounds[MAX_ROUND_PARTICIPATIONS]{};
+    int round_count=game_round_participations(g,rounds);
+    for (int i = 0; i < round_count; i++) {
         cJSON *t = cJSON_CreateObject();
-        cJSON_AddNumberToObject(t, "spielerId",   g->teilnahmen[i].spielerId);
-        cJSON_AddNumberToObject(t, "startPosten", g->teilnahmen[i].startPosten);
-        cJSON_AddNumberToObject(t, "punkte",      g->teilnahmen[i].punkte);
-        cJSON_AddNumberToObject(t, "lauf",        g->teilnahmen[i].lauf);
+        cJSON_AddNumberToObject(t, "spielerId",   rounds[i].spielerId);
+        cJSON_AddNumberToObject(t, "startPosten", rounds[i].startPosten);
+        cJSON_AddNumberToObject(t, "punkte",      rounds[i].punkte);
+        cJSON_AddNumberToObject(t, "lauf",        rounds[i].lauf);
         cJSON_AddItemToArray(teil, t);
     }
     cJSON_AddItemToObject(obj, "teilnahmen", teil);
@@ -1404,16 +1407,13 @@ esp_err_t http_fetch_spielhistorie(void)
         if (jt && cJSON_IsArray(jt)) {
             cJSON *t;
             cJSON_ArrayForEach(t, jt) {
-                if (fg->base.teilnahmen_count >= MAX_SPIELER) break;
-                int ti = fg->base.teilnahmen_count++;
                 cJSON *jsid = cJSON_GetObjectItem(t, "spielerId");
                 cJSON *jsp  = cJSON_GetObjectItem(t, "startPosten");
                 cJSON *jpkt = cJSON_GetObjectItem(t, "punkte");
                 cJSON *jla  = cJSON_GetObjectItem(t, "lauf");
-                if (jsid) fg->base.teilnahmen[ti].spielerId   = (int)jsid->valuedouble;
-                if (jsp)  fg->base.teilnahmen[ti].startPosten = (int)jsp->valuedouble;
-                if (jpkt) fg->base.teilnahmen[ti].punkte      = (int)jpkt->valuedouble;
-                if (jla)  fg->base.teilnahmen[ti].lauf        = (int)jla->valuedouble;
+                if(jsid && jsp && jpkt && jla)
+                    game_merge_participation(&fg->base,(int)jsid->valuedouble,(int)jsp->valuedouble,
+                        (int)jpkt->valuedouble,(int)jla->valuedouble);
             }
         }
 

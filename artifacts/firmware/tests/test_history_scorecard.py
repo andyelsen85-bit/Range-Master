@@ -207,7 +207,12 @@ int main() {
         int runs=mode>=MODUS_CUSTOM_1 ? 1 : 2;
         g_store.history[0]=game((Modus)mode,clays,runs);g_store.historyCount=1;
         show_detail(0);assert(table.cols==clays*runs+2 && table.rows.size()==3);
-        assert(table.rows[1].back()==std::to_string(g_store.history[0].base.teilnahmen[0].punkte));
+        int shownTotal=0;
+        for(int col=1;col<=clays*runs;col++) {
+            const auto &cell=table.rows[1][col];
+            if(!cell.empty() && cell[0]>='0' && cell[0]<='9')shownTotal+=std::stoi(cell);
+        }
+        assert(table.rows[1].back()==std::to_string(shownTotal));
         for(int col=1;col<=clays*runs;++col) {
             int clay=(col-1)%clays+1;
             assert((s_scorecard_state.pair[col]!=0)==(clays==9 && (clay==8 || clay==9)));

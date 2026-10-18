@@ -46,3 +46,4 @@
 - [Integrated diagnostics delivery](terminal-diagnostics-scope.md) — logs, recovery, sync publication and FIRE are one software scope; hardware proof remains separate.
 - [Queue and kiosk contracts](queue-kiosk-contracts.md) — voluntary takeover/start, financial isolation, full live snapshots and authoritative null; preserve journal compatibility.
 - [Isolated PostgreSQL test cleanup](postgres-test-pool-cleanup.md) — mixed module loaders can create multiple pools; close every test-owned pool before dropping the temporary database.
+- [Multi-run scoring compatibility](multi-run-scoring.md) — expand per-run rows on the wire, not the persisted journal ABI; retain aggregate-only legacy history.

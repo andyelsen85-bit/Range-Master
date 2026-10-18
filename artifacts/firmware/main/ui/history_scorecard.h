@@ -131,9 +131,11 @@ static inline bool history_scorecard_doublette(const FinishedGame *game, int run
 
 static inline int history_scorecard_total(const FinishedGame *game, int player)
 {
-    for (int i = 0; i < game->base.teilnahmen_count && i < MAX_SPIELER; ++i)
-        if (game->base.teilnahmen[i].spielerId == player)
-            return game->base.teilnahmen[i].punkte;
+    if(!game->base.ergebnisse_count) {
+        for (int i = 0; i < game->base.teilnahmen_count && i < MAX_SPIELER; ++i)
+            if (game->base.teilnahmen[i].spielerId == player)
+                return game->base.teilnahmen[i].punkte;
+    }
     HistoryScorecardShape shape = history_scorecard_shape(game);
     int total = 0;
     for (int run = 1; run <= shape.runs; ++run)

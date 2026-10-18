@@ -13,6 +13,7 @@ import { billSettlementStatus, dayBillSummary, isSettlementRedundant, lockBillSe
 import { buildDailyReport } from "../lib/daily-report";
 import { localDay } from "../lib/local-day";
 import { sameImmutableChildren } from "../lib/immutable-events";
+import { deriveParticipations } from "../lib/game-participations";
 import { revisionToken, SYNC_MANIFEST_SCHEMA_VERSION } from "../lib/sync-manifest";
 import {
   decryptTerminalConfiguration,
@@ -371,7 +372,11 @@ router.post("/spiele", requireApiKey, async (req, res) => {
 
   for (const s of body.spiele) {
     s.ergebnisse=s.ergebnisse.map(e=>({...e,punkte:computeTaubePunkte(e,isPairClay(e,s.ergebnisse))}));
-    if(s.ergebnisse.length)s.teilnahmen=s.teilnahmen.map(t=>({...t,punkte:s.ergebnisse.filter(e=>e.spielerId===t.spielerId&&e.lauf===t.lauf).reduce((n,e)=>n+e.punkte,0)}));
+    try { s.teilnahmen=deriveParticipations(s.teilnahmen,s.ergebnisse,s.lauf); }
+    catch {
+      results.push({externalId:s.externalId,status:"rejected" as const,error:"Widersprüchliche Teilnahmen"});
+      continue;
+    }
     const missingIds = [...s.teilnahmen,...s.ergebnisse].map(t=>t.spielerId).filter(id=>!knownPlayerIds.has(id));
     if (missingIds.length) {
       results.push({ externalId: s.externalId, status: "rejected" as const, error: "Unbekannte Spieler", playerIds: [...new Set(missingIds)] });

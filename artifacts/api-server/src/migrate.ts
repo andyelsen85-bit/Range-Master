@@ -10,6 +10,11 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db, pool } from "@workspace/db";
 import path from "path";
 
+pool.on("connect",client=>client.on("notice",notice=>{
+  if(notice.message?.startsWith("ROUND_TOTAL_REPAIR"))
+    console.log("[migrate]",notice.message);
+}));
+
 async function runMigrations() {
   console.log("[migrate] Starting database migrations…");
   // Drizzle SQL files live at /app/drizzle/ (one level up from /app/dist/)
