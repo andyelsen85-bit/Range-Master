@@ -45,7 +45,7 @@ router.get("/me/purchases", authenticate, async (req, res) => {
         p.category, COALESCE(k.price_revision_id, pr.id) AS "priceRevisionId",
         COALESCE(k.unit_price_cents, pr.unit_price_cents) AS "unitPriceCents", k.anzahl AS quantity,
         (k.anzahl * COALESCE(k.unit_price_cents, pr.unit_price_cents))::int AS "totalCents"
-      FROM kredit_events k JOIN products p ON p.code = 'GAME_CREDIT'
+      FROM v_effective_kredit_events k JOIN products p ON p.code = 'GAME_CREDIT'
       LEFT JOIN LATERAL (
         SELECT id, unit_price_cents FROM product_price_revisions
         WHERE product_id = p.id AND effective_from <= COALESCE(k.occurred_at, k.created_at)

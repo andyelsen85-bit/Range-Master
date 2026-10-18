@@ -23,6 +23,7 @@
 #include "cJSON.h"
 
 #include "game_store.h"
+#include "credit_outbox.h"
 #include "portal_runtime.h"
 #include "terminal_logs.h"
 #include "game_journal.h"
@@ -126,6 +127,13 @@ typedef struct {
     int  anzahl;
     bool inFlight;
 } LegacyKreditEvent;
+
+// Exact prior receipt-bearing NVS layout. Neither FinishedGame nor FAT journal
+// dimensions change; old credit blobs are migrated on read, never discarded.
+typedef struct {
+    char externalId[40];int spielerId;char datum[11];char typ[8];int anzahl;
+    char occurredAt[32];int preisRevisionId;int unitPriceCent;bool inFlight;
+} ReceiptKreditEvent;
 
 static void kredit_events_lock(void)
 {
@@ -302,11 +310,25 @@ static bool load_counted_blob_compat(const char *key, const char *count_key,
     return true;
 }
 
+static bool s_credit_outbox_unreadable=false;
+bool store_credit_outbox_ready(void) {return !s_credit_outbox_unreadable;}
+static char s_credit_cancelled_game_id[40]={};
+bool store_credit_game_cancelled(const char *game_id) {
+    return game_id&&game_id[0]&&!strcmp(game_id,s_credit_cancelled_game_id);
+}
 static esp_err_t set_credit_events_blob_unlocked(void)
 {
-    return set_counted_blob("credit_events", g_store.pendingKreditEvents,
-                            g_store.pendingKreditEventCount,
-                            sizeof(g_store.pendingKreditEvents[0]));
+    if(s_credit_outbox_unreadable)return ESP_ERR_INVALID_STATE;
+    size_t bytes=credit_outbox_size(g_store.pendingKreditEventCount);
+    void *blob=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!blob)return ESP_ERR_NO_MEM;
+    CreditOutboxHeader header{};
+    header.magic=CREDIT_OUTBOX_MAGIC;header.version=1;header.count=g_store.pendingKreditEventCount;
+    memcpy(header.cancelledGameId,s_credit_cancelled_game_id,sizeof(header.cancelledGameId));
+    memcpy(blob,&header,sizeof(header));
+    memcpy((char*)blob+sizeof(header),g_store.pendingKreditEvents,bytes-sizeof(header));
+    esp_err_t result=nvs_set_blob(s_nvs,"credit_events",blob,bytes);
+    heap_caps_free(blob);return result;
 }
 
 static esp_err_t set_ammo_blob_unlocked(void)
@@ -497,6 +519,7 @@ static bool has_pending_billable_activity(int spieler_id, const char *today)
 
 static bool has_pending_day_activity(int spieler_id, const char *today)
 {
+    if(s_credit_outbox_unreadable)return true;
     for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i)
         if (g_store.pendingVerkaufEvents[i].spielerId == spieler_id &&
             !strcmp(g_store.pendingVerkaufEvents[i].datum, today))
@@ -866,7 +889,7 @@ void store_rebuild_bill_projection(void)
     const Produkt *game_credit = store_produkt("GAME_CREDIT");
     for (int i = 0; i < g_store.pendingKreditEventCount; ++i) {
         const KreditEvent *event = &g_store.pendingKreditEvents[i];
-        if (strcmp(event->datum, today)) continue;
+        if (strcmp(event->datum, today)||event->acknowledged) continue;
         PlayerBill *bill = projection_bill_for_player(&g_store.billDay, event->spielerId);
         if (!bill) continue;
         if (!strcmp(event->typ, "GRANT")) bill->creditGranted += event->anzahl;
@@ -892,6 +915,12 @@ void store_rebuild_bill_projection(void)
     if (g_store.billDay.uniquePlayers < g_store.billDay.playerCount)
         g_store.billDay.uniquePlayers = g_store.billDay.playerCount;
     g_store.billDay.authoritative = g_store.billDayBaseline.authoritative;
+    // An aggregate cached bill cannot identify a just-voided individual USE.
+    // Never offer it as a payable authoritative invoice until the pending
+    // ledger corrections have been accepted and a fresh bill has been pulled.
+    for(int i=0;i<g_store.pendingKreditEventCount;i++)
+        if(!strcmp(g_store.pendingKreditEvents[i].datum,today)&&!g_store.pendingKreditEvents[i].acknowledged)
+            g_store.billDay.authoritative=false;
 
     // A PAID baseline is audit data, not a recurring roster command. The
     // accepted payment transition retires the player exactly once; otherwise
@@ -1784,11 +1813,23 @@ static void remove_pending_kredit_event(GameStore *s, int index)
            sizeof(KreditEvent));
 }
 
-static void clear_active_game_credit_tracking(GameStore *s)
+static void clear_active_game_credit_tracking_unlocked(GameStore *s)
 {
+    // Acknowledged active USEs were retained only for their immutable date and
+    // receipt. They are not pending uploads and can now leave the outbox.
+    for(int i=0;i<s->pendingKreditEventCount;) {
+        bool tracked=false;
+        for(int k=0;k<s->activeGameCreditCount;k++)
+            tracked|=!strcmp(s->pendingKreditEvents[i].externalId,s->activeGameCreditUseIds[k]);
+        if(tracked&&s->pendingKreditEvents[i].acknowledged)remove_pending_kredit_event(s,i);
+        else ++i;
+    }
     memset(s->activeGameCreditPlayerIds, 0, sizeof(s->activeGameCreditPlayerIds));
     memset(s->activeGameCreditUseIds, 0, sizeof(s->activeGameCreditUseIds));
     s->activeGameCreditCount = 0;
+}
+static void clear_active_game_credit_tracking(GameStore *s) {
+    kredit_events_lock();clear_active_game_credit_tracking_unlocked(s);kredit_events_unlock();
 }
 
 bool store_set_lineup_post(int post, int spieler_id)
@@ -2134,6 +2175,10 @@ bool store_adjust_kredite(int spieler_id, int delta)
 // ── store_start_spiel ────────────────────────────────────────
 bool store_start_spiel(void)
 {
+    if(s_credit_outbox_unreadable) {
+        snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),"Kredit-Outbox nicht lesbar. Originaldaten erhalten; Diagnose erforderlich.");
+        return false;
+    }
     if(portal_queue_busy()) {
         snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),"Warteschlange wird noch übernommen. Bitte warten.");
         return false;
@@ -2219,12 +2264,12 @@ bool store_start_spiel(void)
     kredit_events_lock();
     // A start must reserve room for every USE event. Otherwise a later quit
     // could not prove which players were charged or restore them safely.
-    if (s->pendingKreditEventCount + s->spielerCount > MAX_KREDIT_EVENTS) {
+    if (s->pendingKreditEventCount + 2*s->spielerCount > MAX_KREDIT_EVENTS) {
         kredit_events_unlock();
         ESP_LOGW(TAG, "Not enough room to queue all game credit events");
         return false;
     }
-    clear_active_game_credit_tracking(s);
+    clear_active_game_credit_tracking_unlocked(s);
     for (int i = 0; i < s->spielerCount; i++) {
         int kreditSlot = find_kredit_slot(s, s->spieler[i].id);
         if (kreditSlot < 0) {
@@ -2303,7 +2348,7 @@ bool store_cancel_spiel(void)
     if (s->screen != SCREEN_SPIEL) return false;
 
     // A USE still in the local queue can be removed. If it has already been
-    // synced, reserve one GRANT event to compensate it at the portal. Check
+    // synced, reserve one VOID_USE event to cancel it at the portal. Check
     // capacity before altering any local balance, so the UI never reports a
     // completed quit with only some players refunded.
     kredit_events_lock();
@@ -2312,12 +2357,14 @@ bool store_cancel_spiel(void)
     for (int i = 0; i < s->activeGameCreditCount; i++) {
         if (s->activeGameCreditUseIds[i][0] == '\0') continue;
         int eventIndex = find_pending_kredit_event(s, s->activeGameCreditUseIds[i]);
-        if (eventIndex >= 0 && !s->pendingKreditEvents[eventIndex].inFlight) {
+        if (eventIndex >= 0 && !s->pendingKreditEvents[eventIndex].inFlight &&
+            !s->pendingKreditEvents[eventIndex].mayBeAccepted) {
             removableUses++;
         } else {
             // An in-flight request may already have reached the portal. Keep
-            // its USE event for a failed POST retry and queue a durable GRANT.
+            // its USE event for a failed POST retry and queue a durable VOID.
             grantsNeeded++;
+            if(eventIndex>=0&&s->pendingKreditEvents[eventIndex].acknowledged)removableUses++;
         }
     }
     if (s->pendingKreditEventCount - removableUses + grantsNeeded > MAX_KREDIT_EVENTS) {
@@ -2326,28 +2373,50 @@ bool store_cancel_spiel(void)
                  grantsNeeded);
         return false;
     }
+    // Cancellation intent shares the outbox blob. A reset after its durable
+    // commit but before the FAT active tombstone must not resume this game.
+    snprintf(s_credit_cancelled_game_id,sizeof(s_credit_cancelled_game_id),"%.39s",s->spielId);
 
     for (int i = 0; i < s->activeGameCreditCount; i++) {
         const char *useId = s->activeGameCreditUseIds[i];
         if (useId[0] == '\0') continue; // already refunded during a retry
 
         int pendingIndex = find_pending_kredit_event(s, useId);
-        if (pendingIndex >= 0 && !s->pendingKreditEvents[pendingIndex].inFlight) {
+        if (pendingIndex >= 0 && !s->pendingKreditEvents[pendingIndex].inFlight &&
+            !s->pendingKreditEvents[pendingIndex].mayBeAccepted) {
             remove_pending_kredit_event(s, pendingIndex);
-        } else if (!queue_kredit_event_unlocked(s->activeGameCreditPlayerIds[i],
-                                                 "GRANT", 1)) {
+        } else {
+            // Keep the original day/receipt even when cancellation crosses
+            // midnight. Legacy active snapshots without a retained receipt use
+            // the credit day, never the current wall-clock date.
+            KreditEvent original{};
+            if(pendingIndex>=0)original=s->pendingKreditEvents[pendingIndex];
+            if(pendingIndex>=0&&original.acknowledged)remove_pending_kredit_event(s,pendingIndex);
+            if (!queue_kredit_event_unlocked(s->activeGameCreditPlayerIds[i],"VOID_USE",1)) {
             // Keep the dialog open and leave any remaining player entries
             // intact. The operator can sync/clear capacity and retry.
             kredit_events_unlock();
             ESP_LOGE(TAG, "Could not queue credit refund for player %d",
                      s->activeGameCreditPlayerIds[i]);
             return false;
+            }
+            KreditEvent *void_event=&s->pendingKreditEvents[s->pendingKreditEventCount-1];
+            snprintf(void_event->voidsExternalId,sizeof(void_event->voidsExternalId),"%s",useId);
+            snprintf(void_event->datum,sizeof(void_event->datum),"%.10s",
+                original.datum[0]?original.datum:s->kreditDatum);
         }
 
         int kreditSlot = find_kredit_slot(s, s->activeGameCreditPlayerIds[i]);
         if (kreditSlot >= 0 && s->kredite[kreditSlot].verbraucht > 0)
             s->kredite[kreditSlot].verbraucht--;
         s->activeGameCreditUseIds[i][0] = '\0';
+    }
+    // Persist the cancellation before allowing it to complete or the sender
+    // to take another snapshot. Failed persistence keeps the screen blocked.
+    if(!save_kredit_state_unlocked()) {
+        s->activeGameStorageError=true;
+        kredit_events_unlock();
+        return false;
     }
     kredit_events_unlock();
 
@@ -2581,16 +2650,17 @@ static void _store_finish_game(void)
     // The full record must be durable before reporting the game as finished.
     fg.base.finishedAt[0]='\0';
     snprintf(fg.base.finishedAt,sizeof(fg.base.finishedAt),"%.31s",fg.finishedAt);
-    if(s->harakiriOrdersReady && !active_game_checkpoint()) {
-        s->activeGameStorageError=true;return;
-    }
+    // A failed active checkpoint must not prevent the complete finished record
+    // reaching its FAT journal or bounded emergency NVS slot.
+    if(s->harakiriOrdersReady)(void)active_game_checkpoint();
     if(!game_journal_save(&fg)) {
-        terminal_log_add("data_loss_risk","ERROR","Fertiges Spiel noch nicht dauerhaft gespeichert");
-        if(s->harakiriOrdersReady) {
+        if(!game_journal_hold_pending(&fg)) {
+            terminal_log_add("data_loss_risk","ERROR","Fertiges Spiel weder im Archiv noch im NVS gesichert; Speicher erneut versuchen");
             s->activeGameStorageError=true;return;
         }
-        // Keep the complete game in the RAM outbox too. Further starts are
-        // blocked by the latched journal failure, not by a broken live-game UI.
+        terminal_log_add("data_loss_risk","WARN","Fertiges Spiel im NVS gesichert; Spielarchiv wird erneut versucht");
+        // Keep the complete game in RAM and one bounded NVS emergency slot.
+        // The worker retries FAT at 1s/5s/30s; a portal ACK also releases it.
     }
     // Store in history (ring buffer)
     if (s->historyCount < MAX_HISTORY) {
@@ -2690,7 +2760,7 @@ void store_skip_taube(void)
 void store_retry_active_game_save(void)
 {
     g_store.activeGameStorageError=!active_game_checkpoint();
-    if(!g_store.activeGameStorageError && g_store.harakiriOrdersReady &&
+    if(!g_store.activeGameStorageError &&
        g_store.taubeIndex>=g_store.sequenzLen)_store_finish_game();
 }
 
@@ -2921,6 +2991,7 @@ static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anz
         return false;
     }
     KreditEvent *ev = &g_store.pendingKreditEvents[g_store.pendingKreditEventCount++];
+    memset(ev,0,sizeof(*ev));
     snprintf(ev->externalId, sizeof(ev->externalId),
              "kre-%d-%08x", spieler_id, (unsigned)esp_random());
     ev->spielerId = spieler_id;
@@ -2967,6 +3038,10 @@ static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anz
 bool store_queue_kredit_event(int spieler_id, const char *typ, int anzahl)
 {
     kredit_events_lock();
+    if(!strcmp(typ,"VOID_USE")||
+       (g_store.screen==SCREEN_SPIEL&&g_store.pendingKreditEventCount+g_store.activeGameCreditCount>=MAX_KREDIT_EVENTS)) {
+        kredit_events_unlock();return false;
+    }
     bool queued = queue_kredit_event_unlocked(spieler_id, typ, anzahl);
     if (queued && anzahl != 0 && !save_kredit_state_unlocked()) {
         memset(&g_store.pendingKreditEvents[--g_store.pendingKreditEventCount], 0,
@@ -2983,10 +3058,20 @@ int store_begin_kredit_event_sync(KreditEvent *snapshot, int capacity)
     if (!snapshot || capacity <= 0) return 0;
     kredit_events_lock();
     int count = 0;
+    // After reboot a non-resumable normal game has no active tracking. Its
+    // already accepted receipts are audit data on the portal, not pending work.
+    for(int i=0;i<g_store.pendingKreditEventCount;) {
+        bool active=false;
+        for(int k=0;k<g_store.activeGameCreditCount;k++)
+            active|=!strcmp(g_store.pendingKreditEvents[i].externalId,g_store.activeGameCreditUseIds[k]);
+        if(g_store.pendingKreditEvents[i].acknowledged&&!active)remove_pending_kredit_event(&g_store,i);
+        else ++i;
+    }
     for (int i = 0; i < g_store.pendingKreditEventCount && count < capacity; i++) {
         KreditEvent *event = &g_store.pendingKreditEvents[i];
-        if (event->spielerId <= 0 || event->inFlight) continue;
+        if (event->spielerId <= 0 || event->inFlight || event->acknowledged) continue;
         event->inFlight = true;
+        event->mayBeAccepted = true;
         snapshot[count++] = *event;
     }
     if (count > 0 && !save_kredit_state_unlocked()) {
@@ -3014,7 +3099,13 @@ void store_finish_kredit_event_sync_commit(const KreditEvent *snapshot, int coun
         // never an event appended while the HTTP request was in progress.
         if (!g_store.pendingKreditEvents[eventIndex].inFlight) continue;
         if (delivered) {
-            remove_pending_kredit_event(&g_store, eventIndex);
+            bool active=false;
+            for(int k=0;k<g_store.activeGameCreditCount;k++)
+                active|=!strcmp(snapshot[i].externalId,g_store.activeGameCreditUseIds[k]);
+            if(active&&!strcmp(snapshot[i].typ,"USE")) {
+                g_store.pendingKreditEvents[eventIndex].acknowledged=true;
+                g_store.pendingKreditEvents[eventIndex].inFlight=false;
+            } else remove_pending_kredit_event(&g_store, eventIndex);
         } else {
             g_store.pendingKreditEvents[eventIndex].inFlight = false;
         }
@@ -3032,7 +3123,28 @@ void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
     store_rebuild_bill_projection();
 }
 
-void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
+static bool credit_id_in(const char ids[][40],int count,const char *id) {
+    for(int i=0;i<count;i++)if(!strcmp(ids[i],id))return true;
+    return false;
+}
+void store_capture_kredit_reconcile(KreditReconcileProof *request) {
+    memset(request,0,sizeof(*request));kredit_events_lock();
+    for(int i=0;i<g_store.pendingKreditEventCount;i++) {
+        const KreditEvent *e=&g_store.pendingKreditEvents[i];
+        snprintf(request->knownEventIds[request->knownCount++],40,"%s",e->externalId);
+        const char *use=!strcmp(e->typ,"USE")?e->externalId:e->voidsExternalId;
+        if(use[0]&&!credit_id_in(request->voidedUseIds,request->voidedCount,use))
+            snprintf(request->voidedUseIds[request->voidedCount++],40,"%s",use);
+    }
+    for(int i=0;i<g_store.activeGameCreditCount;i++) {
+        const char *use=g_store.activeGameCreditUseIds[i];
+        if(use[0]&&!credit_id_in(request->voidedUseIds,request->voidedCount,use))
+            snprintf(request->voidedUseIds[request->voidedCount++],40,"%s",use);
+    }
+    kredit_events_unlock();
+}
+
+void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht,const KreditReconcileProof *proof)
 {
     kredit_events_lock();
     int kreditSlot = find_kredit_slot(&g_store, spieler_id);
@@ -3063,11 +3175,25 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
         for (int i = 0; i < g_store.pendingKreditEventCount; i++) {
             const KreditEvent *event = &g_store.pendingKreditEvents[i];
             if (event->spielerId != spieler_id || strcmp(event->datum, today)) continue;
+            if(proof&&credit_id_in(proof->knownEventIds,proof->knownCount,event->externalId))continue;
             if (strcmp(event->typ, "GRANT") == 0) {
                 gewaehrt += event->anzahl;
             } else if (strcmp(event->typ, "USE") == 0) {
-                verbraucht += event->anzahl;
+                if(!proof||!credit_id_in(proof->voidedUseIds,proof->voidedCount,event->externalId))
+                    verbraucht += event->anzahl;
+            } else if(!strcmp(event->typ,"VOID_USE")) {
+                if(!proof) {kredit_events_unlock();return;} // no unsafe legacy baseline
+                if(credit_id_in(proof->voidedUseIds,proof->voidedCount,event->voidsExternalId))continue;
+                int pending=find_pending_kredit_event(&g_store,event->voidsExternalId);
+                bool locally_added=pending>=0&&!strcmp(g_store.pendingKreditEvents[pending].typ,"USE")&&
+                    !credit_id_in(proof->knownEventIds,proof->knownCount,event->voidsExternalId);
+                if(locally_added||credit_id_in(proof->countedUseIds,proof->countedCount,event->voidsExternalId))
+                    verbraucht-=event->anzahl;
             }
+        }
+        if(verbraucht<0) {
+            ESP_LOGE(TAG,"Rejected inconsistent portal credit reconciliation for %d",spieler_id);
+            kredit_events_unlock();return;
         }
         g_store.kredite[kreditSlot].gewaehrt = gewaehrt;
         g_store.kredite[kreditSlot].verbraucht = verbraucht;
@@ -3078,8 +3204,10 @@ void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht)
 
 int store_pending_action_count(void)
 {
+    int pending_credits=0;
+    for(int i=0;i<g_store.pendingKreditEventCount;i++)pending_credits+=!g_store.pendingKreditEvents[i].acknowledged;
     return g_store.pendingGamesCount + g_store.spielerUpdateCount +
-           g_store.pendingKreditEventCount + g_store.pendingVerkaufEventCount +
+           pending_credits + g_store.pendingVerkaufEventCount +
            g_store.pendingPaymentEventCount;
 }
 
@@ -3584,54 +3712,22 @@ void game_store_init(void)
         memset(g_store.kredite, 0, sizeof(g_store.kredite));
     }
     int32_t credit_event_count = 0;
-    if (nvs_get_i32(s_nvs, "credit_evt_cnt", &credit_event_count) == ESP_OK &&
-        credit_event_count >= 0 && credit_event_count <= MAX_KREDIT_EVENTS) {
-        size_t credit_events_size = 0;
-        bool current_format = false, legacy_format = false;
-        if (credit_event_count &&
-            nvs_get_blob(s_nvs, "credit_events", NULL, &credit_events_size) == ESP_OK) {
-            current_format = credit_events_size ==
-                (size_t)credit_event_count * sizeof(KreditEvent) ||
-                credit_events_size == sizeof(g_store.pendingKreditEvents);
-            legacy_format = credit_events_size ==
-                (size_t)credit_event_count * sizeof(LegacyKreditEvent) ||
-                credit_events_size == (size_t)MAX_KREDIT_EVENTS * sizeof(LegacyKreditEvent);
+    (void)nvs_get_i32(s_nvs,"credit_evt_cnt",&credit_event_count);
+    size_t bytes=0;esp_err_t read=nvs_get_blob(s_nvs,"credit_events",NULL,&bytes);
+    s_credit_outbox_unreadable=false;
+    if(read==ESP_ERR_NVS_NOT_FOUND&&credit_event_count==0)g_store.pendingKreditEventCount=0;
+    else {
+        void *blob=bytes&&bytes<=credit_outbox_size(MAX_KREDIT_EVENTS)?
+            heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):nullptr;
+        bool loaded=blob&&read==ESP_OK&&nvs_get_blob(s_nvs,"credit_events",blob,&bytes)==ESP_OK&&
+            credit_outbox_decode(blob,bytes,credit_event_count,g_store.pendingKreditEvents,&g_store.pendingKreditEventCount,s_credit_cancelled_game_id);
+        heap_caps_free(blob);
+        if(!loaded) {
+            s_credit_outbox_unreadable=true;g_store.activeGameStorageError=true;
+            g_store.pendingKreditEventCount=0;
+            memset(g_store.pendingKreditEvents,0,sizeof(g_store.pendingKreditEvents));
+            terminal_log_add("data_loss_risk","ERROR","Kredit-Outbox nicht lesbar: Originaldaten erhalten; neue Spiele gesperrt");
         }
-        bool loaded = credit_event_count == 0;
-        if (!loaded && current_format) {
-            credit_events_size = sizeof(g_store.pendingKreditEvents);
-            loaded = nvs_get_blob(s_nvs, "credit_events", g_store.pendingKreditEvents,
-                                  &credit_events_size) == ESP_OK;
-        } else if (!loaded && legacy_format) {
-            LegacyKreditEvent legacy[MAX_KREDIT_EVENTS] = {};
-            credit_events_size = sizeof(legacy);
-            if (nvs_get_blob(s_nvs, "credit_events", legacy, &credit_events_size) == ESP_OK) {
-                for (int i = 0; i < credit_event_count; ++i) {
-                    KreditEvent *out = &g_store.pendingKreditEvents[i];
-                    memcpy(out->externalId, legacy[i].externalId, sizeof(out->externalId));
-                    out->spielerId = legacy[i].spielerId;
-                    memcpy(out->datum, legacy[i].datum, sizeof(out->datum));
-                    memcpy(out->typ, legacy[i].typ, sizeof(out->typ));
-                    out->anzahl = legacy[i].anzahl;
-                    out->inFlight = legacy[i].inFlight;
-                }
-                loaded = true;
-            }
-        }
-        bool valid = true;
-        for (int i = 0; loaded && i < credit_event_count; ++i) {
-            const KreditEvent *event = &g_store.pendingKreditEvents[i];
-            if (event->spielerId == 0 || event->anzahl == 0 ||
-                !memchr(event->externalId, '\0', sizeof(event->externalId)) ||
-                (strcmp(event->typ, "GRANT") != 0 && strcmp(event->typ, "USE") != 0)) {
-                valid = false;
-                break;
-            }
-        }
-        if (loaded && valid) g_store.pendingKreditEventCount = credit_event_count;
-        else memset(g_store.pendingKreditEvents, 0, sizeof(g_store.pendingKreditEvents));
-    } else {
-        memset(g_store.pendingKreditEvents, 0, sizeof(g_store.pendingKreditEvents));
     }
     // An interrupted POST may have been accepted by the portal. Retry its
     // stable external ID rather than leaving the outbox permanently in flight.

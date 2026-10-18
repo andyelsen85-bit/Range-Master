@@ -235,6 +235,14 @@ bool active_game_checkpoint() {
     return ok;
 }
 
+void active_game_retry_finished_checkpoint() {
+    bool acquired=false;
+    if(!ui_manager_snapshot_lock(&acquired))return;
+    bool retry=initialized && !blocked && had_active.load() && !g_store.harakiriOrdersReady;
+    if(acquired)ui_manager_unlock();
+    if(retry)(void)active_game_checkpoint();
+}
+
 bool active_game_restore() {
     ActiveGameRepairInspection initial{};
     (void)active_game_inspect_repair_locked(&initial);
@@ -281,11 +289,16 @@ bool active_game_restore() {
         committed_generation=next_generation=best->generation;committed_slot=best_slot;had_active=best->active;
         // A crash between final-journal commit and active tombstone must not
         // resurrect an already finished (possibly already accepted) game.
-        int finished=best->active?game_journal_contains(best->data.spielId):0;
-        if(best->active && (finished<0 || g_store.operatingMode==TERMINAL_MODE_CATERING)) {
+        bool cancelled=best->active&&store_credit_game_cancelled(best->data.spielId);
+        bool pending_finish=false;
+        for(int i=0;i<g_store.pendingGamesCount;i++)
+            if(!strcmp(g_store.pendingGames[i].externalId,best->data.spielId))pending_finish=true;
+        int finished=best->active&&!cancelled?
+            (pending_finish?1:game_journal_contains(best->data.spielId)):0;
+        if(best->active&&!cancelled && (finished<0 || g_store.operatingMode==TERMINAL_MODE_CATERING)) {
             blocked=true;g_store.activeGameStorageError=true;
             terminal_log_add("data_loss_risk","ERROR","Offenes Harakiri-Spiel gesperrt: Archiv prüfen oder Catering-Modus verlassen");
-        } else if(best->active&&!finished) {
+        } else if(best->active&&!finished&&!cancelled) {
 #define UNPACK(field) memcpy(&g_store.field,&best->data.field,sizeof(g_store.field));
             ACTIVE_FIELDS(UNPACK)
 #undef UNPACK
@@ -300,8 +313,9 @@ bool active_game_restore() {
             if(invalid)terminal_log_add("data_loss_risk","WARN",
                 "Unvollständiger Spielstand: letzte gültige Sicherung geladen; letzte Wertung prüfen");
         } else if(best->active) {
-            // The authoritative finished journal wins; close the active state.
+            // Finished journal OR durable credit cancellation wins.
             g_store.harakiriOrdersReady=false;
+            if(cancelled)terminal_log_add("game","WARN","Storniertes Spiel nach Neustart nicht fortgesetzt; Kredit-Storno bleibt erhalten");
         }
     }
     heap_caps_free(r);heap_caps_free(best);

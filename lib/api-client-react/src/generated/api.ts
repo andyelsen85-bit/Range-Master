@@ -47,6 +47,8 @@ import type {
   GetInventoryStateParams,
   GetKioskPlayersParams,
   GetKioskPrintParams,
+  GetLegacyCreditCancellationCandidates200,
+  GetLegacyCreditCancellationCandidatesParams,
   GetManagedGamesParams,
   GetMyPurchases200,
   GetRangliste200,
@@ -101,6 +103,8 @@ import type {
   QueueCommandInput,
   QueueGroupInput,
   QueueSignupInput,
+  ReconcileSyncDayCredits200,
+  ReconcileSyncDayCreditsBody,
   ReportDateInput,
   SaleEventBatchInput,
   SaleSyncResult,
@@ -1660,6 +1664,77 @@ export const usePostSyncSpiele = <TError = ErrorType<unknown>,
       return useMutation(getPostSyncSpieleMutationOptions(options));
     }
 
+export const getReconcileSyncDayCreditsUrl = () => {
+
+
+
+
+  return `/api/sync/kredite/state`
+}
+
+/**
+ * @summary Read a consistent credit baseline with bounded event acknowledgements
+ */
+export const reconcileSyncDayCredits = async (reconcileSyncDayCreditsBody: ReconcileSyncDayCreditsBody, options?: Parameters<typeof customFetch>[1]): Promise<ReconcileSyncDayCredits200> => {
+
+  return customFetch<ReconcileSyncDayCredits200>(getReconcileSyncDayCreditsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(reconcileSyncDayCreditsBody)
+  }
+);}
+
+
+
+
+
+export const getReconcileSyncDayCreditsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reconcileSyncDayCredits>>, TError,{data: BodyType<ReconcileSyncDayCreditsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reconcileSyncDayCredits>>, TError,{data: BodyType<ReconcileSyncDayCreditsBody>}, TContext> => {
+
+const mutationKey = ['reconcileSyncDayCredits'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reconcileSyncDayCredits>>, {data: BodyType<ReconcileSyncDayCreditsBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  reconcileSyncDayCredits(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReconcileSyncDayCreditsMutationResult = NonNullable<Awaited<ReturnType<typeof reconcileSyncDayCredits>>>
+    export type ReconcileSyncDayCreditsMutationBody = BodyType<ReconcileSyncDayCreditsBody>
+    export type ReconcileSyncDayCreditsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Read a consistent credit baseline with bounded event acknowledgements
+ */
+export const useReconcileSyncDayCredits = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reconcileSyncDayCredits>>, TError,{data: BodyType<ReconcileSyncDayCreditsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reconcileSyncDayCredits>>,
+        TError,
+        {data: BodyType<ReconcileSyncDayCreditsBody>},
+        TContext
+      > => {
+      return useMutation(getReconcileSyncDayCreditsMutationOptions(options));
+    }
+
 export const getGetSyncDayCreditsUrl = (params?: GetSyncDayCreditsParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -2480,6 +2555,90 @@ export function useGetAdminDaySales<TData = Awaited<ReturnType<typeof getAdminDa
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAdminDaySalesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetLegacyCreditCancellationCandidatesUrl = (params: GetLegacyCreditCancellationCandidatesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/kredite/legacy-cancel-candidates?${stringifiedParams}` : `/api/admin/kredite/legacy-cancel-candidates`
+}
+
+/**
+ * @summary Read-only heuristic review of legacy USE/GRANT compensation; never changes history
+ */
+export const getLegacyCreditCancellationCandidates = async (params: GetLegacyCreditCancellationCandidatesParams, options?: Parameters<typeof customFetch>[1]): Promise<GetLegacyCreditCancellationCandidates200> => {
+
+  return customFetch<GetLegacyCreditCancellationCandidates200>(getGetLegacyCreditCancellationCandidatesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetLegacyCreditCancellationCandidatesQueryKey = (params?: GetLegacyCreditCancellationCandidatesParams,) => {
+    return [
+    `/api/admin/kredite/legacy-cancel-candidates`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetLegacyCreditCancellationCandidatesQueryOptions = <TData = Awaited<ReturnType<typeof getLegacyCreditCancellationCandidates>>, TError = ErrorType<unknown>>(params: GetLegacyCreditCancellationCandidatesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegacyCreditCancellationCandidates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLegacyCreditCancellationCandidatesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLegacyCreditCancellationCandidates>>> = ({ signal }) => getLegacyCreditCancellationCandidates(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getLegacyCreditCancellationCandidates>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetLegacyCreditCancellationCandidatesQueryResult = NonNullable<Awaited<ReturnType<typeof getLegacyCreditCancellationCandidates>>>
+export type GetLegacyCreditCancellationCandidatesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read-only heuristic review of legacy USE/GRANT compensation; never changes history
+ */
+
+export function useGetLegacyCreditCancellationCandidates<TData = Awaited<ReturnType<typeof getLegacyCreditCancellationCandidates>>, TError = ErrorType<unknown>>(
+ params: GetLegacyCreditCancellationCandidatesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegacyCreditCancellationCandidates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetLegacyCreditCancellationCandidatesQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -619,12 +619,41 @@ function TabTauben({ token }: { token: string | null }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type TabId = "dag" | "joer" | "tauben";
+function LegacyCancellationReview({token}:{token:string|null}) {
+  const [from,setFrom]=useState(`${todayStr().slice(0,4)}-01-01`);
+  const [to,setTo]=useState(todayStr());
+  const valid=!!from&&!!to&&from<=to;
+  const {data,isLoading,error}=useQuery<{candidates:{spielerId:number;name:string;datum:string;useExternalId:string;grantExternalId:string;useAt:string;grantAt:string}[]}>({
+    queryKey:["legacy-cancellation-candidates",from,to],enabled:valid,
+    queryFn:async()=>{
+      const response=await fetch(`/api/admin/kredite/legacy-cancel-candidates?from=${from}&to=${to}`,{headers:{Authorization:`Bearer ${token}`}});
+      if(!response.ok)throw new Error("Alt-Stornierungen konnten nicht geladen werden.");
+      return response.json();
+    }
+  });
+  return <section className="space-y-4">
+    <h2 className="font-bold">Mögliche frühere Storno-Erstattungen</h2>
+    <p className="text-sm text-muted-foreground">USE und GRANT innerhalb von 30 Minuten, ohne gespeichertes Spiel am selben Tag. Das ist nur ein Hinweis, kein sicherer Storno-Nachweis. Es wird nichts automatisch geändert. Nach Prüfung gegebenenfalls über „Tag“ eine normale Guthaben-Korrektur buchen.</p>
+    <div className="flex flex-wrap gap-4"><label className="flex gap-3 items-center">Von<input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="rounded border border-border bg-background px-3 py-2"/></label>
+    <label className="flex gap-3 items-center">Bis<input type="date" value={to} onChange={e=>setTo(e.target.value)} className="rounded border border-border bg-background px-3 py-2"/></label></div>
+    {!valid?<p role="alert">Bitte einen gültigen Zeitraum auswählen.</p>:isLoading?<p>Wird geladen …</p>:error?<p role="alert" className="text-destructive">{error.message}</p>:
+      <Table><TableHeader><TableRow><TableHead>Spieler</TableHead><TableHead>USE</TableHead><TableHead>GRANT</TableHead></TableRow></TableHeader>
+      <TableBody>{data?.candidates.map(c=><TableRow key={`${c.useExternalId}:${c.grantExternalId}`}>
+        <TableCell>{c.name}</TableCell><TableCell>{new Date(c.useAt).toLocaleString("de-DE")}<small className="block">{c.useExternalId}</small></TableCell>
+        <TableCell>{new Date(c.grantAt).toLocaleString("de-DE")}<small className="block">{c.grantExternalId}</small></TableCell>
+      </TableRow>)}
+      {!data?.candidates.length&&<TableRow><TableCell colSpan={3}>Keine Hinweise für diesen Tag.</TableCell></TableRow>}</TableBody></Table>}
+    {(data?.candidates.length??0)>=500&&<p>Anzeige auf 500 Hinweise begrenzt.</p>}
+  </section>;
+}
+
+type TabId = "dag" | "joer" | "tauben" | "storno";
 
 const TABS: { id: TabId; label: string }[] = [
    { id: "dag",    label: "Tag" },
    { id: "joer",   label: "Jahr" },
    { id: "tauben", label: "Ausgelöste Tauben" },
+   { id: "storno", label: "Alt-Stornierungen prüfen" },
 ];
 
 export default function AdminKredite() {
@@ -641,7 +670,7 @@ export default function AdminKredite() {
       </header>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-secondary/20 rounded-xl p-1 w-fit border border-border/40">
+      <div className="flex flex-wrap gap-1 bg-secondary/20 rounded-xl p-1 w-fit border border-border/40">
         {TABS.map(t => (
           <button
             key={t.id}
@@ -661,6 +690,7 @@ export default function AdminKredite() {
       {activeTab === "dag"    && <TabDag    token={token} />}
       {activeTab === "joer"   && <TabJoer   token={token} />}
       {activeTab === "tauben" && <TabTauben token={token} />}
+      {activeTab === "storno" && <LegacyCancellationReview token={token} />}
     </div>
   );
 }

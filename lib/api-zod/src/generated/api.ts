@@ -496,6 +496,38 @@ export const PostSyncSpieleResponse = zod.object({
 
 
 /**
+ * @summary Read a consistent credit baseline with bounded event acknowledgements
+ */
+export const reconcileSyncDayCreditsBodyPendingEventIdsItemMax = 200;
+
+export const reconcileSyncDayCreditsBodyPendingEventIdsMax = 100;
+
+export const reconcileSyncDayCreditsBodyUseIdsItemMax = 200;
+
+export const reconcileSyncDayCreditsBodyUseIdsMax = 106;
+
+
+
+export const ReconcileSyncDayCreditsBody = zod.object({
+  "datum": zod.coerce.date(),
+  "pendingEventIds": zod.array(zod.string().max(reconcileSyncDayCreditsBodyPendingEventIdsItemMax)).max(reconcileSyncDayCreditsBodyPendingEventIdsMax),
+  "useIds": zod.array(zod.string().max(reconcileSyncDayCreditsBodyUseIdsItemMax)).max(reconcileSyncDayCreditsBodyUseIdsMax)
+})
+
+export const ReconcileSyncDayCreditsResponse = zod.object({
+  "datum": zod.coerce.date(),
+  "kredite": zod.array(zod.object({
+  "spielerId": zod.number().int(),
+  "gewaehrt": zod.number().int(),
+  "verbraucht": zod.number().int()
+})),
+  "knownEventIds": zod.array(zod.string()),
+  "voidedUseIds": zod.array(zod.string()),
+  "countedUseIds": zod.array(zod.string())
+})
+
+
+/**
  * @summary Get per-player credit balances for a day
  */
 export const GetSyncDayCreditsQueryParams = zod.object({
@@ -524,7 +556,8 @@ export const PostSyncCreditEventsBody = zod.object({
   "externalId": zod.string().min(postSyncCreditEventsBodyEventsItemExternalIdMin),
   "spielerId": zod.number().int().min(1),
   "datum": zod.coerce.date(),
-  "typ": zod.enum(['GRANT', 'USE']),
+  "typ": zod.enum(['GRANT', 'USE', 'VOID_USE']),
+  "voidsExternalId": zod.string().optional().describe('Required only for VOID_USE; immutable USE id of the same player and date'),
   "anzahl": zod.number().int().min(postSyncCreditEventsBodyEventsItemAnzahlMin).max(postSyncCreditEventsBodyEventsItemAnzahlMax),
   "occurredAt": zod.coerce.date().optional().describe('Required for USE events; immutable terminal occurrence time.'),
   "priceRevisionId": zod.number().int().min(1).optional().describe('Required for USE events; must belong to GAME_CREDIT.'),
@@ -713,6 +746,36 @@ export const GetAdminDaySalesResponse = zod.object({
   "totalCents": zod.number().int()
 })),
   "totalCents": zod.number().int()
+})
+
+
+/**
+ * @summary Read-only heuristic review of legacy USE/GRANT compensation; never changes history
+ */
+export const getLegacyCreditCancellationCandidatesQueryMinutesDefault = 30;
+export const getLegacyCreditCancellationCandidatesQueryMinutesMax = 1440;
+
+
+
+export const GetLegacyCreditCancellationCandidatesQueryParams = zod.object({
+  "from": zod.date(),
+  "to": zod.date(),
+  "minutes": zod.coerce.number().int().min(1).max(getLegacyCreditCancellationCandidatesQueryMinutesMax).default(getLegacyCreditCancellationCandidatesQueryMinutesDefault)
+})
+
+export const GetLegacyCreditCancellationCandidatesResponse = zod.object({
+  "minutes": zod.number().int(),
+  "limit": zod.number().int(),
+  "candidates": zod.array(zod.object({
+  "spielerId": zod.number().int(),
+  "name": zod.string(),
+  "datum": zod.coerce.date(),
+  "useExternalId": zod.string(),
+  "grantExternalId": zod.string(),
+  "useAt": zod.coerce.date(),
+  "grantAt": zod.coerce.date(),
+  "anzahl": zod.number().int()
+}))
 })
 
 

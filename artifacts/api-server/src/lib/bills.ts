@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 type SqlExecutor = { execute: (query: any) => Promise<{ rows: unknown[] }> };
 
-export function isBillableCreditEvent(type: "GRANT" | "USE"): boolean {
+export function isBillableCreditEvent(type: "GRANT" | "USE" | "VOID_USE"): boolean {
   return type === "USE";
 }
 
@@ -43,7 +43,7 @@ export async function billSettlementStatus(executor: SqlExecutor, spielerId: num
       WHERE s.spieler_id = ${spielerId} AND s.datum = ${datum}
         AND s.product_category <> 'GAME_CREDIT'
       UNION ALL
-      SELECT k.created_at FROM kredit_events k
+      SELECT k.created_at FROM v_effective_kredit_events k
       WHERE k.spieler_id = ${spielerId} AND k.datum = ${datum} AND k.typ = 'USE'
     )
     SELECT EXISTS(SELECT 1 FROM latest_payment) AS has_payment,
@@ -130,7 +130,7 @@ export async function dayBillSummary(datum: string) {
       ORDER BY spieler_id, paid_at DESC, id DESC
     ), activity AS (
       SELECT spieler_id FROM sale_events WHERE datum = ${datum}
-      UNION SELECT spieler_id FROM kredit_events WHERE datum = ${datum}
+      UNION SELECT spieler_id FROM v_effective_kredit_events WHERE datum = ${datum}
       UNION SELECT st.spieler_id FROM spiel_teilnahmen st
         JOIN spiele g ON g.id = st.spiel_id WHERE (g.datum AT TIME ZONE 'Europe/Luxembourg')::date = ${datum}
       UNION SELECT spieler_id FROM bill_payments WHERE datum = ${datum}
@@ -141,7 +141,7 @@ export async function dayBillSummary(datum: string) {
       UNION ALL
       SELECT k.spieler_id, p.id, p.name, p.category, COALESCE(k.price_revision_id, pr.id),
         COALESCE(k.unit_price_cents, pr.unit_price_cents), k.anzahl, k.created_at
-      FROM kredit_events k
+      FROM v_effective_kredit_events k
       JOIN products p ON p.code = 'GAME_CREDIT'
       LEFT JOIN LATERAL (
         SELECT id, unit_price_cents FROM product_price_revisions
@@ -165,7 +165,7 @@ export async function dayBillSummary(datum: string) {
       SELECT spieler_id,
         COALESCE(SUM(CASE WHEN typ = 'GRANT' THEN anzahl ELSE 0 END), 0)::int granted,
         COALESCE(SUM(CASE WHEN typ = 'USE' THEN anzahl ELSE 0 END), 0)::int used
-      FROM kredit_events WHERE datum = ${datum} GROUP BY spieler_id
+      FROM v_effective_kredit_events WHERE datum = ${datum} GROUP BY spieler_id
     ), game_counts AS (
       SELECT st.spieler_id, COUNT(DISTINCT g.id)::int games,
         COUNT(DISTINCT g.id) FILTER (WHERE g.abgeschlossen)::int completed_games
@@ -250,7 +250,7 @@ export async function activityDays(from: string, to: string) {
       WHERE datum BETWEEN ${from} AND ${to}
       UNION
       SELECT datum AS activity_date
-      FROM kredit_events
+      FROM v_effective_kredit_events
       WHERE datum BETWEEN ${from} AND ${to}
       UNION
       SELECT (datum AT TIME ZONE 'Europe/Luxembourg')::date AS activity_date
@@ -276,7 +276,7 @@ export async function periodBillSummary(from: string, to: string) {
       ORDER BY spieler_id, datum, paid_at DESC, id DESC
     ), activity AS (
       SELECT spieler_id FROM sale_events WHERE datum BETWEEN ${from} AND ${to}
-      UNION SELECT spieler_id FROM kredit_events WHERE datum BETWEEN ${from} AND ${to}
+      UNION SELECT spieler_id FROM v_effective_kredit_events WHERE datum BETWEEN ${from} AND ${to}
       UNION SELECT st.spieler_id FROM spiel_teilnahmen st
         JOIN spiele g ON g.id = st.spiel_id
         WHERE (g.datum AT TIME ZONE 'Europe/Luxembourg')::date BETWEEN ${from} AND ${to}
@@ -290,7 +290,7 @@ export async function periodBillSummary(from: string, to: string) {
       SELECT k.spieler_id, k.datum, p.id, p.name, p.category,
         COALESCE(k.price_revision_id, pr.id),
         COALESCE(k.unit_price_cents, pr.unit_price_cents), k.anzahl, k.created_at
-      FROM kredit_events k
+      FROM v_effective_kredit_events k
       JOIN products p ON p.code = 'GAME_CREDIT'
       LEFT JOIN LATERAL (
         SELECT id, unit_price_cents FROM product_price_revisions
@@ -326,7 +326,7 @@ export async function periodBillSummary(from: string, to: string) {
       SELECT spieler_id,
         COALESCE(SUM(CASE WHEN typ = 'GRANT' THEN anzahl ELSE 0 END), 0)::int granted,
         COALESCE(SUM(CASE WHEN typ = 'USE' THEN anzahl ELSE 0 END), 0)::int used
-      FROM kredit_events
+      FROM v_effective_kredit_events
       WHERE datum BETWEEN ${from} AND ${to}
       GROUP BY spieler_id
     ), game_counts AS (

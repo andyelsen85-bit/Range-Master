@@ -186,7 +186,7 @@ typedef struct {
     char externalId[40]; // unique event ID for idempotent portal push
     int  spielerId;
     char datum[11];      // YYYY-MM-DD
-    char typ[8];         // "GRANT" or "USE"
+    char typ[9];         // "GRANT", "USE", "VOID_USE"
     int  anzahl;
     // USE is a billable occurrence.  Its immutable price snapshot is retained
     // even if a later catalog pull changes GAME_CREDIT.
@@ -194,7 +194,20 @@ typedef struct {
     int  preisRevisionId;
     int  unitPriceCent;
     bool inFlight;       // included in the current portal POST; may be accepted
+    bool mayBeAccepted;  // sticky across failed ACKs/reboots: never remove as unsent
+    bool acknowledged;   // retain active USE receipts until finish/cancel
+    char voidsExternalId[40];
 } KreditEvent;
+
+#define MAX_CREDIT_USE_IDS (MAX_KREDIT_EVENTS + MAX_SPIELER)
+typedef struct {
+    char knownEventIds[MAX_KREDIT_EVENTS][40];
+    int knownCount;
+    char voidedUseIds[MAX_CREDIT_USE_IDS][40];
+    int voidedCount;
+    char countedUseIds[MAX_CREDIT_USE_IDS][40];
+    int countedCount;
+} KreditReconcileProof;
 
 typedef struct {
     int   gewaehrt;
@@ -594,7 +607,11 @@ void store_finish_kredit_event_sync(const KreditEvent *snapshot, int count,
 /** Sync worker variant: RAM outbox mutation only; caller owns commit window. */
 void store_finish_kredit_event_sync_commit(const KreditEvent *snapshot, int count,
                                            bool delivered);
-void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht);
+void store_capture_kredit_reconcile(KreditReconcileProof *request);
+bool store_credit_game_cancelled(const char *game_id);
+bool store_credit_outbox_ready(void);
+void store_apply_portal_kredit(int spieler_id, int gewaehrt, int verbraucht,
+                              const KreditReconcileProof *proof = nullptr);
 void store_queue_passwort_reset(int spieler_id);
 int  store_pending_update_count(void);
 

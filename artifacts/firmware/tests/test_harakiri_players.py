@@ -23,6 +23,8 @@ STUBS=r'''
 #include "active_game.h"
 #include "history_scorecard.h"
 GameStore g_store{};
+static bool credit_cancelled=false;
+bool store_credit_game_cancelled(const char*){return credit_cancelled;}
 static bool persist=false;
 static bool remapped=false;
 static int journal_status=0;
@@ -230,11 +232,35 @@ int main() {
     memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
     assert(g_store.spieler[0].id==101&&g_store.activeGameCreditPlayerIds[0]==101);
     for(int i=0;i<g_store.ergebnisseCount;i++)assert(g_store.ergebnisse[i].spielerId!=1);
+    // Durable cancellation wins even when power failed before the FAT
+    // tombstone and the journal is currently unavailable.
+    auto *before_cancel=new GameStore(g_store);
+    credit_cancelled=true;journal_status=-1;memset(&g_store,0,sizeof(g_store));
+    assert(active_game_restore());assert(!g_store.harakiriOrdersReady&&!g_store.activeGameResumed);
+    credit_cancelled=false;journal_status=0;
+    g_store=*before_cancel;delete before_cancel;assert(active_game_checkpoint());
     // Completion recognized by journal wins over an older active checkpoint.
     journal_status=1;memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
     assert(!g_store.harakiriOrdersReady);
     journal_status=0;memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
     assert(!g_store.harakiriOrdersReady); // tombstone persists
+    // An NVS-fallback finished game is already in the boot RAM queue even when
+    // no canonical FAT journal file exists. Never resurrect its active slot.
+    setup(MODUS_HARAKIRI,255,2);persist=true;
+    g_store.harakiriOrdersReady=true;assert(active_game_checkpoint());
+    char pending_id[40];snprintf(pending_id,sizeof(pending_id),"%s",g_store.spielId);
+    memset(&g_store,0,sizeof(g_store));
+    g_store.pendingGamesCount=1;
+    snprintf(g_store.pendingGames[0].externalId,40,"%s",pending_id);
+    journal_status=0;assert(active_game_restore());assert(!g_store.harakiriOrdersReady);
+    setup(MODUS_HARAKIRI,255,2);g_store.harakiriOrdersReady=true;
+    assert(active_game_checkpoint());
+    g_store.harakiriOrdersReady=false;
+    older=1-newest();snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/active%d.bin",older);
+    assert(unlink(name)==0&&mkdir(name,0700)==0);
+    assert(!active_game_checkpoint()&&g_store.activeGameStorageError);
+    assert(rmdir(name)==0);active_game_retry_finished_checkpoint();
+    assert(!g_store.activeGameStorageError);
     // Both unrecognizable files fail closed; never replace with shared order.
     for(int slot=0;slot<2;slot++){
         char name[160];snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/active%d.bin",slot);

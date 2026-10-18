@@ -628,6 +628,7 @@ export type CreditEventInputTyp = typeof CreditEventInputTyp[keyof typeof Credit
 export const CreditEventInputTyp = {
   GRANT: 'GRANT',
   USE: 'USE',
+  VOID_USE: 'VOID_USE',
 } as const;
 
 export interface CreditEventInput {
@@ -637,6 +638,8 @@ export interface CreditEventInput {
   spielerId: number;
   datum: string;
   typ: CreditEventInputTyp;
+  /** Required only for VOID_USE; immutable USE id of the same player and date */
+  voidsExternalId?: string;
   /**
      * @minimum -100
      * @maximum 100
@@ -1268,6 +1271,34 @@ export type PostSyncSpiele200 = {
   results: PostSyncSpiele200ResultsItem[];
 };
 
+export type ReconcileSyncDayCreditsBody = {
+  datum: string;
+  /**
+     * @maxItems 100
+     * @items.maxLength 200
+     */
+  pendingEventIds: string[];
+  /**
+     * @maxItems 106
+     * @items.maxLength 200
+     */
+  useIds: string[];
+};
+
+export type ReconcileSyncDayCredits200KrediteItem = {
+  spielerId: number;
+  gewaehrt: number;
+  verbraucht: number;
+};
+
+export type ReconcileSyncDayCredits200 = {
+  datum: string;
+  kredite: ReconcileSyncDayCredits200KrediteItem[];
+  knownEventIds: string[];
+  voidedUseIds: string[];
+  countedUseIds: string[];
+};
+
 export type GetSyncDayCreditsParams = {
 datum?: string;
 };
@@ -1278,6 +1309,33 @@ export type PostSyncCreditEventsBody = {
 
 export type GetAdminDaySalesParams = {
 datum?: string;
+};
+
+export type GetLegacyCreditCancellationCandidatesParams = {
+from: string;
+to: string;
+/**
+ * @minimum 1
+ * @maximum 1440
+ */
+minutes?: number;
+};
+
+export type GetLegacyCreditCancellationCandidates200CandidatesItem = {
+  spielerId: number;
+  name: string;
+  datum: string;
+  useExternalId: string;
+  grantExternalId: string;
+  useAt: string;
+  grantAt: string;
+  anzahl: number;
+};
+
+export type GetLegacyCreditCancellationCandidates200 = {
+  minutes: number;
+  limit: number;
+  candidates: GetLegacyCreditCancellationCandidates200CandidatesItem[];
 };
 
 export type GetSyncDaySalesParams = {

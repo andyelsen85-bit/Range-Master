@@ -5,6 +5,7 @@ import { clayDifference, isActivityAfterPayment, isBillableCreditEvent, isSettle
 test("only consumed game credits are billable", () => {
   assert.equal(isBillableCreditEvent("USE"), true);
   assert.equal(isBillableCreditEvent("GRANT"), false);
+  assert.equal(isBillableCreditEvent("VOID_USE"), false);
 });
 
 test("a settlement is redundant only when no billable activity followed it", () => {

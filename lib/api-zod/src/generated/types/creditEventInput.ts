@@ -14,6 +14,8 @@ export interface CreditEventInput {
   spielerId: number;
   datum: Date;
   typ: CreditEventInputTyp;
+  /** Required only for VOID_USE; immutable USE id of the same player and date */
+  voidsExternalId?: string;
   /**
      * @minimum -100
      * @maximum 100

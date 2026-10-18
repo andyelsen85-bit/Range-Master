@@ -16,7 +16,7 @@
 - [Nested Arduino include resolution](nested-arduino-includes.md) — Arduino resolves shared-header paths from the nested sketch directory when a wrapper includes a parent `.ino`
 - [Gateway worker concurrency](gateway-worker-concurrency.md) — snapshot settings and synchronize UI feedback; shared-gateway timeout retries must not authorize a new fire.
 - [Gateway ACK validation](gateway-ack-validation.md) — authenticated terminal-to-relay FIRE/ACK path confirmed working on hardware
-- [Credit cancellation during sync](credit-cancellation-sync.md) — cancellation must account for in-flight portal posts and replay pending credit events after a pull
+- [Credit cancellation during sync](credit-cancellation-sync.md) — void consumption, never grant; delivery uncertainty persists and baseline overlays need same-snapshot proof.
 - [Terminal shutdown behavior](terminal-shutdown-behavior.md) — operator chose deep sleep (reset/power-cycle wake), gated by a successful sync rather than a power-cut GPIO
 - [Orval Zod v3 compatibility](orval-zod-v3.md) — generated Zod v4 primitive helpers must be rewritten after codegen while this workspace remains on Zod v3
 - [Player identity remapping](player-identity-remapping.md) — local→portal ID changes must atomically remap every player-keyed ledger and use one roster-application path
@@ -45,3 +45,4 @@
 - [Gateway network addressing](gateway-network-addressing.md) — WiFiManager static-field visibility is conditional; clear live DHCP state without erasing replay counters.
 - [Integrated diagnostics delivery](terminal-diagnostics-scope.md) — logs, recovery, sync publication and FIRE are one software scope; hardware proof remains separate.
 - [Queue and kiosk contracts](queue-kiosk-contracts.md) — voluntary takeover/start, financial isolation, full live snapshots and authoritative null; preserve journal compatibility.
+- [Isolated PostgreSQL test cleanup](postgres-test-pool-cleanup.md) — mixed module loaders can create multiple pools; close every test-owned pool before dropping the temporary database.

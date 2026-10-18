@@ -338,6 +338,9 @@ static esp_err_t publish_sync_batch() {
         if(s_batch->tokenSet[i])
             (void)offline_cache_set_manifest_token((OfflineCacheSection)i,s_batch->tokens[i]);
     }
+    // Also runs for manifest-unchanged syncs: dirty snapshots must not depend
+    // on the server changing the section again before they can become durable.
+    offline_cache_flush_pending();
     // Includes idle waiting separately; not falsely reported as blocked input.
     cJSON *data=cJSON_CreateObject();
     cJSON_AddNumberToObject(data,"commitMs",s_batch->commitUs/1000.0);
@@ -1241,6 +1244,8 @@ esp_err_t http_push_pending_games(void)
     }
     heap_caps_free(snapshot);
     (void)game_journal_reload_pending();
+    if(!g_store.pendingGamesCount && offline_cache_storage_writable())
+        (void)game_journal_recheck_ready();
     free(resp);
     return overall;
 }
@@ -1626,6 +1631,7 @@ esp_err_t http_push_spieler_updates(void)
 // ── http_push_kredit_events ───────────────────────────────────
 esp_err_t http_push_kredit_events(void)
 {
+    if(!store_credit_outbox_ready())return ESP_ERR_INVALID_STATE;
     KreditEvent *snapshot = (KreditEvent *)malloc(MAX_KREDIT_EVENTS * sizeof(KreditEvent));
     if (!snapshot) return ESP_ERR_NO_MEM;
     int snapshotCount = store_begin_kredit_event_sync(snapshot, MAX_KREDIT_EVENTS);
@@ -1646,6 +1652,8 @@ esp_err_t http_push_kredit_events(void)
         cJSON_AddStringToObject(item, "datum",      ev->datum);
         cJSON_AddStringToObject(item, "typ",        ev->typ);
         cJSON_AddNumberToObject(item, "anzahl",     (double)ev->anzahl);
+        if(!strcmp(ev->typ,"VOID_USE"))
+            cJSON_AddStringToObject(item,"voidsExternalId",ev->voidsExternalId);
         // Receipt fields are ignored by older portals but retained on the
         // wire for audit-capable endpoints and deterministic reconciliation.
         if (!strcmp(ev->typ, "USE")) {
@@ -1967,19 +1975,45 @@ esp_err_t http_pull_kredite(void)
     time_t now = tv.tv_sec; struct tm tmi; localtime_r(&now, &tmi);  // local TZ (CET/CEST)
     char datum[11]; strftime(datum, sizeof(datum), "%Y-%m-%d", &tmi);
 
-    char path[64];
-    snprintf(path, sizeof(path), "/api/sync/kredite?datum=%s", datum);
+    const char *path="/api/sync/kredite/state";
+    auto proof=std::shared_ptr<KreditReconcileProof>((KreditReconcileProof*)calloc(1,sizeof(KreditReconcileProof)),free);
+    if(!proof)return ESP_ERR_NO_MEM;
+    store_capture_kredit_reconcile(proof.get());
+    cJSON *request=cJSON_CreateObject(),*ids=cJSON_CreateArray(),*uses=cJSON_CreateArray();
+    if(!request||!ids||!uses){cJSON_Delete(request);cJSON_Delete(ids);cJSON_Delete(uses);return ESP_ERR_NO_MEM;}
+    cJSON_AddStringToObject(request,"datum",datum);
+    cJSON_AddItemToObject(request,"pendingEventIds",ids);cJSON_AddItemToObject(request,"useIds",uses);
+    for(int i=0;i<proof->knownCount;i++)cJSON_AddItemToArray(ids,cJSON_CreateString(proof->knownEventIds[i]));
+    for(int i=0;i<proof->voidedCount;i++)cJSON_AddItemToArray(uses,cJSON_CreateString(proof->voidedUseIds[i]));
+    char *body=cJSON_PrintUnformatted(request);cJSON_Delete(request);
+    if(!body)return ESP_ERR_NO_MEM;
 
-    const size_t credit_capacity = MAX_PORTAL_SPIELER * 96u + 128u;
+    const size_t credit_capacity = MAX_PORTAL_SPIELER * 96u + sizeof(KreditReconcileProof)*2u + 512u;
     char *resp = (char *)malloc(credit_capacity);
-    if (!resp) return ESP_ERR_NO_MEM;
+    if (!resp) {free(body);return ESP_ERR_NO_MEM;}
 
-    esp_err_t err = http_get_json(path, resp, credit_capacity);
+    esp_err_t err = http_post_json(path, body, resp, credit_capacity);
+    free(body);
     if (err != ESP_OK) { free(resp); return err; }
 
     cJSON *root = cJSON_Parse(resp);
     free(resp);
     if (!root) return ESP_ERR_INVALID_RESPONSE;
+    auto parse_ids=[&](const char *key,char out[][40],int maximum,int *count) {
+        cJSON *list=cJSON_GetObjectItemCaseSensitive(root,key);
+        if(!cJSON_IsArray(list)||cJSON_GetArraySize(list)>maximum)return false;
+        *count=0;cJSON *id;
+        cJSON_ArrayForEach(id,list) {
+            if(!cJSON_IsString(id)||!id->valuestring[0]||strlen(id->valuestring)>=40)return false;
+            snprintf(out[(*count)++],40,"%s",id->valuestring);
+        }
+        return true;
+    };
+    if(!parse_ids("knownEventIds",proof->knownEventIds,MAX_KREDIT_EVENTS,&proof->knownCount)||
+       !parse_ids("voidedUseIds",proof->voidedUseIds,MAX_CREDIT_USE_IDS,&proof->voidedCount)||
+       !parse_ids("countedUseIds",proof->countedUseIds,MAX_CREDIT_USE_IDS,&proof->countedCount)) {
+        cJSON_Delete(root);return ESP_ERR_INVALID_RESPONSE;
+    }
 
     cJSON *arr = cJSON_GetObjectItem(root, "kredite");
     cJSON *response_date = cJSON_GetObjectItemCaseSensitive(root, "datum");
@@ -2005,7 +2039,7 @@ esp_err_t http_pull_kredite(void)
         }
     }
     auto owned=std::shared_ptr<cJSON>(root,cJSON_Delete);
-    return stage_dataset("credits",OFFLINE_CACHE_CREDITS,[owned]() {
+    return stage_dataset("credits",OFFLINE_CACHE_CREDITS,[owned,proof]() {
         cJSON *arr=cJSON_GetObjectItem(owned.get(),"kredite");
         cJSON *item;
         // This endpoint is a FULL current-day baseline. Omitted players have
@@ -2023,7 +2057,7 @@ esp_err_t http_pull_kredite(void)
             }
             // Do not transiently zero a returned player's balance: that would
             // remove valid lineup positions before their real row is applied.
-            if (!present) store_apply_portal_kredit(sid, 0, 0);
+            if (!present) store_apply_portal_kredit(sid, 0, 0,proof.get());
         }
         cJSON_ArrayForEach(item, arr) {
             cJSON *jsid = cJSON_GetObjectItem(item, "spielerId");
@@ -2033,7 +2067,7 @@ esp_err_t http_pull_kredite(void)
             int sid = (int)jsid->valuedouble;
             int gew = jgew && cJSON_IsNumber(jgew) ? (int)jgew->valuedouble : 0;
             int ver = jver && cJSON_IsNumber(jver) ? (int)jver->valuedouble : 0;
-            store_apply_portal_kredit(sid, gew, ver);
+            store_apply_portal_kredit(sid, gew, ver,proof.get());
         }
     });
 }

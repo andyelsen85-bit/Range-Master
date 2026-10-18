@@ -62,6 +62,21 @@ Failed fsync/close does not authorize deleting a complete checksummed journal
 temporary: it may be the only recoverable copy. Remove only incomplete writes
 whose live source is retained; keep complete unsynced temporaries protected.
 
+A portal's explicit acceptance is authoritative even if the local journal
+record is absent. Do not strand an acknowledged game in a RAM retry loop.
+Transient write failures require retry and a fresh readiness proof, not a
+permanent boot-lifetime failure latch. Cache write throttling is deferral, not
+evidence that media failed; deferred snapshots must not advance durable tokens.
+
+**Why:** A missing journal record after a failed finish caused every successful
+portal upload to report failure and permanently blocked new games. A separate
+five-minute cache throttle falsely reported healthy media as unavailable.
+
+**How to apply:** Preserve unacknowledged records and bounded durable fallback
+data across restart; clear only the accepted ID. Include recovery siblings and
+older active checkpoints in the reasoning so acceptance cannot resurrect a
+pending or active game. Never infer the original I/O cause from free space alone.
+
 The user selected: **"Refuse repair until all durable pending data is synced."**
 Only a proven-empty-of-pending-work FAT may be reformatted to reclaim orphan
 chains. Active games, queue reservations/events, financial outboxes, unknown files

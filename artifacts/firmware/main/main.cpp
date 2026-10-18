@@ -45,6 +45,13 @@
 #include "lora_stub.h"
 
 static const char *TAG = "main";
+static void storage_maintenance_task(void *) {
+    // Flash work belongs on a worker, never in an LVGL timer/input callback.
+    for(;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        game_journal_maintenance();
+    }
+}
 
 // ── Backlight ─────────────────────────────────────────────────
 static void backlight_init(void)
@@ -354,5 +361,6 @@ extern "C" void app_main(void)
         1        // core 1
     );
 
+    configASSERT(xTaskCreate(storage_maintenance_task,"storage_retry",6144,nullptr,2,nullptr)==pdPASS);
     // app_main returns — LVGL task owns the display from here on.
 }

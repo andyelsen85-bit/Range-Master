@@ -26,6 +26,7 @@
 #include "terminal_logs.h"
 #include "storage_budget.h"
 #include "portal_runtime.h"
+#include "ui_manager.h"
 #include "esp_timer.h"
 #include <strings.h>
 #include <initializer_list>
@@ -43,6 +44,7 @@ static uint32_t s_saved_hash[OFFLINE_CACHE_SECTION_COUNT];
 static int64_t s_saved_at[OFFLINE_CACHE_SECTION_COUNT];
 static bool s_saved_known[OFFLINE_CACHE_SECTION_COUNT];
 static bool s_attempted[OFFLINE_CACHE_SECTION_COUNT];
+static uint32_t s_dirty_sections;
 static std::atomic<bool> s_repair_pending{false};
 static std::atomic<bool> s_cleaning{false},s_storage_blocked{false};
 static std::atomic<int> s_disk_pending{0};
@@ -330,7 +332,7 @@ static bool recover_cache_locked(const esp_vfs_fat_mount_config_t &cfg,bool *ref
     if(ok) {
         memset(s_saved_known,0,sizeof(s_saved_known));
         memset(s_attempted,0,sizeof(s_attempted));
-        s_failed_sections=0;s_metadata_failed=false;g_store.offlineCacheLoaded=false;
+        s_failed_sections=0;s_dirty_sections=0;s_metadata_failed=false;g_store.offlineCacheLoaded=false;
         memset(g_store.cacheManifestTokens,0,sizeof(g_store.cacheManifestTokens));
         g_store.cacheManifestDailyDate[0]=0;
     }
@@ -795,11 +797,19 @@ bool offline_cache_save(OfflineCacheSection s) {
     const bool mounted = offline_cache_mount();
     void *p = mounted ? heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
     if (mounted && !p) ESP_LOGE(TAG, "OOM saving cache section %d", (int)s);
+    if(p) {
+        bool acquired=false;
+        if(!ui_manager_snapshot_lock(&acquired)) {
+            // Busy input/UI is a deferral, not a media failure.
+            lock_cache();s_dirty_sections|=1u<<s;unlock_cache();
+            heap_caps_free(p);return true;
+        }
+        memset(p,0,n);snapshot(s,p);
+        if(acquired)ui_manager_unlock();
+    }
     lock_cache();
-    bool ok = false;
+    bool ok = false,deferred=false;
     if (p) {
-        memset(p,0,n);
-        snapshot(s, p);
         const uint32_t hash=esp_rom_crc32_le(0,(const uint8_t*)p,n);
         const int64_t now=esp_timer_get_time();
         if(valid(s,p)) {
@@ -808,19 +818,35 @@ bool offline_cache_save(OfflineCacheSection s) {
                 s_attempted[s]=true;s_saved_at[s]=now;s_saved_known[s]=false;
                 ok=write_file(names[s],s,p,n);
                 if(ok){s_saved_known[s]=true;s_saved_hash[s]=hash;s_saved_at[s]=now;}
-            } else ESP_LOGD(TAG,"Cache %s deferred: content changed, five-minute write interval",names[s]);
+            } else {
+                deferred=true;ok=true;s_dirty_sections|=1u<<s;
+                ESP_LOGD(TAG,"Cache %s deferred: content changed, five-minute write interval",names[s]);
+            }
         }
     }
-    if (ok) {
+    if (ok && !deferred) {
+        s_dirty_sections &= ~(1u << s);
         s_failed_sections &= ~(1u << s);
         g_store.offlineCacheLoaded = true;
-    } else {
+    } else if(!ok) {
+        s_dirty_sections |= 1u << s;
         s_failed_sections |= 1u << s;
     }
     update_health();
     unlock_cache();
     if (p) heap_caps_free(p);
     return ok;
+}
+void offline_cache_flush_pending() {
+    // Called after publication by the same sync worker, even for an unchanged
+    // manifest. Re-snapshot current RAM; do not retain widget/data pointers.
+    for(unsigned i=0;i<OFFLINE_CACHE_SECTION_COUNT;i++) {
+        lock_cache();
+        bool due=(s_dirty_sections&(1u<<i)) &&
+            esp_timer_get_time()-s_saved_at[i]>=300000000LL;
+        unlock_cache();
+        if(due)(void)offline_cache_save((OfflineCacheSection)i);
+    }
 }
 bool offline_cache_save_metadata(void) {
     if (!s_mounted && !offline_cache_mount()) {
@@ -846,6 +872,10 @@ bool offline_cache_save_metadata(void) {
     m->loaded = g_store.offlineCacheLoaded;
     memcpy(m->dailyDate, g_store.cacheManifestDailyDate, sizeof(m->dailyDate));
     memcpy(m->tokens, g_store.cacheManifestTokens, sizeof(m->tokens));
+    // Deferred RAM data and its new token are not yet durable together.
+    // An empty persisted token forces a pull after reboot, never a false hit.
+    for(unsigned i=0;i<OFFLINE_CACHE_SECTION_COUNT;i++)
+        if(s_dirty_sections&(1u<<i))m->tokens[i][0]=0;
     const bool ok = write_file("meta", 0xffff, m, sizeof(*m));
     s_metadata_failed = !ok;
     update_health();

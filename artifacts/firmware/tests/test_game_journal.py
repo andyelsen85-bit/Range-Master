@@ -10,6 +10,16 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1] / "main" / "store"
 
+def production_function(path, signature):
+    source=path.read_text()
+    start=source.index(signature)
+    end=source.index("{",start)+1
+    depth=1
+    while depth:
+        depth+=(source[end]=="{")-(source[end]=="}")
+        end+=1
+    return source[start:end]
+
 
 class DurableGames(unittest.TestCase):
     def test_full_modules_storage_and_restart(self):
@@ -43,6 +53,15 @@ class DurableGames(unittest.TestCase):
                         if(access(b,F_OK)==0) {errno=EEXIST;return -1;}
                         return std::rename(a,b);
                     }
+                    inline bool fat_open_fail=false;
+                    inline int fat_open_attempts=0;
+                    inline FILE *fat_fopen(const char *path,const char *mode) {
+                        if(strstr(path,".part") && !strcmp(mode,"wb")) {
+                            ++fat_open_attempts;
+                            if(fat_open_fail){errno=EIO;return nullptr;}
+                        }
+                        return fopen(path,mode);
+                    }
                     inline int esp_vfs_fat_info(const char*p,uint64_t*t,uint64_t*f) {
                         *t=9842688;uint64_t used=0;
                         for(auto &entry:std::filesystem::recursive_directory_iterator(p))
@@ -57,7 +76,8 @@ class DurableGames(unittest.TestCase):
                     inline bool fat_sync_fail=false;
                     inline int fat_sync_calls=0;
                     inline int fat_fsync(int fd) {
-                        if(fat_sync_fail&&++fat_sync_calls>=2) {errno=EIO;return -1;}
+                        ++fat_sync_calls;
+                        if(fat_sync_fail&&fat_sync_calls>=2) {errno=EIO;return -1;}
                         return fsync(fd);
                     }
                 """,
@@ -86,6 +106,10 @@ class DurableGames(unittest.TestCase):
                     #define ESP_OK 0
                     #define ESP_FAIL -1
                     #define ESP_ERR_NVS_NOT_FOUND 1
+                    #define ESP_ERR_NO_MEM 2
+                    #define ESP_ERR_TIMEOUT 3
+                    #define ESP_ERR_INVALID_STATE 4
+                    #define ESP_ERR_INVALID_RESPONSE 5
                     inline const char *esp_err_to_name(int e){return e?"ESP_FAIL":"ESP_OK";}
                 """,
                 "esp_attr.h": "#pragma once\n#define EXT_RAM_BSS_ATTR\n",
@@ -152,7 +176,25 @@ class DurableGames(unittest.TestCase):
                     #pragma once
                     #include <cstdlib>
                     #include <cstring>
-                    struct cJSON {const char *text;};
+                    struct cJSON {const char *text="{}";const char *valuestring=nullptr;cJSON *child=nullptr,*next=nullptr;};
+                    inline const char *host_status="created",*host_game_id="";
+                    inline cJSON host_json,host_item,host_results,host_id,host_result_status;
+                    inline cJSON *cJSON_CreateObject(){return &host_json;}
+                    inline cJSON *cJSON_CreateArray(){return &host_json;}
+                    inline void cJSON_AddItemToArray(cJSON*,cJSON*){}
+                    inline void cJSON_AddItemToObject(cJSON*,const char*,cJSON*){}
+                    inline void cJSON_AddStringToObject(cJSON*,const char*,const char*){}
+                    inline void cJSON_AddNumberToObject(cJSON*,const char*,double){}
+                    inline void cJSON_Delete(cJSON*){}
+                    inline cJSON *cJSON_Parse(const char*){return &host_json;}
+                    inline bool cJSON_IsString(const cJSON *p){return p&&p->valuestring;}
+                    inline cJSON *cJSON_GetObjectItem(cJSON*,const char *key) {
+                        if(!strcmp(key,"results")){host_results.child=&host_item;return &host_results;}
+                        if(!strcmp(key,"externalId")){host_id.valuestring=host_game_id;return &host_id;}
+                        if(!strcmp(key,"status")){host_result_status.valuestring=host_status;return &host_result_status;}
+                        return nullptr;
+                    }
+                    #define cJSON_ArrayForEach(item,array) for(item=(array)?(array)->child:nullptr;item;item=item->next)
                     inline char *cJSON_PrintUnformatted(const cJSON *j){return strdup(j->text);}
                     inline void cJSON_free(void *p){free(p);}
                 """,
@@ -176,6 +218,7 @@ class DurableGames(unittest.TestCase):
                     inline int nvs_get_blob(unsigned h,const char*k,void*p,size_t*n){
                         FILE*f=fopen(nvs_path(h,k).c_str(),"rb");if(!f)return 1;
                         fseek(f,0,SEEK_END);size_t s=ftell(f);rewind(f);
+                        if(!p){*n=s;fclose(f);return 0;}
                         if(s>*n){fclose(f);return -1;}
                         bool ok=fread(p,1,s,f)==s;*n=s;fclose(f);return ok?0:-1;
                     }
@@ -189,7 +232,7 @@ class DurableGames(unittest.TestCase):
             for source in ("game_journal.cpp", "terminal_logs.cpp", "offline_cache.cpp", "active_game.cpp"):
                 content = (ROOT / source).read_text().replace('"/fatfs', '"' + str(temp / "volume"))
                 if source=="game_journal.cpp":
-                    content=content.replace("rename(", "fat_rename(").replace("fwrite(", "fat_fwrite(").replace("fsync(", "fat_fsync(")
+                    content=content.replace("rename(", "fat_rename(").replace("fwrite(", "fat_fwrite(").replace("fsync(", "fat_fsync(").replace("fopen(", "fat_fopen(")
                 if source=="active_game.cpp":content+="\nvoid host_latch_active(){had_active=true;}\n"
                 (temp / source).write_text(content)
             # Instrument the real chunk writer too: faults must not bypass its
@@ -210,12 +253,32 @@ class DurableGames(unittest.TestCase):
                 #include <cstdio>
                 #include <cstring>
                 #include <filesystem>
+                #include <sys/time.h>
                 GameStore g_store;
+                bool store_credit_game_cancelled(const char*){return false;}
                 void host_latch_active();
                 bool store_sync_commit_begin(){return true;}
                 void store_sync_commit_end(){}
                 void store_rebuild_bill_projection(){}
                 void store_reconcile_lineup_after_cache_load(){}
+                static int save_calls=0,pushed_games=0;
+                static const char *TAG="test";
+                using TickType_t=uint32_t;
+                constexpr size_t HTTP_BUF_SIZE=65536;
+                void game_store_save(){++save_calls;}
+                void portal_live_changed(int){}
+                void store_reconcile_lineup_with_credits(){}
+                void clear_active_game_credit_tracking(GameStore*){}
+                bool sync_commit_begin(const char*,TickType_t*){return true;}
+                void sync_commit_end(const char*,TickType_t){}
+                void note_pushed(const char*,int n){pushed_games+=n;}
+                void set_http_error(const char*,const char*,const char*){}
+                cJSON *pending_game_to_json(PendingGame *game) {
+                    host_game_id=game->externalId;return cJSON_CreateObject();
+                }
+                esp_err_t http_post_json(const char*,const char*,char *response,size_t size) {
+                    snprintf(response,size,"accepted");return ESP_OK;
+                }
                 static void full_cache() {
                     std::filesystem::create_directory(VOLUME "/tmcache");
                     FILE*f=fopen(VOLUME "/tmcache/history.tmp","wb");assert(f);fclose(f);
@@ -223,7 +286,8 @@ class DurableGames(unittest.TestCase):
                 }
                 int main(int argc,char**argv) {
                     assert(argc==2);terminal_logs_init();g_store.offlineCacheHealthy=true;
-                    if(!strcmp(argv[1],"empty-proof")||!strcmp(argv[1],"capacity") || !strcmp(argv[1],"write-errors") || !strcmp(argv[1],"rate-limit")) {
+                    bool finish_test=!strncmp(argv[1],"finish-",7);
+                    if((finish_test && strcmp(argv[1],"finish-reboot-read")) || !strcmp(argv[1],"empty-proof")||!strcmp(argv[1],"capacity") || !strcmp(argv[1],"write-errors") || !strcmp(argv[1],"rate-limit")) {
                         std::filesystem::remove_all(VOLUME);
                         std::filesystem::create_directory(VOLUME);
                     }
@@ -292,6 +356,86 @@ class DurableGames(unittest.TestCase):
                     }
                     assert(mounted);
                     assert(game_journal_init());
+                    if(finish_test) {
+                        if(!strcmp(argv[1],"finish-reboot-read")) {
+                            assert(g_store.pendingGamesCount==1 && !game_journal_ready());
+                            host_now_us=1000000;game_journal_maintenance();
+                            assert(game_journal_contains("finished-recovery")==1 && game_journal_ready());
+                            assert(http_push_pending_games()==ESP_OK && !g_store.pendingGamesCount);
+                            GameJournalInspection proof{};assert(game_journal_inspect_locked(&proof));
+                            assert(proof.pending==0 && proof.accepted==1);
+                            printf("PASS emergency game survives process restart, retries and archives after ACK\\n");
+                            return 0;
+                        }
+                        strcpy(g_store.spielId,"finished-recovery");g_store.lauf=1;
+                        g_store.spielerCount=1;g_store.spieler[0].id=9;
+                        strcpy(g_store.spieler[0].name,"Test");
+                        g_store.screen=SCREEN_SPIEL;
+                        bool normal=!strcmp(argv[1],"finish-normal")||!strcmp(argv[1],"finish-ack-rewrite");
+                        bool fsync_failure=!strcmp(argv[1],"finish-fsync-ack");
+                        fat_open_fail=!normal&&!fsync_failure;
+                        fat_sync_fail=fsync_failure;fat_sync_calls=0;
+                        _store_finish_game();
+                        assert(g_store.pendingGamesCount==1 && save_calls==1);
+                        assert(g_store.screen==SCREEN_RESULTATE);
+                        if(!normal) {
+                            assert(!game_journal_ready());
+                            size_t bytes=0;
+                            assert(nvs_get_blob(2,"finish_pending",nullptr,&bytes)==ESP_OK && bytes==7072);
+                            assert(game_journal_contains("finished-recovery")==0);
+                            bool diagnostic=false;
+                            for(auto &line:host_logs)
+                                if(line.find(fsync_failure?"fsync errno=5":"fopen(.part) errno=5")!=std::string::npos &&
+                                   line.find("frei=")!=std::string::npos && line.find("Grenze=")!=std::string::npos)diagnostic=true;
+                            assert(diagnostic);
+                            TerminalLogEntry entries[20];int count=terminal_logs_snapshot(entries,20);
+                            bool terminal_diagnostic=false;
+                            for(int i=0;i<count;i++)
+                                if(strstr(entries[i].msg,"errno=5")&&!strcmp(entries[i].type,"data_loss_risk"))terminal_diagnostic=true;
+                            assert(terminal_diagnostic);
+                        }
+                        if(!strcmp(argv[1],"finish-reboot-write"))return 0;
+                        if(!strcmp(argv[1],"finish-remap")) {
+                            assert(!game_journal_ready());
+                            assert(game_journal_remap(9,19));
+                            g_store.pendingGames[0].teilnahmen[0].spielerId=19;
+                            host_now_us=1000000;fat_open_fail=false;game_journal_maintenance();
+                            assert(game_journal_ready());
+                            g_store.historyCount=0;assert(game_journal_reload_pending()>=0);
+                            assert(g_store.historyCount==1 && g_store.history[0].base.teilnahmen[0].spielerId==19);
+                            printf("PASS emergency NVS player remap works while readiness is latched\\n");
+                        }
+                        if(!strcmp(argv[1],"finish-retry")) {
+                            assert(fat_open_attempts==1);
+                            host_now_us=999999;game_journal_maintenance();assert(fat_open_attempts==1);
+                            host_now_us=1000000;game_journal_maintenance();assert(fat_open_attempts==2);
+                            host_now_us=5999999;game_journal_maintenance();assert(fat_open_attempts==2);
+                            host_now_us=6000000;game_journal_maintenance();assert(fat_open_attempts==3);
+                            host_now_us=35999999;game_journal_maintenance();assert(fat_open_attempts==3);
+                            fat_open_fail=false;host_now_us=36000000;game_journal_maintenance();
+                            assert(game_journal_contains("finished-recovery")==1 && game_journal_ready());
+                            assert(g_store.pendingGamesCount==1); // durable save alone is not portal acceptance
+                            printf("PASS finished game retry: exact 1s/5s/30s backoff, latch recovers\\n");
+                        }
+                        host_status=!strcmp(argv[1],"finish-skipped")?"skipped":"created";
+                        if(!strcmp(argv[1],"finish-ack-rewrite")) {
+                            fat_open_fail=true;
+                            assert(http_push_pending_games()==ESP_FAIL && g_store.pendingGamesCount==1);
+                            assert(!pushed_games && save_calls==1 && game_journal_contains("finished-recovery")==1);
+                            host_status="skipped";
+                        }
+                        fat_open_fail=false;fat_sync_fail=false;
+                        assert(http_push_pending_games()==ESP_OK);
+                        assert(!g_store.pendingGamesCount && pushed_games==1 && save_calls==2);
+                        assert(game_journal_ready());
+                        size_t bytes=0;assert(nvs_get_blob(2,"finish_pending",nullptr,&bytes)==ESP_ERR_NVS_NOT_FOUND);
+                        assert(!std::filesystem::exists(VOLUME "/g_finished-recovery.part"));
+                        assert(game_journal_reload_pending()==0 && !g_store.pendingGamesCount);
+                        GameJournalInspection proof{};assert(game_journal_inspect_locked(&proof) && !proof.pending);
+                        assert(proof.accepted==((normal||!strcmp(argv[1],"finish-retry")||!strcmp(argv[1],"finish-remap"))?1:0));
+                        printf("PASS actual finish + HTTP ACK: %s; NVS drained, no resurrection, archive preserved\\n",argv[1]);
+                        return 0;
+                    }
                     if(!strcmp(argv[1],"rate-limit")) {
                         TerminalLogEntry entries[20];
                         int before=terminal_logs_snapshot(entries,20);
@@ -316,7 +460,7 @@ class DurableGames(unittest.TestCase):
                     }
                     if(!strcmp(argv[1],"write-errors")) {
                         FinishedGame game{};strcpy(game.base.externalId,"sync-failed");
-                        fat_sync_fail=true;
+                        fat_sync_fail=true;fat_sync_calls=0;
                         assert(!game_journal_save(&game));
                         assert(std::filesystem::exists(VOLUME "/g_sync-failed.part"));
                         g_store.pendingGamesCount=0;
@@ -324,6 +468,13 @@ class DurableGames(unittest.TestCase):
                         fat_sync_fail=false;
                         assert(game_journal_init() && g_store.pendingGamesCount==1);
                         assert(std::filesystem::exists(VOLUME "/g_sync-failed"));
+                        assert(fat_sync_calls>=2); // real 7072-byte writer: 512 + 6560 bytes
+                        FILE *broken=fopen(VOLUME "/g_broken","wb");assert(broken);fputc('x',broken);fclose(broken);
+                        strcpy(game.base.externalId,"separate-game");
+                        assert(game_journal_save(&game)); // corrupt unrelated entry cannot strand this finish
+                        bool named=false;for(auto &line:host_logs)if(line.find("trim/read_record")!=std::string::npos)named=true;
+                        assert(named && std::filesystem::exists(VOLUME "/g_broken"));
+                        assert(!game_journal_ready()); // unknown game evidence still fails closed
                         printf("PASS complete unsynced temp survives fsync failure and reload\\n");
                         return 0;
                     }
@@ -405,10 +556,13 @@ class DurableGames(unittest.TestCase):
                     assert(!game_journal_ready());
                 }
             '''
+            actual=production_function(ROOT/"game_store.cpp","static void _store_finish_game(void)\n{")
+            actual+="\n"+production_function(ROOT.parent/"net/http_sync.cpp","esp_err_t http_push_pending_games(void)\n{")
+            harness=harness.replace("int main(int argc,char**argv)",actual+"\nint main(int argc,char**argv)")
             (temp / "harness.cpp").write_text(textwrap.dedent(harness))
             exe = temp / "test"
             subprocess.run([
-                "g++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                "g++", "-std=gnu++17", "-Wall", "-Wextra", "-Werror",
                 "-I" + str(temp / "sdk"), "-I" + str(ROOT), "-I" + str(ROOT.parent/"net"),
                 '-DNVS_DIR=std::string("' + str(temp / "nvs") + '/")',
                 '-DVOLUME="' + str(temp / "volume") + '"',
@@ -426,6 +580,9 @@ class DurableGames(unittest.TestCase):
                 subprocess.run([str(exe), "full-" + scenario], check=True)
             subprocess.run([str(exe), "write-errors"], check=True)
             subprocess.run([str(exe), "rate-limit"], check=True)
+            for scenario in ("finish-created","finish-skipped","finish-fsync-ack","finish-retry","finish-remap",
+                             "finish-normal","finish-ack-rewrite","finish-reboot-write","finish-reboot-read"):
+                subprocess.run([str(exe),scenario],check=True)
 
 
 if __name__ == "__main__":

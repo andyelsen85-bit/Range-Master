@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { effectiveCreditEvent,creditFingerprint } from "../lib/credit-ledger";
 import { closeQueueEntries } from "../lib/queue";
 import { computeTaubePunkte,isPairClay } from "../lib/scoring";
 import bcrypt from "bcryptjs";
@@ -482,12 +483,21 @@ const KreditEventSchema = z.object({
   externalId: z.string().min(8),
   spielerId: z.number().int().positive(),
   datum: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  typ: z.enum(["GRANT", "USE"]),
+  typ: z.enum(["GRANT", "USE", "VOID_USE"]),
+  voidsExternalId: z.string().min(8).max(200).optional(),
   anzahl: z.number().int().min(-100).max(100).refine(n => n !== 0, "anzahl darf net 0 sinn"),
   occurredAt: z.string().datetime().optional(),
   priceRevisionId: z.number().int().positive().optional(),
   unitPriceCents: z.number().int().min(0).optional(),
 }).superRefine((event, ctx) => {
+  if(event.typ==="VOID_USE") {
+    if(!event.voidsExternalId||event.voidsExternalId===event.externalId||event.anzahl!==1)
+      ctx.addIssue({code:z.ZodIssueCode.custom,path:["voidsExternalId"],message:"VOID_USE requires a different USE id and anzahl=1"});
+    if(event.occurredAt!=null||event.priceRevisionId!=null||event.unitPriceCents!=null)
+      ctx.addIssue({code:z.ZodIssueCode.custom,message:"VOID_USE has no price or occurrence receipt"});
+  } else if(event.voidsExternalId!=null) {
+    ctx.addIssue({code:z.ZodIssueCode.custom,path:["voidsExternalId"],message:"Only VOID_USE may reference a USE"});
+  }
   if (event.typ === "USE") {
     for (const field of ["occurredAt", "priceRevisionId", "unitPriceCents"] as const) {
       if (event[field] == null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `${field} is required for credit use events` });
@@ -501,21 +511,21 @@ async function lockLedger(tx: any, scope: string): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${scope}, 0))`);
 }
 
-async function unsettledDayCreditsPayload(datum: string) {
+async function unsettledDayCreditsPayload(datum: string,executor:typeof db=db) {
   const afterLatestPayment = sql<boolean>`${kreditEventsTable.createdAt} > COALESCE((
     SELECT MAX(${billPaymentsTable.paidAt})
     FROM ${billPaymentsTable}
     WHERE ${billPaymentsTable.spielerId} = ${kreditEventsTable.spielerId}
       AND ${billPaymentsTable.datum} = ${kreditEventsTable.datum}
   ), '-infinity'::timestamptz)`;
-  const rows = await db
+  const rows = await executor
     .select({
       spielerId: kreditEventsTable.spielerId,
       gewaehrt: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'GRANT' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
       verbraucht: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'USE' THEN ${kreditEventsTable.anzahl} ELSE 0 END), 0)::int`,
     })
     .from(kreditEventsTable)
-    .where(and(eq(kreditEventsTable.datum, datum), afterLatestPayment))
+    .where(and(eq(kreditEventsTable.datum, datum), afterLatestPayment,effectiveCreditEvent))
     .groupBy(kreditEventsTable.spielerId)
     .orderBy(kreditEventsTable.spielerId);
   return { datum, kredite: rows };
@@ -525,6 +535,29 @@ async function unsettledDayCreditsPayload(datum: string) {
 router.get("/kredite", requireApiKey, async (req, res) => {
   const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
   return res.json(await unsettledDayCreditsPayload(datum));
+});
+
+// Read-only reconciliation: bounded IDs, one repeatable-read snapshot for BOTH
+// aggregate totals and acknowledgements. A lost POST response must not replay
+// an already reflected USE/GRANT/VOID on top of that baseline.
+router.post("/kredite/state",requireApiKey,async(req,res)=>{
+ const body=z.object({datum:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  pendingEventIds:z.array(z.string().min(1).max(200)).max(100),
+  useIds:z.array(z.string().min(1).max(200)).max(106)}).parse(req.body);
+ const state=await db.transaction(async tx=>{
+  const totals=await unsettledDayCreditsPayload(body.datum,tx as unknown as typeof db);
+  const known=body.pendingEventIds.length?(await tx.select({id:kreditEventsTable.externalId}).from(kreditEventsTable)
+   .where(and(eq(kreditEventsTable.datum,body.datum),inArray(kreditEventsTable.externalId,body.pendingEventIds)))):[];
+  const voided=body.useIds.length?(await tx.select({id:kreditEventsTable.voidsExternalId}).from(kreditEventsTable)
+   .where(and(eq(kreditEventsTable.datum,body.datum),inArray(kreditEventsTable.voidsExternalId,body.useIds)))):[];
+  const counted=body.useIds.length?(await tx.execute(sql`SELECT k.external_id id FROM v_effective_kredit_events k
+   WHERE k.typ='USE' AND k.datum=${body.datum}
+   AND k.external_id IN(${sql.join(body.useIds.map(id=>sql`${id}`),sql`,`)})
+   AND k.created_at>COALESCE((SELECT max(p.paid_at) FROM bill_payments p
+    WHERE p.spieler_id=k.spieler_id AND p.datum=k.datum),'-infinity'::timestamptz)`)).rows:[];
+  return {...totals,knownEventIds:known.map(r=>r.id),voidedUseIds:voided.map(r=>r.id),countedUseIds:counted.map(r=>r.id)};
+ },{isolationLevel:"repeatable read",accessMode:"read only"});
+ res.json(state);
 });
 
 // POST /api/sync/kredite — idempotent push of grant/use events from the terminal
@@ -556,6 +589,8 @@ router.post("/kredite", requireApiKey, async (req, res) => {
           await lockBillSettlement(tx, Number(spielerId), datum);
         }
         for (const scope of scopes) await lockLedger(tx, scope);
+        const eventIds=[...new Set(body.events.flatMap(e=>[e.externalId,...(e.voidsExternalId?[e.voidsExternalId]:[])]))].sort();
+        for(const eventId of eventIds)await lockLedger(tx,`credit-event:${eventId}`);
         const useEvents = body.events.filter(event => event.typ === "USE");
         const [gameCredit] = useEvents.length
           ? await tx.select({ id: productsTable.id }).from(productsTable).where(eq(productsTable.code, "GAME_CREDIT")).limit(1)
@@ -576,23 +611,33 @@ router.post("/kredite", requireApiKey, async (req, res) => {
         // Already-stored IDs and duplicate IDs in this upload are no-ops, just
         // like the former bulk ON CONFLICT upload.
         const candidates: typeof body.events = [];
-        const seen = new Set<string>();
+        const seen = new Map<string,string>();
         for (const event of body.events) {
-          if (seen.has(event.externalId)) continue;
-          seen.add(event.externalId);
-          const [prior] = await tx.select({ id: kreditEventsTable.id }).from(kreditEventsTable)
+          const fingerprint=creditFingerprint(event);
+          if(seen.has(event.externalId)) {
+            if(seen.get(event.externalId)!==fingerprint)throw new LedgerBalanceError("Conflicting credit event id");
+            continue;
+          }
+          seen.set(event.externalId,fingerprint);
+          const [prior] = await tx.select().from(kreditEventsTable)
             .where(eq(kreditEventsTable.externalId, event.externalId)).limit(1);
+          if(prior&&creditFingerprint(prior)!==fingerprint)throw new LedgerBalanceError("Conflicting credit event id");
           if (!prior) candidates.push(event);
         }
-        for (const scope of scopes) {
-          const [, spielerIdText, datum] = scope.split(":");
-          const spielerId = Number(spielerIdText);
-          const [balance] = await tx.select({
-            available: sql<number>`COALESCE(SUM(CASE WHEN ${kreditEventsTable.typ} = 'GRANT' THEN ${kreditEventsTable.anzahl} ELSE -${kreditEventsTable.anzahl} END), 0)::int`,
-          }).from(kreditEventsTable).where(and(eq(kreditEventsTable.spielerId, spielerId), eq(kreditEventsTable.datum, datum)));
-          const change = candidates.filter(event => event.spielerId === spielerId && event.datum === datum)
-            .reduce((sum, event) => sum + (event.typ === "GRANT" ? event.anzahl : -event.anzahl), 0);
-          if (Number(balance?.available ?? 0) + change < 0) throw new LedgerBalanceError("Credit balance cannot become negative");
+        // Validate references against both persistent and same-batch events,
+        // irrespective of upload order. Unknown references remain durable.
+        for(const event of candidates) {
+          if(event.typ==="VOID_USE") {
+            const prior=candidates.find(e=>e.externalId===event.voidsExternalId)??
+              (await tx.select().from(kreditEventsTable).where(eq(kreditEventsTable.externalId,event.voidsExternalId!)).limit(1))[0];
+            if(prior&&(prior.typ!=="USE"||prior.spielerId!==event.spielerId||prior.datum!==event.datum||prior.anzahl!==1))
+              throw new LedgerBalanceError("VOID_USE must reference one USE of the same player and date");
+          } else {
+            const voids=[...candidates.filter(e=>e.voidsExternalId===event.externalId),
+              ...await tx.select().from(kreditEventsTable).where(eq(kreditEventsTable.voidsExternalId,event.externalId))];
+            if(voids.some(v=>event.typ!=="USE"||v.spielerId!==event.spielerId||v.datum!==event.datum||event.anzahl!==1))
+              throw new LedgerBalanceError("Credit event does not match its VOID_USE");
+          }
         }
         const inserted = candidates.length
           ? await tx.insert(kreditEventsTable).values(candidates.map(event => {
@@ -601,9 +646,17 @@ router.post("/kredite", requireApiKey, async (req, res) => {
                 ? { ...creditEvent, occurredAt: new Date(occurredAt!), priceRevisionId: priceRevisionId!, unitPriceCents: unitPriceCents! }
                 : creditEvent;
             }))
-              .onConflictDoNothing({ target: kreditEventsTable.externalId })
+              .onConflictDoNothing()
               .returning({ externalId: kreditEventsTable.externalId })
           : [];
+        // Check the final effective state, NOT a sequential sum of the batch.
+        // A VOID before/in the same batch as its USE must never consume credit.
+        for(const scope of scopes) {
+          const [,player,day]=scope.split(":");
+          const [balance]=(await tx.execute(sql`SELECT COALESCE(sum(CASE WHEN typ='GRANT' THEN anzahl ELSE -anzahl END),0)::int available
+            FROM v_effective_kredit_events WHERE spieler_id=${Number(player)} AND datum=${day}`)).rows as {available:number}[];
+          if(balance.available<0)throw new LedgerBalanceError("Credit balance cannot become negative");
+        }
         const acceptedIds = new Set(inserted.map(row => row.externalId));
         const results = body.events.map(event => ({
           externalId: event.externalId,

@@ -47,6 +47,8 @@ STUBS = r"""
 #include "game_journal.h"
 #include "storage_budget.h"
 GameStore g_store = {};
+bool ui_manager_snapshot_lock(bool *acquired){*acquired=false;return true;}
+void ui_manager_unlock(){}
 using esp_err_t = int;
 constexpr int ESP_OK = 0, ESP_FAIL = -1, ESP_ERR_NVS_NOT_FOUND = 1;
 constexpr int ESP_ERR_TIMEOUT = 2, ESP_ERR_INVALID_STATE = 3, ESP_ERR_NO_MEM = 4;
@@ -307,7 +309,7 @@ void reset() {
     memset(s_saved_known,0,sizeof(s_saved_known));
     memset(s_attempted,0,sizeof(s_attempted));orphan_bytes=0;
     journal_pending=journal_uncertain=0;
-    s_failed_sections = 0; s_metadata_failed = false;
+    s_failed_sections = 0; s_dirty_sections=0; s_metadata_failed = false;
     total_bytes = 0x970000; free_bytes = 0x900000;
     fresh = true; probe_fails = repaired_probe_fails = false;
     mount_error = format_error = unmount_error = 0;
@@ -458,9 +460,15 @@ int main() {
     int writes_before=next_fd;
     assert(offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd==writes_before);
     g_store.billDayBaseline.playerCount=1;
-    assert(!offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd==writes_before);
-    assert(!offline_cache_set_manifest_token(OFFLINE_CACHE_BILLS,"not-durable"));
-    clock_us+=300000000LL;assert(offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd>writes_before);
+    assert(offline_cache_save(OFFLINE_CACHE_BILLS)&&next_fd==writes_before);
+    assert(s_dirty_sections&(1u<<OFFLINE_CACHE_BILLS));
+    assert(!s_failed_sections && g_store.offlineCacheHealthy);
+    assert(offline_cache_set_manifest_token(OFFLINE_CACHE_BILLS,"not-yet-durable"));
+    memcpy(&metadata,files.at("/fatfs/tmcache/meta.bin").data()+sizeof(CacheEnvelope),sizeof(metadata));
+    assert(!metadata.tokens[OFFLINE_CACHE_BILLS][0]);
+    assert(!logged("Cache unavailable for pulled section"));
+    clock_us+=300000000LL;offline_cache_flush_pending();
+    assert(!(s_dirty_sections&(1u<<OFFLINE_CACHE_BILLS))&&next_fd>writes_before);
     // Exact reported empty-image regression: 2,394 allocated, unreachable
     // clusters, one reachable root cluster, no directory entries or pending data.
     reset();total_bytes=9842688;orphan_bytes=2394u*4096;

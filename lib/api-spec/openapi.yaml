@@ -436,6 +436,45 @@ paths:
                       required: [externalId, status]
                 required: [results]
 
+  /sync/kredite/state:
+    post:
+      operationId: reconcileSyncDayCredits
+      tags: [sync]
+      summary: Read a consistent credit baseline with bounded event acknowledgements
+      security: [{ apiKeyAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [datum, pendingEventIds, useIds]
+              properties:
+                datum: { type: string, format: date }
+                pendingEventIds: { type: array, maxItems: 100, items: { type: string, maxLength: 200 } }
+                useIds: { type: array, maxItems: 106, items: { type: string, maxLength: 200 } }
+      responses:
+        "200":
+          description: Single-snapshot totals and acknowledgements; countedUseIds are unsettled effective uses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [datum, kredite, knownEventIds, voidedUseIds, countedUseIds]
+                properties:
+                  datum: { type: string, format: date }
+                  kredite:
+                    type: array
+                    items:
+                      type: object
+                      required: [spielerId, gewaehrt, verbraucht]
+                      properties:
+                        spielerId: { type: integer }
+                        gewaehrt: { type: integer }
+                        verbraucht: { type: integer }
+                  knownEventIds: { type: array, items: { type: string } }
+                  voidedUseIds: { type: array, items: { type: string } }
+                  countedUseIds: { type: array, items: { type: string } }
   /sync/kredite:
     get:
       operationId: getSyncDayCredits
@@ -576,6 +615,40 @@ paths:
       parameters: [{ name: datum, in: query, schema: { type: string, format: date } }]
       responses:
         "200": { description: Per-day sales report, content: { application/json: { schema: { $ref: "#/components/schemas/DaySalesReport" } } } }
+  /admin/kredite/legacy-cancel-candidates:
+    get:
+      operationId: getLegacyCreditCancellationCandidates
+      tags: [admin]
+      summary: Read-only heuristic review of legacy USE/GRANT compensation; never changes history
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: minutes, in: query, schema: { type: integer, minimum: 1, maximum: 1440, default: 30 } }
+      responses:
+        "200":
+          description: Suspected legacy pairs, capped at 500; manual review required
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [candidates, minutes, limit]
+                properties:
+                  minutes: { type: integer }
+                  limit: { type: integer }
+                  candidates:
+                    type: array
+                    items:
+                      type: object
+                      required: [spielerId, name, datum, useExternalId, grantExternalId, useAt, grantAt, anzahl]
+                      properties:
+                        spielerId: { type: integer }
+                        name: { type: string }
+                        datum: { type: string, format: date }
+                        useExternalId: { type: string }
+                        grantExternalId: { type: string }
+                        useAt: { type: string, format: date-time }
+                        grantAt: { type: string, format: date-time }
+                        anzahl: { type: integer }
   /admin/kredite/adjust:
     post:
       operationId: adjustAdminCredit
@@ -1432,7 +1505,8 @@ components:
         externalId: { type: string, minLength: 8 }
         spielerId: { type: integer, minimum: 1 }
         datum: { type: string, format: date }
-        typ: { type: string, enum: [GRANT, USE] }
+        typ: { type: string, enum: [GRANT, USE, VOID_USE] }
+        voidsExternalId: { type: string, description: Required only for VOID_USE; immutable USE id of the same player and date }
         anzahl: { type: integer, minimum: -100, maximum: 100, not: { const: 0 } }
         occurredAt:
           type: string

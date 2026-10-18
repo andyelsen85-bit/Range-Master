@@ -20,6 +20,7 @@ typedef enum {
 bool offline_cache_mount(void);
 void offline_cache_load(void);
 bool offline_cache_save(OfflineCacheSection section);
+void offline_cache_flush_pending(); // worker context, flush throttled dirty snapshots
 bool offline_cache_save_metadata(void);
 bool offline_cache_set_manifest_token(OfflineCacheSection section, const char *token);
 bool offline_cache_storage_available(void); // readable mount, independent of optional cache health

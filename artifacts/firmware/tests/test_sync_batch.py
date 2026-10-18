@@ -32,6 +32,7 @@ void sync_commit_end(const char*,TickType_t){assert(locked);locked=false;s_batch
 void game_store_save(){assert(!locked);++nvs;}
 bool day_inventory_persist(){assert(!locked);return true;}
 bool offline_cache_save(OfflineCacheSection){assert(!locked);++fat;return true;}
+void offline_cache_flush_pending(){assert(!locked);}
 void cache_pulled_section(OfflineCacheSection s){(void)offline_cache_save(s);}
 bool offline_cache_set_manifest_token(OfflineCacheSection,const char*){assert(!locked);return true;}
 void store_rebuild_bill_projection(){assert(locked);clockUs+=10;}

@@ -384,4 +384,54 @@ empty repair. These tests do **not** prove physical flash atomicity. FatFs
 fsync reduces but cannot eliminate the allocation/directory power-cut window.
 Required device acceptance remains: serial boot census with >80% free after
 repair, and 20 real power cuts during snapshot writes with logs at every reboot.
+
+### Finished-game journal write failure and recovery
+
+A portal result of `created` or `skipped` acknowledges that external game ID,
+even if its canonical local journal file is absent. The RAM outbox is removed
+and settings are saved. Only recovery siblings belonging to that acknowledged
+ID are removed; other pending games are untouched. An existing journal record
+must still be marked accepted successfully (or use the existing low-space
+accepted-record fallback). A genuine rewrite error retains the pending game.
+
+If the final journal write fails, one checksummed complete finished game can
+be committed to the `tm_cache` NVS namespace as an emergency outbox. This is
+bounded to **one 7,072-byte record**, not a second 200-game journal. New starts
+remain blocked. If neither FAT nor this NVS fallback can commit, the game stays
+on the game screen with a storage error; do not reset or power off the terminal.
+Use the existing save-retry action or restore writable storage first. Never
+erase NVS, format storage or move the partition to resolve this condition.
+
+A background storage worker retries the emergency record after 1 second,
+then 5 seconds, then every 30 seconds, including while offline. A committed
+FAT replacement or an explicit portal ACK releases the emergency NVS slot.
+Boot reloads it into the pending queue before active-game recovery, so an
+already finished Harakiri game cannot resume from an older active checkpoint.
+Local-to-portal player-ID remapping includes the emergency record.
+Readiness is re-proven after recovery/ACK; a transient error does not require
+a reboot. Corrupt/unreadable evidence continues to block unsafe starts/repair.
+
+The ESP log and terminal `data_loss_risk` log now report the exact failing
+stage, errno, free bytes, required free-space threshold and file. Stages
+distinguish archive scan/read/capacity, FAT capacity query, reserve threshold,
+temporary open, write, flush, fsync, close and both rename operations.
+Each failing stage logs its first occurrence and at most once per hour.
+An unrelated malformed `g_*` entry is retained and diagnosed; it cannot prevent
+another finished game from being written, but it still fails readiness proof.
+The old generic message alone cannot identify which stage failed on hardware.
+
+Changed rebuildable snapshots inside the five-minute write interval are dirty,
+not failed. Their save returns success-pending without lowering cache health.
+The next sync after the interval flushes dirty sections even if the server's
+manifest is unchanged. Deferred sections have no persisted manifest token
+until their snapshot is durable, so reboot cannot mistake old data for new.
+
+Host regression:
+`python artifacts/firmware/tests/test_game_journal.py` compiles the actual
+finish/upload functions, journal, chunk writer, NVS shim and recovery modules.
+It covers created/skipped with no file, 7,072-byte second-fsync failure,
+1/5/30-second retries, process restart, player remapping, archive retention,
+and refusing to drain an existing record on a real ACK-rewrite error.
+`test_offline_cache.py` covers healthy deferral, dirty flush and token safety.
+These tests and the full target build do not replace physical power-cut testing.
 Do this on a test terminal; do not risk live unsynchronized games.

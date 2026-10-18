@@ -53,3 +53,13 @@ not survive Ninja's later Kconfig regeneration.
 **How to apply:** Derive the series from the actual SDK's version.cmake.
 Use the pinned SDK and exported tool environment, including ROM ELF files.
 Host libc compatibility is insufficient: target newlib also lacks timegm.
+
+The container's native IDF invocation needs `IDF_PYTHON_ENV_PATH` pointing to
+the existing workspace `.pythonlibs`; IDF's default Python environment path
+does not exist. Use the installed ROM ELF directory matching the pinned SDK.
+
+**Why:** Calling the existing IDF tool with workspace Python still fails before
+compilation if IDF tries to validate its nonexistent default environment.
+
+**How to apply:** Reuse the installed workspace Python and SDK tools; do not
+create a virtual environment or guess a newer ROM asset version.

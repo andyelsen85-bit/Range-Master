@@ -12,4 +12,5 @@ export type CreditEventInputTyp = typeof CreditEventInputTyp[keyof typeof Credit
 export const CreditEventInputTyp = {
   GRANT: 'GRANT',
   USE: 'USE',
+  VOID_USE: 'VOID_USE',
 } as const;

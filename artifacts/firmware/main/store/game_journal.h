@@ -18,3 +18,6 @@ void game_journal_storage_unlock();
 bool game_journal_inspect_locked(GameJournalInspection *out);
 size_t game_journal_record_size();
 bool game_journal_resume_after_cleanup(); // read-only journal validation, no pruning/rewrites
+bool game_journal_hold_pending(const FinishedGame *game); // bounded emergency NVS slot
+bool game_journal_recheck_ready(); // clears transient failure only after a fresh proof
+void game_journal_maintenance(); // worker context, 1s/5s/30s retry; never LVGL timer

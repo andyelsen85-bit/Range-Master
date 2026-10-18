@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { effectiveCreditEvent } from "../lib/credit-ledger";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import { db, spielerTable, spieleTable, spielTeilnahmenTable, ergebnisseTable, apiKeysTable, kreditEventsTable, spielerUpdatesTable, smtpSettingsTable, productsTable, productPriceRevisionsTable, saleEventsTable, billPaymentsTable, terminalConfigBackupsTable, terminalRestoreAuthorizationsTable } from "@workspace/db";
@@ -414,7 +415,7 @@ router.get("/kredite/joer", async (req, res) => {
       COALESCE(SUM(CASE WHEN typ = 'USE'   THEN anzahl ELSE 0 END), 0)::int  AS total_verbraucht,
       COUNT(DISTINCT datum)::int                                               AS anzahl_dagen,
       COUNT(DISTINCT spieler_id)::int                                          AS anzahl_spiller
-    FROM kredit_events
+    FROM v_effective_kredit_events
     WHERE EXTRACT(YEAR FROM datum::timestamp) = ${year}
   `)).rows as any[];
   const byMonth = (await db.execute(sql`
@@ -423,7 +424,7 @@ router.get("/kredite/joer", async (req, res) => {
       COALESCE(SUM(CASE WHEN typ = 'GRANT' THEN anzahl ELSE 0 END), 0)::int  AS gewaehrt,
       COALESCE(SUM(CASE WHEN typ = 'USE'   THEN anzahl ELSE 0 END), 0)::int  AS verbraucht,
       COUNT(DISTINCT datum)::int                                               AS dagen
-    FROM kredit_events
+    FROM v_effective_kredit_events
     WHERE EXTRACT(YEAR FROM datum::timestamp) = ${year}
     GROUP BY monat ORDER BY monat
   `)).rows as any[];
@@ -463,6 +464,24 @@ router.get("/kredite/tauben", async (req, res) => {
 });
 
 // GET /api/admin/kredite?datum=YYYY-MM-DD — read-only day-credit overview
+// Heuristic only: an ordinary grant can look like a legacy refund. Never alter
+// history automatically; admins must review and use the existing adjustment.
+router.get("/kredite/legacy-cancel-candidates",async(req,res)=>{
+ const day=z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+ const {from,to,minutes}=z.object({from:day,to:day,minutes:z.coerce.number().int().min(1).max(1440).default(30)}).parse(req.query);
+ const candidates=(await db.execute(sql`SELECT u.spieler_id AS "spielerId",s.name,u.datum::text AS datum,
+  u.external_id AS "useExternalId",g.external_id AS "grantExternalId",
+  u.created_at AS "useAt",g.created_at AS "grantAt",g.anzahl
+  FROM v_effective_kredit_events u JOIN kredit_events g
+   ON g.spieler_id=u.spieler_id AND g.datum=u.datum AND g.typ='GRANT' AND g.anzahl=1
+   AND g.created_at BETWEEN u.created_at AND u.created_at+(${minutes}::int*interval '1 minute')
+  JOIN spieler s ON s.id=u.spieler_id
+  WHERE u.typ='USE' AND u.anzahl=1 AND u.datum BETWEEN ${from} AND ${to}
+   AND NOT EXISTS(SELECT 1 FROM spiel_teilnahmen t JOIN spiele p ON p.id=t.spiel_id
+    WHERE t.spieler_id=u.spieler_id AND (p.datum AT TIME ZONE 'Europe/Luxembourg')::date=u.datum)
+  ORDER BY u.datum DESC,s.name,u.created_at DESC LIMIT 500`)).rows;
+ res.json({candidates,minutes,limit:500});
+});
 router.get("/kredite", async (req, res) => {
   const datum = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).catch(new Date().toISOString().slice(0, 10)).parse(req.query.datum);
   const rows = await db
@@ -475,7 +494,7 @@ router.get("/kredite", async (req, res) => {
     })
     .from(kreditEventsTable)
     .innerJoin(spielerTable, eq(kreditEventsTable.spielerId, spielerTable.id))
-    .where(eq(kreditEventsTable.datum, datum))
+    .where(and(eq(kreditEventsTable.datum, datum),effectiveCreditEvent))
     .groupBy(kreditEventsTable.spielerId, spielerTable.name, spielerTable.mitgliedNr)
     .orderBy(spielerTable.name);
   return res.json({ datum, kredite: rows });
@@ -518,6 +537,7 @@ async function creditAggregate(tx: Parameters<Parameters<typeof db.transaction>[
   }).from(kreditEventsTable).where(and(
     eq(kreditEventsTable.spielerId, spielerId),
     eq(kreditEventsTable.datum, datum),
+    effectiveCreditEvent,
   ));
   const gewaehrt = Number(totals?.granted ?? 0);
   const verbraucht = Number(totals?.used ?? 0);
