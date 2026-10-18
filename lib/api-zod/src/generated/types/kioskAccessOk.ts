@@ -6,12 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface KioskTokenOnce {
-  id: number;
-  /**
-     * @minLength 43
-     * @maxLength 43
-     */
-  token: string;
-  url: string;
+export interface KioskAccessOk {
+  ok: boolean;
 }

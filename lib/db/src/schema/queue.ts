@@ -8,6 +8,18 @@ export const kioskTokensTable=pgTable("kiosk_tokens",{
  createdAt:at("created_at").notNull().defaultNow(),createdBy:integer("created_by").notNull(),
  lastUsedAt:at("last_used_at"),lastUsedIpHash:text("last_used_ip_hash"),revokedAt:at("revoked_at"),
 });
+// Historical table above is retained for audit only; it has no runtime reader.
+export const kioskDevicesTable=pgTable("kiosk_devices",{
+ id:serial("id").primaryKey(),tokenHash:text("token_hash").notNull().unique(),name:text("name"),
+ pinEpoch:integer("pin_epoch").notNull(),createdAt:at("created_at").notNull().defaultNow(),
+ lastUsedAt:at("last_used_at").notNull().defaultNow(),lastRenewedAt:at("last_renewed_at").notNull().defaultNow(),
+ lastUsedIpHash:text("last_used_ip_hash"),revokedAt:at("revoked_at"),
+});
+export const kioskPinLimitsTable=pgTable("kiosk_pin_limits",{
+ key:text("key").primaryKey(),failures:integer("failures").notNull().default(0),
+ strikes:integer("strikes").notNull().default(0),windowStartedAt:at("window_started_at").notNull().defaultNow(),
+ lockedUntil:at("locked_until"),updatedAt:at("updated_at").notNull().defaultNow(),
+});
 export const spielerGruppenTable=pgTable("spieler_gruppen",{
  id:serial("id").primaryKey(),name:text("name").notNull(),createdAt:at("created_at").notNull().defaultNow(),
  updatedAt:at("updated_at").notNull().defaultNow(),deletedAt:at("deleted_at"),
@@ -35,6 +47,7 @@ export const queueEntriesTable=pgTable("queue_entries",{
 export const queueAuditTable=pgTable("queue_audit",{
  id:serial("id").primaryKey(),at:at("at").notNull().defaultNow(),action:text("action").notNull(),spielerId:integer("spieler_id"),
  entryId:integer("entry_id"),groupId:integer("group_id"),ipHash:text("ip_hash"),tokenId:integer("token_id"),
+ deviceId:integer("device_id").references(()=>kioskDevicesTable.id),
  details:jsonb("details").notNull().default(sql`'{}'::jsonb`),
 });
 export const spielSpielerHiddenTable=pgTable("spiel_spieler_hidden",{

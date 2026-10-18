@@ -3,23 +3,24 @@
 ## Inbetriebnahme
 
 1. API und Portal zusammen ausrollen. Die vorhandene API-Init-Container-Migration
-   führt `0012_queue_kiosk_live.sql` automatisch aus. Keine SQL-Datei von Hand
+   führt auch `0016_kiosk_device_pin.sql` automatisch aus. Keine SQL-Datei von Hand
    einspielen und kein `drizzle-kit push` im Serverstart verwenden.
 2. Als Administrator **Mailserver & Live-Seite** öffnen. Live-Seite und bei Bedarf
    Warteschlange, Gruppen und Top 15 einschalten. Erlaubte Spielmodi und maximale
    Zahl der wartenden Spiele festlegen; neue Installationen erlauben zunächst Normal.
-3. Unter **Kiosk-Zugänge** einen Zugang pro Stand-PC anlegen. Die vollständige URL
-   und der geheime Token werden nur einmal angezeigt. Die URL auf dem betreffenden
-   PC öffnen. `/live` speichert den Token lokal als `rangemaster-kiosk` und entfernt
-   ihn sofort aus der Adresszeile. Ein Browserprofil pro Stand-PC verwenden.
+3. Unter **Öffentliche Seite → Stand-PC Zugang** eine PIN mit 6 bis 32 Ziffern
+   setzen und bestätigen. Ohne gesetzte PIN bleibt die eingeschaltete Seite gesperrt.
+   Am Stand-PC `/live` öffnen, PIN eingeben und **OK** drücken. Ein Browserprofil
+   pro Stand-PC verwenden; der Browser merkt die Freigabe über einen persistenten,
+   sicheren HttpOnly-Cookie. Keine Zugangsdaten in URLs oder Browser-Speicher.
 4. Optional Chromium/Chrome im Kioskmodus starten:
 
    ```sh
    chromium --kiosk --no-first-run 'https://<eigener-portal-host>/live'
    ```
 
-   Das Profil zuvor einmal mit der im Portal erzeugten geheimen URL einrichten.
-   Tokens nicht in gemeinsam genutzte Startskripte, Screenshots oder Tickets kopieren.
+   Dasselbe persistente Browserprofil verwenden, nicht Inkognito/Gastmodus.
+   PIN nicht in gemeinsam genutzte Startskripte, Screenshots oder Tickets kopieren.
    Für zuverlässigen Betrieb Standby/Bildschirmsperre am Stand-PC konfigurieren.
 
 Die Seite ist für 1920 × 1080 und Touchbedienung ausgelegt. Links stehen laufendes
@@ -111,21 +112,35 @@ Ein erneuter Terminalsync überschreibt keine Korrektur und blendet nichts ein.
 
 ## Sicherheit und Fehlerbehebung
 
-- Alle `/api/public/*`-Aufrufe verlangen `X-Kiosk-Token`, auch Ergebnisse und Druck.
-  Token: 32 Zufallsbytes; gespeichert wird nur SHA-256. Metadaten zeigen niemals
-  den Token. Widerrufen beendet den Zugang; Erneuern widerruft den bisherigen.
-- Live-Seite aus oder kein aktiver Datenbank-Token: **404**. Ansonsten fehlender/
-  falscher Token: **401**. Browser löscht bei 401/403 seinen Kiosk-Token und zeigt
-  die Zugangshinweise. Das meldet keinen gleichzeitig angemeldeten Administrator ab.
+- Außer `/api/public/unlock` verlangen alle öffentlichen Aufrufe den Cookie
+  `rm_kiosk`, auch Ergebnisse und Druck. 32 Zufallsbytes; gespeichert wird nur
+  SHA-256. HttpOnly, Secure, SameSite=Lax, Path=/, ein Jahr, täglich verlängerbar.
+  `last_renewed_at` ist vom 30-Sekunden-Nutzungsstempel getrennt: auch durchgehend
+  aktive Browser bekommen die tägliche Verlängerung.
+- Live-Seite aus: **404**. Eingeschaltet, aber keine PIN/keine gültige
+  Gerätefreigabe: **401 `kiosk_locked`**. Nur diese Kombination zeigt die PIN-Tastatur.
+  Netzwerkfehler, 5xx, 403 `origin_mismatch` und Geschäftsfehler behalten die Seite
+  und zeigen einen Fehler im Panel; keine lokale Abmeldung.
+- PIN-Wechsel und **Alle abmelden** erhöhen die Freigabe-Epoche und sperren sofort
+  alle bisherigen Geräte. Einzelne Geräte können separat abgemeldet werden.
+  Das meldet keinen gleichzeitig angemeldeten Portal-Administrator ab.
+- PIN: scrypt mit zufälligem Salt und konstantzeitlichem Vergleich. Fünf Fehlversuche
+  pro gehashter Client-IP sperren für 15 Minuten, dann eine Stunde, dann 24 Stunden.
+  Auch die richtige PIN wird während einer Sperre abgelehnt. Zusätzlich gelten
+  höchstens 50 Fehlversuche pro Stunde global; neue Entsperrungen warten dann bis
+  zum Fensterende. Bereits freigegebene Geräte bleiben nutzbar. Die Zähler liegen
+  in PostgreSQL und überleben Neustarts/mehrere API-Pods. PINs werden nie protokolliert.
 - Same-Origin, keine öffentliche CORS-Freigabe, `Cache-Control: no-store`.
-  Pro Token/IP: 60 Lesezugriffe, 10 Schreibzugriffe, zusätzlich sechs Druckabrufe
-  pro Minute. Bei 429 kurz warten, nicht einen neuen Zugang erzeugen.
+  Pro Gerät/IP: 60 Lesezugriffe, 10 Schreibzugriffe, zusätzlich sechs Druckabrufe
+  pro Minute. Bei 429 die angezeigte Wartezeit abwarten.
 - Terminal-Queue und Live-Uploads benötigen einen aktiven API-Schlüssel vom Typ
   `TERMINAL`; Reservierungen sind zusätzlich an Schlüssel **und Terminal-ID** gebunden.
 - Live-Stände älter als 120 Sekunden oder mit FINISHED/ABORTED erscheinen nicht.
   Verwaiste Live-Daten werden nach 24 Stunden bereinigt.
-- Bei „Zugang erforderlich“ neuen Kioskzugang anlegen/erneuern und die einmalige URL
-  auf diesem Browserprofil öffnen. Bei „Spieler noch nicht synchronisiert“ Terminal
+- Bei PIN-Abfrage im bestehenden Browserprofil die aktuelle Stand-PIN eingeben.
+  Nach Browser-Neustart bleibt dieselbe Freigabe erhalten, sofern das Profil seine
+  Cookies behält. 60 Sekunden Inaktivität löschen nur die Auswahl, nie die Freigabe.
+  Bei „Spieler noch nicht synchronisiert“ Terminal
   synchronisieren. Bei Queue-Konflikt erneut abrufen; manuelles Aufstellen bleibt möglich.
 
 Offene Produktentscheidungen und technische Abweichungen stehen in

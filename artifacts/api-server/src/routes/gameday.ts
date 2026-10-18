@@ -58,7 +58,8 @@ router.post("/admin/daily-report/resend", authenticate, requireAdmin, async (req
 });
 router.get("/admin/public-page", authenticate, requireAdmin, async (_req, res) => {
   const [row] = (await db.execute(sql`SELECT enabled,name_mode "nameMode",queue_enabled "queueEnabled",groups_enabled "groupsEnabled",
-    show_ranking "showRanking",max_queue_games "maxQueueGames",enabled_modes "enabledModes" FROM public_page_settings WHERE id=1`)).rows;
+    show_ranking "showRanking",max_queue_games "maxQueueGames",enabled_modes "enabledModes",
+    (pin_hash IS NOT NULL) "pinConfigured",pin_changed_at "pinChangedAt" FROM public_page_settings WHERE id=1`)).rows;
   res.json(row ?? { enabled: false, nameMode: "INITIAL" });
 });
 router.put("/admin/public-page", authenticate, requireAdmin, async (req, res) => {
@@ -77,7 +78,8 @@ router.put("/admin/public-page", authenticate, requireAdmin, async (req, res) =>
     max_queue_games=COALESCE(${body.maxQueueGames??null},public_page_settings.max_queue_games),
     enabled_modes=COALESCE(${modesSql},public_page_settings.enabled_modes)
     RETURNING enabled,name_mode "nameMode",queue_enabled "queueEnabled",groups_enabled "groupsEnabled",
-      show_ranking "showRanking",max_queue_games "maxQueueGames",enabled_modes "enabledModes"`)).rows;
+      show_ranking "showRanking",max_queue_games "maxQueueGames",enabled_modes "enabledModes",
+      (pin_hash IS NOT NULL) "pinConfigured",pin_changed_at "pinChangedAt"`)).rows;
   res.json(saved);
 });
 router.get("/public/last-game", async (_req, res) => {

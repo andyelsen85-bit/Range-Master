@@ -6,11 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface KioskTokenMetadata {
+export interface KioskDeviceMetadata {
   id: number;
-  name: string;
+  /** @nullable */
+  name: string | null;
   createdAt: Date;
   lastUsedAt: Date | null;
-  lastUsedIpHash: string | null;
-  revokedAt: Date | null;
 }

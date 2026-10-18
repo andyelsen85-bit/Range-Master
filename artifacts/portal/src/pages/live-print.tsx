@@ -5,17 +5,16 @@ import type { SharedScorecard } from "@workspace/api-client-react";
 import { Scorecard } from "@/components/scorecard";
 import { DayStatsBlock } from "@/components/kiosk/day-stats";
 import type { DayStats } from "@/components/kiosk/types";
-import { apiErrorText, formatDay, reportKioskError, todayIso, useKioskToken } from "@/lib/kiosk";
-import { KioskAccessScreen, useIdleReset } from "@/pages/live";
+import { apiErrorText, formatDay, reportKioskError, todayIso } from "@/lib/kiosk";
+import { useIdleReset } from "@/pages/live";
+import { KioskGate } from "@/components/kiosk/kiosk-gate";
 import { ArrowLeft, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PrintData { name: string; tag: string; club?: string; games: SharedScorecard[]; stats: DayStats }
 
 export default function LivePrint() {
-  const token = useKioskToken();
-  if (!token) return <KioskAccessScreen />;
-  return <PrintView />;
+  return <KioskGate><PrintView /></KioskGate>;
 }
 
 function PrintView() {
@@ -27,7 +26,7 @@ function PrintView() {
   const [format, setFormat] = useState<"a4" | "bon">("a4");
 
   const q = useGetKioskPrint(spielerId, { tag }, {
-    query: { queryKey: getGetKioskPrintQueryKey(spielerId, { tag }), enabled: Number.isFinite(spielerId) && spielerId > 0, retry: 1 },
+    query: { queryKey: getGetKioskPrintQueryKey(spielerId, { tag }), enabled: Number.isFinite(spielerId) && spielerId > 0, retry: 1, refetchInterval: (query) => (query.state.error ? 10_000 : false) },
   });
   useEffect(() => { if (q.error) reportKioskError(q.error); }, [q.error]);
   const data = q.data as unknown as PrintData | undefined;

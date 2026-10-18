@@ -5,8 +5,8 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
-import type { KioskTokenMetadata } from './kioskTokenMetadata';
+import type { KioskDeviceMetadata } from './kioskDeviceMetadata';
 
-export interface KioskTokenList {
-  tokens: KioskTokenMetadata[];
+export interface KioskDeviceList {
+  devices: KioskDeviceMetadata[];
 }

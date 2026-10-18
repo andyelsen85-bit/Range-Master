@@ -3,11 +3,11 @@ import { sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { publicName } from "@workspace/scorecard";
 import {queueEligibility,cancelIneligibleQueue} from "./queue-eligibility";
-export class PortalConflict extends Error { constructor(message:string,public status=409){super(message);} }
+export class PortalConflict extends Error { constructor(message:string,public status=409,public code="queue_conflict"){super(message);} }
 export type Tx=Parameters<Parameters<typeof db.transaction>[0]>[0];
 export const queueLock=async(tx:Tx)=>{await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('portal-queue',0))`);};
 export async function queueAudit(tx:Tx,action:string,details:unknown={},context:any={}) {
-  await tx.execute(sql`INSERT INTO queue_audit(action,details,token_id,ip_hash,group_id,spieler_id)
+  await tx.execute(sql`INSERT INTO queue_audit(action,details,device_id,ip_hash,group_id,spieler_id)
     VALUES(${action},${JSON.stringify(details)}::jsonb,${context.id??null},${context.ipHash??null},${context.groupId??null},${context.spielerId??null})`);
 }
 export async function compactQueue(tx:Tx) {
@@ -38,9 +38,9 @@ export async function signupQueue(ids:number[],modus:string,context:any={},group
   return db.transaction(async tx=>{
     await queueLock(tx);
     const [settings]=(await tx.execute(sql`SELECT * FROM public_page_settings WHERE id=1`)).rows as any[];
-    if(!settings?.queue_enabled)throw new PortalConflict("Die Warteschlange ist ausgeschaltet.",404);
-    if(!settings.enabled_modes.includes(modus))throw new PortalConflict("Dieser Spielmodus ist nicht freigegeben.",400);
-    if(groupId&&!settings.groups_enabled)throw new PortalConflict("Gruppen sind ausgeschaltet.",403);
+    if(!settings?.queue_enabled)throw new PortalConflict("Die Warteschlange ist ausgeschaltet.",422,"queue_disabled");
+    if(!settings.enabled_modes.includes(modus))throw new PortalConflict("Dieser Spielmodus ist nicht freigegeben.",400,"mode_disabled");
+    if(groupId&&!settings.groups_enabled)throw new PortalConflict("Gruppen sind ausgeschaltet.",422,"groups_disabled");
     if(groupId) {
       ids=(await tx.execute(sql`SELECT m.spieler_id FROM spieler_gruppen_mitglieder m JOIN spieler_gruppen g ON g.id=m.gruppe_id
         WHERE g.id=${groupId} AND g.deleted_at IS NULL ORDER BY m.spieler_id`)).rows.map((r:any)=>r.spieler_id);
@@ -52,12 +52,12 @@ export async function signupQueue(ids:number[],modus:string,context:any={},group
      const eligibility=await queueEligibility(tx,ids);
      const ineligible=eligibility.filter(p=>!p.registered||p.available<1);
      if(ineligible.length)throw new PortalConflict(ineligible.map(p=>!p.registered
-       ?`${p.name} ist heute nicht eingetragen.`:`${p.name} hat keine Credits gebucht.`).join(" "),403);
+        ?`${p.name} ist heute nicht eingetragen.`:`${p.name} hat keine Credits gebucht.`).join(" "),422,"queue_ineligible");
     const blockers=(await tx.execute(sql`SELECT s.name,g.status FROM queue_entries e JOIN spieler s ON s.id=e.spieler_id
       JOIN queue_games g ON g.id=e.queue_game_id WHERE e.spieler_id IN(${list}) AND e.status IN('OPEN','TAKEN')`)).rows as any[];
     if(blockers.length)throw new PortalConflict(blockers.map(p=>p.status==="STARTED"
        ?`${p.name} schießt gerade. Erneut einschreiben ist nach dem Ergebnis möglich.`
-       :`${p.name} hat noch einen offenen Eintrag.`).join(" "));
+        :`${p.name} hat noch einen offenen Eintrag.`).join(" "),409,"queue_duplicate");
     const [count]=(await tx.execute(sql`SELECT count(*)::int n FROM queue_entries WHERE status IN('OPEN','TAKEN')`)).rows as any[];
     if(count.n+ids.length>40)throw new PortalConflict("Die Warteschlange ist voll.");
     const [available]=(await tx.execute(sql`SELECT g.id FROM queue_games g WHERE g.status='OPEN' AND g.modus::text=${modus}

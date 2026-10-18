@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:queue": "node --import tsx/esm --test ../../lib/db/tests/portal-queue.test.mjs",
+    "test:kiosk": "node --import tsx/esm --test ../../lib/db/tests/kiosk-pin.test.mjs ../../lib/db/tests/kiosk-client-cache.test.mjs",
     "test:credits": "node --import tsx/esm --test ../../lib/db/tests/void-credit-use.test.mjs",
     "test:rounds": "node --import tsx/esm --test ../../lib/db/tests/round-participations.test.mjs",
     "test:sync-contract": "node --import tsx/esm --test ../../lib/db/tests/sync-contract.test.mjs",

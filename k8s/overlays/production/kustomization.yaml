@@ -6,6 +6,14 @@ namespace: rangemaster
 resources:
   - ../../base
   - ingress.yaml
+patches:
+  - target:
+      kind: ConfigMap
+      name: api-server-config
+    patch: |-
+      - op: add
+        path: /data/PUBLIC_HOST
+        value: rangemaster.hostzone.lu
 
 # Image tag substitution — ArgoCD Image Updater rewrites these automatically
 # when a new image is pushed to the registry.

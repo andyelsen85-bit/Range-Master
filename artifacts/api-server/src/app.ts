@@ -5,6 +5,8 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
+// Exactly one ingress hop; never trust an arbitrary client-supplied proxy chain.
+app.set("trust proxy", 1);
 
 app.use(
   pinoHttp({

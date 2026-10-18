@@ -44,7 +44,7 @@
 - [Drizzle SQL array bindings](drizzle-array-bindings.md) — use explicit bound membership lists; JS-array interpolation is not a PostgreSQL array parameter.
 - [Gateway network addressing](gateway-network-addressing.md) — WiFiManager static-field visibility is conditional; clear live DHCP state without erasing replay counters.
 - [Integrated diagnostics delivery](terminal-diagnostics-scope.md) — logs, recovery, sync publication and FIRE are one software scope; hardware proof remains separate.
-- [Queue and kiosk contracts](queue-kiosk-contracts.md) — voluntary takeover/start, financial isolation, full live snapshots and authoritative null; preserve journal compatibility.
+- [Queue and kiosk contracts](queue-kiosk-contracts.md) — queue/finance isolation, authoritative live snapshots, PIN-device access and journal compatibility.
 - [Isolated PostgreSQL test cleanup](postgres-test-pool-cleanup.md) — mixed module loaders can create multiple pools; close every test-owned pool before dropping the temporary database.
 - [Multi-run scoring compatibility](multi-run-scoring.md) — expand per-run rows on the wire, not the persisted journal ABI; retain aggregate-only legacy history.
 - [Sync build verification](sync-build-verification.md) — embedded build identity and authenticated production probes; an image push or 401 is not rollout proof.

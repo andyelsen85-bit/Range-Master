@@ -1,77 +1,46 @@
-import { useEffect, useState } from "react";
+import type { QueryClient } from "@tanstack/react-query";
 
-/** localStorage key read by custom-fetch to attach the X-Kiosk-Token header. */
-export const KIOSK_STORAGE_KEY = "rangemaster-kiosk";
-/** Event dispatched by custom-fetch on a public 401/403. */
-export const KIOSK_UNAUTHORIZED_EVENT = "kiosk-unauthorized";
+/** Event dispatched when the server answers 401 with code "kiosk_locked". */
+export const KIOSK_LOCKED_EVENT = "kiosk-locked";
 
-export function getKioskToken(): string | null {
-  try {
-    return localStorage.getItem(KIOSK_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+function errBody(err: unknown): { code?: string; message?: string; error?: string; retryAfterSec?: number } | null {
+  const d = (err as { data?: unknown } | null)?.data;
+  return d && typeof d === "object" ? (d as Record<string, never>) : null;
 }
 
-export function clearKioskToken() {
-  try {
-    localStorage.removeItem(KIOSK_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
+export function errStatus(err: unknown): number | undefined {
+  return (err as { status?: number } | null)?.status;
 }
 
-/**
- * Reads `?kiosk=<token>` once, persists it and removes it from the address bar
- * immediately so it never stays visible or ends up in history/bookmarks.
- */
-export function captureKioskTokenFromUrl() {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  const token = url.searchParams.get("kiosk");
-  if (token === null) return;
-  url.searchParams.delete("kiosk");
-  window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
-  if (token.trim()) {
-    try {
-      localStorage.setItem(KIOSK_STORAGE_KEY, token.trim());
-    } catch {
-      /* ignore */
-    }
-  }
+export function errCode(err: unknown): string | undefined {
+  return errBody(err)?.code;
 }
 
-/** Returns the current kiosk token; null after a 401/403 or when missing. */
-export function useKioskToken(): string | null {
-  const [token, setToken] = useState<string | null>(() => {
-    captureKioskTokenFromUrl();
-    return getKioskToken();
-  });
-  useEffect(() => {
-    const onUnauthorized = () => {
-      clearKioskToken();
-      setToken(null);
-    };
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === KIOSK_STORAGE_KEY) setToken(e.newValue);
-    };
-    window.addEventListener(KIOSK_UNAUTHORIZED_EVENT, onUnauthorized);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener(KIOSK_UNAUTHORIZED_EVENT, onUnauthorized);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-  return token;
+/** Only an exact 401 + code "kiosk_locked" locks the stand-PC session. */
+export function isKioskLocked(err: unknown): boolean {
+  return errStatus(err) === 401 && errCode(err) === "kiosk_locked";
 }
 
-/** Fallback in case a 401/403 reaches a component: same effect as the fetch event. */
+export function retryAfterSec(err: unknown): number | undefined {
+  const n = errBody(err)?.retryAfterSec;
+  return typeof n === "number" && n > 0 ? n : undefined;
+}
+
+/** Broadcasts a lock only for the exact kiosk_locked code; all other errors stay local. */
 export function reportKioskError(err: unknown) {
-  const status = (err as { status?: number } | null)?.status;
-  if (status === 401 || status === 403) {
-    clearKioskToken();
-    window.dispatchEvent(new Event(KIOSK_UNAUTHORIZED_EVENT));
-  }
+  if (isKioskLocked(err)) window.dispatchEvent(new Event(KIOSK_LOCKED_EVENT));
+}
+
+/** Drop old-cookie failures before remounting widgets after a successful unlock. */
+export async function refreshKioskAccess(client: QueryClient) {
+  const publicQueries = {
+    predicate: (query: { queryKey: readonly unknown[] }) =>
+      query.queryKey.some(part => typeof part === "string" && /\/public(?:\/|$)/.test(part)),
+  };
+  await client.cancelQueries(publicQueries);
+  // invalidateQueries preserves inactive errors; those would re-lock the gate
+  // from a widget's mount effect before its new-cookie request completes.
+  await client.resetQueries(publicQueries);
 }
 
 export function todayIso() {
@@ -86,6 +55,9 @@ export function formatDay(iso: string) {
 }
 
 export function apiErrorText(e: unknown): string {
-  const any = e as { data?: { error?: string }; message?: string } | null;
-  return any?.data?.error ?? any?.message ?? "Unbekannter Fehler";
+  const b = errBody(e);
+  if (b?.message) return b.message;
+  if (b?.error) return b.error;
+  if (errStatus(e) === undefined) return "Keine Verbindung zum Server. Neuer Versuch läuft automatisch.";
+  return (e as { message?: string } | null)?.message ?? "Unbekannter Fehler";
 }

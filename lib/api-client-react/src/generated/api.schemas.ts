@@ -195,27 +195,27 @@ export interface KioskGroupList {
   groups: KioskGroup[];
 }
 
-export interface KioskTokenMetadata {
+export interface KioskDeviceMetadata {
   id: number;
-  name: string;
+  /** @nullable */
+  name: string | null;
   createdAt: string;
   lastUsedAt: string | null;
-  lastUsedIpHash: string | null;
-  revokedAt: string | null;
 }
 
-export interface KioskTokenList {
-  tokens: KioskTokenMetadata[];
+export interface KioskDeviceList {
+  devices: KioskDeviceMetadata[];
 }
 
-export interface KioskTokenOnce {
-  id: number;
-  /**
-     * @minLength 43
-     * @maxLength 43
-     */
-  token: string;
-  url: string;
+export interface KioskAccessOk {
+  ok: boolean;
+}
+
+export interface KioskAccessError {
+  code: string;
+  message?: string;
+  /** @minimum 1 */
+  retryAfterSec?: number;
 }
 
 export interface KioskPrintDays {
@@ -328,12 +328,13 @@ export type KioskLiveGame = LiveSnapshotInput & {
   updatedAt: string;
 };
 
-export interface KioskTokenInput {
+export interface KioskPinInput {
   /**
-     * @minLength 1
-     * @maxLength 80
+     * @minLength 6
+     * @maxLength 32
+     * @pattern ^[0-9]+$
      */
-  name: string;
+  pin: string;
 }
 
 export type QueueSignupInputModus = typeof QueueSignupInputModus[keyof typeof QueueSignupInputModus];
@@ -402,6 +403,9 @@ export const PublicPageSettingsNameMode = {
 } as const;
 
 export interface PublicPageSettings {
+  readonly pinConfigured?: boolean;
+  /** @nullable */
+  readonly pinChangedAt?: string | null;
   enabled: boolean;
   nameMode: PublicPageSettingsNameMode;
   queueEnabled?: boolean;

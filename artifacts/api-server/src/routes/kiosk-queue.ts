@@ -2,8 +2,7 @@ import { Router, type ErrorRequestHandler } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { authenticate,requireAdmin,requireApiKey } from "./auth";
-import { newKioskToken,tokenHash } from "../lib/kiosk";
+import { requireApiKey } from "./auth";
 import { rateLimit } from "../lib/rate-limit";
 import { queueSnapshot,signupQueue,cancelQueue,mutateQueue,queueLock,queueAudit,PortalConflict } from "../lib/queue";
 import { liveSnapshotSchema,storeLiveSnapshot } from "../lib/live-game";
@@ -14,41 +13,6 @@ import { daySchema,localDay } from "../lib/local-day";
 import { computeRangliste } from "./rangliste-compute";
 const router=Router(),id=z.coerce.number().int().positive(),mode=z.enum(["NORMAL","HARAKIRI","HARAKIRI_CUSTOM","CUSTOM_1","CUSTOM_2","CUSTOM_3","CUSTOM_4"]);
 router.use("/public",(req,res,next)=>rateLimit(req.method==="GET"?"read":"write",req.method==="GET"?60:10)(req,res,next));
-const tokenInput=z.object({name:z.string().trim().min(1).max(80)});
-router.get("/admin/kiosk-tokens",authenticate,requireAdmin,async(_req,res)=>{
-  res.setHeader("Cache-Control","no-store");
-  const tokens=(await db.execute(sql`SELECT id,name,created_at "createdAt",last_used_at "lastUsedAt",
-    last_used_ip_hash "lastUsedIpHash",revoked_at "revokedAt" FROM kiosk_tokens ORDER BY id DESC`)).rows;
-  res.json({tokens});
-});
-router.post("/admin/kiosk-tokens",authenticate,requireAdmin,async(req,res)=>{
-  const body=tokenInput.parse(req.body),token=newKioskToken();
-  const row=await db.transaction(async tx=>{
-    const [row]=(await tx.execute(sql`INSERT INTO kiosk_tokens(name,token_hash,created_by)
-      VALUES(${body.name},${tokenHash(token)},${(req as any).user.id}) RETURNING id`)).rows as any[];
-    await queueAudit(tx,"KIOSK_CREATED",{tokenId:row.id,adminId:(req as any).user.id});return row;
-  });
-  res.setHeader("Cache-Control","no-store");res.status(201).json({...row,token,url:`/live?kiosk=${token}`});
-});
-router.patch("/admin/kiosk-tokens/:id",authenticate,requireAdmin,async(req,res)=>{
-  const body=tokenInput.parse(req.body),tokenId=id.parse(req.params.id);
-  await db.transaction(async tx=>{
-    await tx.execute(sql`UPDATE kiosk_tokens SET name=${body.name} WHERE id=${tokenId}`);
-    await queueAudit(tx,"KIOSK_RENAMED",{tokenId,name:body.name,adminId:(req as any).user.id});
-  });res.json({success:true});
-});
-for(const action of ["revoke","renew"] as const)router.post(`/admin/kiosk-tokens/:id/${action}`,authenticate,requireAdmin,async(req,res)=>{
-  const tokenId=id.parse(req.params.id),token=action==="renew"?newKioskToken():null;
-  const result=await db.transaction(async tx=>{
-    const [old]=(await tx.execute(sql`UPDATE kiosk_tokens SET revoked_at=COALESCE(revoked_at,now()) WHERE id=${tokenId} RETURNING name`)).rows as any[];
-    if(!old)throw new PortalConflict("Token nicht gefunden.",404);
-    let newId:number|null=null;
-    if(token){const [row]=(await tx.execute(sql`INSERT INTO kiosk_tokens(name,token_hash,created_by)
-      VALUES(${old.name},${tokenHash(token)},${(req as any).user.id}) RETURNING id`)).rows as any[];newId=row.id;}
-    await queueAudit(tx,action==="renew"?"KIOSK_RENEWED":"KIOSK_REVOKED",{tokenId,newId,adminId:(req as any).user.id});return {id:newId};
-  });
-  res.setHeader("Cache-Control","no-store");res.json(token?{...result,token,url:`/live?kiosk=${token}`}:{success:true});
-});
 router.get("/public/queue",async(_req,res)=>res.json(await queueSnapshot()));
 router.get("/public/queue/players",async(req,res)=>{
   const q=z.string().max(80).parse(req.query.q??"");
@@ -83,7 +47,7 @@ router.get("/public/groups",async(_req,res)=>{
 });
 const groupInput=z.object({name:z.string().trim().min(1).max(80),spielerIds:z.array(id).min(2).max(6).refine(a=>new Set(a).size===a.length)});
 for(const method of ["post","put"] as const)router[method](method==="post"?"/public/groups":"/public/groups/:id",async(req,res)=>{
-  if(!res.locals.kiosk.settings.groups_enabled)return void res.sendStatus(403);
+  if(!res.locals.kiosk.settings.groups_enabled)return void res.status(422).json({code:"groups_disabled",message:"Gruppen sind deaktiviert.",error:"Gruppen sind deaktiviert."});
   const body=groupInput.parse(req.body);
   const result=await db.transaction(async tx=>{
     await queueLock(tx);let groupId=method==="put"?id.parse((req.params as any).id):0;
@@ -103,11 +67,13 @@ for(const method of ["post","put"] as const)router[method](method==="post"?"/pub
   });res.json(result);
 });
 router.delete("/public/groups/:id",async(req,res)=>{
+  if(!res.locals.kiosk.settings.groups_enabled)throw new PortalConflict("Gruppen sind deaktiviert.",422,"groups_disabled");
   await db.transaction(async tx=>{await queueLock(tx);const groupId=id.parse(req.params.id);
     await tx.execute(sql`UPDATE spieler_gruppen SET deleted_at=now() WHERE id=${groupId}`);
     await queueAudit(tx,"GROUP_DELETED",{groupId},res.locals.kiosk);});res.json({success:true});
 });
 router.post("/public/groups/:id/signup",async(req,res)=>{
+  if(!res.locals.kiosk.settings.groups_enabled)throw new PortalConflict("Gruppen sind deaktiviert.",422,"groups_disabled");
   const groupId=id.parse(req.params.id),body=z.object({modus:mode.default("NORMAL")}).parse(req.body);
   const members=(await db.execute(sql`SELECT m.spieler_id FROM spieler_gruppen_mitglieder m JOIN spieler_gruppen g ON g.id=m.gruppe_id WHERE g.id=${groupId} AND g.deleted_at IS NULL`)).rows as any[];
   res.json(await signupQueue(members.map(p=>p.spieler_id),body.modus,res.locals.kiosk,groupId));
@@ -163,8 +129,9 @@ router.get("/public/live-game",async(_req,res)=>{
   res.json({...payload,updatedAt:row.updated_at,players:payload.players.map((p:any)=>({...p,name:publicName(p.name,res.locals.kiosk.settings.name_mode)}))});
 });
 const errors:ErrorRequestHandler=(err,_req,res,next)=>{
-  if(err instanceof PortalConflict)return void res.status(err.status).json({error:err.message});
-  if(err?.code==="23505")return void res.status(409).json({error:"Dieser Spieler hat bereits einen offenen Eintrag."});
+  if(err?.name==="ZodError")return void res.status(400).json({code:"invalid_request",message:"Die Eingaben sind ungültig.",error:"Die Eingaben sind ungültig."});
+  if(err instanceof PortalConflict)return void res.status(err.status).json({code:err.code,message:err.message,error:err.message});
+  if(err?.code==="23505")return void res.status(409).json({code:"queue_duplicate",message:"Dieser Spieler hat bereits einen offenen Eintrag.",error:"Dieser Spieler hat bereits einen offenen Eintrag."});
   next(err);
 };
 router.use(errors);

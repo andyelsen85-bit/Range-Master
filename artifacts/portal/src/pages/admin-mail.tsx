@@ -6,7 +6,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Mail, Send, Save, ShieldAlert } from "lucide-react";
 import { DailyReportSettingsCard } from "@/components/daily-report-settings";
 import { PublicPageSettingsCard } from "@/components/public-page-settings";
-import { KioskTokenSettingsCard } from "@/components/kiosk-token-settings";
 
 interface SmtpSettings {
   host: string;
@@ -182,7 +181,6 @@ export default function AdminMail() {
 
       <PublicPageSettingsCard />
 
-      <KioskTokenSettingsCard />
     </div>
   );
 }

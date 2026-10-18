@@ -67,16 +67,17 @@ import type {
   HealthStatus,
   InventoryInput,
   InventoryState,
+  KioskAccessError,
+  KioskAccessOk,
+  KioskDeviceList,
   KioskGroupList,
   KioskLiveGame,
   KioskPicker,
+  KioskPinInput,
   KioskPrintData,
   KioskPrintDays,
   KioskQueueSnapshot,
   KioskRanking,
-  KioskTokenInput,
-  KioskTokenList,
-  KioskTokenOnce,
   ListSpieler200,
   LiveSnapshotInput,
   LoginRequest,
@@ -120,6 +121,33 @@ import type {
 
 import { customFetch } from '../custom-fetch';
 import type { ErrorType , BodyType } from '../custom-fetch';
+
+// https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
+type IfEquals<X, Y, A = X, B = never> = (<T>() => T extends X ? 1 : 2) extends <
+T,
+>() => T extends Y ? 1 : 2
+? A
+: B;
+
+type WritableKeys<T> = {
+[P in keyof T]-?: IfEquals<
+  { [Q in P]: T[P] },
+  { -readonly [Q in P]: T[P] },
+  P
+>;
+}[keyof T];
+
+type UnionToIntersection<U> =
+  (U extends any ? (k: U)=>void : never) extends ((k: infer I)=>void) ? I : never;
+type DistributeReadOnlyOverUnions<T> = T extends any ? NonReadonly<T> : never;
+
+type Writable<T> = Pick<T, WritableKeys<T>>;
+type NonReadonly<T> = [T] extends [UnionToIntersection<T>] ? {
+  [P in keyof Writable<T>]: T[P] extends object
+    ? NonReadonly<NonNullable<T[P]>>
+    : T[P];
+} : DistributeReadOnlyOverUnions<T>;
+
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -4146,7 +4174,7 @@ export const getUpdatePublicPageSettingsUrl = () => {
   return `/api/admin/public-page`
 }
 
-export const updatePublicPageSettings = async (publicPageSettings: PublicPageSettings, options?: Parameters<typeof customFetch>[1]): Promise<PublicPageSettings> => {
+export const updatePublicPageSettings = async (publicPageSettings: NonReadonly<PublicPageSettings>, options?: Parameters<typeof customFetch>[1]): Promise<PublicPageSettings> => {
 
   return customFetch<PublicPageSettings>(getUpdatePublicPageSettingsUrl(),
   {
@@ -4162,8 +4190,8 @@ export const updatePublicPageSettings = async (publicPageSettings: PublicPageSet
 
 
 export const getUpdatePublicPageSettingsMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePublicPageSettings>>, TError,{data: BodyType<PublicPageSettings>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updatePublicPageSettings>>, TError,{data: BodyType<PublicPageSettings>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePublicPageSettings>>, TError,{data: BodyType<NonReadonly<PublicPageSettings>>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePublicPageSettings>>, TError,{data: BodyType<NonReadonly<PublicPageSettings>>}, TContext> => {
 
 const mutationKey = ['updatePublicPageSettings'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -4175,7 +4203,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePublicPageSettings>>, {data: BodyType<PublicPageSettings>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePublicPageSettings>>, {data: BodyType<NonReadonly<PublicPageSettings>>}> = (props) => {
           const {data} = props ?? {};
 
           return  updatePublicPageSettings(data,requestOptions)
@@ -4189,15 +4217,15 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type UpdatePublicPageSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updatePublicPageSettings>>>
-    export type UpdatePublicPageSettingsMutationBody = BodyType<PublicPageSettings>
+    export type UpdatePublicPageSettingsMutationBody = BodyType<NonReadonly<PublicPageSettings>>
     export type UpdatePublicPageSettingsMutationError = ErrorType<unknown>
 
     export const useUpdatePublicPageSettings = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePublicPageSettings>>, TError,{data: BodyType<PublicPageSettings>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePublicPageSettings>>, TError,{data: BodyType<NonReadonly<PublicPageSettings>>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updatePublicPageSettings>>,
         TError,
-        {data: BodyType<PublicPageSettings>},
+        {data: BodyType<NonReadonly<PublicPageSettings>>},
         TContext
       > => {
       return useMutation(getUpdatePublicPageSettingsMutationOptions(options));
@@ -4345,17 +4373,147 @@ export function useGetSharedScorecard<TData = Awaited<ReturnType<typeof getShare
 
 
 
-export const getGetKioskTokensUrl = () => {
+export const getUnlockPublicPageUrl = () => {
 
 
 
 
-  return `/api/admin/kiosk-tokens`
+  return `/api/public/unlock`
 }
 
-export const getKioskTokens = async ( options?: Parameters<typeof customFetch>[1]): Promise<KioskTokenList> => {
+export const unlockPublicPage = async (kioskPinInput: KioskPinInput, options?: Parameters<typeof customFetch>[1]): Promise<KioskAccessOk> => {
 
-  return customFetch<KioskTokenList>(getGetKioskTokensUrl(),
+  return customFetch<KioskAccessOk>(getUnlockPublicPageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(kioskPinInput)
+  }
+);}
+
+
+
+
+
+export const getUnlockPublicPageMutationOptions = <TError = ErrorType<KioskAccessError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unlockPublicPage>>, TError,{data: BodyType<KioskPinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof unlockPublicPage>>, TError,{data: BodyType<KioskPinInput>}, TContext> => {
+
+const mutationKey = ['unlockPublicPage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof unlockPublicPage>>, {data: BodyType<KioskPinInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  unlockPublicPage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UnlockPublicPageMutationResult = NonNullable<Awaited<ReturnType<typeof unlockPublicPage>>>
+    export type UnlockPublicPageMutationBody = BodyType<KioskPinInput>
+    export type UnlockPublicPageMutationError = ErrorType<KioskAccessError | void>
+
+    export const useUnlockPublicPage = <TError = ErrorType<KioskAccessError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unlockPublicPage>>, TError,{data: BodyType<KioskPinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof unlockPublicPage>>,
+        TError,
+        {data: BodyType<KioskPinInput>},
+        TContext
+      > => {
+      return useMutation(getUnlockPublicPageMutationOptions(options));
+    }
+
+export const getSetPublicPagePinUrl = () => {
+
+
+
+
+  return `/api/admin/public-page/pin`
+}
+
+export const setPublicPagePin = async (kioskPinInput: KioskPinInput, options?: Parameters<typeof customFetch>[1]): Promise<KioskAccessOk> => {
+
+  return customFetch<KioskAccessOk>(getSetPublicPagePinUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(kioskPinInput)
+  }
+);}
+
+
+
+
+
+export const getSetPublicPagePinMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setPublicPagePin>>, TError,{data: BodyType<KioskPinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setPublicPagePin>>, TError,{data: BodyType<KioskPinInput>}, TContext> => {
+
+const mutationKey = ['setPublicPagePin'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setPublicPagePin>>, {data: BodyType<KioskPinInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setPublicPagePin(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetPublicPagePinMutationResult = NonNullable<Awaited<ReturnType<typeof setPublicPagePin>>>
+    export type SetPublicPagePinMutationBody = BodyType<KioskPinInput>
+    export type SetPublicPagePinMutationError = ErrorType<unknown>
+
+    export const useSetPublicPagePin = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setPublicPagePin>>, TError,{data: BodyType<KioskPinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setPublicPagePin>>,
+        TError,
+        {data: BodyType<KioskPinInput>},
+        TContext
+      > => {
+      return useMutation(getSetPublicPagePinMutationOptions(options));
+    }
+
+export const getGetPublicPageDevicesUrl = () => {
+
+
+
+
+  return `/api/admin/public-page/devices`
+}
+
+export const getPublicPageDevices = async ( options?: Parameters<typeof customFetch>[1]): Promise<KioskDeviceList> => {
+
+  return customFetch<KioskDeviceList>(getGetPublicPageDevicesUrl(),
   {
     ...options,
     method: 'GET'
@@ -4368,42 +4526,42 @@ export const getKioskTokens = async ( options?: Parameters<typeof customFetch>[1
 
 
 
-export const getGetKioskTokensQueryKey = () => {
+export const getGetPublicPageDevicesQueryKey = () => {
     return [
-    `/api/admin/kiosk-tokens`
+    `/api/admin/public-page/devices`
     ] as const;
     }
 
 
-export const getGetKioskTokensQueryOptions = <TData = Awaited<ReturnType<typeof getKioskTokens>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskTokens>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetPublicPageDevicesQueryOptions = <TData = Awaited<ReturnType<typeof getPublicPageDevices>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPublicPageDevices>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetKioskTokensQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetPublicPageDevicesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKioskTokens>>> = ({ signal }) => getKioskTokens({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublicPageDevices>>> = ({ signal }) => getPublicPageDevices({ signal, ...requestOptions });
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKioskTokens>>, TError, TData> & { queryKey: QueryKey }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublicPageDevices>>, TError, TData> & { queryKey: QueryKey }
 }
 
-export type GetKioskTokensQueryResult = NonNullable<Awaited<ReturnType<typeof getKioskTokens>>>
-export type GetKioskTokensQueryError = ErrorType<unknown>
+export type GetPublicPageDevicesQueryResult = NonNullable<Awaited<ReturnType<typeof getPublicPageDevices>>>
+export type GetPublicPageDevicesQueryError = ErrorType<unknown>
 
 
 
-export function useGetKioskTokens<TData = Awaited<ReturnType<typeof getKioskTokens>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskTokens>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export function useGetPublicPageDevices<TData = Awaited<ReturnType<typeof getPublicPageDevices>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPublicPageDevices>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetKioskTokensQueryOptions(options)
+  const queryOptions = getGetPublicPageDevicesQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -4416,22 +4574,22 @@ export function useGetKioskTokens<TData = Awaited<ReturnType<typeof getKioskToke
 
 
 
-export const getCreateKioskTokenUrl = () => {
+export const getRevokePublicPageDeviceUrl = (id: number,) => {
 
 
 
 
-  return `/api/admin/kiosk-tokens`
+  return `/api/admin/public-page/devices/${id}`
 }
 
-export const createKioskToken = async (kioskTokenInput: KioskTokenInput, options?: Parameters<typeof customFetch>[1]): Promise<KioskTokenOnce> => {
+export const revokePublicPageDevice = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<KioskAccessOk> => {
 
-  return customFetch<KioskTokenOnce>(getCreateKioskTokenUrl(),
+  return customFetch<KioskAccessOk>(getRevokePublicPageDeviceUrl(id),
   {
     ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(kioskTokenInput)
+    method: 'DELETE'
+
+
   }
 );}
 
@@ -4439,11 +4597,11 @@ export const createKioskToken = async (kioskTokenInput: KioskTokenInput, options
 
 
 
-export const getCreateKioskTokenMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKioskToken>>, TError,{data: BodyType<KioskTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof createKioskToken>>, TError,{data: BodyType<KioskTokenInput>}, TContext> => {
+export const getRevokePublicPageDeviceMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePublicPageDevice>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokePublicPageDevice>>, TError,{id: number}, TContext> => {
 
-const mutationKey = ['createKioskToken'];
+const mutationKey = ['revokePublicPageDevice'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4453,10 +4611,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createKioskToken>>, {data: BodyType<KioskTokenInput>}> = (props) => {
-          const {data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokePublicPageDevice>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
 
-          return  createKioskToken(data,requestOptions)
+          return  revokePublicPageDevice(id,requestOptions)
         }
 
 
@@ -4466,100 +4624,32 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type CreateKioskTokenMutationResult = NonNullable<Awaited<ReturnType<typeof createKioskToken>>>
-    export type CreateKioskTokenMutationBody = BodyType<KioskTokenInput>
-    export type CreateKioskTokenMutationError = ErrorType<unknown>
+    export type RevokePublicPageDeviceMutationResult = NonNullable<Awaited<ReturnType<typeof revokePublicPageDevice>>>
 
-    export const useCreateKioskToken = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKioskToken>>, TError,{data: BodyType<KioskTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    export type RevokePublicPageDeviceMutationError = ErrorType<unknown>
+
+    export const useRevokePublicPageDevice = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePublicPageDevice>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof createKioskToken>>,
+        Awaited<ReturnType<typeof revokePublicPageDevice>>,
         TError,
-        {data: BodyType<KioskTokenInput>},
+        {id: number},
         TContext
       > => {
-      return useMutation(getCreateKioskTokenMutationOptions(options));
+      return useMutation(getRevokePublicPageDeviceMutationOptions(options));
     }
 
-export const getRenameKioskTokenUrl = (id: number,) => {
+export const getResetPublicPageDevicesUrl = () => {
 
 
 
 
-  return `/api/admin/kiosk-tokens/${id}`
+  return `/api/admin/public-page/devices/reset`
 }
 
-export const renameKioskToken = async (id: number,
-    kioskTokenInput: KioskTokenInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
+export const resetPublicPageDevices = async ( options?: Parameters<typeof customFetch>[1]): Promise<KioskAccessOk> => {
 
-  return customFetch<PortalData>(getRenameKioskTokenUrl(id),
-  {
-    ...options,
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(kioskTokenInput)
-  }
-);}
-
-
-
-
-
-export const getRenameKioskTokenMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameKioskToken>>, TError,{id: number;data: BodyType<KioskTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof renameKioskToken>>, TError,{id: number;data: BodyType<KioskTokenInput>}, TContext> => {
-
-const mutationKey = ['renameKioskToken'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameKioskToken>>, {id: number;data: BodyType<KioskTokenInput>}> = (props) => {
-          const {id,data} = props ?? {};
-
-          return  renameKioskToken(id,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type RenameKioskTokenMutationResult = NonNullable<Awaited<ReturnType<typeof renameKioskToken>>>
-    export type RenameKioskTokenMutationBody = BodyType<KioskTokenInput>
-    export type RenameKioskTokenMutationError = ErrorType<unknown>
-
-    export const useRenameKioskToken = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameKioskToken>>, TError,{id: number;data: BodyType<KioskTokenInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof renameKioskToken>>,
-        TError,
-        {id: number;data: BodyType<KioskTokenInput>},
-        TContext
-      > => {
-      return useMutation(getRenameKioskTokenMutationOptions(options));
-    }
-
-export const getChangeKioskTokenUrl = (id: number,
-    action: 'revoke' | 'renew',) => {
-
-
-
-
-  return `/api/admin/kiosk-tokens/${id}/${action}`
-}
-
-export const changeKioskToken = async (id: number,
-    action: 'revoke' | 'renew', options?: Parameters<typeof customFetch>[1]): Promise<PortalData> => {
-
-  return customFetch<PortalData>(getChangeKioskTokenUrl(id,action),
+  return customFetch<KioskAccessOk>(getResetPublicPageDevicesUrl(),
   {
     ...options,
     method: 'POST'
@@ -4572,11 +4662,11 @@ export const changeKioskToken = async (id: number,
 
 
 
-export const getChangeKioskTokenMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeKioskToken>>, TError,{id: number;action: 'revoke' | 'renew'}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof changeKioskToken>>, TError,{id: number;action: 'revoke' | 'renew'}, TContext> => {
+export const getResetPublicPageDevicesMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetPublicPageDevices>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resetPublicPageDevices>>, TError,void, TContext> => {
 
-const mutationKey = ['changeKioskToken'];
+const mutationKey = ['resetPublicPageDevices'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4586,10 +4676,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeKioskToken>>, {id: number;action: 'revoke' | 'renew'}> = (props) => {
-          const {id,action} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetPublicPageDevices>>, void> = () => {
 
-          return  changeKioskToken(id,action,requestOptions)
+
+          return  resetPublicPageDevices(requestOptions)
         }
 
 
@@ -4599,19 +4689,19 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type ChangeKioskTokenMutationResult = NonNullable<Awaited<ReturnType<typeof changeKioskToken>>>
+    export type ResetPublicPageDevicesMutationResult = NonNullable<Awaited<ReturnType<typeof resetPublicPageDevices>>>
 
-    export type ChangeKioskTokenMutationError = ErrorType<unknown>
+    export type ResetPublicPageDevicesMutationError = ErrorType<unknown>
 
-    export const useChangeKioskToken = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeKioskToken>>, TError,{id: number;action: 'revoke' | 'renew'}, TContext>, request?: SecondParameter<typeof customFetch>}
+    export const useResetPublicPageDevices = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetPublicPageDevices>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof changeKioskToken>>,
+        Awaited<ReturnType<typeof resetPublicPageDevices>>,
         TError,
-        {id: number;action: 'revoke' | 'renew'},
+        void,
         TContext
       > => {
-      return useMutation(getChangeKioskTokenMutationOptions(options));
+      return useMutation(getResetPublicPageDevicesMutationOptions(options));
     }
 
 export const getGetKioskQueueUrl = () => {

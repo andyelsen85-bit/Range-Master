@@ -8,6 +8,9 @@
 import type { PublicPageSettingsNameMode } from './publicPageSettingsNameMode';
 
 export interface PublicPageSettings {
+  readonly pinConfigured?: boolean;
+  /** @nullable */
+  readonly pinChangedAt?: Date | null;
   enabled: boolean;
   nameMode: PublicPageSettingsNameMode;
   queueEnabled?: boolean;

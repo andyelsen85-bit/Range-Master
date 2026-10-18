@@ -346,10 +346,6 @@ export async function customFetch<T = unknown>(
 
   const headers = mergeHeaders(isRequest(input) ? input.headers : undefined, headersInit);
   const kioskRequest=/\/public(?:\/|$)/.test(resolveUrl(input).split("?")[0]);
-  if(kioskRequest && typeof window!=="undefined") {
-    const token=window.localStorage.getItem("rangemaster-kiosk");
-    if(token)headers.set("X-Kiosk-Token",token);
-  }
 
   if (
     typeof init.body === "string" &&
@@ -374,11 +370,7 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
-  const response = await fetch(input, { ...init, method, headers });
-  if(kioskRequest && [401,403].includes(response.status) && typeof window!=="undefined") {
-    window.localStorage.removeItem("rangemaster-kiosk");
-    window.dispatchEvent(new Event("kiosk-unauthorized"));
-  }
+  const response = await fetch(input, { ...init, ...(kioskRequest ? { credentials: "include" as const } : {}), method, headers });
 
   if (response.status === 401 && !kioskRequest) {
     _onUnauthorized?.();

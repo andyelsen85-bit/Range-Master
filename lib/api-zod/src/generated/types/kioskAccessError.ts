@@ -6,10 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface KioskTokenInput {
-  /**
-     * @minLength 1
-     * @maxLength 80
-     */
-  name: string;
+export interface KioskAccessError {
+  code: string;
+  message?: string;
+  /** @minimum 1 */
+  retryAfterSec?: number;
 }

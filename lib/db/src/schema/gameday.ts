@@ -40,6 +40,8 @@ export const dailyReportLogTable = pgTable("daily_report_log", {
 export const publicPageSettingsTable = pgTable("public_page_settings", {
   id: integer("id").primaryKey().default(1), enabled: boolean("enabled").notNull().default(false),
   nameMode: text("name_mode").notNull().default("INITIAL"),
+  pinHash:text("pin_hash"),pinChangedAt:timestamp("pin_changed_at",{withTimezone:true}),
+  pinEpoch:integer("pin_epoch").notNull().default(1),
   queueEnabled:boolean("queue_enabled").notNull().default(false),
   groupsEnabled:boolean("groups_enabled").notNull().default(true),
   showRanking:boolean("show_ranking").notNull().default(false),

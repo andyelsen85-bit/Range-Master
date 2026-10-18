@@ -1251,6 +1251,8 @@ export const getPublicPageSettingsResponseMaxQueueGamesMax = 40;
 
 
 export const GetPublicPageSettingsResponse = zod.object({
+  "pinConfigured": zod.boolean().optional(),
+  "pinChangedAt": zod.coerce.date().nullish(),
   "enabled": zod.boolean(),
   "nameMode": zod.enum(['FULL', 'INITIAL']),
   "queueEnabled": zod.boolean().optional(),
@@ -1280,6 +1282,8 @@ export const updatePublicPageSettingsResponseMaxQueueGamesMax = 40;
 
 
 export const UpdatePublicPageSettingsResponse = zod.object({
+  "pinConfigured": zod.boolean().optional(),
+  "pinChangedAt": zod.coerce.date().nullish(),
   "enabled": zod.boolean(),
   "nameMode": zod.enum(['FULL', 'INITIAL']),
   "queueEnabled": zod.boolean().optional(),
@@ -1336,59 +1340,60 @@ export const GetSharedScorecardResponse = zod.object({
 })
 
 
-export const GetKioskTokensResponse = zod.object({
-  "tokens": zod.array(zod.object({
+export const unlockPublicPageBodyPinMin = 6;
+export const unlockPublicPageBodyPinMax = 32;
+
+
+export const unlockPublicPageBodyPinRegExp = new RegExp('^[0-9]+$');
+
+
+export const UnlockPublicPageBody = zod.object({
+  "pin": zod.string().min(unlockPublicPageBodyPinMin).max(unlockPublicPageBodyPinMax).regex(unlockPublicPageBodyPinRegExp)
+})
+
+export const UnlockPublicPageResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+export const setPublicPagePinBodyPinMin = 6;
+export const setPublicPagePinBodyPinMax = 32;
+
+
+export const setPublicPagePinBodyPinRegExp = new RegExp('^[0-9]+$');
+
+
+export const SetPublicPagePinBody = zod.object({
+  "pin": zod.string().min(setPublicPagePinBodyPinMin).max(setPublicPagePinBodyPinMax).regex(setPublicPagePinBodyPinRegExp)
+})
+
+export const SetPublicPagePinResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+export const GetPublicPageDevicesResponse = zod.object({
+  "devices": zod.array(zod.object({
   "id": zod.number().int(),
-  "name": zod.string(),
+  "name": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
-  "lastUsedAt": zod.coerce.date().nullable(),
-  "lastUsedIpHash": zod.string().nullable(),
-  "revokedAt": zod.coerce.date().nullable()
+  "lastUsedAt": zod.coerce.date().nullable()
 }))
 })
 
 
-export const createKioskTokenBodyNameMax = 80;
-
-
-
-export const CreateKioskTokenBody = zod.object({
-  "name": zod.string().min(1).max(createKioskTokenBodyNameMax)
-})
-
-export const createKioskTokenResponseTokenMin = 43;
-export const createKioskTokenResponseTokenMax = 43;
-
-
-
-export const CreateKioskTokenResponse = zod.object({
-  "id": zod.number().int(),
-  "token": zod.string().min(createKioskTokenResponseTokenMin).max(createKioskTokenResponseTokenMax),
-  "url": zod.string()
-})
-
-
-export const RenameKioskTokenParams = zod.object({
+export const RevokePublicPageDeviceParams = zod.object({
   "id": zod.coerce.number().int()
 })
 
-export const renameKioskTokenBodyNameMax = 80;
-
-
-
-export const RenameKioskTokenBody = zod.object({
-  "name": zod.string().min(1).max(renameKioskTokenBodyNameMax)
+export const RevokePublicPageDeviceResponse = zod.object({
+  "ok": zod.boolean()
 })
 
-export const RenameKioskTokenResponse = zod.record(zod.string(), zod.unknown())
 
-
-export const ChangeKioskTokenParams = zod.object({
-  "id": zod.coerce.number().int(),
-  "action": zod.enum(['revoke', 'renew'])
+export const ResetPublicPageDevicesResponse = zod.object({
+  "ok": zod.boolean()
 })
-
-export const ChangeKioskTokenResponse = zod.record(zod.string(), zod.unknown())
 
 
 export const GetKioskQueueResponse = zod.object({

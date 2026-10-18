@@ -156,7 +156,7 @@ Es verändert keine Entwicklungs-/Produktionsdaten.
 Abgedeckt: parallele Doppelanmeldung und Gruppen ohne Aufteilung, First-Fit,
 exakte Take-Einträge, Terminalbesitz, Release-/STARTED-Wiederholung, verspätetes
 STARTED nach abgeschlossenem Spielsync, Live-Sequenz/Staleness/Isolation,
-Tokenrotation/-widerruf und Ratenlimit, keine fremden Namen/IDs in eigenen
+Gerätewiderruf/PIN-Epochen und Ratenlimit, keine fremden Namen/IDs in eigenen
 Scorecards, Druckstatistikgleichheit, drei Spiele/vier Spieler mit Hide/Unhide
 gegen gefilterte Rankingfixture, unveränderte operative Berichte einschließlich
 Hash, Admin-Korrekturen und konfliktfreier erneuter Sync.
@@ -173,11 +173,11 @@ erfolgreich, App **2.613.536 Bytes**, **728.800 Bytes Reserve je OTA-Slot**.
 Partitions-/Bootplan-Test bestätigt unveränderte geschützte Bereiche und `ota_0`.
 
 Ein Playwright-Durchlauf prüfte am echten laufenden Portal 1920×1080:
-Tokenübernahme/URL-Bereinigung, Zugang ohne Token, Touch-Tastatur, Anmeldung,
+PIN-Freigabe mit Geräte-Cookie, gesperrter Zugang, Touch-Tastatur, Anmeldung,
 Gruppen, Abmeldung, Tagesdruck, stabilen DOM-/Auswahlzustand bei Aktualisierungen,
 60-Sekunden-Rücksetzung, Adminfilter, Hide/Unhide, Schusskorrektur/Audit, Top 15
-und Tokenwiderruf. Screenshots: Splitansicht, Tastatur, Gruppeneditor, Druck,
-Zugangsseite, Adminliste, korrigiertes Detail, Top 15 und Tokenverwaltung.
+und Gerätewiderruf. Screenshots: Splitansicht, Tastatur, Gruppeneditor, Druck,
+Zugangsseite, Adminliste, korrigiertes Detail, Top 15 und Stand-PC Zugang.
 Testeigene Fixtures wurden bereinigt; gleichzeitig von Benutzern verwendete
 Gruppen/Anmeldungen wurden ausdrücklich nicht gelöscht.
 

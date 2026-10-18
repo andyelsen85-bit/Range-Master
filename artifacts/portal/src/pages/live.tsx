@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
-import { Target, KeyRound } from "lucide-react";
-import { useKioskToken } from "@/lib/kiosk";
+import { Target } from "lucide-react";
+import { KioskGate } from "@/components/kiosk/kiosk-gate";
 import { LiveGamePanel } from "@/components/kiosk/live-game-panel";
 import { LastGamePanel } from "@/components/kiosk/last-game-panel";
 import { QueuePanel } from "@/components/kiosk/queue-panel";
@@ -12,22 +12,10 @@ import { useGetKioskLiveGame, getGetKioskLiveGameQueryKey } from "@workspace/api
 const IDLE_MS = 60_000;
 
 export default function Live() {
-  const token = useKioskToken();
-  if (!token) return <KioskAccessScreen />;
-  return <LiveBoard />;
+  return <KioskGate><LiveBoard /></KioskGate>;
 }
 
-export function KioskAccessScreen() {
-  return (
-    <div className="kiosk-root min-h-[100dvh] bg-background text-foreground flex flex-col items-center justify-center gap-6 text-center p-8" data-testid="screen-kiosk-access">
-      <div className="h-24 w-24 rounded-2xl bg-primary/15 text-primary flex items-center justify-center"><KeyRound size={52} /></div>
-      <h1 className="text-5xl font-black tracking-tight">Zugriff nur über den Stand-PC</h1>
-      <p className="text-2xl text-muted-foreground max-w-2xl">Diese Seite ist für den Touch-PC am Stand eingerichtet. Bitte wende dich an den Vorstand.</p>
-    </div>
-  );
-}
-
-/** Idle reset: 60 s without a touch clears every selection. */
+/** Idle reset: 60 s without a touch clears every selection (never locks the session). */
 export function useIdleReset(ms = IDLE_MS) {
   const [tick, setTick] = useState(0);
   useEffect(() => {

@@ -840,7 +840,7 @@ paths:
   /public/last-game:
     get:
       operationId: getPublicLastGame
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       responses:
         "200": { description: Most recently completed scorecard or null, content: { application/json: { schema: { $ref: "#/components/schemas/SharedScorecard" } } } }
         "404": { description: Public page disabled }
@@ -852,67 +852,75 @@ paths:
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
         "200": { description: Stored ledger scorecard, content: { application/json: { schema: { $ref: "#/components/schemas/SharedScorecard" } } } }
-  /admin/kiosk-tokens:
+  /public/unlock:
+    post:
+      operationId: unlockPublicPage
+      security: []
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPinInput" } } } }
+      responses:
+        "200": { description: Device cookie set, content: { application/json: { schema: { $ref: "#/components/schemas/KioskAccessOk" } } } }
+        "401": { description: Invalid PIN, content: { application/json: { schema: { $ref: "#/components/schemas/KioskAccessError" } } } }
+        "429": { description: Temporarily locked, content: { application/json: { schema: { $ref: "#/components/schemas/KioskAccessError" } } } }
+        "403": { description: Origin mismatch, content: { application/json: { schema: { $ref: "#/components/schemas/KioskAccessError" } } } }
+        "404": { description: Public page disabled }
+  /admin/public-page/pin:
+    put:
+      operationId: setPublicPagePin
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPinInput" } } } }
+      responses:
+        "200": { description: PIN changed and all devices invalidated, content: { application/json: { schema: { $ref: "#/components/schemas/KioskAccessOk" } } } }
+  /admin/public-page/devices:
     get:
-      operationId: getKioskTokens
+      operationId: getPublicPageDevices
       responses:
-        "200": { description: Kiosk token metadata only, content: { application/json: { schema: { $ref: "#/components/schemas/KioskTokenList" } } } }
-    post:
-      operationId: createKioskToken
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KioskTokenInput" } } } }
-      responses:
-        "201": { description: Token shown once, content: { application/json: { schema: { $ref: "#/components/schemas/KioskTokenOnce" } } } }
-  /admin/kiosk-tokens/{id}:
+        "200": { description: Currently unlocked devices, content: { application/json: { schema: { $ref: "#/components/schemas/KioskDeviceList" } } } }
+  /admin/public-page/devices/{id}:
     parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
-    patch:
-      operationId: renameKioskToken
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KioskTokenInput" } } } }
+    delete:
+      operationId: revokePublicPageDevice
       responses:
-        "200": { description: Renamed, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
-  /admin/kiosk-tokens/{id}/{action}:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: integer } }
-      - { name: action, in: path, required: true, schema: { type: string, enum: [revoke, renew] } }
+        "200": { description: Device revoked, content: { application/json: { schema: { $ref: "#/components/schemas/KioskAccessOk" } } } }
+  /admin/public-page/devices/reset:
     post:
-      operationId: changeKioskToken
+      operationId: resetPublicPageDevices
       responses:
-        "200": { description: Revoked or renewed, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+        "200": { description: All devices invalidated, content: { application/json: { schema: { $ref: "#/components/schemas/KioskAccessOk" } } } }
   /public/queue:
     get:
       operationId: getKioskQueue
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       responses:
         "200": { description: Queue and kiosk settings, content: { application/json: { schema: { $ref: "#/components/schemas/KioskQueueSnapshot" } } } }
   /public/queue/players:
     get:
       operationId: getKioskPlayers
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       parameters: [{ name: q, in: query, schema: { type: string } }]
       responses:
         "200": { description: Minimal active player picker, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPicker" } } } }
   /public/queue/signup:
     post:
       operationId: kioskSignup
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueSignupInput" } } } }
       responses:
         "201": { description: Signed up atomically, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
   /public/queue/cancel:
     post:
       operationId: kioskCancel
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueCancelInput" } } } }
       responses:
         "200": { description: Cancelled, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
   /public/groups:
     get:
       operationId: getKioskGroups
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       responses:
         "200": { description: Persistent groups, content: { application/json: { schema: { $ref: "#/components/schemas/KioskGroupList" } } } }
     post:
       operationId: createKioskGroup
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueGroupInput" } } } }
       responses:
         "200": { description: Saved group, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
@@ -920,20 +928,20 @@ paths:
     parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
     put:
       operationId: updateKioskGroup
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueGroupInput" } } } }
       responses:
         "200": { description: Updated group, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
     delete:
       operationId: deleteKioskGroup
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       responses:
         "200": { description: Soft deleted group, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
   /public/groups/{id}/signup:
     parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
     post:
       operationId: kioskGroupSignup
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueSignupInput" } } } }
       responses:
         "200": { description: Entire group signed up, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
@@ -941,27 +949,27 @@ paths:
     parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
     get:
       operationId: getKioskPrintDays
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       responses:
         "200": { description: All visible result days, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPrintDays" } } } }
   /public/player/{id}/print:
     parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
     get:
       operationId: getKioskPrint
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       parameters: [{ name: tag, in: query, required: true, schema: { type: string, format: date } }]
       responses:
         "200": { description: Anonymised cards and shared day statistics, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPrintData" } } } }
   /public/ranking:
     get:
       operationId: getKioskRanking
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       responses:
         "200": { description: Visible best-game top fifteen, content: { application/json: { schema: { $ref: "#/components/schemas/KioskRanking" } } } }
   /public/live-game:
     get:
       operationId: getKioskLiveGame
-      security: [{ KioskToken: [] }]
+      security: [{ KioskDevice: [] }]
       responses:
         "200": { description: Most recent running snapshot or null, content: { application/json: { schema: { anyOf: [{ $ref: "#/components/schemas/KioskLiveGame" }, { type: "null" }] } } } }
   /sync/queue:
@@ -1030,7 +1038,7 @@ paths:
         "200": { description: Corrected points and audited before/after, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
 components:
   securitySchemes:
-    KioskToken: { type: apiKey, in: header, name: X-Kiosk-Token }
+    KioskDevice: { type: apiKey, in: cookie, name: rm_kiosk }
     bearerAuth:
       type: http
       scheme: bearer
@@ -1196,28 +1204,31 @@ components:
       required: [groups]
       properties:
         groups: { type: array, items: { $ref: "#/components/schemas/KioskGroup" } }
-    KioskTokenMetadata:
+    KioskDeviceMetadata:
       type: object
-      required: [id, name, createdAt, lastUsedAt, lastUsedIpHash, revokedAt]
+      required: [id, name, createdAt, lastUsedAt]
       properties:
         id: { type: integer }
-        name: { type: string }
+        name: { type: ["string", "null"] }
         createdAt: { type: string, format: date-time }
         lastUsedAt: { type: string, format: date-time, nullable: true }
-        lastUsedIpHash: { type: string, nullable: true }
-        revokedAt: { type: string, format: date-time, nullable: true }
-    KioskTokenList:
+    KioskDeviceList:
       type: object
-      required: [tokens]
+      required: [devices]
       properties:
-        tokens: { type: array, items: { $ref: "#/components/schemas/KioskTokenMetadata" } }
-    KioskTokenOnce:
+        devices: { type: array, items: { $ref: "#/components/schemas/KioskDeviceMetadata" } }
+    KioskAccessOk:
       type: object
-      required: [id, token, url]
+      required: [ok]
       properties:
-        id: { type: integer }
-        token: { type: string, minLength: 43, maxLength: 43 }
-        url: { type: string }
+        ok: { type: boolean }
+    KioskAccessError:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        retryAfterSec: { type: integer, minimum: 1 }
     KioskPrintDays:
       type: object
       required: [days]
@@ -1262,11 +1273,11 @@ components:
           required: [updatedAt]
           properties:
             updatedAt: { type: string, format: date-time }
-    KioskTokenInput:
+    KioskPinInput:
       type: object
-      required: [name]
+      required: [pin]
       properties:
-        name: { type: string, minLength: 1, maxLength: 80 }
+        pin: { type: string, minLength: 6, maxLength: 32, pattern: '^[0-9]+$', writeOnly: true }
     QueueSignupInput:
       type: object
       required: [modus]
@@ -1323,6 +1334,8 @@ components:
       type: object
       required: [enabled, nameMode]
       properties:
+        pinConfigured: { type: boolean, readOnly: true }
+        pinChangedAt: { type: ["string", "null"], format: date-time, readOnly: true }
         enabled: { type: boolean }
         nameMode: { type: string, enum: [FULL, INITIAL] }
         queueEnabled: { type: boolean }

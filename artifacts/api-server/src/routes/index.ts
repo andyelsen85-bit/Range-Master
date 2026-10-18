@@ -10,12 +10,14 @@ import gamedayRouter from "./gameday";
 import terminalLogsRouter from "./terminal-logs";
 import { requireKiosk } from "../lib/kiosk";
 import kioskQueueRouter from "./kiosk-queue";
+import kioskAccessRouter from "./kiosk-access";
 import managedGamesRouter from "./managed-games";
 import { configureSyncRoutes } from "../lib/build-health";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(kioskAccessRouter);
 router.use("/public",requireKiosk);
 router.use(kioskQueueRouter);
 router.use(managedGamesRouter);
