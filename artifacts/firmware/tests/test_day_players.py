@@ -94,7 +94,7 @@ int main(int argc,char **argv) {
  for(int i=0;i<DAY_PLAYER_EVENTS_MAX;i++){assert(day_players_prepare(1000+i,true));day_players_finish(true);}
  assert(!day_players_prepare(9999,true)&&day_players_pending()==DAY_PLAYER_EVENTS_MAX);
  assert(!day_players_repair_safe());
- for(int i=0;i<2;i++){char path[512];snprintf(path,sizeof(path),DAY_PLAYERS_ROOT "/dayp%d.bin",i);FILE*f=fopen(path,"wb");assert(f);fputs("corrupt",f);fclose(f);}
+ for(int i=0;i<2;i++){char path[512];snprintf(path,sizeof(path),DAY_PLAYERS_ROOT "/DAYP%d.BIN",i);FILE*f=fopen(path,"wb");assert(f);fputs("corrupt",f);fclose(f);}
  day_players_init();assert(day_players_pending()==-1&&!day_players_flush()&&!day_players_repair_safe());
  assert(!logs.empty());
  puts("PASS durable day-player ADD/REMOVE order, reboot intent recovery, ID remap, 4xx retention/manual retry, failed ack, capacity and corruption refusal.");

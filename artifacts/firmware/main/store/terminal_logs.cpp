@@ -1,5 +1,6 @@
 #include "terminal_logs.h"
 #include "hourly_log_gate.h"
+#include "failure_log_gate.h"
 #include "esp_timer.h"
 #include <cstdio>
 #include <cstring>
@@ -89,6 +90,24 @@ void terminal_log_add(const char *type,const char *level,const char *message,con
     if(json && strlen(json)>500) { cJSON_free(json); return; }
     copy(entry.data,sizeof(entry.data),json?json:"{}"); cJSON_free(json);
     xSemaphoreTake(s_lock,portMAX_DELAY);
+    static FailureLogGate failures;
+    if(type&&!strcmp(type,"data_loss_risk")) {
+        uint32_t key=2166136261u;
+        for(const char *p=entry.msg;*p;p++)key=(key^(unsigned char)*p)*16777619u;
+        for(const char *p=entry.data;*p;p++)key=(key^(unsigned char)*p)*16777619u;
+        FailureLogCount count;
+        if(!failures.admit(key,esp_timer_get_time(),&count)){xSemaphoreGive(s_lock);return;}
+        char detail[360];snprintf(detail,sizeof(detail),"%.350s",entry.data);
+        size_t length=strlen(entry.data);
+        if(length<350&&length>=2&&detail[0]=='{'&&detail[length-1]=='}') {
+            detail[length-1]=0;
+            snprintf(entry.data,sizeof(entry.data),"%s%s\"count\":%u,\"firstUptimeMs\":%lld,\"lastUptimeMs\":%lld}",
+                detail,length>2?",":"",(unsigned)count.count,(long long)(count.first/1000),(long long)(count.last/1000));
+        }
+        else
+            snprintf(entry.data,sizeof(entry.data),"{\"count\":%u,\"firstUptimeMs\":%lld,\"lastUptimeMs\":%lld,\"detailHash\":%u}",
+                (unsigned)count.count,(long long)(count.first/1000),(long long)(count.last/1000),(unsigned)key);
+    }
     static HourlyLogGate archive_errors,identity_errors,glyph_errors;
     const bool archive_error=message && strstr(message,"Spielarchiv") &&
         strstr(message,"nicht") && (strstr(message,"verfügbar") || strstr(message,"geladen"));

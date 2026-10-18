@@ -10,6 +10,8 @@
 #include "ui_fonts.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "active_game.h"
+#include "screen_open_games.h"
 #include "network_test.h"
 #include "coprocessor.h"
 static lv_obj_t *s_network_test_label,*s_c6_version_label;
@@ -1424,9 +1426,65 @@ static lv_obj_t *s_storage_confirm;
 static char *s_storage_games;
 static char s_storage_pin[17],s_storage_new_pin[17],s_storage_target[40],s_storage_token[24],s_storage_typed[64];
 static char s_storage_result[200];
+static char s_storage_active[1200],s_storage_active_id[40];
+static bool s_storage_has_active=false,s_storage_open_mode=false,s_storage_offer_start=false;
+static lv_timer_t *s_storage_poll;
+static void storage_confirmation();
 static void storage_discard_confirmation();
+static void storage_active_discard(int stage) {
+    s_storage_confirm=lv_msgbox_create(nullptr);
+    lv_obj_set_style_text_font(s_storage_confirm,UI_FONT_16,0);
+    lv_obj_set_style_bg_color(s_storage_confirm,lv_color_hex(CLR_CARD),0);
+    lv_obj_set_style_text_color(s_storage_confirm,lv_color_hex(CLR_TEXT),0);
+    lv_obj_add_event_cb(s_storage_confirm,[](lv_event_t *e){if(s_storage_confirm==lv_event_get_target_obj(e))s_storage_confirm=nullptr;},LV_EVENT_DELETE,nullptr);
+    lv_msgbox_add_title(s_storage_confirm,stage==1?"Spiel verwerfen?":"Zweite Bestätigung");
+    lv_msgbox_add_text(s_storage_confirm,"Wertung nicht speichern. Gebuchte Credits werden storniert, niemals als neue Gutschrift erzeugt.");
+    lv_obj_t *back=lv_msgbox_add_footer_button(s_storage_confirm,"Abbrechen");
+    lv_obj_add_event_cb(back,[](lv_event_t*){lv_msgbox_close(s_storage_confirm);},LV_EVENT_CLICKED,nullptr);
+    lv_obj_t *button=lv_msgbox_add_footer_button(s_storage_confirm,stage==1?"Weiter":"Endgültig verwerfen");
+    lv_obj_add_event_cb(button,[](lv_event_t *event) {
+        int stage=(int)(intptr_t)lv_event_get_user_data(event);
+        lv_msgbox_close(s_storage_confirm);
+        if(stage==1){storage_active_discard(2);return;}
+        if(!g_store.activeGameOpen||strcmp(g_store.spielId,s_storage_active_id)){ui_open_games();return;}
+        g_store.screen=SCREEN_SPIEL;
+        if(!store_cancel_spiel())ui_open_games();
+    },LV_EVENT_CLICKED,(void*)(intptr_t)stage);
+}
+static void storage_ensure_poll() {
+    if(s_storage_poll)return;
+    s_storage_poll=lv_timer_create([](lv_timer_t*) {
+        int phase=s_storage_phase.load();
+        if(phase==2){s_storage_phase=0;storage_confirmation();}
+        else if(phase==6){s_storage_phase=0;storage_discard_confirmation();}
+        else if(phase==4||phase==5) {
+            s_storage_phase=0;
+            lv_obj_t *box=lv_msgbox_create(nullptr);
+            lv_obj_set_style_bg_color(box,lv_color_hex(CLR_CARD),0);
+            lv_obj_set_style_text_color(box,lv_color_hex(CLR_TEXT),0);
+            lv_obj_set_style_text_font(box,UI_FONT_16,0);
+            lv_msgbox_add_title(box,phase==4?"Speicher bereit":"Speichervorgang nicht freigegeben");
+            lv_msgbox_add_text(box,s_storage_result[0]?s_storage_result:
+                phase==4?"Cache neu bereitgestellt. Veraltete aktive Markierungen geprüft; NVS und Originalspiele bleiben erhalten.":
+                s_storage_proof.reason);
+            lv_msgbox_add_close_button(box);
+        }
+    },200,nullptr);
+}
 static void storage_worker(void *argument) {
     intptr_t operation=(intptr_t)argument;
+    if(operation==6) {
+        bool ok=store_sync();
+        TickType_t begin=xTaskGetTickCount();
+        while(ok&&store_sync_is_queued_or_running()&&xTaskGetTickCount()-begin<pdMS_TO_TICKS(120000))
+            vTaskDelay(pdMS_TO_TICKS(100));
+        if(!ok||store_sync_is_queued_or_running()) {
+            snprintf(s_storage_result,sizeof(s_storage_result),"Synchronisierung nicht gestartet oder noch aktiv. Keine Reparatur ausgeführt.");
+            s_storage_phase=5;vTaskDelete(nullptr);return;
+        }
+        // Recheck and ask again; never format automatically after a sync.
+        argument=nullptr;operation=0;
+    }
     if(operation>=2) {
         bool ok=operation==2?http_pending_games_reconcile(s_storage_pin)==ESP_OK:
             operation==3?storage_admin_set(s_storage_pin,s_storage_new_pin):
@@ -1441,22 +1499,51 @@ static void storage_worker(void *argument) {
         s_storage_phase=operation==4&&ok?6:ok?4:5;
     } else if(argument) {
         bool ok=s_storage_repair?offline_cache_repair():offline_cache_cleanup();
-        if(!ok)offline_cache_repair_status(&s_storage_proof);
+        if(!ok) {
+            offline_cache_repair_status(&s_storage_proof);
+            snprintf(s_storage_result,sizeof(s_storage_result),"%.179s",
+                offline_cache_path_error()[0]?offline_cache_path_error():
+                s_storage_proof.allowed?"FAT-Schreibprüfung fehlgeschlagen; Schritt und errno im Protokoll.":s_storage_proof.reason);
+        }
         s_storage_phase=ok?4:5;
     }
     else {
         offline_cache_repair_status(&s_storage_proof);s_storage_pending=s_storage_proof.pending;
         if(s_storage_games)cJSON_free(s_storage_games);
-        s_storage_games=http_pending_games_json();s_storage_phase=2;
+        s_storage_games=http_pending_games_json();
+        bool acquired=false;s_storage_has_active=false;s_storage_active[0]=0;
+        if(ui_manager_snapshot_lock(&acquired)) {
+            s_storage_has_active=g_store.activeGameOpen;
+            if(s_storage_has_active) {
+                snprintf(s_storage_active_id,sizeof(s_storage_active_id),"%.39s",g_store.spielId);
+                const char *modes[]={"Normal","Harakiri","Custom 1","Custom 2","Custom 3","Custom 4","Harakiri Custom"};
+                char date[40]="Startzeit unbekannt";time_t start=(time_t)g_store.liveStartedAt;struct tm local{};
+                if(start>0&&localtime_r(&start,&local))strftime(date,sizeof(date),"%d.%m.%Y %H:%M",&local);
+                snprintf(s_storage_active,sizeof(s_storage_active),"Aktives Spiel: %s\n%s\nLauf %d / Taube %d von %d\n",
+                    g_store.modus>=0&&g_store.modus<7?modes[g_store.modus]:"unbekannt",date,g_store.lauf,
+                    g_store.taubeIndex<g_store.sequenzLen?g_store.taubeIndex+1:g_store.sequenzLen,g_store.sequenzLen);
+                for(int i=0;i<g_store.spielerCount&&i<MAX_SPIELER;i++) {
+                    size_t used=strlen(s_storage_active);
+                    snprintf(s_storage_active+used,sizeof(s_storage_active)-used,"%.63s: %d Punkte\n",
+                        g_store.spieler[i].name,g_store.spieler[i].punkte);
+                }
+            }
+            if(acquired)ui_manager_unlock();
+        }
+        s_storage_phase=2;
     }
     vTaskDelete(nullptr);
 }
 static bool start_storage_worker(bool clean) {
+    storage_ensure_poll();
     s_storage_result[0]=0;
-    return xTaskCreate(storage_worker,"storage_clean",6144,
+    bool ok=xTaskCreate(storage_worker,"storage_clean",6144,
         clean?(void*)1:nullptr,2,nullptr)==pdPASS;
+    if(!ok)snprintf(s_storage_result,sizeof(s_storage_result),"Zu wenig Arbeitsspeicher für die Speicherprüfung. Keine Daten geändert.");
+    return ok;
 }
 static bool start_recovery_worker(int operation) {
+    storage_ensure_poll();
     s_storage_phase=3;s_storage_result[0]=0;
     bool ok=xTaskCreate(storage_worker,"storage_resolve",8192,(void*)(intptr_t)operation,2,nullptr)==pdPASS;
     if(!ok){memset(s_storage_pin,0,sizeof(s_storage_pin));s_storage_phase=5;}
@@ -1512,7 +1599,7 @@ static void storage_capture_pin() {
 }
 static void storage_discard_confirmation() {
     s_storage_confirm=lv_msgbox_create(nullptr);
-    lv_obj_add_event_cb(s_storage_confirm,[](lv_event_t*){s_storage_confirm=nullptr;},LV_EVENT_DELETE,nullptr);
+    lv_obj_add_event_cb(s_storage_confirm,[](lv_event_t *e){if(s_storage_confirm==lv_event_get_target_obj(e))s_storage_confirm=nullptr;},LV_EVENT_DELETE,nullptr);
     lv_obj_set_style_bg_color(s_storage_confirm,lv_color_hex(CLR_CARD),0);
     lv_obj_set_style_text_color(s_storage_confirm,lv_color_hex(CLR_TEXT),0);
     lv_msgbox_add_title(s_storage_confirm,"Zweite Bestätigung: Datenverlust");
@@ -1541,19 +1628,45 @@ static void storage_confirmation() {
     lv_obj_set_style_bg_opa(s_storage_confirm,LV_OPA_COVER,0);
     lv_obj_set_style_text_color(s_storage_confirm,lv_color_hex(CLR_TEXT),0);
     lv_obj_set_style_text_font(s_storage_confirm,UI_FONT_16,0);
-    lv_obj_add_event_cb(s_storage_confirm,[](lv_event_t*){s_storage_confirm=nullptr;},LV_EVENT_DELETE,nullptr);
-    lv_obj_t *title=lv_msgbox_add_title(s_storage_confirm,s_storage_repair?"Speicher reparieren":"Speicher bereinigen");
+    lv_obj_add_event_cb(s_storage_confirm,[](lv_event_t *e){if(s_storage_confirm==lv_event_get_target_obj(e))s_storage_confirm=nullptr;},LV_EVENT_DELETE,nullptr);
+    lv_obj_t *title=lv_msgbox_add_title(s_storage_confirm,s_storage_open_mode?"Offene Spiele":s_storage_repair?"Speicher reparieren":"Speicher bereinigen");
     lv_obj_set_style_text_color(title,lv_color_hex(CLR_PRIMARY),0);
     lv_obj_set_style_text_font(title,UI_FONT_20,0);
     char message[1024];
     snprintf(message,sizeof(message),"Nicht übertragene Spiele: %d.\n%.511s\n%.159s\n%.300s",pending,
         s_storage_proof.checks,s_storage_proof.reason,
+        s_storage_open_mode?"Offene Spiele prüfen. Ohne Portalbestätigung wird kein fertiges Spiel gelöscht.":
         !s_storage_proof.allowed?"Reparatur gesperrt. Journal und NVS bleiben erhalten.":
         s_storage_repair?"Bei verwaisten Clustern FAT neu formatieren? Nur ohne offene Spiele, aktives Spiel oder Queue-Ereignisse. Bereits übertragene lokale Archive und Cache werden neu vom Portal geladen. Einstellungen und NVS bleiben erhalten.":
         "Nur wiederherstellbare Portal-Cache-Dateien löschen und FAT neu einhängen? "
         "Keine Formatierung. Spielarchiv, Einstellungen und NVS bleiben erhalten.");
     lv_obj_t *body=lv_msgbox_add_text(s_storage_confirm,message);
     lv_obj_set_style_text_color(body,lv_color_hex(CLR_TEXT),0);
+    lv_obj_set_width(s_storage_confirm,LV_PCT(92));
+    lv_obj_set_style_max_height(s_storage_confirm,lv_obj_get_height(lv_layer_top())-40,0);
+    lv_obj_set_style_text_font(lv_msgbox_get_content(s_storage_confirm),UI_FONT_16,0);
+    if(offline_cache_path_error()[0])lv_msgbox_add_text(s_storage_confirm,offline_cache_path_error());
+    if(s_storage_has_active) {
+        lv_msgbox_add_text(s_storage_confirm,s_storage_active);
+        lv_obj_t *resume=lv_msgbox_add_footer_button(s_storage_confirm,"Fortsetzen");
+        lv_obj_add_event_cb(resume,[](lv_event_t*) {
+            if(g_store.activeGameOpen&&!strcmp(g_store.spielId,s_storage_active_id)) {
+                g_store.activeGameResumed=true;g_store.screen=SCREEN_SPIEL;
+            }
+            lv_msgbox_close(s_storage_confirm);
+        },LV_EVENT_CLICKED,nullptr);
+        lv_obj_t *finish=lv_msgbox_add_footer_button(s_storage_confirm,"Beenden und speichern");
+        lv_obj_add_event_cb(finish,[](lv_event_t*) {
+            lv_msgbox_close(s_storage_confirm);
+            if(g_store.activeGameOpen&&!strcmp(g_store.spielId,s_storage_active_id)) {
+                g_store.screen=SCREEN_SPIEL;if(!store_finish_open_game())ui_open_games();
+            }
+        },LV_EVENT_CLICKED,nullptr);
+        lv_obj_t *discard=lv_msgbox_add_footer_button(s_storage_confirm,"Verwerfen");
+        lv_obj_add_event_cb(discard,[](lv_event_t*) {
+            lv_msgbox_close(s_storage_confirm);storage_active_discard(1);
+        },LV_EVENT_CLICKED,nullptr);
+    }
     lv_obj_t *cancel=lv_msgbox_add_footer_button(s_storage_confirm,"Abbrechen");
     lv_obj_add_style(cancel,&g_style_btn_secondary,0);
     lv_obj_add_event_cb(cancel,[](lv_event_t*){lv_msgbox_close(s_storage_confirm);},LV_EVENT_CLICKED,nullptr);
@@ -1579,6 +1692,14 @@ static void storage_confirmation() {
                 cJSON_IsString(date)?date->valuestring:"Datum unbekannt",cJSON_IsString(state)?state->valuestring:"Status unbekannt",
                 cJSON_IsString(portal)?portal->valuestring:"unbekannt");
             lv_obj_set_width(details,LV_PCT(95));
+            cJSON *score,*scores=cJSON_GetObjectItem(game,"scores");
+            cJSON_ArrayForEach(score,scores) {
+                cJSON *name=cJSON_GetObjectItem(score,"name"),*points=cJSON_GetObjectItem(score,"points");
+                if(!cJSON_IsString(name)||!cJSON_IsNumber(points))continue;
+                lv_obj_t *label=lv_label_create(row);
+                lv_label_set_text_fmt(label,"%s: %d Punkte",name->valuestring,points->valueint);
+                lv_obj_set_width(label,LV_PCT(95));
+            }
             lv_obj_t *save=lv_button_create(row);lv_label_set_text(lv_label_create(save),"Als Datei sichern");
             lv_obj_add_event_cb(save,[](lv_event_t*) {
                 lv_msgbox_add_text(s_storage_confirm,"Im Browser die oben angegebene /pending-Adresse öffnen, Admin-PIN eingeben und beim passenden Spiel „Als Datei sichern“ wählen. Danach erst Verwerfen bestätigen.");
@@ -1597,7 +1718,18 @@ static void storage_confirmation() {
         },LV_EVENT_CLICKED,nullptr);
     }
     cJSON_Delete(games);
-    if(s_storage_proof.allowed) {
+    lv_obj_t *send=lv_msgbox_add_footer_button(s_storage_confirm,s_storage_open_mode?"Jetzt senden":"Jetzt synchronisieren und dann reparieren");
+    lv_obj_add_event_cb(send,[](lv_event_t*) {
+        lv_msgbox_close(s_storage_confirm);start_recovery_worker(6);
+    },LV_EVENT_CLICKED,nullptr);
+    if(s_storage_open_mode&&s_storage_offer_start&&!s_storage_has_active) {
+        lv_obj_t *start=lv_msgbox_add_footer_button(s_storage_confirm,"Neues Spiel");
+        lv_obj_add_event_cb(start,[](lv_event_t*) {
+            lv_msgbox_close(s_storage_confirm);
+            if(!store_start_spiel())ui_open_games(true);
+        },LV_EVENT_CLICKED,nullptr);
+    }
+    if(!s_storage_open_mode&&s_storage_proof.allowed) {
         lv_obj_t *confirm=lv_msgbox_add_footer_button(s_storage_confirm,s_storage_repair?"Jetzt reparieren":"Jetzt bereinigen");
         lv_obj_add_style(confirm,&g_style_btn_primary,0);
         lv_obj_add_event_cb(confirm,[](lv_event_t*) {
@@ -1606,9 +1738,18 @@ static void storage_confirmation() {
             if(!start_storage_worker(true)) s_storage_phase=5;
         },LV_EVENT_CLICKED,nullptr);
     }
+    lv_obj_t *footer=lv_msgbox_get_footer(s_storage_confirm);
+    if(footer)lv_obj_set_flex_flow(footer,LV_FLEX_FLOW_ROW_WRAP);
+}
+void ui_open_games(bool offer_start) {
+    if(s_storage_phase.load()!=0||s_storage_confirm)return;
+    s_storage_open_mode=true;s_storage_offer_start=offer_start;s_storage_phase=1;
+    if(!start_storage_worker(false))s_storage_phase=5;
 }
 static lv_obj_t *build_system_tab(lv_obj_t *parent)
 {
+    lv_obj_t *open=lv_button_create(parent);lv_label_set_text(lv_label_create(open),"OFFENE SPIELE");
+    lv_obj_add_event_cb(open,[](lv_event_t*){ui_open_games();},LV_EVENT_CLICKED,nullptr);
     lv_obj_t *pin_form=lv_obj_create(parent);lv_obj_set_width(pin_form,LV_PCT(95));lv_obj_set_height(pin_form,LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(pin_form,LV_FLEX_FLOW_COLUMN);
     lv_label_set_text(lv_label_create(pin_form),"Speicher-Admin-PIN (4–16 Ziffern, getrennt von Catering)");
@@ -1640,6 +1781,7 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_obj_add_event_cb(clean,[](lv_event_t*) {
         if(s_storage_phase.load()!=0 || s_storage_confirm) return;
         s_storage_repair=false;
+        s_storage_open_mode=false;
         s_storage_phase=1;
         if(!start_storage_worker(false)) s_storage_phase=5;
     },LV_EVENT_CLICKED,nullptr);
@@ -1649,22 +1791,19 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     lv_label_set_text(repair_label,"Speicher reparieren");
     lv_obj_add_event_cb(repair,[](lv_event_t*) {
         if(s_storage_phase.load()!=0||s_storage_confirm)return;
-        s_storage_repair=true;s_storage_phase=1;
+        s_storage_open_mode=false;s_storage_repair=true;s_storage_phase=1;
         if(!start_storage_worker(false))s_storage_phase=5;
     },LV_EVENT_CLICKED,nullptr);
     lv_timer_t *storage_timer=lv_timer_create([](lv_timer_t *timer) {
         auto *label=(lv_obj_t*)lv_timer_get_user_data(timer);
         int phase=s_storage_phase.load();
         if(phase==1) lv_label_set_text(label,"Offene Spiele werden geprüft …");
-        if(phase==2) {s_storage_phase=0;storage_confirmation();}
         if(phase==3) lv_label_set_text(label,"Speichervorgang läuft …");
-        if(phase==6){s_storage_phase=0;storage_discard_confirmation();}
         if(phase==4 || phase==5) {
             if(s_storage_result[0])lv_label_set_text(label,s_storage_result);
             else if(phase==4)lv_label_set_text(label,"Speicher bereit. Einstellungen und NVS erhalten; Portal-Cache wird neu geladen.");
             else lv_label_set_text_fmt(label,"Speicherreparatur gesperrt oder fehlgeschlagen: %s",
                 s_storage_proof.allowed?"FAT/NVS-Fehler; Details im Terminal-Protokoll.":s_storage_proof.reason);
-            s_storage_phase=0;
         }
     },200,storage_status);
     lv_obj_add_event_cb(storage_status,[](lv_event_t *event) {

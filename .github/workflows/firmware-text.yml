@@ -18,3 +18,5 @@ jobs:
           python3 artifacts/firmware/tests/test_day_players.py
           python3 artifacts/firmware/tests/test_day_player_reconcile.py
           python3 artifacts/firmware/tests/test_network_policy.py
+          python3 artifacts/firmware/tests/test_fat_paths.py
+          python3 artifacts/firmware/tests/test_pending_recovery.py

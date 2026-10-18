@@ -5,6 +5,7 @@
 #include <errno.h>
 #include "../store/storage_write.h"
 #include "../store/storage_repair.h"
+#include "../store/fat_name.h"
 #include <dirent.h>
 #include <strings.h>
 inline bool portal_queue_read_file(const char *path,PortalQueueRecord *out) {
@@ -22,7 +23,8 @@ inline bool portal_queue_inspect_repair_files(const char *root,QueueRepairInspec
   errno=0;auto *entry=readdir(dir);
   if(!entry){if(errno){++out->unreadable;out->error=errno;}break;}
   if(strcasecmp(entry->d_name,"queue0.bin")&&strcasecmp(entry->d_name,"queue1.bin"))continue;
-  ++out->present;char name[384];snprintf(name,sizeof(name),"%s/%.255s",root,entry->d_name);
+  ++out->present;char name[384];
+  if(!fat_name(name,sizeof(name),entry->d_name,nullptr,root)){++out->unreadable;out->error=EINVAL;continue;}
   PortalQueueRecord value={};
   if(!portal_queue_read_file(name,&value)){++out->unreadable;out->error=errno?errno:EBADMSG;continue;}
   if(!found||value.generation>generation){found=true;generation=value.generation;latest=value;}

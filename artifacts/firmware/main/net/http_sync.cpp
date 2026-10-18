@@ -1295,7 +1295,7 @@ static uint32_t record_hash(const FinishedGame *game) {
 }
 static bool pending_record(const char *id,FinishedGame *game) {
     if(game_journal_read(id,game))return true;
-    if(!store_sync_commit_begin())return false;
+    bool acquired=false;if(!ui_manager_snapshot_lock(&acquired))return false;
     bool found=false;
     for(int i=0;i<g_store.pendingGamesCount;i++)if(!strcmp(id,g_store.pendingGames[i].externalId)) {
         *game={};game->base=g_store.pendingGames[i];
@@ -1315,27 +1315,29 @@ static bool pending_record(const char *id,FinishedGame *game) {
         }
         snprintf(game->finishedAt,sizeof(game->finishedAt),"%.31s",game->base.finishedAt);
     }
-    store_sync_commit_end();return found;
+    if(acquired)ui_manager_unlock();
+    return found;
 }
 static int pending_ids(char (*ids)[40]) {
     int count=game_journal_pending_ids(ids,STORAGE_JOURNAL_SLOTS);
     if(count<0)count=0; // RAM is still exportable when the FAT cannot be read.
-    if(!store_sync_commit_begin())return -1;
+    bool acquired=false;if(!ui_manager_snapshot_lock(&acquired))return -1;
     for(int i=0;i<g_store.pendingGamesCount&&count<(int)STORAGE_JOURNAL_SLOTS;i++) {
         bool found=false;
         for(int j=0;j<count;j++)if(!strcmp(ids[j],g_store.pendingGames[i].externalId))found=true;
         if(!found)snprintf(ids[count++],40,"%.39s",g_store.pendingGames[i].externalId);
     }
-    store_sync_commit_end();return count;
+    if(acquired)ui_manager_unlock();
+    return count;
 }
 static bool remove_ram_pending(const char *id) {
-    TickType_t started;
-    if(!sync_commit_begin("pending-game-ack",&started))return false;
+    bool acquired=false;if(!ui_manager_snapshot_lock(&acquired))return false;
     for(int i=0;i<g_store.pendingGamesCount;i++)if(!strcmp(id,g_store.pendingGames[i].externalId)) {
         memmove(g_store.pendingGames+i,g_store.pendingGames+i+1,(g_store.pendingGamesCount-i-1)*sizeof(PendingGame));
         --g_store.pendingGamesCount;break;
     }
-    sync_commit_end("pending-game-ack",started);game_store_save();return true;
+    if(acquired)ui_manager_unlock();
+    game_store_save();return true;
 }
 }
 char *http_pending_games_json() {
@@ -1345,7 +1347,8 @@ char *http_pending_games_json() {
     int count=pending_ids(ids);cJSON *root=cJSON_CreateObject(),*items=cJSON_AddArrayToObject(root,"games");
     for(int i=0;i<count;i++) {
         bool full=pending_record(ids[i],game);cJSON *item=cJSON_CreateObject();
-        cJSON_AddStringToObject(item,"externalId",ids[i]);cJSON_AddStringToObject(item,"date",full?game->base.datum:"unbekannt");
+        cJSON_AddStringToObject(item,"externalId",ids[i]);cJSON_AddStringToObject(item,"date",
+            full?(game->finishedAt[0]?game->finishedAt:game->base.finishedAt[0]?game->base.finishedAt:game->base.datum):"unbekannt");
         int journal=game_journal_contains(ids[i]);cJSON_AddStringToObject(item,"state",journal==1?"im Journal":journal<0?"Journal unlesbar":"nur RAM/NVS-Fallback");
         int portal_state=0;portENTER_CRITICAL(&s_recovery_lock);
         for(const auto &entry:s_exports)if(!strcmp(entry.id,ids[i]))portal_state=entry.portalState;
@@ -1354,6 +1357,16 @@ char *http_pending_games_json() {
             "nicht im Portal (letzter Abgleich)":"unbekannt – Mit Portal abgleichen");
         cJSON *names=cJSON_AddArrayToObject(item,"players");
         if(full)for(int j=0;j<game->spieler_count&&j<MAX_SPIELER;j++)cJSON_AddItemToArray(names,cJSON_CreateString(game->spielerNamen[j]));
+        cJSON *scores=cJSON_AddArrayToObject(item,"scores");
+        if(full)for(int j=0;j<game->spieler_count&&j<MAX_SPIELER;j++) {
+            int points=0;
+            for(int k=0;k<game->base.ergebnisse_count;k++)if(game->base.ergebnisse[k].spielerId==game->spielerIds[j]&&!game->base.ergebnisse[k].wiederholt)
+                points+=game->base.ergebnisse[k].punkte;
+            if(!game->base.ergebnisse_count)for(int k=0;k<game->base.teilnahmen_count;k++)
+                if(game->base.teilnahmen[k].spielerId==game->spielerIds[j])points+=game->base.teilnahmen[k].punkte;
+            cJSON *score=cJSON_CreateObject();cJSON_AddStringToObject(score,"name",game->spielerNamen[j]);
+            cJSON_AddNumberToObject(score,"points",points);cJSON_AddItemToArray(scores,score);
+        }
         cJSON_AddItemToArray(items,item);
     }
     char *json=count>=0?cJSON_PrintUnformatted(root):nullptr;cJSON_Delete(root);

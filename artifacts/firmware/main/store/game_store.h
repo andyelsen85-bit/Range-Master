@@ -399,6 +399,7 @@ typedef struct {
     uint8_t harakiriOrder[MAX_SPIELER][HARAKIRI_MAX_CLAYS];
     bool    harakiriOrdersReady;
     bool    activeGameStorageError;
+    bool    activeGameOpen; // survives navigation; false only after finish/cancel
     bool    activeGameResumed;
     Ergebnis ergebnisse[MAX_ERGEBNISSE];
     int      ergebnisseCount;
@@ -538,6 +539,9 @@ void store_navigate(Screen s);
 // ── Game flow ────────────────────────────────────────────────
 bool store_start_spiel(void);   // deducts credits, builds sequenz
 bool store_cancel_spiel(void);  // refunds this game's credits; no result is saved
+bool store_finish_open_game(void);
+bool store_game_was_ended(const char *id);
+void store_record_game_end(const char *id);
 void store_eintragen(int punkte);
 void store_retry_active_game_save(void);
 void store_wiederholen(void);

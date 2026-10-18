@@ -237,6 +237,8 @@ class DurableGames(unittest.TestCase):
             }
             for name, content in headers.items():
                 (temp / "sdk" / name).write_text(textwrap.dedent(content))
+            for header in ("fat_name.h","fat_patterns.h"):
+                (temp/header).write_text((ROOT/header).read_text().replace('"/fatfs','"'+str(temp/"volume")))
             for source in ("game_journal.cpp", "terminal_logs.cpp", "offline_cache.cpp", "active_game.cpp"):
                 content = (ROOT / source).read_text().replace('"/fatfs', '"' + str(temp / "volume"))
                 if source=="game_journal.cpp":
@@ -262,8 +264,14 @@ class DurableGames(unittest.TestCase):
                 #include <cstring>
                 #include <filesystem>
                 #include <sys/time.h>
+                #include <set>
+                #include <string>
                 GameStore g_store;
                 bool store_credit_game_cancelled(const char*){return false;}
+                static std::set<std::string> ended;
+                bool store_game_was_ended(const char *id){return id[0]&&ended.count(id);}
+                void store_record_game_end(const char *id){if(id[0])ended.insert(id);}
+                bool day_players_repair_safe(){return true;}
                 void host_latch_active();
                 bool store_sync_commit_begin(){return true;}
                 void store_sync_commit_end(){}
@@ -289,9 +297,9 @@ class DurableGames(unittest.TestCase):
                     snprintf(response,size,"accepted");return ESP_OK;
                 }
                 static void full_cache() {
-                    std::filesystem::create_directory(VOLUME "/tmcache");
-                    FILE*f=fopen(VOLUME "/tmcache/history.tmp","wb");assert(f);fclose(f);
-                    std::filesystem::resize_file(VOLUME "/tmcache/history.tmp",9842688);
+                    std::filesystem::create_directory(VOLUME "/TMCACHE");
+                    FILE*f=fopen(VOLUME "/TMCACHE/HISTORY.TMP","wb");assert(f);fclose(f);
+                    std::filesystem::resize_file(VOLUME "/TMCACHE/HISTORY.TMP",9842688);
                 }
                 int main(int argc,char**argv) {
                     assert(argc==2);terminal_logs_init();g_store.offlineCacheHealthy=true;
@@ -339,12 +347,12 @@ class DurableGames(unittest.TestCase):
                         bool clean=!strcmp(argv[1],"full-clean");
                         if(clean) {
                             assert(mounted && game_journal_init() && game_journal_ready());
-                            assert(!std::filesystem::exists(VOLUME "/tmcache/history.tmp"));
+                            assert(!std::filesystem::exists(VOLUME "/TMCACHE/HISTORY.TMP"));
                             assert(std::filesystem::exists(VOLUME "/J000.REC"));
                         } else {
                             assert(!mounted && offline_cache_storage_available());
                             assert(!offline_cache_cleanup());
-                            assert(std::filesystem::file_size(VOLUME "/tmcache/history.tmp")==9842688);
+                            assert(std::filesystem::file_size(VOLUME "/TMCACHE/HISTORY.TMP")==9842688);
                             if(!strcmp(argv[1],"full-pending")) {
                                 assert(game_journal_init() && g_store.pendingGamesCount==1);
                                 assert(!game_journal_ready() && !offline_cache_cleanup());
@@ -352,7 +360,7 @@ class DurableGames(unittest.TestCase):
                                 assert(!offline_cache_cleanup());
                                 assert(game_journal_ack("protected-game")); // exact portal ACK, ENOSPC drain
                                 assert(offline_cache_cleanup() && game_journal_ready());
-                                assert(!std::filesystem::exists(VOLUME "/tmcache/history.tmp"));
+                                assert(!std::filesystem::exists(VOLUME "/TMCACHE/HISTORY.TMP"));
                             } else {
                                 assert(!game_journal_init());
                                 assert(std::filesystem::file_size(VOLUME "/g_bad.part")==1);

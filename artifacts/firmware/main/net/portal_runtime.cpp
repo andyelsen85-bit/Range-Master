@@ -1,4 +1,5 @@
 #include "portal_runtime.h"
+#include "../store/fat_name.h"
 #include "portal_storage.h"
 #include "portal_queue_json.h"
 #include "http_sync.h"
@@ -48,7 +49,7 @@ static void status(const char *text) {
  if(!stateLock)return;
  xSemaphoreTake(stateLock,portMAX_DELAY);snprintf(statusText,sizeof(statusText),"%.127s",text);xSemaphoreGive(stateLock);
 }
-static void filePath(int s,char path[48]){snprintf(path,48,"/fatfs/queue%d.bin",s);}
+static void filePath(int s,char path[48]){char base[9];snprintf(base,sizeof(base),"QUEUE%u",(unsigned)(s&1));(void)fat_name(path,48,base,"BIN");}
 // Caller owns stateLock. Only the older slot is ever rewritten.
 static bool save(PortalQueueRecord next) {
  if(!durable)return false;

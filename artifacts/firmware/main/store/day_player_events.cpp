@@ -1,4 +1,5 @@
 #include "day_player_events.h"
+#include "fat_name.h"
 #include "game_store.h"
 #include "game_journal.h"
 #include "storage_write.h"
@@ -33,7 +34,7 @@ uint32_t checksum(const Record &r) {
     for(size_t i=0;i<sizeof(r);i++)if(i<offsetof(Record,checksum)||i>=offsetof(Record,checksum)+4)h=(h^bytes[i])*16777619u;
     return h;
 }
-void path(int n,char *out,size_t cap){snprintf(out,cap,DAY_PLAYERS_ROOT "/dayp%d.bin",n);}
+void path(int n,char *out,size_t cap){char base[9];snprintf(base,sizeof(base),"DAYP%u",(unsigned)(n&1));(void)fat_name(out,cap,base,"BIN",DAY_PLAYERS_ROOT);}
 bool valid(const Record &r) {
     if(r.magic!=0x44504c59||r.version!=1||r.count<0||r.count>DAY_PLAYER_EVENTS_MAX||r.checksum!=checksum(r))return false;
     for(int i=0;i<r.count;i++) {

@@ -1,4 +1,5 @@
 #include "game_journal.h"
+#include "fat_name.h"
 #include "terminal_logs.h"
 #include "offline_cache.h"
 #include "storage_budget.h"
@@ -51,9 +52,7 @@ static int journal_kind(const char *name) {
 }
 bool game_journal_is_file(const char *name){return journal_kind(name)!=0;}
 static void sibling_path(const char *file,const char *extension,char *out,size_t size) {
-    snprintf(out,size,"%s",file);
-    char *dot=strrchr(out,'.');
-    if(dot)snprintf(dot,size-(size_t)(dot-out),".%s",extension);
+    (void)fat_name(out,size,file,extension);
 }
 static bool portal_known(const char *id) {
     for(int i=0;i<s_ack_count;i++)if(!strcmp(s_portal_acks[i],id))return true;
@@ -118,7 +117,7 @@ static bool filename(const char *id,char *out,size_t size,bool create=true) {
         while((entry=readdir(dir))) {
             int kind=journal_kind(entry->d_name);
             if(!kind||kind==4)continue;
-            char path[48];snprintf(path,sizeof(path),"/fatfs/%.8s",entry->d_name);
+            char path[48];if(!fat_name(path,sizeof(path),entry->d_name))continue;
             if(read_record(path,record)) {
                 int slot=(entry->d_name[1]-'0')*100+(entry->d_name[2]-'0')*10+entry->d_name[3]-'0';
                 snprintf(s_slot_ids[slot],40,"%.39s",record->game.base.externalId);
@@ -127,19 +126,19 @@ static bool filename(const char *id,char *out,size_t size,bool create=true) {
         closedir(dir);heap_caps_free(record);s_index_built=true;
     }
     for(unsigned i=0;i<STORAGE_JOURNAL_SLOTS;i++)if(!strcmp(s_slot_ids[i],id))
-        return snprintf(out,size,"/fatfs/J%03u.REC",i)>0;
+        {char base[9];snprintf(base,sizeof(base),"J%03u",i);return fat_name(out,size,base,"REC");}
     if(!create)return false;
     for(int pass=0;pass<2;pass++) {
         for(unsigned i=0;i<STORAGE_JOURNAL_SLOTS;i++) {
             bool occupied=false;char path[48];
             for(const char *ext:{"REC","PRT","BAK"}) {
-                snprintf(path,sizeof(path),"/fatfs/J%03u.%s",i,ext);
+                char base[9];snprintf(base,sizeof(base),"J%03u",i);(void)fat_name(path,sizeof(path),base,ext);
                 struct stat st{};
                 if(stat(path,&st)==0 || errno!=ENOENT){occupied=true;break;}
             }
             if(occupied)continue;
             snprintf(s_slot_ids[i],40,"%.39s",id);
-            return snprintf(out,size,"/fatfs/J%03u.REC",i)>0;
+            char base[9];snprintf(base,sizeof(base),"J%03u",i);return fat_name(out,size,base,"REC");
         }
         if(!trim_archive_locked(1))break;
     }
@@ -167,7 +166,7 @@ bool game_journal_inspect_locked(GameJournalInspection *out) {
         if(!journal_kind(entry->d_name)) continue;
         if(!record)record=(Record*)heap_caps_malloc(sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
         if(!record){++out->uncertain;continue;}
-        char file[320];int n=snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
+        char file[320];int n=fat_name(file,sizeof(file),entry->d_name)?(int)strlen(file):-1;
         if(n<0 || (size_t)n>=sizeof(file) || !read_record(file,record)) {++out->uncertain;continue;}
         out->bytes+=sizeof(Record);
         if(record->accepted||portal_known(record->game.base.externalId)) ++out->accepted;else ++out->pending;
@@ -289,7 +288,7 @@ static bool trim_archive_locked(unsigned reserve) {
         errno=0;struct dirent *entry=readdir(dir);
         if(!entry) {if(errno){journal_failure("trim/readdir",nullptr,errno);ok=false;}break;}
         if(journal_kind(entry->d_name)!=1) continue;
-        char path[96];int n=snprintf(path,sizeof(path),"/fatfs/%s",entry->d_name);
+        char path[96];int n=fat_name(path,sizeof(path),entry->d_name)?(int)strlen(path):-1;
         ++total;
         if(n<0 || (size_t)n>=sizeof(path) || !read_record(path,record)) {
             // Preserve/count uncertain evidence, but do not prevent a different
@@ -536,7 +535,7 @@ int game_journal_pending_ids(char (*ids)[40],int capacity) {
     if(dir) {
         struct dirent *entry;while((entry=readdir(dir))) {
             if(!journal_kind(entry->d_name))continue;
-            char file[320];snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
+            char file[320];if(!fat_name(file,sizeof(file),entry->d_name))continue;
             if(read_record(file,r))add();
         }
         closedir(dir);
@@ -588,14 +587,15 @@ static int scan(unsigned days,bool recover,int old_id=0,int new_id=0) {
     while((entry=readdir(dir))) {
         int kind=journal_kind(entry->d_name);
         if(!kind) continue;
-        char file[320];snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
+        char file[320];if(!fat_name(file,sizeof(file),entry->d_name)){corrupt=true;continue;}
         if(kind==4) {
             // Old LFN volumes are migrated without ever creating an LFN.
             if(access(file,F_OK)!=0&&errno==ENOENT)continue;
             char legacy[320];snprintf(legacy,sizeof(legacy),"%s",file);
             char *dot=strchr(legacy+7,'.');if(dot)*dot=0;
             char part[326],backup[326];
-            snprintf(part,sizeof(part),"%s.part",legacy);snprintf(backup,sizeof(backup),"%s.bak",legacy);
+            if(!fat_name(part,sizeof(part),legacy,"PRT")||
+               !fat_name(backup,sizeof(backup),legacy,"BAK")){corrupt=true;continue;}
             if(!read_record(part,record)&&!read_record(legacy,record)&&!read_record(backup,record)) {corrupt=true;continue;}
             char target[96];
             if(!filename(record->game.base.externalId,target,sizeof(target))||!write_record(target,record)) {corrupt=true;continue;}
@@ -851,7 +851,7 @@ int game_journal_manifest(const char *day,char (*ids)[40],int capacity) {
     if(dir) {
         while((entry=readdir(dir)) && count<capacity) {
             if(journal_kind(entry->d_name)!=1) continue;
-            char file[320];snprintf(file,sizeof(file),"/fatfs/%s",entry->d_name);
+            char file[320];if(!fat_name(file,sizeof(file),entry->d_name))continue;
             if(read_record(file,record) && !strcmp(record->game.base.datum,day))
                 snprintf(ids[count++],40,"%.39s",record->game.base.externalId);
         }

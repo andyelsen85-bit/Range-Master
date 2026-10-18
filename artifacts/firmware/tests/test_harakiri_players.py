@@ -27,6 +27,9 @@ STUBS=r'''
 GameStore g_store{};
 static bool credit_cancelled=false;
 bool store_credit_game_cancelled(const char*){return credit_cancelled;}
+static std::set<std::string> ended_games;
+bool store_game_was_ended(const char *id){return ended_games.count(id)>0;}
+void store_record_game_end(const char *id){if(id[0])ended_games.insert(id);}
 static bool persist=false;
 static bool remapped=false;
 static int journal_status=0;
@@ -238,14 +241,14 @@ int main() {
     auto newest=[]() {
         uint32_t gen[2]={};
         for(int slot=0;slot<2;slot++) {
-            char name[160];snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/active%d.bin",slot);
+            char name[160];snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/ACTIVE%d.BIN",slot);
             FILE *f=fopen(name,"rb");assert(f);uint32_t header[5];
             assert(fread(header,sizeof(header),1,f)==1);fclose(f);gen[slot]=header[4];
         }
         return gen[0]>gen[1]?0:1;
     };
     char name[160];int older=1-newest();
-    snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/active%d.bin",older);
+    snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/ACTIVE%d.BIN",older);
     assert(unlink(name)==0&&mkdir(name,0700)==0);
     assert(!active_game_checkpoint());assert(rmdir(name)==0);
     memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
@@ -253,7 +256,7 @@ int main() {
     assert(active_game_checkpoint());
     // Simulate an interrupted flash write; use the other validated checkpoint,
     // warn, and retain the same player permutations rather than regenerating.
-    snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/active%d.bin",newest());
+    snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/ACTIVE%d.BIN",newest());
     FILE *partial=fopen(name,"wb");assert(partial);fputs("partial",partial);fclose(partial);
     memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
     assert(!memcmp(saved,g_store.harakiriOrder,sizeof(saved))&&g_store.currentFireSent);
@@ -290,12 +293,13 @@ int main() {
     journal_status=0;assert(active_game_restore());assert(!g_store.harakiriOrdersReady);
     setup(MODUS_HARAKIRI,255,2);g_store.harakiriOrdersReady=true;
     assert(active_game_checkpoint());
-    g_store.harakiriOrdersReady=false;
-    older=1-newest();snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/active%d.bin",older);
+    active_game_mark_ended();g_store.harakiriOrdersReady=false;g_store.screen=SCREEN_DASHBOARD;
+    older=1-newest();snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/ACTIVE%d.BIN",older);
     assert(unlink(name)==0&&mkdir(name,0700)==0);
-    assert(!active_game_checkpoint()&&g_store.activeGameStorageError);
+    assert(!active_game_checkpoint()&&!g_store.activeGameStorageError&&!active_game_is_open());
     assert(rmdir(name)==0);active_game_retry_finished_checkpoint();
     assert(!g_store.activeGameStorageError);
+    ended_games.clear(); // subsequent independent trials reuse this fixture's UUID
     // Normal game: reboot between repeat stages preserves the explicit retry.
     for(int mode:{MODUS_NORMAL,MODUS_HARAKIRI}) {
     remapped=false;setup(mode,127,3);persist=true;int initial_player=g_store.spielerIndex;
@@ -309,16 +313,35 @@ int main() {
     g_store.currentFireSent=true;assert(active_game_checkpoint());store_wiederholen();store_wiederholen();
     assert(g_store.repeatCurrentLaunch&&!g_store.currentFireSent&&g_store.ergebnisseCount==0&&g_store.spielerIndex==initial_player);
     }
+    // Navigation must not silently end a Normal or Harakiri game.
+    assert(g_store.activeGameOpen);g_store.screen=SCREEN_EINSTELLUNGEN;
+    assert(active_game_checkpoint());
+    memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
+    assert(g_store.activeGameOpen&&g_store.screen==SCREEN_SPIEL);
+    // Failed ended tombstones clear only the RAM latch; durable end identity
+    // still prevents resurrecting the old active slot after a power cycle.
+    for(int slot=0;slot<2;slot++){
+        char temp[160];snprintf(temp,sizeof(temp),ACTIVE_GAME_ROOT "/ACTIVE%d.TMP",slot);
+        assert(mkdir(temp,0700)==0);
+    }
+    active_game_mark_ended();g_store.harakiriOrdersReady=false;g_store.screen=SCREEN_DASHBOARD;
+    assert(!active_game_checkpoint()&&!g_store.activeGameStorageError&&!active_game_is_open());
+    for(int slot=0;slot<2;slot++){
+        char temp[160];snprintf(temp,sizeof(temp),ACTIVE_GAME_ROOT "/ACTIVE%d.TMP",slot);
+        assert(rmdir(temp)==0);
+    }
+    memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
+    assert(!active_game_is_open()&&!g_store.activeGameStorageError);
     // Both unrecognizable files fail closed; never replace with shared order.
     for(int slot=0;slot<2;slot++){
-        char name[160];snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/active%d.bin",slot);
+        char name[160];snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/ACTIVE%d.BIN",slot);
         FILE *f=fopen(name,"wb");assert(f);fputs("corrupt",f);fclose(f);
     }
     memset(&g_store,0,sizeof(g_store));assert(!active_game_restore());
     assert(g_store.activeGameStorageError&&!active_game_checkpoint());
     assert(active_game_record_size()<=12288);
     printf("PASS %d games: all subsets, 2–6 players, independent whole-unit orders, flow/undo/skip, canonical scorecards\n",games);
-    printf("PASS hardware-RNG shuffle distribution; active RAM map=%zu bytes, FAT record=%zu bytes x 2, no NVS growth\n",
+    printf("PASS hardware-RNG shuffle distribution; active RAM map=%zu bytes, FAT record=%zu bytes x 2, unchanged FinishedGame ABI\n",
            sizeof(g_store.harakiriOrder),active_game_record_size());
     puts("PASS mid-game restart, failed/interrupted writes, credit identity, uncertain/final journal, durable tombstone, corrupt records fail closed");
 }
@@ -333,6 +356,7 @@ with tempfile.TemporaryDirectory(prefix="tm-harakiri-players-") as directory:
     path=Path(directory)
     (path/"ui_manager.h").write_text("#pragma once\nbool ui_manager_snapshot_lock(bool*);\nvoid ui_manager_unlock();\n")
     (path/"cJSON.h").write_text("#pragma once\nstruct cJSON {};\n")
+    (path/"esp_timer.h").write_text("#pragma once\n#include <stdint.h>\ninline int64_t esp_timer_get_time(){return 100000000;}\n")
     # The log declaration's pointer type must match the real terminal header.
     STUBS=STUBS.replace('const void*){}','const cJSON*){}').replace('#include "active_game.h"','#include "active_game.h"\n#include "cJSON.h"')
     (path/"esp_heap_caps.h").write_text("#pragma once\n#include <cstdlib>\n#define MALLOC_CAP_SPIRAM 0\n#define MALLOC_CAP_8BIT 0\n#define heap_caps_malloc(n,c) malloc(n)\n#define heap_caps_calloc(n,s,c) calloc(n,s)\n#define heap_caps_free free\n")

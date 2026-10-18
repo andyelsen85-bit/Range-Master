@@ -81,6 +81,10 @@ EXT_RAM_BSS_ATTR GameStore g_store;
 
 // ── NVS helpers ──────────────────────────────────────────────
 static nvs_handle_t s_nvs;
+static char s_ended_games[4][40];
+static portMUX_TYPE s_ended_lock=portMUX_INITIALIZER_UNLOCKED;
+static bool s_ended_dirty=false;
+static unsigned s_ended_revision=0;
 static SemaphoreHandle_t s_nvs_mutex;
 static SemaphoreHandle_t s_wifi_networks_mutex;
 static SemaphoreHandle_t s_kredit_events_mutex;
@@ -171,6 +175,36 @@ static void nvs_lock(void)
 static void nvs_unlock(void)
 {
     xSemaphoreGive(s_nvs_mutex);
+}
+
+bool store_game_was_ended(const char *id) {
+    bool found=false;portENTER_CRITICAL(&s_ended_lock);
+    for(const auto &ended:s_ended_games)if(id[0]&&!strcmp(ended,id))found=true;
+    portEXIT_CRITICAL(&s_ended_lock);return found;
+}
+void store_record_game_end(const char *id) {
+    char snapshot[4][40];unsigned revision;
+    portENTER_CRITICAL(&s_ended_lock);
+    bool found=false;for(const auto &ended:s_ended_games)if(id[0]&&!strcmp(ended,id))found=true;
+    if(id[0]&&!found) {
+        memmove(s_ended_games+1,s_ended_games,3*sizeof(s_ended_games[0]));
+        snprintf(s_ended_games[0],sizeof(s_ended_games[0]),"%.39s",id);
+        s_ended_dirty=true;++s_ended_revision;
+    }
+    bool dirty=s_ended_dirty;revision=s_ended_revision;
+    memcpy(snapshot,s_ended_games,sizeof(snapshot));
+    portEXIT_CRITICAL(&s_ended_lock);
+    if(!dirty)return;
+    nvs_lock();
+    esp_err_t err=nvs_set_blob(s_nvs,"ended_games",snapshot,sizeof(snapshot));
+    if(err==ESP_OK)err=nvs_commit(s_nvs);
+    nvs_unlock();
+    if(err==ESP_OK) {
+        portENTER_CRITICAL(&s_ended_lock);
+        if(revision==s_ended_revision)s_ended_dirty=false;
+        portEXIT_CRITICAL(&s_ended_lock);
+    }
+    if(err!=ESP_OK)terminal_log_add("data_loss_risk","ERROR","Abschlussmarkierung nicht in NVS gespeichert; Originalarchiv bleibt erforderlich");
 }
 
 static void nvs_reopen_after_failure(void)
@@ -2199,7 +2233,7 @@ bool store_start_spiel(void)
         snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),"Warteschlange wird noch übernommen. Bitte warten.");
         return false;
     }
-    if(g_store.harakiriOrdersReady || g_store.activeGameStorageError) {
+    if(active_game_is_open()) {
         snprintf(g_store.lineupWarning,sizeof(g_store.lineupWarning),
                  "Offenes Harakiri-Spiel oder Speicherfehler: zuerst fortsetzen, prüfen oder abbrechen.");
         return false;
@@ -2345,6 +2379,7 @@ bool store_start_spiel(void)
     }
 
     s->screen = SCREEN_SPIEL;
+    s->activeGameOpen=true;
     if(!portal_queue_game_started()) {
         (void)store_cancel_spiel();
         snprintf(s->lineupWarning,sizeof(s->lineupWarning),"Warteschlange konnte nicht gespeichert werden. Bitte freigeben.");
@@ -2440,6 +2475,7 @@ bool store_cancel_spiel(void)
 
     // Never call _store_finish_game here: a quit must not create results,
     // history, a pending game, or a result screen.
+    active_game_mark_ended();
     clear_active_game_credit_tracking(s);
     memset(s->spieler, 0, sizeof(s->spieler));
     memset(s->sequenz, 0, sizeof(s->sequenz));
@@ -2709,6 +2745,7 @@ static void _store_finish_game(void)
     clear_active_game_credit_tracking(s);
     s->activeAcknowledgedClays = 0;
     s->screen         = SCREEN_RESULTATE;
+    active_game_mark_ended();
     store_reconcile_lineup_with_credits();
     game_store_save();
     ESP_LOGI(TAG, "Game finished, navigating to resultate");
@@ -2778,6 +2815,12 @@ void store_retry_active_game_save(void)
     g_store.activeGameStorageError=!active_game_checkpoint();
     if(!g_store.activeGameStorageError &&
        g_store.taubeIndex>=g_store.sequenzLen)_store_finish_game();
+}
+
+bool store_finish_open_game(void) {
+    if(!g_store.activeGameOpen||g_store.screen!=SCREEN_SPIEL)return false;
+    _store_finish_game();
+    return !g_store.activeGameOpen&&g_store.screen==SCREEN_RESULTATE;
 }
 
 // ── Navigation ───────────────────────────────────────────────
@@ -3616,6 +3659,10 @@ void game_store_init(void)
     s_verkauf_events_mutex = xSemaphoreCreateMutex();
     configASSERT(s_verkauf_events_mutex);
     nvs_open();
+    {size_t size=sizeof(s_ended_games);
+        if(nvs_get_blob(s_nvs,"ended_games",s_ended_games,&size)!=ESP_OK||size!=sizeof(s_ended_games))
+            memset(s_ended_games,0,sizeof(s_ended_games));
+        for(auto &id:s_ended_games)id[39]=0;}
     (void)nvs_get_u64(s_nvs,"live_seq",&g_store.liveSequence);
     (void)nvs_get_i64(s_nvs,"live_start",&g_store.liveStartedAt);
 

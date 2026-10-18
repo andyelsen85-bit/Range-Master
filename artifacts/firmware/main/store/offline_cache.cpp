@@ -8,6 +8,10 @@
 #include <time.h>
 #include <dirent.h>
 #include <atomic>
+#include "fat_name.h"
+#include "fat_patterns.h"
+static char s_path_error[180];
+const char *offline_cache_path_error(){return s_path_error;}
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
@@ -33,7 +37,17 @@
 #include <initializer_list>
 
 static const char *TAG = "offline_cache";
-static const char *ROOT = "/fatfs/tmcache";
+static const char *ROOT = "/fatfs/TMCACHE";
+static bool s_patterns_checked=false;
+static bool check_path_patterns() {
+    s_patterns_checked=true;
+    bool ok=fat_patterns_self_test("/fatfs",s_path_error,sizeof(s_path_error));
+    if(!ok) {
+        terminal_log_add("data_loss_risk","ERROR",s_path_error);
+        ESP_LOGE(TAG,"%s",s_path_error);
+    } else ESP_LOGI(TAG,"FAT all name patterns write/fsync/rename/read/unlink OK");
+    return ok;
+}
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
 static SemaphoreHandle_t s_mutex;
 static bool s_mounted;
@@ -103,7 +117,7 @@ static void census_directory(const char *root,Census *out,bool log_files,unsigne
         errno=0;struct dirent *entry=readdir(dir);
         if(!entry) {if(errno) out->complete=false;break;}
         if(!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")) continue;
-        char path[384];int n=snprintf(path,sizeof(path),"%s/%s",root,entry->d_name);
+        char path[384];int n=fat_name(path,sizeof(path),entry->d_name,nullptr,root)?(int)strlen(path):-1;
         struct stat st{};
         if(n<0 || (size_t)n>=sizeof(path) || stat(path,&st)!=0) {out->complete=false;continue;}
         if(S_ISDIR(st.st_mode)) {census_directory(path,out,log_files,depth+1);continue;}
@@ -163,14 +177,15 @@ static bool removable_root_only_locked() {
         errno=0;auto *e=readdir(d);if(!e){if(errno)ok=false;break;}
         const char *n=e->d_name;
         if(!strcmp(n,".")||!strcmp(n,".."))continue;
-        char full[384];snprintf(full,sizeof(full),"/fatfs/%s",n);struct stat st{};
+        char full[384];if(!fat_name(full,sizeof(full),n)){ok=false;continue;}struct stat st{};
         if(stat(full,&st)!=0){ok=false;continue;}
         if(!strcasecmp(n,"tmcache")){if(!S_ISDIR(st.st_mode))ok=false;continue;}
         if(!S_ISREG(st.st_mode)){ok=false;continue;}
         if((!strcasecmp(n,"dayp0.bin")||!strcasecmp(n,"dayp1.bin"))&&day_players_repair_safe())continue;
+        if((n[0]=='Z'||n[0]=='z'||n[0]=='Y'||n[0]=='y')&&fat_test_owned(full,false))continue;
         if(!strcasecmp(n,"tmcache")||game_journal_is_file(n)||!strcasecmp(n,"probe.tmp")||
            !strcasecmp(n,"active0.bin")||!strcasecmp(n,"active1.bin")||
-           !strcasecmp(n,"active0.bin.tmp")||!strcasecmp(n,"active1.bin.tmp")||
+           !strcasecmp(n,"active0.tmp")||!strcasecmp(n,"active1.tmp")||
            !strcasecmp(n,"queue0.bin")||!strcasecmp(n,"queue1.bin"))continue;
         ok=false;
     }
@@ -179,8 +194,9 @@ static bool removable_root_only_locked() {
     for(;;) {
         errno=0;auto *e=readdir(d);if(!e){if(errno)ok=false;break;}
         if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
-        char full[384];snprintf(full,sizeof(full),"%s/%s",ROOT,e->d_name);struct stat st{};
+        char full[384];if(!fat_name(full,sizeof(full),e->d_name,nullptr,ROOT)){ok=false;continue;}struct stat st{};
         if(stat(full,&st)!=0||!S_ISREG(st.st_mode)){ok=false;continue;}
+        if((e->d_name[0]=='Z'||e->d_name[0]=='z'||e->d_name[0]=='Y'||e->d_name[0]=='y')&&fat_test_owned(full,false))continue;
         bool known=false;
         for(unsigned i=0;i<=OFFLINE_CACHE_SECTION_COUNT;i++)for(const char *ext:{"bin","bak","tmp"}) {
             char name[40];snprintf(name,sizeof(name),"%s.%s",i<OFFLINE_CACHE_SECTION_COUNT?names[i]:"meta",ext);
@@ -231,14 +247,15 @@ static bool remove_cache_files_locked() {
     for(unsigned i=0;i<=OFFLINE_CACHE_SECTION_COUNT;i++) {
         const char *name=i<OFFLINE_CACHE_SECTION_COUNT?names[i]:"meta";
         for(const char *extension:extensions) {
-            char path[64];snprintf(path,sizeof(path),"%s/%s.%s",ROOT,name,extension);
+            char path[64];if(!fat_name(path,sizeof(path),name,extension,ROOT)){ok=false;continue;}
             bool present=access(path,F_OK)==0;
             if(present)volume_usage(path);
             if(unlink(path)!=0 && errno!=ENOENT) ok=false;
             if(present)volume_usage("after cache unlink");
         }
     }
-    if(unlink("/fatfs/probe.tmp")!=0 && errno!=ENOENT) ok=false;
+    char probe[64];(void)fat_name(probe,sizeof(probe),"PROBE","TMP");
+    if(unlink(probe)!=0 && errno!=ENOENT) ok=false;
     return ok;
 }
 static void repair_proof_locked(StorageRepairStatus *out,bool log) {
@@ -418,9 +435,9 @@ static void sync_cache_directory(void) {
 
 static bool write_file(const char *name,uint16_t section,const void *p,size_t n) {
     char path[64],tmp[64],backup[64];
-    snprintf(path,sizeof(path),"%s/%s.bin",ROOT,name);
-    snprintf(tmp,sizeof(tmp),"%s/%s.tmp",ROOT,name);
-    snprintf(backup,sizeof(backup),"%s/%s.bak",ROOT,name);
+    if(!fat_name(path,sizeof(path),name,"BIN",ROOT)||
+       !fat_name(tmp,sizeof(tmp),name,"TMP",ROOT)||
+       !fat_name(backup,sizeof(backup),name,"BAK",ROOT))return false;
     // Snapshots are rebuildable. Drop the previous section, never hold old +
     // new full copies. A failed write removes its partial temp immediately.
     const char *obsolete[]={tmp,backup,path};
@@ -494,8 +511,8 @@ static bool read_envelope(const char *path,uint16_t section,void *p,size_t n) {
 }
 static bool read_file(const char *name,uint16_t section,void *p,size_t n) {
     char path[64],backup[64];
-    snprintf(path,sizeof(path),"%s/%s.bin",ROOT,name);
-    snprintf(backup,sizeof(backup),"%s/%s.bak",ROOT,name);
+    if(!fat_name(path,sizeof(path),name,"BIN",ROOT)||
+       !fat_name(backup,sizeof(backup),name,"BAK",ROOT))return false;
     if(read_envelope(path,section,p,n))return true;
     if(!read_envelope(backup,section,p,n)) {
         // A missing single-copy snapshot must invalidate its old manifest
@@ -511,7 +528,7 @@ static bool read_file(const char *name,uint16_t section,void *p,size_t n) {
     return true;
 }
 static bool cache_self_test(void) {
-    const char *path = "/fatfs/probe.tmp"; // 8.3 name, also works without LFN
+    char path[64];(void)fat_name(path,sizeof(path),"PROBE","TMP");
     const uint8_t bytes[16] = {0};
     errno = 0;
     const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -574,7 +591,7 @@ static bool cache_volume_is_empty(void) {
         const char *extensions[] = {"bin", "bak"};
         for (unsigned e = 0; e < 2; ++e) {
             char path[64];
-            snprintf(path, sizeof(path), "%s/%s.%s", ROOT, name, extensions[e]);
+            if(!fat_name(path,sizeof(path),name,extensions[e],ROOT))return false;
             errno = 0;
             const int result = access(path, F_OK);
             const int access_errno = errno;
@@ -652,7 +669,7 @@ bool offline_cache_mount(void) {
     bool may_clean_temps=game_journal_inspect_locked(&startup)&&!startup.pending&&
         !g_store.pendingGamesCount&&active_game_repair_safe_locked()&&portal_queue_repair_safe_locked()&&day_players_repair_safe();
     if(may_clean_temps)for(unsigned i=0;i<=OFFLINE_CACHE_SECTION_COUNT;i++) {
-        char temp[64];snprintf(temp,sizeof(temp),"%s/%s.tmp",ROOT,i<OFFLINE_CACHE_SECTION_COUNT?names[i]:"meta");
+        char temp[64];(void)fat_name(temp,sizeof(temp),i<OFFLINE_CACHE_SECTION_COUNT?names[i]:"meta","TMP",ROOT);
         if(access(temp,F_OK)==0) {
             volume_usage("before stale cache temporary");
             if(unlink(temp)!=0)ESP_LOGW(TAG,"Stale cache temporary retained: errno=%d",errno);
@@ -690,6 +707,7 @@ bool offline_cache_mount(void) {
     errno = 0;
     const int mkdir_result = mkdir(ROOT, 0755);
     const int mkdir_errno = errno;
+    if(!s_patterns_checked&&(mkdir_result==0||mkdir_errno==EEXIST))(void)check_path_patterns();
     if (mkdir_result != 0 && mkdir_errno != EEXIST) {
         ESP_LOGW(TAG, "Could not create cache directory: errno=%d", mkdir_errno);
         g_store.offlineCacheHealthy = false;
@@ -728,7 +746,9 @@ void offline_cache_repair_status(StorageRepairStatus *out) {
         out->allowed=false;snprintf(out->reason,sizeof(out->reason),"Offene oder ungeprüfte Spieler-des-Tages-Ereignisse; erst synchronisieren.");
     }
     if(out->allowed&&(g_store.pendingKreditEventCount||g_store.pendingVerkaufEventCount||g_store.pendingPaymentEventCount)) {
-        out->allowed=false;snprintf(out->reason,sizeof(out->reason),"Offene Kredit-, Verkauf- oder Zahlungsereignisse; erst synchronisieren.");
+        out->allowed=false;snprintf(out->reason,sizeof(out->reason),
+            "%d Kreditereignisse, %d Verkäufe, %d Zahlungen offen; zuerst synchronisieren.",
+            g_store.pendingKreditEventCount,g_store.pendingVerkaufEventCount,g_store.pendingPaymentEventCount);
     }
     if(out->allowed&&!removable_root_only_locked()) {
         out->allowed=false;snprintf(out->reason,sizeof(out->reason),"Unbekannte oder ungeprüfte Dateien auf FAT.");
@@ -756,6 +776,7 @@ bool offline_cache_recheck(void) {
     bool bad=false;
     bool ok=s_wl!=WL_INVALID_HANDLE && inspect_volume(&bad);
     if(ok) {int result=mkdir(ROOT,0755);ok=result==0 || errno==EEXIST;}
+    if(ok)ok=check_path_patterns();
     s_mounted=ok;s_storage_blocked=!ok;update_health();
     unlock_cache();return ok;
 }
@@ -783,6 +804,7 @@ static bool cleanup_storage(bool repair) {
     if(ok) {
         bool bad=false;ok=inspect_volume(&bad);
         if(ok) {int result=mkdir(ROOT,0755);ok=result==0 || errno==EEXIST;}
+        if(ok)ok=check_path_patterns();
     }
     s_mounted=ok;s_storage_blocked=!ok;update_health();
     unlock_cache();

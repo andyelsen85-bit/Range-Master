@@ -41,6 +41,8 @@ bool offline_cache_cleanup_busy(){return false;}
 FinishedGame record{};
 bool on_disk=true,commit_ok=true,delete_ok=true;
 int deletes,audits,commits,saves;
+bool ui_manager_snapshot_lock(bool *acquired){*acquired=commit_ok;return commit_ok;}
+void ui_manager_unlock(){commits++;}
 bool pending_record(const char *id,FinishedGame *out){
  if((on_disk||g_store.pendingGamesCount)&&!strcmp(id,record.base.externalId)){*out=record;return true;}return false;
 }

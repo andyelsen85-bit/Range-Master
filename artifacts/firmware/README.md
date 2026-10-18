@@ -44,6 +44,10 @@ device verification.
 
 # TrapMaster ESP32-P4 Firmware
 
+Aktive und noch nicht übertragene Spiele, FAT-8.3-Pfadprüfung und die
+Hardware-Abnahme sind in [ACTIVE_GAME_RECOVERY.md](ACTIVE_GAME_RECOVERY.md)
+beschrieben. Kein `erase-flash`, keine NVS-/FAT-Löschung für dieses Update.
+
 ## Inventar & Tag: Oberfläche und Schriftprüfung
 
 Der Bildschirm zeigt Tagesbeginn und Tagesschluss gleichzeitig. Beide Spalten

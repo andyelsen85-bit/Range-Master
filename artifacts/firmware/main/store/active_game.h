@@ -9,3 +9,5 @@ bool active_game_remap(); // rewrite both slots before acknowledging player-ID c
 size_t active_game_record_size();
 bool active_game_repair_safe_locked(); // read-only CRC proof; caller holds journal lock
 bool active_game_inspect_repair_locked(ActiveGameRepairInspection *out);
+bool active_game_is_open();
+void active_game_mark_ended();

@@ -41,6 +41,9 @@ STUBS = r"""
 #include <atomic>
 #include <dirent.h>
 #include <sys/stat.h>
+#include "fat_name.h"
+static bool fat_patterns_self_test(const char*,char *error,size_t capacity){if(capacity)error[0]=0;return true;}
+static bool fat_test_owned(const char*,bool=true){return false;}
 #include "game_store.h"
 #include "storage_repair.h"
 #include "offline_cache.h"
@@ -116,7 +119,8 @@ static bool fresh = true, probe_fails = false, repaired_probe_fails = false;
 static int mount_error = 0, format_error = 0, unmount_error = 0;
 static int write_error = 0, fsync_error = 0, close_error = 0;
 static int mounts = 0, formats = 0, unmounts = 0, nvs_saves = 0;
-static std::map<std::string, std::vector<uint8_t>> files;
+struct FatLess {bool operator()(const std::string &a,const std::string &b)const{return strcasecmp(a.c_str(),b.c_str())<0;}};
+static std::map<std::string, std::vector<uint8_t>,FatLess> files;
 static int journal_pending=0,journal_uncertain=0;
 void game_journal_storage_lock() {}
 void game_journal_storage_unlock() {}
@@ -136,7 +140,7 @@ void terminal_log_add(const char*,const char*,const char*) {}
 struct FakeDir {std::vector<std::string> entries;size_t index=0;struct dirent entry{};};
 DIR *tm_opendir(const char *path) {
     auto *d=new FakeDir;std::string prefix=std::string(path)+"/";
-    for(const auto &item:files) if(item.first.rfind(prefix,0)==0) {
+    for(const auto &item:files) if(!strncasecmp(item.first.c_str(),prefix.c_str(),prefix.size())) {
         std::string child=item.first.substr(prefix.size());child=child.substr(0,child.find('/'));
         if(std::find(d->entries.begin(),d->entries.end(),child)==d->entries.end()) d->entries.push_back(child);
     }
@@ -152,7 +156,7 @@ int tm_stat(const char *path,struct stat *st) {
     auto item=files.find(path);memset(st,0,sizeof(*st));
     if(item!=files.end()) {st->st_mode=S_IFREG;st->st_size=item->second.size();return 0;}
     std::string prefix=std::string(path)+"/";
-    for(const auto &value:files) if(value.first.rfind(prefix,0)==0) {st->st_mode=S_IFDIR;return 0;}
+    for(const auto &value:files) if(!strncasecmp(value.first.c_str(),prefix.c_str(),prefix.size())) {st->st_mode=S_IFDIR;return 0;}
     errno=ENOENT;return -1;
 }
 static std::map<int, std::string> descriptors;
@@ -206,7 +210,7 @@ int tm_open(const char *path, int flags, ...) {
     return fd;
 }
 ssize_t tm_write(int fd, const void *bytes, size_t length) {
-    if (write_error || (probe_fails && descriptors[fd] == "/fatfs/probe.tmp")) {
+    if (write_error || (probe_fails && !strcasecmp(descriptors[fd].c_str(),"/fatfs/probe.tmp"))) {
         errno = write_error ? write_error : ENOSPC; return -1;
     }
     auto &out = files[descriptors[fd]];
@@ -356,7 +360,7 @@ int main() {
     assert(!offline_cache_mount() && formats == 0 && mounts==1);
     assert(!files.count("/fatfs/tmcache/history.tmp") && !files.count("/fatfs/tmcache/history.bak"));
     assert(files.count("/fatfs/unknown.tmp"));
-    assert(logged("FAT census file=/fatfs/tmcache/history.tmp"));
+    assert(logged("HISTORY.TMP"));
     assert(logged("FinishedGame=") && logged("cache total="));
     reset(); free_bytes=0;journal_pending=1;
     files["/fatfs/tmcache/history.bin"]={3};
@@ -526,6 +530,15 @@ int main() {
     assert(offline_cache_mount()&&formats==2&&!repair_intent&&!s_repair_pending);
     reset();assert(offline_cache_mount());free_bytes=0;orphan_bytes=total_bytes;
     assert(offline_cache_repair()&&formats==1&&offline_cache_storage_writable());
+    reset();assert(offline_cache_mount()&&offline_cache_cleanup());
+    for(int section=0;section<OFFLINE_CACHE_SECTION_COUNT;section++) {
+        assert(offline_cache_save((OfflineCacheSection)section,false));
+        char path[160];assert(fat_name(path,sizeof(path),names[section],"BIN","/fatfs/TMCACHE"));
+        assert(files.count(path)==1);
+    }
+    assert(offline_cache_save_metadata());
+    assert(files.count("/fatfs/TMCACHE/META.BIN")==1&&formats==0&&g_store.offlineCacheHealthy);
+    std::puts("PASS cleanup recreates all six typed cache sections plus metadata without formatting");
     std::printf("PASS budget: FinishedGame=%zu Record=%zu journal allocated=%zu cache allocated=%zu\\n",
         sizeof(FinishedGame),game_journal_record_size(),
         storage_allocated(game_journal_record_size())*(STORAGE_JOURNAL_SLOTS+2),cache_budget_bytes());
@@ -542,7 +555,7 @@ if __name__ == "__main__":
         assert kind in {"fire_trace","gateway_trace","sync","data_loss_risk","ui_commit","wifi"},kind
         assert kind!="data_loss_risk" or level=="ERROR","Portal rejects non-ERROR data_loss_risk entries"
     ui_source=(ROOT/"main/ui/screen_einstellungen.cpp").read_text()
-    assert "if(s_storage_proof.allowed)" in ui_source and "s_storage_proof.reason" in ui_source
+    assert "s_storage_proof.allowed)" in ui_source and "s_storage_proof.reason" in ui_source
     cache = (ROOT / "main/store/offline_cache.cpp").read_text()
     sync = (ROOT / "main/net/http_sync.cpp").read_text()
     cache_body = re.sub(r"^#include.*\n", "", cache, flags=re.MULTILINE)

@@ -11,6 +11,9 @@
 #include "screen_queue.h"
 #include "screen_start.h"
 #include "offline_cache.h"
+#include "active_game.h"
+#include "game_journal.h"
+#include "screen_open_games.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_player_rows[MAX_SPIELER];
@@ -117,7 +120,9 @@ static void start_cb(lv_event_t *e)
         return;
     }
 
+    if(active_game_is_open()||g_store.pendingGamesCount>0){ui_open_games(true);return;}
     if (!store_start_spiel()) {
+        if(!game_journal_ready()){ui_open_games(true);return;}
         lv_label_set_text(s_lbl_error, g_store.lineupWarning[0]
             ? g_store.lineupWarning : "FEHLER: SPIELER HABEN KEINE KREDITE!");
         lv_obj_set_style_text_color(s_lbl_error, lv_color_hex(CLR_DANGER), 0);

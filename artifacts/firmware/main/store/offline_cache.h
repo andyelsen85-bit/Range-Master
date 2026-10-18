@@ -18,6 +18,7 @@ typedef enum {
 } OfflineCacheSection;
 
 bool offline_cache_mount(void);
+const char *offline_cache_path_error();
 void offline_cache_load(void);
 bool offline_cache_save(OfflineCacheSection section, bool defer = false);
 void offline_cache_flush_pending(); // worker context, flush throttled dirty snapshots
