@@ -664,8 +664,23 @@ export const PurgeAdminDataResponse = zod.object({
   "credits": zod.number().int(),
   "sales": zod.number().int(),
   "billPayments": zod.number().int(),
-  "playerUpdates": zod.number().int()
-})
+  "playerUpdates": zod.number().int(),
+  "queueGames": zod.number().int(),
+  "queueEntries": zod.number().int(),
+  "gamedayPlayers": zod.number().int(),
+  "gamedayMaitre": zod.number().int(),
+  "groupMembers": zod.number().int(),
+  "hiddenPlayers": zod.number().int(),
+  "liveGames": zod.number().int(),
+  "inventoryDays": zod.number().int(),
+  "dailyReports": zod.number().int(),
+  "terminalManifests": zod.number().int(),
+  "gamedayEvents": zod.number().int(),
+  "gamedayPlayerEvents": zod.number().int(),
+  "auditsDetached": zod.number().int(),
+  "restoreAuthorizationsDetached": zod.number().int()
+}),
+  "auditId": zod.number().int()
 })
 
 

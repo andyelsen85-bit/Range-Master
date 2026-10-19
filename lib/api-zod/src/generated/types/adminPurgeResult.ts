@@ -12,4 +12,5 @@ export interface AdminPurgeResult {
   mode: AdminPurgeResultMode;
   datum?: Date;
   counts: AdminPurgeCounts;
+  auditId: number;
 }

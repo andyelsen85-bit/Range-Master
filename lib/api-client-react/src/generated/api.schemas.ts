@@ -932,6 +932,20 @@ export interface AdminPurgeCounts {
   sales: number;
   billPayments: number;
   playerUpdates: number;
+  queueGames: number;
+  queueEntries: number;
+  gamedayPlayers: number;
+  gamedayMaitre: number;
+  groupMembers: number;
+  hiddenPlayers: number;
+  liveGames: number;
+  inventoryDays: number;
+  dailyReports: number;
+  terminalManifests: number;
+  gamedayEvents: number;
+  gamedayPlayerEvents: number;
+  auditsDetached: number;
+  restoreAuthorizationsDetached: number;
 }
 
 export type AdminPurgeResultMode = typeof AdminPurgeResultMode[keyof typeof AdminPurgeResultMode];
@@ -946,6 +960,23 @@ export interface AdminPurgeResult {
   mode: AdminPurgeResultMode;
   datum?: string;
   counts: AdminPurgeCounts;
+  auditId: number;
+}
+
+export type AdminPurgeErrorCode = typeof AdminPurgeErrorCode[keyof typeof AdminPurgeErrorCode];
+
+
+export const AdminPurgeErrorCode = {
+  PURGE_BLOCKED: 'PURGE_BLOCKED',
+  PURGE_FAILED: 'PURGE_FAILED',
+} as const;
+
+export interface AdminPurgeError {
+  error: string;
+  code: AdminPurgeErrorCode;
+  table: string | null;
+  constraint: string | null;
+  requestId: string;
 }
 
 export interface HealthStatus {

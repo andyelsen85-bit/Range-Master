@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getTableName } from "drizzle-orm";
 import { PgDialect, getTableConfig } from "drizzle-orm/pg-core";
 import { db, ergebnisseTable, spielTeilnahmenTable, spieleTable } from "@workspace/db";
 import adminRouter from "./admin";
@@ -59,43 +58,31 @@ test("global reset clears admin statistics but preserves every admin account", a
         locked = true;
         return { rows: [] };
       }
-      const table = compiled.sql.match(/FROM "([^"]+)"/)?.[1];
-      assert.ok(table && rows[table], "Unexpected query");
-      const count = table === "spieler"
-        ? rows.spieler.filter((p) => !p.isAdmin).length : rows[table].length;
-      return { rows: [{ count }] };
-    },
-    delete(table: any) {
-      const name = getTableName(table);
+      if(compiled.sql.includes("FROM pg_constraint"))return {rows:[]};
       assert.ok(locked, "Must lock before deletion");
-      assert.ok(rows[name], "Must not delete configuration, products, or API keys");
-      return {
-        async where(condition: any) {
-          assert.equal(name, "spieler");
-          const predicate = dialect.sqlToQuery(condition);
-          assert.match(predicate.sql, /"spieler"\."is_admin" = \$1/);
-          assert.deepEqual(predicate.params, [false]);
-          rows.spieler = rows.spieler.filter((p) => p.isAdmin);
-          deleted.push(name);
-          return [];
-        },
-        then(resolve: (value: any[]) => void) {
-          assert.notEqual(name, "spieler", "Unconditional account deletion forbidden");
-          rows[name] = [];
-          deleted.push(name);
-          if (name === "spiele") {
-            rows.ergebnisse = [];
-            rows.spiel_teilnahmen = [];
-          }
-          resolve([]);
-        },
-      };
+      if(compiled.sql.includes("UPDATE admin_game_edits")||compiled.sql.includes("UPDATE terminal_restore_authorizations"))
+        return {rows:[]};
+      if(compiled.sql.includes("INSERT INTO admin_game_edits")) {
+        assert.ok(compiled.params.some(p=>typeof p==="string"&&p.includes('"mode":"all"')));
+        return {rows:[{id:99}]};
+      }
+      const name=compiled.sql.match(/DELETE FROM "([^"]+)"/)?.[1];
+      assert.ok(name,"Unexpected query");
+      assert.ok(!["products","product_price_revisions","api_keys","admin_game_edits"].includes(name),
+        "Must preserve configuration and audit history");
+      const count=name==="spieler"?rows.spieler.filter(p=>!p.isAdmin).length:(rows[name]?.length??0);
+      if(name==="spieler"){
+        assert.match(compiled.sql,/WHERE NOT is_admin/);
+        rows.spieler=rows.spieler.filter(p=>p.isAdmin);
+      }else if(rows[name])rows[name]=[];
+      deleted.push(name);
+      return {rows:[{n:count}]};
     },
   };
   (db as any).transaction = async (run: (transaction: any) => unknown) => run(tx);
   try {
     const res = response();
-    await handler({ body: { mode: "all", confirmation: "PURGE_ALL" } }, res);
+    await handler({ body: { mode: "all", confirmation: "PURGE_ALL" }, user:{id:1} }, res);
     assert.equal(res.statusCode, 200);
     assert.deepEqual(rows.spieler, admins);
     for (const [table, data] of Object.entries(rows)) {

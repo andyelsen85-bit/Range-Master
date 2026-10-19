@@ -127,6 +127,13 @@
       "when": 1792432027574,
       "tag": "0017_terminal_player_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792434351217,
+      "tag": "0018_admin_purge_integrity",
+      "breakpoints": true
     }
   ]
 }

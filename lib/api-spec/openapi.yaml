@@ -583,6 +583,8 @@ paths:
           description: Operational data removed while catalogue and administrator accounts remain
           content: { application/json: { schema: { $ref: "#/components/schemas/AdminPurgeResult" } } }
         "400": { description: Invalid scope or confirmation, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        "409": { description: Purge blocked and fully rolled back, content: { application/json: { schema: { $ref: "#/components/schemas/AdminPurgeError" } } } }
+        "500": { description: Purge failed and fully rolled back, content: { application/json: { schema: { $ref: "#/components/schemas/AdminPurgeError" } } } }
 
   # ── PRODUCTS & SALES ─────────────────────────────────────────────────────
   /admin/products:
@@ -1821,7 +1823,7 @@ components:
             confirmation: { type: string, enum: [PURGE_ALL] }
     AdminPurgeCounts:
       type: object
-      required: [players, games, participations, results, credits, sales, billPayments, playerUpdates]
+      required: [players, games, participations, results, credits, sales, billPayments, playerUpdates, queueGames, queueEntries, gamedayPlayers, gamedayMaitre, groupMembers, hiddenPlayers, liveGames, inventoryDays, dailyReports, terminalManifests, gamedayEvents, gamedayPlayerEvents, auditsDetached, restoreAuthorizationsDetached]
       properties:
         players: { type: integer }
         games: { type: integer }
@@ -1831,13 +1833,37 @@ components:
         sales: { type: integer }
         billPayments: { type: integer }
         playerUpdates: { type: integer }
+        queueGames: { type: integer }
+        queueEntries: { type: integer }
+        gamedayPlayers: { type: integer }
+        gamedayMaitre: { type: integer }
+        groupMembers: { type: integer }
+        hiddenPlayers: { type: integer }
+        liveGames: { type: integer }
+        inventoryDays: { type: integer }
+        dailyReports: { type: integer }
+        terminalManifests: { type: integer }
+        gamedayEvents: { type: integer }
+        gamedayPlayerEvents: { type: integer }
+        auditsDetached: { type: integer }
+        restoreAuthorizationsDetached: { type: integer }
     AdminPurgeResult:
       type: object
-      required: [mode, counts]
+      required: [mode, counts, auditId]
       properties:
         mode: { type: string, enum: [day, all] }
         datum: { type: string, format: date }
         counts: { $ref: "#/components/schemas/AdminPurgeCounts" }
+        auditId: { type: integer }
+    AdminPurgeError:
+      type: object
+      required: [error, code, table, constraint, requestId]
+      properties:
+        error: { type: string }
+        code: { type: string, enum: [PURGE_BLOCKED, PURGE_FAILED] }
+        table: { type: string, nullable: true }
+        constraint: { type: string, nullable: true }
+        requestId: { type: string }
     HealthStatus:
       type: object
       properties:

@@ -6,6 +6,7 @@ import { authenticate,requireAdmin } from "./auth";
 import { gameScorecard } from "../lib/game-scorecard";
 import { computeTaubePunkte } from "../lib/scoring";
 import { daySchema } from "../lib/local-day";
+import { gameAuditSnapshot } from "../lib/game-audit";
 const router=Router(),id=z.coerce.number().int().positive();
 router.use("/admin/spiele",authenticate,requireAdmin);
 router.get("/admin/spiele",async(req,res)=>{
@@ -39,7 +40,7 @@ for(const action of ["hide","unhide"] as const) {
  for(const player of [false,true])router.post(player?`/admin/spiele/:id/spieler/:spielerId/${action}`:`/admin/spiele/:id/${action}`,async(req,res)=>{
   const gameId=id.parse(req.params.id),playerId=player?id.parse((req.params as any).spielerId):null,adminId=(req as any).user.id;
   const success=await db.transaction(async tx=>{
-   const [before]=(await tx.execute(sql`SELECT * FROM spiele WHERE id=${gameId} FOR UPDATE`)).rows;
+   const [before]=(await tx.execute(sql`SELECT * FROM spiele WHERE id=${gameId} FOR UPDATE`)).rows as any[];
    if(!before)return false;
    let previous:unknown=before;
    if(playerId) {
@@ -51,7 +52,8 @@ for(const action of ["hide","unhide"] as const) {
    } else await tx.execute(sql`UPDATE spiele SET hidden_at=${action==="hide"?new Date():null},hidden_by=${action==="hide"?adminId:null} WHERE id=${gameId}`);
    await tx.execute(sql`INSERT INTO admin_game_edits(admin_user_id,action,spiel_id,spieler_id,before,after)
     VALUES(${adminId},${`${action.toUpperCase()}_${player?"PLAYER":"GAME"}`},${gameId},${playerId},
-     ${JSON.stringify(previous)}::jsonb,${JSON.stringify({hidden:action==="hide"})}::jsonb)`);
+     ${JSON.stringify(gameAuditSnapshot(previous,before))}::jsonb,
+     ${JSON.stringify(gameAuditSnapshot({hidden:action==="hide"},before))}::jsonb)`);
    return true;
   });res.status(success?200:404).json({success});
  });
@@ -60,7 +62,8 @@ router.patch("/admin/spiele/:id/ergebnisse/:ergebnisId",async(req,res)=>{
  const body=z.object({schuss1:z.boolean(),schuss2:z.boolean(),wiederholt:z.boolean().optional()}).parse(req.body);
  const gameId=id.parse(req.params.id),shotId=id.parse(req.params.ergebnisId),adminId=(req as any).user.id;
  const result=await db.transaction(async tx=>{
-  await tx.execute(sql`SELECT id FROM spiele WHERE id=${gameId} FOR UPDATE`);
+  const [game]=(await tx.execute(sql`SELECT id,external_id,datum FROM spiele WHERE id=${gameId} FOR UPDATE`)).rows as any[];
+  if(!game)return null;
   const [before]=(await tx.execute(sql`SELECT * FROM ergebnisse WHERE id=${shotId} AND spiel_id=${gameId} FOR UPDATE`)).rows as any[];
   if(!before)return null;
   const neighbor=(await tx.execute(sql`SELECT 1 FROM ergebnisse WHERE spiel_id=${gameId} AND spieler_id=${before.spieler_id}
@@ -71,7 +74,8 @@ router.patch("/admin/spiele/:id/ergebnisse/:ergebnisId",async(req,res)=>{
     e.spiel_id=t.spiel_id AND e.spieler_id=t.spieler_id AND e.lauf=t.lauf AND NOT e.wiederholt) WHERE t.spiel_id=${gameId} AND t.spieler_id=${before.spieler_id} AND t.lauf=${before.lauf}`);
   await tx.execute(sql`UPDATE spiele SET edited_at=now(),edited_by=${adminId} WHERE id=${gameId}`);
   await tx.execute(sql`INSERT INTO admin_game_edits(admin_user_id,action,spiel_id,spieler_id,before,after)
-   VALUES(${adminId},'EDIT_RESULT',${gameId},${before.spieler_id},${JSON.stringify(before)}::jsonb,${JSON.stringify(after)}::jsonb)`);
+   VALUES(${adminId},'EDIT_RESULT',${gameId},${before.spieler_id},
+    ${JSON.stringify(gameAuditSnapshot(before,game))}::jsonb,${JSON.stringify(gameAuditSnapshot(after,game))}::jsonb)`);
   return after;
  });res.status(result?200:404).json(result??{error:"Ergebnis nicht gefunden."});
 });

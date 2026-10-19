@@ -15,3 +15,15 @@ client from being terminated by forced database removal.
 **How to apply:** Scope any pool-construction tracking to the isolated test, close
 all captured pools, restore the original constructor, and only then drop the
 test-owned database. Never terminate development or production workflow pools.
+
+Do not immediately force-drop after `Pool.end()`. Check that PostgreSQL sees no
+remaining test-database sessions, then use ordinary `DROP DATABASE`.
+
+**Why:** A purge integration run passed every assertion but an immediate forced
+drop raced client shutdown and emitted asynchronous “terminating connection”
+errors. A server round-trip verifying zero sessions plus a normal drop avoided
+that race without suppressing errors.
+
+**How to apply:** Track actual pool connections as well as construction when
+loaders may cache constructors, and assert every application connection targets
+the disposable database. Do not use forced termination to hide a resource leak.

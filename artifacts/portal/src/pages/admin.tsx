@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { AdminPurgeCounts, AdminPurgeResult } from "@workspace/api-client-react";
 import { PortalBuildStatus } from "@/components/portal-build-status";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/use-auth-store";
@@ -11,6 +12,16 @@ import { useLocation } from "wouter";
 import { Plus, Pencil, Trash2, KeyRound, Shield, CheckCircle2, XCircle, Eye, Search, RotateCcw, Database } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+const PURGE_COUNT_LABELS: Record<keyof AdminPurgeCounts, string> = {
+  players:"Spieler",games:"Spiele",participations:"Teilnahmen",results:"Ergebnisse",
+  credits:"Kreditbuchungen",sales:"Verkäufe",billPayments:"Zahlungen",playerUpdates:"Spielerbenachrichtigungen",
+  queueGames:"Warteschlangenspiele",queueEntries:"Warteschlangeneinträge",gamedayPlayers:"Tageslisteneinträge",
+  gamedayMaitre:"Tages-Schießleiter",groupMembers:"Gruppenmitgliedschaften",hiddenPlayers:"Statistik-Ausblendungen",
+  liveGames:"Live-Spielstände",inventoryDays:"Inventar-Tagesstände",dailyReports:"Tagesabschlussberichte",
+  terminalManifests:"Terminal-Spielverzeichnisse",gamedayEvents:"Tagesabschluss-Empfangsbestätigungen",
+  gamedayPlayerEvents:"Tageslisten-Empfangsbestätigungen",auditsDetached:"Erhaltene Spielprotokolle",
+  restoreAuthorizationsDetached:"Erhaltene Wiederherstellungsfreigaben",
+};
 
 interface AdminPlayer {
   id: number;
@@ -64,7 +75,10 @@ export default function Admin() {
   const [deletePlayer, setDeletePlayer] = useState<AdminPlayer | null>(null);
   const [pwdPlayer, setPwdPlayer] = useState<AdminPlayer | null>(null);
   const [purgeMode, setPurgeMode] = useState<"day" | "all" | null>(null);
-  const [purgeDate, setPurgeDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [purgeResult, setPurgeResult] = useState<AdminPurgeResult | null>(null);
+  const [purgeDate, setPurgeDate] = useState(() => new Intl.DateTimeFormat("en-CA", {
+    timeZone:"Europe/Luxembourg",year:"numeric",month:"2-digit",day:"2-digit",
+  }).format(new Date()));
   const [purgeConfirm, setPurgeConfirm] = useState("");
   const [purgeTerminalsStopped, setPurgeTerminalsStopped] = useState(false);
   const [addForm, setAddForm] = useState<PlayerForm>(emptyForm);
@@ -128,15 +142,15 @@ export default function Admin() {
           ? { mode, datum, confirmation: "PURGE_DAY" }
           : { mode, confirmation: "PURGE_ALL" }),
       }),
-    onSuccess: (result: any) => {
+    onSuccess: (result: AdminPurgeResult) => {
       qc.invalidateQueries();
-      setPurgeMode(null);
+      setPurgeResult(result);
       setPurgeConfirm("");
       setPurgeTerminalsStopped(false);
       const count = result.counts;
       toast({
         title: result.mode === "day" ? "Tag bereinigt" : "Statistik und Spieler zurückgesetzt",
-        description: `${count.games} Spiele, ${count.credits} Kreditbuchungen, ${count.sales} Verkäufe und ${count.billPayments} Zahlungen entfernt${count.players ? `; ${count.players} Spieler gelöscht` : ""}.`,
+        description: `${count.games} Spiele, ${count.queueGames} Warteschlangenspiele, ${count.queueEntries} Warteschlangeneinträge und ${count.gamedayPlayers} Tageslisteneinträge entfernt. Alle Zahlen stehen im Ergebnisdialog.`,
       });
     },
     onError: (e: Error) => toast({ title: "Bereinigung fehlgeschlagen", description: e.message, variant: "destructive" }),
@@ -353,15 +367,33 @@ export default function Admin() {
       </Dialog>
 
       {/* ── Purge Dialog ──────────────────────────────────────────────────── */}
-      <Dialog open={purgeMode !== null} onOpenChange={(o) => { if (!o && !purgeMut.isPending) { setPurgeMode(null); setPurgeConfirm(""); setPurgeTerminalsStopped(false); } }}>
+      <Dialog open={purgeMode !== null} onOpenChange={(o) => { if (!o && !purgeMut.isPending) { setPurgeMode(null); setPurgeResult(null); setPurgeConfirm(""); setPurgeTerminalsStopped(false); } }}>
         <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{purgeMode === "all" ? "Statistik und Spieler zurücksetzen" : "Tag bereinigen"}</DialogTitle>
+            <DialogTitle>{purgeResult ? "Bereinigung abgeschlossen" : purgeMode === "all" ? "Statistik und Spieler zurücksetzen" : "Tag bereinigen"}</DialogTitle>
             <DialogDescription>
-              Nur operative Spieler-, Spiel-, Kauf- und Abrechnungsdaten werden entfernt. Produkte, Preise, API-Schlüssel und Einstellungen bleiben unverändert.
+              {purgeResult
+                ? `Protokoll Nr. ${purgeResult.auditId}. ${purgeResult.mode === "day" ? `Tag ${purgeResult.datum}` : "Alle Tage"}. Die Bereinigung wurde vollständig abgeschlossen.`
+                : "Nur operative Spieler-, Spiel-, Kauf- und Abrechnungsdaten werden entfernt. Produkte, Preise, API-Schlüssel und Einstellungen bleiben unverändert."}
             </DialogDescription>
           </DialogHeader>
-
+          {purgeResult ? (
+            <>
+              <dl data-testid="purge-result-counts" className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 text-sm">
+                {(Object.keys(PURGE_COUNT_LABELS) as (keyof AdminPurgeCounts)[]).map(key=>(
+                  <div key={key} className="contents">
+                    <dt>{PURGE_COUNT_LABELS[key]}</dt>
+                    <dd className="font-mono text-right" data-testid={`purge-count-${key}`}>{purgeResult.counts[key]}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="text-xs text-muted-foreground">Protokolle und Wiederherstellungsfreigaben wurden nicht gelöscht; nur ihre Verknüpfungen wurden aufgehoben.</p>
+              <DialogFooter>
+                <button data-testid="button-purge-done" onClick={()=>{setPurgeMode(null);setPurgeResult(null);}}
+                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground font-semibold">Fertig</button>
+              </DialogFooter>
+            </>
+          ) : (<>
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
@@ -398,8 +430,8 @@ export default function Admin() {
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
             <strong className="text-destructive">Unwiderruflich:</strong>{" "}
             {purgeMode === "day"
-              ? `Alle Spiele, Käufe, Kreditbuchungen und Zahlungen vom ${purgeDate || "gewählten Tag"} werden endgültig entfernt.`
-              : "Alle Nicht-Admin-Spieler werden gelöscht – nicht nur als Demo verwendete Spieler. Alle Spiele, Ergebnisse, Statistiken, Käufe, Kreditbuchungen und Zahlungen werden für ALLE Konten entfernt, auch für Administratoren. Admin-Konten und ihre Zugangsdaten bleiben bestehen. Dieser Vorgang kann nicht rückgängig gemacht werden."}
+              ? `Alle Spiele, Käufe, Kreditbuchungen, Zahlungen, Warteschlangeneinträge, Tageslisteneinträge und Tagesabschlussdaten vom ${purgeDate || "gewählten Tag"} (Europe/Luxembourg) werden endgültig entfernt. Spieler und Gruppenmitgliedschaften bleiben erhalten.`
+              : "Alle Nicht-Admin-Spieler werden gelöscht – nicht nur als Demo verwendete Spieler. Alle Spiele, Ergebnisse, Statistiken, Käufe, Kreditbuchungen, Zahlungen, Tageslisten, Warteschlangen und Tagesabschlussdaten werden für ALLE Konten entfernt, auch für Administratoren. Admin-Konten und ihre Zugangsdaten sowie Audit-Protokolle bleiben bestehen. Dieser Vorgang kann nicht rückgängig gemacht werden."}
           </div>
 
           {purgeMode === "all" && (
@@ -443,6 +475,7 @@ export default function Admin() {
               {purgeMut.isPending ? "Wird bereinigt…" : purgeMode === "day" ? "Tag endgültig löschen" : "Statistik und Spieler endgültig zurücksetzen"}
             </button>
           </DialogFooter>
+          </>)}
         </DialogContent>
       </Dialog>
 

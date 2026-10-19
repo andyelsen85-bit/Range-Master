@@ -30,3 +30,16 @@ without deleting admin-flagged accounts.
 **How to apply:** Do not restrict cleanup to players whose names look like demos,
 and do not exempt admin activity from deletion. Keep terminal sync disconnected
 until local test data is removed so it cannot repopulate the portal.
+
+Destructive game/day cleanup must retain administrator audit history with enough
+copied game identity to remain understandable after game references are nulled.
+New player/game-linked features must account for both day cleanup and global
+reset, rather than relying only on the original financial/game tables.
+
+**Why:** The user requires “Tag löschen” to clear the operational day without
+losing audit evidence or leaving queue and daily-list references that block
+deletion. Shared player profiles and group membership are not owned by one day.
+
+**How to apply:** Keep all cleanup and the surviving PURGE audit in one locked
+transaction. Reject unknown blocking dependencies with a readable admin error
+and complete rollback; never silently cascade new tables or broaden a day purge.

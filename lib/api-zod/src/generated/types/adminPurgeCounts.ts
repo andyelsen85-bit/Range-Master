@@ -15,4 +15,18 @@ export interface AdminPurgeCounts {
   sales: number;
   billPayments: number;
   playerUpdates: number;
+  queueGames: number;
+  queueEntries: number;
+  gamedayPlayers: number;
+  gamedayMaitre: number;
+  groupMembers: number;
+  hiddenPlayers: number;
+  liveGames: number;
+  inventoryDays: number;
+  dailyReports: number;
+  terminalManifests: number;
+  gamedayEvents: number;
+  gamedayPlayerEvents: number;
+  auditsDetached: number;
+  restoreAuthorizationsDetached: number;
 }

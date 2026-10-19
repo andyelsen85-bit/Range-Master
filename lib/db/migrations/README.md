@@ -1,5 +1,13 @@
 # DB Migrations
 
+## Admin-Bereinigung: Migration 0018
+
+[`0018_admin_purge_integrity`](20261019-admin-purge.md) behebt den Audit-FK
+bei „Tag löschen“ (`ON DELETE SET NULL`, Audit bleibt erhalten). Der Bericht
+enthält alle 19 geprüften Fremdschlüssel, Löschreihenfolge, Aufbewahrung und
+Tests. Auch diese Migration läuft automatisch über den initContainer;
+kein manuelles SQL und kein DDL beim API-Start.
+
 Die verbindliche Deployment-Migrationskette liegt unter `lib/db/drizzle/`
 und ist in `lib/db/drizzle/meta/_journal.json` registriert. Der bestehende
 Kubernetes-initContainer `run-migrations` führt `/app/dist/migrate.mjs` aus;

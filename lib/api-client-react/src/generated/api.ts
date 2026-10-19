@@ -24,6 +24,7 @@ import type {
   AdminAmmoAdjustmentResult,
   AdminCreditAdjustmentInput,
   AdminCreditAdjustmentResult,
+  AdminPurgeError,
   AdminPurgeInput,
   AdminPurgeResult,
   BillActivityDays,
@@ -2223,7 +2224,7 @@ export const purgeAdminData = async (adminPurgeInput: AdminPurgeInput, options?:
 
 
 
-export const getPurgeAdminDataMutationOptions = <TError = ErrorType<ErrorResponse>,
+export const getPurgeAdminDataMutationOptions = <TError = ErrorType<ErrorResponse | AdminPurgeError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof purgeAdminData>>, TError,{data: BodyType<AdminPurgeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof purgeAdminData>>, TError,{data: BodyType<AdminPurgeInput>}, TContext> => {
 
@@ -2252,9 +2253,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PurgeAdminDataMutationResult = NonNullable<Awaited<ReturnType<typeof purgeAdminData>>>
     export type PurgeAdminDataMutationBody = BodyType<AdminPurgeInput>
-    export type PurgeAdminDataMutationError = ErrorType<ErrorResponse>
+    export type PurgeAdminDataMutationError = ErrorType<ErrorResponse | AdminPurgeError>
 
-    export const usePurgeAdminData = <TError = ErrorType<ErrorResponse>,
+    export const usePurgeAdminData = <TError = ErrorType<ErrorResponse | AdminPurgeError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof purgeAdminData>>, TError,{data: BodyType<AdminPurgeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof purgeAdminData>>,

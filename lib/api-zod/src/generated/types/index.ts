@@ -16,6 +16,8 @@ export * from './adminCreditAdjustmentResult';
 export * from './adminCreditAdjustmentResultCredit';
 export * from './adminCreditAdjustmentResultStatus';
 export * from './adminPurgeCounts';
+export * from './adminPurgeError';
+export * from './adminPurgeErrorCode';
 export * from './adminPurgeInput';
 export * from './adminPurgeResult';
 export * from './adminPurgeResultMode';

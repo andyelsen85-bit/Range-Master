@@ -56,7 +56,7 @@ export const spielSpielerHiddenTable=pgTable("spiel_spieler_hidden",{
 },t=>[primaryKey({columns:[t.spielId,t.spielerId]})]);
 export const adminGameEditsTable=pgTable("admin_game_edits",{
  id:serial("id").primaryKey(),at:at("at").notNull().defaultNow(),adminUserId:integer("admin_user_id").notNull(),action:text("action").notNull(),
- spielId:integer("spiel_id").references(()=>spieleTable.id),spielerId:integer("spieler_id"),before:jsonb("before"),after:jsonb("after"),
+ spielId:integer("spiel_id").references(()=>spieleTable.id,{onDelete:"set null"}),spielerId:integer("spieler_id"),before:jsonb("before"),after:jsonb("after"),
 });
 export const liveGameStateTable=pgTable("live_game_state",{
  terminalId:text("terminal_id").primaryKey(),seq:bigint("seq",{mode:"number"}).notNull(),state:text("state").notNull(),
