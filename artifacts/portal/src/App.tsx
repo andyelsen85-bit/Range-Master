@@ -28,6 +28,7 @@ import Kaef from '@/pages/kaef';
 import NotFound from '@/pages/not-found';
 import Live from '@/pages/live';
 import LivePrint from '@/pages/live-print';
+import MeineDruck from '@/pages/meine-druck';
 import AdminSpiele from '@/pages/admin-spiele';
 import AdminSpielDetail from '@/pages/admin-spiel-detail';
 
@@ -74,6 +75,7 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/live" component={Live} />
       <Route path="/live/print/:spielerId" component={LivePrint} />
+      <Route path="/resultater/druck" component={() => <PrivateRoute component={MeineDruck} />} />
       <Route>
         <Layout>
           <Switch>

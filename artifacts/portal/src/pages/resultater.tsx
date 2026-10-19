@@ -2,10 +2,11 @@ import { useMemo } from "react";
 import { useAuthStore } from "@/store/use-auth-store";
 import {
   useGetSpielerErgebnisse, getGetSpielerErgebnisseQueryKey,
-  useGetSharedScorecard, getGetSharedScorecardQueryKey,
+  useGetOwnerScorecard, getGetOwnerScorecardQueryKey,
 } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, RotateCcw } from "lucide-react";
+import { Link } from "wouter";
+import { AlertCircle, Printer, RotateCcw } from "lucide-react";
 import { Scorecard, ScorecardSkeleton } from "@/components/scorecard";
 
 interface ResultaterProps {
@@ -32,9 +33,15 @@ export default function Resultater({ spielerId }: ResultaterProps = {}) {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="border-b border-border/50 pb-6">
+      <header className="border-b border-border/50 pb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
         <h1 className="text-3xl font-bold tracking-tight">Meine Ergebnisse</h1>
         <p className="text-muted-foreground mt-2 text-sm font-medium">Jedes Spiel als Schießzettel – wie auf Papier.</p>
+        </div>
+        <Link href={spielerId ? `/resultater/druck?spieler=${spielerId}` : "/resultater/druck"} data-testid="link-owner-print"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border/60 text-sm font-bold hover:bg-secondary/40">
+          <Printer size={15} /> Drucken (Tag / Gesamt Jahr)
+        </Link>
       </header>
 
       {isLoading ? (
@@ -45,7 +52,7 @@ export default function Resultater({ spielerId }: ResultaterProps = {}) {
         <ErrorBox text="Ergebnisse konnten nicht geladen werden." onRetry={() => refetch()} />
       ) : spielIds.length > 0 ? (
         <div className="space-y-6">
-          {spielIds.map((id) => <GameScorecard key={id} spielId={id} />)}
+          {spielIds.map((id) => <GameScorecard key={id} spielerId={effectiveId} spielId={id} />)}
         </div>
       ) : (
         <div className="p-12 text-center bg-card rounded-xl border border-border/50">
@@ -58,9 +65,10 @@ export default function Resultater({ spielerId }: ResultaterProps = {}) {
   );
 }
 
-function GameScorecard({ spielId }: { spielId: number }) {
-  const { data, isLoading, isError, refetch } = useGetSharedScorecard(spielId, {
-    query: { enabled: !!spielId, queryKey: getGetSharedScorecardQueryKey(spielId) },
+function GameScorecard({ spielerId, spielId }: { spielerId: number; spielId: number }) {
+  // Owner-scoped: the server returns only this player's own row.
+  const { data, isLoading, isError, refetch } = useGetOwnerScorecard(spielerId, spielId, {
+    query: { enabled: !!spielId && !!spielerId, queryKey: getGetOwnerScorecardQueryKey(spielerId, spielId) },
   });
   if (isLoading) return <ScorecardSkeleton />;
   if (isError || !data) return <ErrorBox text={`Spiel #${spielId} konnte nicht geladen werden.`} onRetry={() => refetch()} />;

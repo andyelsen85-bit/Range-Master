@@ -84,3 +84,59 @@ mtime_ms = 1792317956599
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/b0e6e308-1a10-4fbc-b63d-fcbca4806984/e81de69a-4c66-4e31-bcf8-428b6a308e89"
 storage_version_token = "1792318306562736"
 content_type = "image/png"
+
+[[outputs]]
+id = "4SmTHkA0iL-G0UOiRfj2C"
+uri = "file://generated-artifacts/verification/part-b-six-player-a4.pdf"
+type = "pdf"
+title = "Portal: six-player A4 print fixture"
+description = "Actual headless-browser PDF: six players, two runs, all 25 columns on one A4 portrait page. Synthetic layout fixture, not a private API response."
+logical_id = "d7736d79-9d60-4761-a20a-320fa2ac91f0"
+content_hash = "sha256:1a5994db2c0db98f3312683075f1381cd197b639be83371b069e2d3d8edc2931"
+size = 180366
+mtime_ms = 1792434948661
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/d7736d79-9d60-4761-a20a-320fa2ac91f0/e6be5cb5-32a4-4897-a92d-6d594dfb38dd"
+storage_version_token = "1792435277352112"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "OJ9pDG2MxKewn7ZC7uD_w"
+uri = "file://generated-artifacts/verification/part-b-six-player-a4.png"
+type = "image"
+title = "Portal A4 PDF — rendered page"
+description = "Screenshot rendered from the verified six-player PDF, including the right border and TOTAL POINTS."
+logical_id = "40ea1d9c-a62f-4190-9a75-237b843d0040"
+content_hash = "sha256:9055bcf89143c270bb926e2267e4bf02840ad5c24a6741d78c262d5ad7627dd4"
+size = 153472
+mtime_ms = 1792434958861
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/40ea1d9c-a62f-4190-9a75-237b843d0040/e1eae714-d867-4425-851e-c50bd933bd64"
+storage_version_token = "1792435278132581"
+content_type = "image/png"
+
+[[outputs]]
+id = "yj0CwKpNLY6kPmI0vMJUO"
+uri = "file://generated-artifacts/verification/part-b-owner-annual-a4.pdf"
+type = "pdf"
+title = "Portal: annual player report"
+description = "Actual one-page A4 PDF with annual statistics, A–H, clays 1–9 and all twelve months. Synthetic owner data."
+logical_id = "4b509a51-cdc6-4cf6-a888-ba9c29798092"
+content_hash = "sha256:d23d852b254a51bc826d620edfe012d904144b4a3c2bc7a8a86cc4d81c864bf8"
+size = 132759
+mtime_ms = 1792434849753
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/4b509a51-cdc6-4cf6-a888-ba9c29798092/9bee4e4a-c5cd-4a1d-845e-d5ef971b58dc"
+storage_version_token = "1792435279031500"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "cf_-RbiGyZ2-o4BSqwI34"
+uri = "file://generated-artifacts/verification/part-b-owner-annual-page.png"
+type = "image"
+title = "Annual PDF — rendered page"
+description = "Screenshot rendered from the actual annual report PDF. No individual game cards."
+logical_id = "2970cb23-cdec-40de-b3b2-a91e62a09d7a"
+content_hash = "sha256:f1080ef2aa329201c6454abf08053b5c5d39985f8b4617fbcadd3f725e285b41"
+size = 99952
+mtime_ms = 1792434857529
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b4995181-80a7-49c9-9ff9-37fe919051ad/2970cb23-cdec-40de-b3b2-a91e62a09d7a/164eb754-ab35-4ee7-8fff-d7ef011678da"
+storage_version_token = "1792435279608666"
+content_type = "image/png"

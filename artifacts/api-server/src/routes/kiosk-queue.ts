@@ -7,9 +7,7 @@ import { rateLimit } from "../lib/rate-limit";
 import { queueSnapshot,signupQueue,cancelQueue,mutateQueue,queueLock,queueAudit,PortalConflict } from "../lib/queue";
 import { liveSnapshotSchema,storeLiveSnapshot } from "../lib/live-game";
 import { publicName } from "@workspace/scorecard";
-import { computePlayerStats } from "../lib/player-stats";
-import { gameScorecard } from "../lib/game-scorecard";
-import { daySchema,localDay } from "../lib/local-day";
+import { playerPrintReport,playerReportDays } from "../lib/player-report";
 import { computeRangliste } from "./rangliste-compute";
 const router=Router(),id=z.coerce.number().int().positive(),mode=z.enum(["NORMAL","HARAKIRI","HARAKIRI_CUSTOM","CUSTOM_1","CUSTOM_2","CUSTOM_3","CUSTOM_4"]);
 router.use("/public",(req,res,next)=>rateLimit(req.method==="GET"?"read":"write",req.method==="GET"?60:10)(req,res,next));
@@ -77,18 +75,12 @@ router.post("/public/groups/:id/signup",async(req,res)=>{
   res.json(await signupQueue(members.map(p=>p.spieler_id),body.modus,res.locals.kiosk,groupId));
 });
 router.get("/public/player/:id/days",async(req,res)=>{
-  const days=(await db.execute(sql`SELECT DISTINCT (g.datum AT TIME ZONE 'Europe/Luxembourg')::date::text datum
-    FROM v_spiele_visible g JOIN v_teilnahmen_visible t ON t.spiel_id=g.id WHERE t.spieler_id=${id.parse(req.params.id)} ORDER BY datum DESC`)).rows.map((r:any)=>r.datum);
-  res.json({days});
+  res.json(await playerReportDays(id.parse(req.params.id)));
 });
 router.get("/public/player/:id/print",rateLimit("print",6),async(req,res)=>{
-  const playerId=id.parse(req.params.id),tag=daySchema.parse(req.query.tag??localDay());
-  const [player]=(await db.execute(sql`SELECT name FROM spieler WHERE id=${playerId} AND aktiv`)).rows as any[];
-  if(!player)return void res.sendStatus(404);
-  const ids=(await db.execute(sql`SELECT g.id FROM v_spiele_visible g JOIN v_teilnahmen_visible t ON t.spiel_id=g.id
-    WHERE t.spieler_id=${playerId} AND (g.datum AT TIME ZONE 'Europe/Luxembourg')::date=${tag}::date GROUP BY g.id ORDER BY g.id`)).rows as any[];
-  res.json({name:player.name,tag,club:"Rangemaster",games:await Promise.all(ids.map(g=>gameScorecard(g.id,{viewerSpielerId:playerId,anonymise:true}))),
-    stats:await computePlayerStats(playerId,{from:tag,to:tag})});
+  const data=await playerPrintReport(id.parse(req.params.id),req.query);
+  if(!data)return void res.sendStatus(404);
+  res.json(data);
 });
 router.get("/sync/queue",requireApiKey,async(req,res)=>{
   if((req as any).apiKeyType!=="TERMINAL")return void res.sendStatus(403);

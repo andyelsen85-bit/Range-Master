@@ -63,7 +63,7 @@ export function Scorecard({ game, size = "default", hideHeader, className }: Sco
       )}
 
       <div className="overflow-x-auto overscroll-x-contain">
-        <table className="border-collapse w-max min-w-full">
+        <table className="slip-table border-collapse w-max min-w-full">
           <thead>
             <tr>
               <th className={cn("slip-sticky slip-cell text-left px-3 font-bold uppercase tracking-widest text-[hsl(var(--slip-muted))]", nameW, tv ? "text-lg" : "text-[10px]")}>
@@ -86,13 +86,13 @@ export function Scorecard({ game, size = "default", hideHeader, className }: Sco
                 </th>
               ))}
               {game.runs > 1 && Array.from({ length: game.runs }, (_, r) => (
-                <th key={`rt-${r}`} className={cn("slip-cell slip-sum-start text-center font-bold leading-tight px-1 text-[hsl(var(--slip-muted))]", sumW, tv ? "text-base" : "text-[9px]")}>
+                <th key={`rt-${r}`} className={cn("slip-cell slip-run-total slip-sum-start text-center font-bold leading-tight px-1 text-[hsl(var(--slip-muted))]", sumW, tv ? "text-base" : "text-[9px]")}>
                   TOT<br />{r + 1}. LAUF
                 </th>
               ))}
-              <th className={cn("slip-cell text-center font-bold leading-tight px-1 text-[hsl(var(--slip-two))]", sumW, tv ? "text-base" : "text-[9px]", game.runs <= 1 && "slip-sum-start")}>2 PTS</th>
-              <th className={cn("slip-cell text-center font-bold leading-tight px-1 text-[hsl(var(--slip-one))]", sumW, tv ? "text-base" : "text-[9px]")}>1 PT</th>
-              <th className={cn("slip-cell text-center font-bold leading-tight px-1 text-[hsl(var(--slip-muted))]", sumW, tv ? "text-base" : "text-[9px]")}>0</th>
+              <th className={cn("slip-cell slip-hit-total text-center font-bold leading-tight px-1 text-[hsl(var(--slip-two))]", sumW, tv ? "text-base" : "text-[9px]", game.runs <= 1 && "slip-sum-start")}>2 PTS</th>
+              <th className={cn("slip-cell slip-hit-total text-center font-bold leading-tight px-1 text-[hsl(var(--slip-one))]", sumW, tv ? "text-base" : "text-[9px]")}>1 PT</th>
+              <th className={cn("slip-cell slip-zero-total text-center font-bold leading-tight px-1 text-[hsl(var(--slip-muted))]", sumW, tv ? "text-base" : "text-[9px]")}>0</th>
               <th className={cn("slip-cell slip-total text-center font-black leading-tight px-2", tv ? "text-lg min-w-[6rem]" : "text-[10px] min-w-[3.5rem]")}>TOTAL<br />POINTS</th>
             </tr>
           </thead>

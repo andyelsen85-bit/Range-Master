@@ -5,6 +5,7 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+import type { KioskPrintDataZeitraum } from './kioskPrintDataZeitraum';
 import type { SharedScorecard } from './sharedScorecard';
 import type { SpielerStatistik } from './spielerStatistik';
 
@@ -14,4 +15,6 @@ export interface KioskPrintData {
   club: string;
   games: SharedScorecard[];
   stats: SpielerStatistik;
+  zeitraum?: KioskPrintDataZeitraum;
+  jahr?: number;
 }

@@ -162,7 +162,19 @@
 .print-receipt { padding: 3mm; font-size: 11px; }
 .print-receipt .print-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .print-receipt .print-two-col { grid-template-columns: 1fr; }
-@page { size: A4; margin: 12mm; }
+@page { size: A4 portrait; margin: 10mm; }
+/* Screen-side measurement mode: mirrors print table rules at 9 pt (removed before paint). */
+.print-measure { width: var(--measure-width, 190mm) !important; max-width: none !important; padding: 0 !important; box-sizing: content-box; }
+.print-measure .overflow-x-auto { overflow: visible !important; }
+.print-measure .slip-table { width: max-content !important; min-width: 0 !important; table-layout: auto; }
+.print-measure .slip-table .slip-cell { min-width: 0 !important; width: auto !important; max-width: none !important; font-size: 9pt !important; padding: 0.5mm 0.2mm !important; line-height: 1.15; }
+.print-measure .slip-table .slip-sticky { max-width: 24mm !important; overflow: hidden; position: static !important; }
+.print-measure .slip-table th.slip-sticky { width: 24mm !important; min-width: 24mm !important; padding-left: 1mm !important; }
+.print-measure .slip-table th.slip-run-total { width: 10mm !important; min-width: 10mm !important; }
+.print-measure .slip-table th.slip-hit-total { width: 9mm !important; min-width: 9mm !important; }
+.print-measure .slip-table th.slip-zero-total { width: 5mm !important; min-width: 5mm !important; }
+.print-measure .slip-table th.slip-total { width: 15mm !important; min-width: 15mm !important; }
+@page wide { size: A4 landscape; margin: 10mm; }
 @page receipt { size: 80mm auto; margin: 3mm; }
 @media print {
   html, body, #root { background: #fff !important; color: #111 !important; }
@@ -170,6 +182,45 @@
   .print-receipt { page: receipt; width: 74mm; }
   .print-sheet .scorecard-paper { background: transparent; }
   .print-sheet .overflow-x-auto { overflow: visible; }
-  .print-avoid-break { break-inside: avoid; }
+  .print-avoid-break { break-inside: avoid; page-break-inside: avoid; }
+  .print-a4[data-print-fit="landscape"] { page: wide; }
+  /* A4 sheet: nothing may clip the scorecard. Scoped to the A4 sheet, receipt untouched. */
+  html:has(.print-a4), html:has(.print-a4) body, html:has(.print-a4) #root,
+  html:has(.print-a4) .kiosk-root, .print-ancestor:has(.print-a4),
+  :is(div, main, section):has(.print-a4) { overflow: visible !important; max-width: none !important; height: auto !important; min-height: 0 !important; }
+  .print-a4, .print-a4 * { overflow: visible !important; max-width: none !important; }
+  .print-a4 { width: 100% !important; font-size: 10pt; }
+  .print-a4 .slip-table { width: 100% !important; min-width: 0 !important; table-layout: fixed; }
+  .print-a4 .slip-table .slip-cell { min-width: 0 !important; width: auto !important; font-size: max(7pt, calc(9pt * var(--print-scale, 1))) !important;
+    padding: 0.5mm 0.2mm !important; line-height: 1.15; white-space: normal; word-break: keep-all; }
+  .print-a4 .slip-table th.slip-sticky { width: 24mm !important; padding-left: 1mm !important; }
+  .print-a4 .slip-table th.slip-run-total { width: 10mm !important; }
+  .print-a4 .slip-table th.slip-hit-total { width: 9mm !important; }
+  .print-a4 .slip-table th.slip-zero-total { width: 5mm !important; }
+  .print-a4 .slip-table th.slip-total { width: 15mm !important; }
+  .print-a4 .slip-sticky { position: static !important; overflow-wrap: anywhere; word-break: break-word; }
+  .print-a4 .scorecard-paper > div:first-child { font-size: max(7pt, calc(9pt * var(--print-scale, 1))); padding: 1mm 1.5mm; }
+  /* Annual report: stats + 12 months + footer on one A4 page. Receipt untouched. */
+  .print-annual { font-size: 8.5pt; }
+  .print-annual > header { margin-bottom: 2.5mm; padding-bottom: 1.5mm; }
+  .print-annual > header h1 { font-size: 15pt; line-height: 1.1; }
+  .print-annual > header p { font-size: 8pt; }
+  .print-annual section { margin-top: 0 !important; }
+  .print-annual [data-testid="section-day-stats"] > * + * { margin-top: 3mm !important; }
+  .print-annual [data-testid="section-day-stats"] h2 { font-size: 12pt; }
+  .print-annual h3 { font-size: 7.5pt; margin-bottom: 1mm; }
+  .print-annual .print-stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.5mm; }
+  .print-annual .print-stats-grid > div { padding: 0.8mm 1.5mm; }
+  .print-annual .print-stats-grid dt { font-size: 7pt; }
+  .print-annual .print-stats-grid dd { font-size: 11pt; line-height: 1.15; }
+  .print-annual .print-two-col { grid-template-columns: 1fr 1fr; gap: 5mm; }
+  .print-annual .print-two-col .space-y-1 > * + * { margin-top: 0.6mm !important; }
+  .print-annual .print-two-col .grid { font-size: 7.5pt; grid-template-columns: 17mm 1fr 20mm; }
+  .print-annual .print-two-col .h-4 { height: 2.8mm; }
+  .print-annual table { font-size: 7.5pt; }
+  .print-annual [data-testid="section-month-table"] { margin-top: 3mm !important; }
+  .print-annual .print-month-table td, .print-annual .print-month-table th { padding-top: 0.3mm; padding-bottom: 0.3mm; }
+  .print-annual .print-month-table .h-3 { height: 2.5mm; }
+  .print-annual > footer { margin-top: 3mm; padding-top: 1mm; font-size: 7pt; }
   .kiosk-root { min-height: 0 !important; }
 }

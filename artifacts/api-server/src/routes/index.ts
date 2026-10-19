@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import authRouter from "./auth";
 import spielerRouter from "./spieler";
+import playerReportsRouter from "./player-reports";
 import ranglisteRouter from "./rangliste";
 import statistikRouter from "./statistik";
 import syncRouter from "./sync";
@@ -13,7 +14,7 @@ import { requireKiosk } from "../lib/kiosk";
 import kioskQueueRouter from "./kiosk-queue";
 import kioskAccessRouter from "./kiosk-access";
 import managedGamesRouter from "./managed-games";
-import { configureSyncRoutes } from "../lib/build-health";
+import { configureSyncRoutes,configureReportRoutes } from "../lib/build-health";
 
 const router: IRouter = Router();
 
@@ -27,6 +28,7 @@ router.use(gamedayPlayersRouter);
 router.use(terminalLogsRouter);
 router.use("/auth", authRouter);
 router.use("/spieler", spielerRouter);
+router.use("/spieler", playerReportsRouter);
 router.use("/rangliste", ranglisteRouter);
 router.use("/statistik", statistikRouter);
 router.use("/sync", syncRouter);
@@ -38,6 +40,10 @@ configureSyncRoutes([
   {router:gamedayRouter,prefix:"/api"},
   {router:gamedayPlayersRouter,prefix:"/api"},
   {router:terminalLogsRouter,prefix:"/api"},
+]);
+configureReportRoutes([
+  {router:playerReportsRouter,prefix:"/api/spieler"},
+  {router:kioskQueueRouter,prefix:"/api"},
 ]);
 
 export default router;

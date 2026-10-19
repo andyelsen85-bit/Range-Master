@@ -38,6 +38,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @workspace/api-server test:sync-contract
       - run: pnpm --filter @workspace/api-server test:local-players
+      - run: pnpm --filter @workspace/api-server test:player-reports
       - name: Check PIN and persistent stand-PC access
         run: pnpm --filter @workspace/api-server test:kiosk
       - name: Check queue eligibility and durable day-player delivery

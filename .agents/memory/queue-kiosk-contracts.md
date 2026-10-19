@@ -72,3 +72,17 @@ production cookie policy unnecessarily.
 
 **How to apply:** Compare direct API and proxied Set-Cookie attributes before
 changing cookie code; separately verify the actual production browser/proxy path.
+
+“Meine Ergebnisse” and any selected-player print report must contain only that
+player's row, enforced on the server rather than hidden in the browser. Anonymous
+placeholder rows for other players are not sufficient. Only the owner or an
+administrator may request private player reports; live/shared scorecards remain
+separate and unchanged.
+
+**Why:** The user explicitly requires no other names or results in personal
+results, tooltips, hidden DOM or personal printouts. A kiosk report for a selected
+player is still a per-player report, not implicitly a club-wide report.
+
+**How to apply:** Keep owner-scoped reads distinct from shared scorecards. Annual
+reports use the same visible-result rules and Luxembourg calendar boundaries as
+daily reports, without individual game cards.

@@ -51,6 +51,7 @@ import type {
   GetLegacyCreditCancellationCandidatesParams,
   GetManagedGamesParams,
   GetMyPurchases200,
+  GetOwnerPrintParams,
   GetRangliste200,
   GetRanglisteParams,
   GetSpielerErgebnisse200,
@@ -5389,6 +5390,236 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       return useMutation(getKioskGroupSignupMutationOptions(options));
     }
 
+export const getGetOwnerScorecardUrl = (id: number,
+    spielId: number,) => {
+
+
+
+
+  return `/api/spieler/${id}/spiele/${spielId}/scorecard`
+}
+
+export const getOwnerScorecard = async (id: number,
+    spielId: number, options?: Parameters<typeof customFetch>[1]): Promise<SharedScorecard> => {
+
+  return customFetch<SharedScorecard>(getGetOwnerScorecardUrl(id,spielId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOwnerScorecardQueryKey = (id: number,
+    spielId: number,) => {
+    return [
+    `/api/spieler/${id}/spiele/${spielId}/scorecard`
+    ] as const;
+    }
+
+
+export const getGetOwnerScorecardQueryOptions = <TData = Awaited<ReturnType<typeof getOwnerScorecard>>, TError = ErrorType<void>>(id: number,
+    spielId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOwnerScorecard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOwnerScorecardQueryKey(id,spielId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOwnerScorecard>>> = ({ signal }) => getOwnerScorecard(id,spielId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined && spielId !== null && spielId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOwnerScorecard>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOwnerScorecardQueryResult = NonNullable<Awaited<ReturnType<typeof getOwnerScorecard>>>
+export type GetOwnerScorecardQueryError = ErrorType<void>
+
+
+
+export function useGetOwnerScorecard<TData = Awaited<ReturnType<typeof getOwnerScorecard>>, TError = ErrorType<void>>(
+ id: number,
+    spielId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOwnerScorecard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOwnerScorecardQueryOptions(id,spielId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetOwnerPrintDaysUrl = (id: number,) => {
+
+
+
+
+  return `/api/spieler/${id}/print-days`
+}
+
+export const getOwnerPrintDays = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<KioskPrintDays> => {
+
+  return customFetch<KioskPrintDays>(getGetOwnerPrintDaysUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOwnerPrintDaysQueryKey = (id: number,) => {
+    return [
+    `/api/spieler/${id}/print-days`
+    ] as const;
+    }
+
+
+export const getGetOwnerPrintDaysQueryOptions = <TData = Awaited<ReturnType<typeof getOwnerPrintDays>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOwnerPrintDays>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOwnerPrintDaysQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOwnerPrintDays>>> = ({ signal }) => getOwnerPrintDays(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOwnerPrintDays>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOwnerPrintDaysQueryResult = NonNullable<Awaited<ReturnType<typeof getOwnerPrintDays>>>
+export type GetOwnerPrintDaysQueryError = ErrorType<void>
+
+
+
+export function useGetOwnerPrintDays<TData = Awaited<ReturnType<typeof getOwnerPrintDays>>, TError = ErrorType<void>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOwnerPrintDays>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOwnerPrintDaysQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetOwnerPrintUrl = (id: number,
+    params?: GetOwnerPrintParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/spieler/${id}/print?${stringifiedParams}` : `/api/spieler/${id}/print`
+}
+
+export const getOwnerPrint = async (id: number,
+    params?: GetOwnerPrintParams, options?: Parameters<typeof customFetch>[1]): Promise<KioskPrintData> => {
+
+  return customFetch<KioskPrintData>(getGetOwnerPrintUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOwnerPrintQueryKey = (id: number,
+    params?: GetOwnerPrintParams,) => {
+    return [
+    `/api/spieler/${id}/print`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOwnerPrintQueryOptions = <TData = Awaited<ReturnType<typeof getOwnerPrint>>, TError = ErrorType<void>>(id: number,
+    params?: GetOwnerPrintParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOwnerPrint>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOwnerPrintQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOwnerPrint>>> = ({ signal }) => getOwnerPrint(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOwnerPrint>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOwnerPrintQueryResult = NonNullable<Awaited<ReturnType<typeof getOwnerPrint>>>
+export type GetOwnerPrintQueryError = ErrorType<void>
+
+
+
+export function useGetOwnerPrint<TData = Awaited<ReturnType<typeof getOwnerPrint>>, TError = ErrorType<void>>(
+ id: number,
+    params?: GetOwnerPrintParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOwnerPrint>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOwnerPrintQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetKioskPrintDaysUrl = (id: number,) => {
 
 
@@ -5461,7 +5692,7 @@ export function useGetKioskPrintDays<TData = Awaited<ReturnType<typeof getKioskP
 
 
 export const getGetKioskPrintUrl = (id: number,
-    params: GetKioskPrintParams,) => {
+    params?: GetKioskPrintParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -5477,7 +5708,7 @@ export const getGetKioskPrintUrl = (id: number,
 }
 
 export const getKioskPrint = async (id: number,
-    params: GetKioskPrintParams, options?: Parameters<typeof customFetch>[1]): Promise<KioskPrintData> => {
+    params?: GetKioskPrintParams, options?: Parameters<typeof customFetch>[1]): Promise<KioskPrintData> => {
 
   return customFetch<KioskPrintData>(getGetKioskPrintUrl(id,params),
   {
@@ -5501,7 +5732,7 @@ export const getGetKioskPrintQueryKey = (id: number,
 
 
 export const getGetKioskPrintQueryOptions = <TData = Awaited<ReturnType<typeof getKioskPrint>>, TError = ErrorType<unknown>>(id: number,
-    params: GetKioskPrintParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPrint>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+    params?: GetKioskPrintParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPrint>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -5526,7 +5757,7 @@ export type GetKioskPrintQueryError = ErrorType<unknown>
 
 export function useGetKioskPrint<TData = Awaited<ReturnType<typeof getKioskPrint>>, TError = ErrorType<unknown>>(
  id: number,
-    params: GetKioskPrintParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPrint>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+    params?: GetKioskPrintParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKioskPrint>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 

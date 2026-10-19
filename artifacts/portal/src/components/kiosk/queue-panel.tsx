@@ -229,7 +229,8 @@ export function QueuePanel({ enabled, resetSignal }: { enabled: boolean; resetSi
     );
   } else if (view === "print" && selected) {
     body = <PrintDayPicker player={selected} day={printDay} onDay={setPrintDay} onBack={() => setView("single")}
-      onPreview={(d) => setLocation(`/live/print/${selected.id}?tag=${d}`)} header={header} />;
+      onPreview={(d) => setLocation(`/live/print/${selected.id}?tag=${d}`)}
+      onYear={(y) => setLocation(`/live/print/${selected.id}?zeitraum=jahr&jahr=${y}`)} header={header} />;
   } else if (view === "groups") {
     body = (
       <div className="flex-1 min-h-0 flex flex-col gap-3" data-testid="view-kiosk-groups">
@@ -477,9 +478,9 @@ export function PlayerList({ players, loading, selectedIds, onTap, compact }: {
   );
 }
 
-function PrintDayPicker({ player, day, onDay, onBack, onPreview, header }: {
+function PrintDayPicker({ player, day, onDay, onBack, onPreview, onYear, header }: {
   player: Selected; day: string | null; onDay: (d: string) => void; onBack: () => void;
-  onPreview: (d: string) => void; header: (t: string, back?: () => void) => React.ReactNode;
+  onPreview: (d: string) => void; onYear: (y: number) => void; header: (t: string, back?: () => void) => React.ReactNode;
 }) {
   const q = useGetKioskPrintDays(player.id, {
     query: { queryKey: getGetKioskPrintDaysQueryKey(player.id), placeholderData: keepPreviousData },
@@ -487,6 +488,7 @@ function PrintDayPicker({ player, day, onDay, onBack, onPreview, header }: {
   useEffect(() => { if (q.error) reportKioskError(q.error); }, [q.error]);
   const days = useMemo(() => parseDays(q.data), [q.data]);
   const today = todayIso();
+  const years = q.data?.years ?? [];
   const chosen = day ?? (days.includes(today) ? today : days[0] ?? null);
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-4" data-testid="view-kiosk-print">
@@ -504,6 +506,15 @@ function PrintDayPicker({ player, day, onDay, onBack, onPreview, header }: {
           </button>
         ))}
       </div>
+      {years.length > 0 && (
+        <div className="shrink-0 flex flex-wrap items-center gap-2" data-testid="row-print-years">
+          <span className="text-xl font-bold mr-2">Gesamt Jahr</span>
+          {years.map((y) => (
+            <button key={y} type="button" onClick={() => onYear(y)} data-testid={`button-print-year-${y}`}
+              className="h-16 px-6 rounded-xl text-2xl font-bold font-mono border-2 border-border bg-background/40">{y}</button>
+          ))}
+        </div>
+      )}
       <button type="button" disabled={!chosen} onClick={() => chosen && onPreview(chosen)} data-testid="button-print-preview"
         className="kiosk-primary shrink-0 h-20 rounded-2xl text-2xl font-black flex items-center justify-center gap-3 disabled:opacity-40">
         <Printer size={30} /> Vorschau anzeigen

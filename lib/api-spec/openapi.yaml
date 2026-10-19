@@ -974,6 +974,37 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/QueueSignupInput" } } } }
       responses:
         "200": { description: Entire group signed up, content: { application/json: { schema: { $ref: "#/components/schemas/PortalData" } } } }
+  /spieler/{id}/spiele/{spielId}/scorecard:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+      - { name: spielId, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: getOwnerScorecard
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Only the selected owner's row, content: { application/json: { schema: { $ref: "#/components/schemas/SharedScorecard" } } } }
+        "403": { description: Not the owner or an administrator }
+        "404": { description: No visible participation }
+  /spieler/{id}/print-days:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    get:
+      operationId: getOwnerPrintDays
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Own visible days and years, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPrintDays" } } } }
+        "403": { description: Not the owner or an administrator }
+  /spieler/{id}/print:
+    parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+    get:
+      operationId: getOwnerPrint
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: tag, in: query, schema: { type: string, format: date } }
+        - { name: zeitraum, in: query, schema: { type: string, enum: [tag, jahr] } }
+        - { name: jahr, in: query, schema: { type: integer, minimum: 1970, maximum: 9998 } }
+      responses:
+        "200": { description: Own day scorecards or SQL-aggregated annual report, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPrintData" } } } }
+        "403": { description: Not the owner or an administrator }
   /public/player/{id}/days:
     parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
     get:
@@ -986,9 +1017,12 @@ paths:
     get:
       operationId: getKioskPrint
       security: [{ KioskDevice: [] }]
-      parameters: [{ name: tag, in: query, required: true, schema: { type: string, format: date } }]
+      parameters:
+        - { name: tag, in: query, schema: { type: string, format: date } }
+        - { name: zeitraum, in: query, schema: { type: string, enum: [tag, jahr] } }
+        - { name: jahr, in: query, schema: { type: integer, minimum: 1970, maximum: 9998 } }
       responses:
-        "200": { description: Anonymised cards and shared day statistics, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPrintData" } } } }
+        "200": { description: Selected player's own cards and day or annual statistics, content: { application/json: { schema: { $ref: "#/components/schemas/KioskPrintData" } } } }
   /public/ranking:
     get:
       operationId: getKioskRanking
@@ -1262,9 +1296,10 @@ components:
         retryAfterSec: { type: integer, minimum: 1 }
     KioskPrintDays:
       type: object
-      required: [days]
+      required: [days, years]
       properties:
         days: { type: array, items: { type: string, format: date } }
+        years: { type: array, items: { type: integer } }
     KioskPrintData:
       type: object
       required: [name, tag, club, games, stats]
@@ -1274,6 +1309,8 @@ components:
         club: { type: string }
         games: { type: array, items: { $ref: "#/components/schemas/SharedScorecard" } }
         stats: { $ref: "#/components/schemas/SpielerStatistik" }
+        zeitraum: { type: string, enum: [tag, jahr] }
+        jahr: { type: integer }
     KioskRanking:
       type: object
       required: [rangliste]
@@ -1428,6 +1465,7 @@ components:
       type: object
       required: [date, completedAt, mode, runs, claysPerRun, columns, players]
       properties:
+        maxPoints: { type: integer }
         date: { type: string, format: date-time }
         completedAt: { type: [string, "null"], format: date-time }
         mode: { type: string }
@@ -1956,6 +1994,21 @@ components:
     SpielerStatistik:
       type: object
       properties:
+        anzahlSpieltage: { type: integer }
+        besterTag: { type: [string, "null"] }
+        besterTagPunkte: { type: integer }
+        monate:
+          type: array
+          items:
+            type: object
+            required: [month, spiele, schuesse, treffer, quote, schnitt]
+            properties:
+              month: { type: integer }
+              spiele: { type: integer }
+              schuesse: { type: integer }
+              treffer: { type: integer }
+              quote: { type: number }
+              schnitt: { type: number }
         breakdown:
           type: array
           items:

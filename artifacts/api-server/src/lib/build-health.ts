@@ -5,6 +5,7 @@ export const portalBuild = typeof __PORTAL_BUILD__ === "undefined"
   ? {commit:"unbundled",builtAt:null,dirty:true} : __PORTAL_BUILD__;
 export interface SyncRoute { method:string; path:string }
 let syncRoutes:SyncRoute[]=[];
+let reportRoutes:SyncRoute[]=[];
 
 /** Inspect the actual mounted routers, not a separately maintained route list. */
 export function configureSyncRoutes(mounts:{router:IRouter;prefix:string}[]) {
@@ -24,4 +25,12 @@ export function configureSyncRoutes(mounts:{router:IRouter;prefix:string}[]) {
   }
   syncRoutes=[...routes.values()].sort((a,b)=>a.path.localeCompare(b.path)||a.method.localeCompare(b.method));
 }
-export function portalHealth() { return {status:"ok" as const,build:portalBuild,syncRoutes}; }
+export function configureReportRoutes(mounts:{router:IRouter;prefix:string}[]) {
+  reportRoutes=mounts.flatMap(({router,prefix})=>router.stack.flatMap(layer=>{
+    const route=layer.route;
+    if(!route||typeof route.path!=="string"||!/(scorecard|print|days)/.test(route.path))return [];
+    return Object.entries((route as unknown as {methods:Record<string,boolean>}).methods)
+      .filter(([,enabled])=>enabled).map(([method])=>({method:method.toUpperCase(),path:prefix+route.path}));
+  }));
+}
+export function portalHealth() { return {status:"ok" as const,build:portalBuild,syncRoutes,reportRoutes}; }

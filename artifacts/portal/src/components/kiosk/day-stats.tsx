@@ -1,16 +1,22 @@
 import { modeLabel } from "@/components/scorecard";
+import { formatDay } from "@/lib/kiosk";
 import type { DayStats, TaubeStat } from "./types";
 
 const fmt = (n: number, d = 1) => (Number.isFinite(n) ? n.toLocaleString("de-LU", { maximumFractionDigits: d, minimumFractionDigits: d }) : "–");
 
 /** Day statistics for the printout. Bars use a hatch pattern + labels so they print in black and white. */
-export function DayStatsBlock({ stats }: { stats: DayStats }) {
-  const maschinen = Object.entries(stats.maschinen ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  const tauben = Object.entries(stats.tauben ?? {}).sort(([a], [b]) => Number(a) - Number(b));
+export function DayStatsBlock({ stats, title = "Statistik des Tages", annual }: { stats: DayStats; title?: string; annual?: boolean }) {
+  const zero: TaubeStat = { versuche: 0, treffer: 0, quote: 0 };
+  const maschinen: [string, TaubeStat][] = annual
+    ? "ABCDEFGH".split("").map((k) => [k, stats.maschinen?.[k] ?? zero])
+    : Object.entries(stats.maschinen ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const tauben: [string, TaubeStat][] = annual
+    ? Array.from({ length: 9 }, (_, i) => [String(i + 1), stats.tauben?.[String(i + 1)] ?? zero])
+    : Object.entries(stats.tauben ?? {}).sort(([a], [b]) => Number(a) - Number(b));
   const breakdown = stats.breakdown ?? [];
   return (
     <section className="space-y-5 print-avoid-break" data-testid="section-day-stats">
-      <h2 className="text-xl font-black border-b-2 border-[hsl(var(--slip-ink))] pb-1">Statistik des Tages</h2>
+      <h2 className="text-xl font-black border-b-2 border-[hsl(var(--slip-ink))] pb-1" data-testid="text-stats-title">{title}</h2>
       <dl className="grid grid-cols-3 sm:grid-cols-6 gap-3 print-stats-grid">
         <Kpi label="Spiele" value={String(stats.gesamtSpiele)} />
         <Kpi label="Schüsse" value={String(stats.gesamtSchuesse)} />
@@ -18,6 +24,8 @@ export function DayStatsBlock({ stats }: { stats: DayStats }) {
         <Kpi label="Trefferquote" value={`${fmt(stats.trefferquote)} %`} />
         <Kpi label="Bestes Spiel" value={String(stats.bestPunkte)} />
         <Kpi label="Schnitt / Spiel" value={fmt(stats.durchschnitt)} />
+        {annual && <Kpi label="Spieltage" value={String(stats.anzahlSpieltage ?? 0)} />}
+        {annual && <Kpi label="Bester Tag" value={stats.besterTag ? `${formatDay(stats.besterTag)} · ${stats.besterTagPunkte ?? 0}` : "–"} />}
       </dl>
       <div className="grid sm:grid-cols-2 gap-6 print-two-col">
         <Bars title="Trefferquote pro Maschine" rows={maschinen.map(([k, v]) => [`Maschine ${k}`, v])} testid="bars-maschinen" />

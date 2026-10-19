@@ -113,6 +113,7 @@ export type SharedScorecardPlayersItem = {
 };
 
 export interface SharedScorecard {
+  maxPoints?: number;
   date: string;
   /** @nullable */
   completedAt: string | null;
@@ -222,7 +223,25 @@ export interface KioskAccessError {
 
 export interface KioskPrintDays {
   days: string[];
+  years: number[];
 }
+
+export type KioskPrintDataZeitraum = typeof KioskPrintDataZeitraum[keyof typeof KioskPrintDataZeitraum];
+
+
+export const KioskPrintDataZeitraum = {
+  tag: 'tag',
+  jahr: 'jahr',
+} as const;
+
+export type SpielerStatistikMonateItem = {
+  month: number;
+  spiele: number;
+  schuesse: number;
+  treffer: number;
+  quote: number;
+  schnitt: number;
+};
 
 export type SpielerStatistikBreakdownItem = {
   modus: string;
@@ -244,6 +263,11 @@ export type SpielerStatistikMaschinen = {[key: string]: {
 }};
 
 export interface SpielerStatistik {
+  anzahlSpieltage?: number;
+  /** @nullable */
+  besterTag?: string | null;
+  besterTagPunkte?: number;
+  monate?: SpielerStatistikMonateItem[];
   breakdown?: SpielerStatistikBreakdownItem[];
   gesamtSchuesse: number;
   gesamtTreffer: number;
@@ -262,6 +286,8 @@ export interface KioskPrintData {
   club: string;
   games: SharedScorecard[];
   stats: SpielerStatistik;
+  zeitraum?: KioskPrintDataZeitraum;
+  jahr?: number;
 }
 
 export interface RanglisteEntry {
@@ -1434,9 +1460,41 @@ export type GetKioskPlayersParams = {
 q?: string;
 };
 
-export type GetKioskPrintParams = {
-tag: string;
+export type GetOwnerPrintParams = {
+tag?: string;
+zeitraum?: GetOwnerPrintZeitraum;
+/**
+ * @minimum 1970
+ * @maximum 9998
+ */
+jahr?: number;
 };
+
+export type GetOwnerPrintZeitraum = typeof GetOwnerPrintZeitraum[keyof typeof GetOwnerPrintZeitraum];
+
+
+export const GetOwnerPrintZeitraum = {
+  tag: 'tag',
+  jahr: 'jahr',
+} as const;
+
+export type GetKioskPrintParams = {
+tag?: string;
+zeitraum?: GetKioskPrintZeitraum;
+/**
+ * @minimum 1970
+ * @maximum 9998
+ */
+jahr?: number;
+};
+
+export type GetKioskPrintZeitraum = typeof GetKioskPrintZeitraum[keyof typeof GetKioskPrintZeitraum];
+
+
+export const GetKioskPrintZeitraum = {
+  tag: 'tag',
+  jahr: 'jahr',
+} as const;
 
 export type GetTerminalQueueParams = {
 /**

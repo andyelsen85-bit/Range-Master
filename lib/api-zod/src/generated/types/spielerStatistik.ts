@@ -7,9 +7,15 @@
  */
 import type { SpielerStatistikBreakdownItem } from './spielerStatistikBreakdownItem';
 import type { SpielerStatistikMaschinen } from './spielerStatistikMaschinen';
+import type { SpielerStatistikMonateItem } from './spielerStatistikMonateItem';
 import type { SpielerStatistikTauben } from './spielerStatistikTauben';
 
 export interface SpielerStatistik {
+  anzahlSpieltage?: number;
+  /** @nullable */
+  besterTag?: string | null;
+  besterTagPunkte?: number;
+  monate?: SpielerStatistikMonateItem[];
   breakdown?: SpielerStatistikBreakdownItem[];
   gesamtSchuesse: number;
   gesamtTreffer: number;

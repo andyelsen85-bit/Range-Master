@@ -345,6 +345,17 @@ export const GetStatistikParams = zod.object({
 })
 
 export const GetStatistikResponse = zod.object({
+  "anzahlSpieltage": zod.number().int().optional(),
+  "besterTag": zod.string().nullish(),
+  "besterTagPunkte": zod.number().int().optional(),
+  "monate": zod.array(zod.object({
+  "month": zod.number().int(),
+  "spiele": zod.number().int(),
+  "schuesse": zod.number().int(),
+  "treffer": zod.number().int(),
+  "quote": zod.number(),
+  "schnitt": zod.number()
+})).optional(),
   "breakdown": zod.array(zod.object({
   "modus": zod.string(),
   "anzahlSpiele": zod.number().int(),
@@ -1321,6 +1332,7 @@ export const UpdatePublicPageSettingsResponse = zod.object({
 
 
 export const GetPublicLastGameResponse = zod.object({
+  "maxPoints": zod.number().int().optional(),
   "date": zod.coerce.date(),
   "completedAt": zod.coerce.date().nullable(),
   "mode": zod.string(),
@@ -1346,6 +1358,7 @@ export const GetSharedScorecardParams = zod.object({
 })
 
 export const GetSharedScorecardResponse = zod.object({
+  "maxPoints": zod.number().int().optional(),
   "date": zod.coerce.date(),
   "completedAt": zod.coerce.date().nullable(),
   "mode": zod.string(),
@@ -1554,28 +1567,64 @@ export const KioskGroupSignupBody = zod.object({
 export const KioskGroupSignupResponse = zod.record(zod.string(), zod.unknown())
 
 
-export const GetKioskPrintDaysParams = zod.object({
+export const GetOwnerScorecardParams = zod.object({
+  "id": zod.coerce.number().int(),
+  "spielId": zod.coerce.number().int()
+})
+
+export const GetOwnerScorecardResponse = zod.object({
+  "maxPoints": zod.number().int().optional(),
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable(),
+  "mode": zod.string(),
+  "runs": zod.number().int(),
+  "claysPerRun": zod.number().int(),
+  "columns": zod.array(zod.object({
+  "run": zod.number().int(),
+  "clay": zod.number().int(),
+  "machine": zod.string(),
+  "pair": zod.union([zod.literal('start'),zod.literal('end'),zod.literal(null)]).nullable()
+})),
+  "players": zod.array(zod.object({
+  "name": zod.string(),
+  "total": zod.number().int(),
+  "runTotals": zod.array(zod.number().int()),
+  "cells": zod.array(zod.number().int().nullable())
+}))
+})
+
+
+export const GetOwnerPrintDaysParams = zod.object({
   "id": zod.coerce.number().int()
 })
 
-export const GetKioskPrintDaysResponse = zod.object({
-  "days": zod.array(zod.coerce.date())
+export const GetOwnerPrintDaysResponse = zod.object({
+  "days": zod.array(zod.coerce.date()),
+  "years": zod.array(zod.number().int())
 })
 
 
-export const GetKioskPrintParams = zod.object({
+export const GetOwnerPrintParams = zod.object({
   "id": zod.coerce.number().int()
 })
 
-export const GetKioskPrintQueryParams = zod.object({
-  "tag": zod.date()
+export const getOwnerPrintQueryJahrMin = 1970;
+export const getOwnerPrintQueryJahrMax = 9998;
+
+
+
+export const GetOwnerPrintQueryParams = zod.object({
+  "tag": zod.date().optional(),
+  "zeitraum": zod.enum(['tag', 'jahr']).optional(),
+  "jahr": zod.coerce.number().int().min(getOwnerPrintQueryJahrMin).max(getOwnerPrintQueryJahrMax).optional()
 })
 
-export const GetKioskPrintResponse = zod.object({
+export const GetOwnerPrintResponse = zod.object({
   "name": zod.string(),
   "tag": zod.coerce.date(),
   "club": zod.string(),
   "games": zod.array(zod.object({
+  "maxPoints": zod.number().int().optional(),
   "date": zod.coerce.date(),
   "completedAt": zod.coerce.date().nullable(),
   "mode": zod.string(),
@@ -1595,6 +1644,17 @@ export const GetKioskPrintResponse = zod.object({
 }))
 })),
   "stats": zod.object({
+  "anzahlSpieltage": zod.number().int().optional(),
+  "besterTag": zod.string().nullish(),
+  "besterTagPunkte": zod.number().int().optional(),
+  "monate": zod.array(zod.object({
+  "month": zod.number().int(),
+  "spiele": zod.number().int(),
+  "schuesse": zod.number().int(),
+  "treffer": zod.number().int(),
+  "quote": zod.number(),
+  "schnitt": zod.number()
+})).optional(),
   "breakdown": zod.array(zod.object({
   "modus": zod.string(),
   "anzahlSpiele": zod.number().int(),
@@ -1618,7 +1678,99 @@ export const GetKioskPrintResponse = zod.object({
   "treffer": zod.number().int(),
   "quote": zod.number()
 }))
+}),
+  "zeitraum": zod.enum(['tag', 'jahr']).optional(),
+  "jahr": zod.number().int().optional()
 })
+
+
+export const GetKioskPrintDaysParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const GetKioskPrintDaysResponse = zod.object({
+  "days": zod.array(zod.coerce.date()),
+  "years": zod.array(zod.number().int())
+})
+
+
+export const GetKioskPrintParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const getKioskPrintQueryJahrMin = 1970;
+export const getKioskPrintQueryJahrMax = 9998;
+
+
+
+export const GetKioskPrintQueryParams = zod.object({
+  "tag": zod.date().optional(),
+  "zeitraum": zod.enum(['tag', 'jahr']).optional(),
+  "jahr": zod.coerce.number().int().min(getKioskPrintQueryJahrMin).max(getKioskPrintQueryJahrMax).optional()
+})
+
+export const GetKioskPrintResponse = zod.object({
+  "name": zod.string(),
+  "tag": zod.coerce.date(),
+  "club": zod.string(),
+  "games": zod.array(zod.object({
+  "maxPoints": zod.number().int().optional(),
+  "date": zod.coerce.date(),
+  "completedAt": zod.coerce.date().nullable(),
+  "mode": zod.string(),
+  "runs": zod.number().int(),
+  "claysPerRun": zod.number().int(),
+  "columns": zod.array(zod.object({
+  "run": zod.number().int(),
+  "clay": zod.number().int(),
+  "machine": zod.string(),
+  "pair": zod.union([zod.literal('start'),zod.literal('end'),zod.literal(null)]).nullable()
+})),
+  "players": zod.array(zod.object({
+  "name": zod.string(),
+  "total": zod.number().int(),
+  "runTotals": zod.array(zod.number().int()),
+  "cells": zod.array(zod.number().int().nullable())
+}))
+})),
+  "stats": zod.object({
+  "anzahlSpieltage": zod.number().int().optional(),
+  "besterTag": zod.string().nullish(),
+  "besterTagPunkte": zod.number().int().optional(),
+  "monate": zod.array(zod.object({
+  "month": zod.number().int(),
+  "spiele": zod.number().int(),
+  "schuesse": zod.number().int(),
+  "treffer": zod.number().int(),
+  "quote": zod.number(),
+  "schnitt": zod.number()
+})).optional(),
+  "breakdown": zod.array(zod.object({
+  "modus": zod.string(),
+  "anzahlSpiele": zod.number().int(),
+  "durchschnitt": zod.number(),
+  "durchschnittProzent": zod.number()
+})).optional(),
+  "gesamtSchuesse": zod.number().int(),
+  "gesamtTreffer": zod.number().int(),
+  "tauben": zod.record(zod.string(), zod.object({
+  "versuche": zod.number().int(),
+  "treffer": zod.number().int(),
+  "quote": zod.number()
+})),
+  "spielerId": zod.number().int(),
+  "gesamtSpiele": zod.number().int(),
+  "durchschnitt": zod.number(),
+  "bestPunkte": zod.number().int(),
+  "trefferquote": zod.number(),
+  "maschinen": zod.record(zod.string(), zod.object({
+  "versuche": zod.number().int(),
+  "treffer": zod.number().int(),
+  "quote": zod.number()
+}))
+}),
+  "zeitraum": zod.enum(['tag', 'jahr']).optional(),
+  "jahr": zod.number().int().optional()
 })
 
 
@@ -1821,6 +1973,7 @@ export const GetManagedGameResponse = zod.object({
   "playerCount": zod.number().int().optional()
 }),
   "scorecard": zod.object({
+  "maxPoints": zod.number().int().optional(),
   "date": zod.coerce.date(),
   "completedAt": zod.coerce.date().nullable(),
   "mode": zod.string(),

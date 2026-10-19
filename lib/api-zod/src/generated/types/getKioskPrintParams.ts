@@ -5,7 +5,14 @@
  * TrapMaster API — F.S.H.C.L. Sektioun Wolz
  * OpenAPI spec version: 0.1.0
  */
+import type { GetKioskPrintZeitraum } from './getKioskPrintZeitraum';
 
 export type GetKioskPrintParams = {
-tag: Date;
+tag?: Date;
+zeitraum?: GetKioskPrintZeitraum;
+/**
+ * @minimum 1970
+ * @maximum 9998
+ */
+jahr?: number;
 };

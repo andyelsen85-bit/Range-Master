@@ -9,6 +9,7 @@ import type { SharedScorecardColumnsItem } from './sharedScorecardColumnsItem';
 import type { SharedScorecardPlayersItem } from './sharedScorecardPlayersItem';
 
 export interface SharedScorecard {
+  maxPoints?: number;
   date: Date;
   /** @nullable */
   completedAt: Date | null;

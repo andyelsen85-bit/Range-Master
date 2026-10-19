@@ -8,4 +8,5 @@
 
 export interface KioskPrintDays {
   days: Date[];
+  years: number[];
 }
