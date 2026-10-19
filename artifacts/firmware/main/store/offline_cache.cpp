@@ -33,6 +33,7 @@ const char *offline_cache_path_error(){return s_path_error;}
 #include "portal_runtime.h"
 #include "ui_manager.h"
 #include "esp_timer.h"
+#include "fat_selftest.h"
 #include <strings.h>
 #include <initializer_list>
 
@@ -40,12 +41,20 @@ static const char *TAG = "offline_cache";
 static const char *ROOT = "/fatfs/TMCACHE";
 static bool s_patterns_checked=false;
 static bool check_path_patterns() {
+    if(s_patterns_checked)return !s_path_error[0];
     s_patterns_checked=true;
-    bool ok=fat_patterns_self_test("/fatfs",s_path_error,sizeof(s_path_error));
+    int64_t start=esp_timer_get_time();
+    bool ok=fat_patterns_validate("/fatfs");
+    if(!ok)snprintf(s_path_error,sizeof(s_path_error),"FAT: ungültiges Dateinamensmuster");
+    // Reserved scratch names with the same shapes as ACTIVE0, ROSTER and J000.
+    // No fsync here: full durability probes run once, after the UI is ready.
+    for(int index:{0,4,25})
+        if(ok)ok=fat_patterns_self_test("/fatfs",s_path_error,sizeof(s_path_error),index,false);
     if(!ok) {
         terminal_log_add("data_loss_risk","ERROR",s_path_error);
         ESP_LOGE(TAG,"%s",s_path_error);
-    } else ESP_LOGI(TAG,"FAT all name patterns write/fsync/rename/read/unlink OK");
+    } else ESP_LOGI(TAG,"fat selftest done in %lld ms mode=quick",
+        (long long)((esp_timer_get_time()-start)/1000));
     return ok;
 }
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
@@ -93,6 +102,15 @@ static const char *names[] = {"roster","products","history","credits","sales","b
 
 static void lock_cache(void) { if (!s_mutex) s_mutex = xSemaphoreCreateMutex(); configASSERT(s_mutex); xSemaphoreTake(s_mutex, portMAX_DELAY); }
 static void unlock_cache(void) { xSemaphoreGive(s_mutex); }
+bool offline_cache_pattern_step(int index,bool durable,char *error,unsigned capacity) {
+    lock_cache();
+    game_journal_storage_lock();
+    bool ok=s_mounted&&!s_storage_blocked&&
+        fat_patterns_self_test("/fatfs",error,capacity,index,durable);
+    game_journal_storage_unlock();
+    unlock_cache();
+    return ok;
+}
 static size_t payload_size(OfflineCacheSection s) {
     switch (s) {
     case OFFLINE_CACHE_ROSTER: return sizeof(RosterPayload); case OFFLINE_CACHE_PRODUCTS: return sizeof(ProductsPayload);

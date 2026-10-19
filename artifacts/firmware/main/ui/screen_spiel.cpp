@@ -14,6 +14,9 @@
 #include "scorecard_render.h"
 #include "active_scorecard.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
+#include "esp_log.h"
+#include "active_game.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_maschine;
@@ -53,8 +56,12 @@ static void score_cb(lv_event_t *e)
     spiel_action_score(pts);
 }
 
-SpielActionResult spiel_action_score(int pts)
+SpielActionResult spiel_action_score(int pts,uint32_t receivedMs)
 {
+    int64_t pressed=receivedMs?(int64_t)receivedMs*1000:esp_timer_get_time();
+#ifdef ESP_PLATFORM
+    if(game_store_finish_pending())return SPIEL_ACTION_IGNORED;
+#endif
     if (g_store.taubeIndex >= g_store.sequenzLen || pts < 0 || pts > 2)
         return SPIEL_ACTION_IGNORED;
     const SequenzEintrag *entry=store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
@@ -63,11 +70,18 @@ SpielActionResult spiel_action_score(int pts)
         return SPIEL_ACTION_IGNORED;
     store_eintragen(pts);
     screen_spiel_refresh();
+    int ms=(esp_timer_get_time()-pressed)/1000;
+    esp_log_level_t level=ms>150?ESP_LOG_WARN:ESP_LOG_INFO;
+    ESP_LOG_LEVEL(level,"score","score_ui_ms=%d source=%s queue_depth=%u",
+        ms,receivedMs?"remote":"touch",active_game_checkpoint_pending()?1u:0u);
     return SPIEL_ACTION_OK;
 }
 
 SpielActionResult spiel_action_fire()
 {
+#ifdef ESP_PLATFORM
+    if(game_store_finish_pending())return SPIEL_ACTION_IGNORED;
+#endif
     if (g_store.taubeIndex >= g_store.sequenzLen) return SPIEL_ACTION_IGNORED;
     const SequenzEintrag *se = store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
     if(!se || g_store.activeGameStorageError)return SPIEL_ACTION_IGNORED;
@@ -79,7 +93,7 @@ SpielActionResult spiel_action_fire()
     // after WDH can therefore safely preserve its explicit false fire flag.
     g_store.currentFireSent=true;
     g_store.repeatCurrentLaunch=false;
-    game_store_save();
+    game_store_save_game_checkpoint();
     if(g_store.activeGameStorageError)return SPIEL_ACTION_RADIO_BUSY;
     bool queued = false;
     if (se->isPair && se->maschine != MASCHINE_H) {
@@ -89,7 +103,7 @@ SpielActionResult spiel_action_fire()
         // locally by the addressed relay after its fixed system delay.
         queued = lora_fire_machine_game(se->maschine);
     }
-    if (!queued) {g_store.currentFireSent=false;game_store_save();}
+    if (!queued) {g_store.currentFireSent=false;game_store_save_game_checkpoint();}
     screen_spiel_refresh();
     return queued ? SPIEL_ACTION_OK : SPIEL_ACTION_RADIO_BUSY;
 }
@@ -101,9 +115,13 @@ static void fire_cb(lv_event_t *e)
 
 SpielActionResult spiel_action_repeat()
 {
-    if (g_store.ergebnisseCount <= 0 &&
-        !g_store.currentFireSent)return SPIEL_ACTION_IGNORED;
+#ifdef ESP_PLATFORM
+    if(game_store_finish_pending())return SPIEL_ACTION_IGNORED;
+#endif
     const SequenzEintrag *entry=store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
+    bool unscoredPair=entry&&entry->isPair&&!entry->isDoublette&&!g_store.repeatCurrentLaunch;
+    if (g_store.ergebnisseCount <= 0 &&
+        !g_store.currentFireSent&&!unscoredPair)return SPIEL_ACTION_IGNORED;
     if(g_store.activeGameStorageError ||
        (g_store.currentFireSent && entry && entry->isPair && entry->isDoublette))
         return SPIEL_ACTION_IGNORED;
@@ -114,6 +132,9 @@ SpielActionResult spiel_action_repeat()
 
 SpielActionResult spiel_action_skip()
 {
+#ifdef ESP_PLATFORM
+    if(game_store_finish_pending())return SPIEL_ACTION_IGNORED;
+#endif
     if (g_store.taubeIndex >= g_store.sequenzLen) return SPIEL_ACTION_IGNORED;
     store_skip_taube();
     screen_spiel_refresh();
@@ -574,6 +595,10 @@ void screen_spiel_refresh(void)
         char text[160];
         if(s->activeGameStorageError)
             snprintf(text,sizeof(text),"SPEICHERFEHLER: keine weitere Wertung/kein Start. Speichern wird erneut versucht.");
+#ifdef ESP_PLATFORM
+        else if(game_store_finish_pending())
+            snprintf(text,sizeof(text),"Spielabschluss wird sicher gespeichert …");
+#endif
         else if(s->repeatCurrentLaunch)
             snprintf(text,sizeof(text),"Maschine erneut starten");
         else if(s->activeGameResumed)

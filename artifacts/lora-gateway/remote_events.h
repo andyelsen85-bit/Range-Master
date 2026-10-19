@@ -163,8 +163,9 @@ static bool buttonEnqueue(const tm_protocol::DecodedPacket &p) {
     remoteMailbox[(remoteHead+remoteCount)%8]=p;++remoteCount;return true;
 }
 static void buttonRadioTick() {
-    // The legacy FIRE path has absolute priority and owns its own flags.
-    if(pendingFire || radioBusy) return;
+    // FIRE owns only the actual TX. While awaiting ACK or pair delay, receive,
+    // persist and ACK remote presses normally (same durable counter rules).
+    if(radioBusy) return;
     if(remoteTx) {
         if(txDone||txTimeout||millis()-remoteTxStarted>TX_TIMEOUT_MS) {
             remoteTx=false;Radio.Rx(0);

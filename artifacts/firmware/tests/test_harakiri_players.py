@@ -37,6 +37,7 @@ static int finished=0;
 static std::mt19937 rng(173128);
 static uint32_t esp_random(){return rng();}
 void game_store_save(){if(persist)assert(active_game_checkpoint());}
+void game_store_save_game_checkpoint(){game_store_save();}
 void portal_live_changed(int){}
 bool portal_queue_game_started(){return true;}
 bool portal_queue_release(){return true;}
@@ -116,11 +117,18 @@ int main() {
         assert(g_store.ergebnisse[0].wiederholt);
     }
     setup(MODUS_CUSTOM_1,255,2);
+    // First repeat also rearms an unscored pair before any launch flag exists.
+    store_wiederholen();
+    assert(g_store.repeatCurrentLaunch&&g_store.ergebnisseCount==0&&g_store.taubeIndex==0);
+    store_wiederholen();
+    assert(g_store.ergebnisseCount==0&&g_store.taubeIndex==0);
     g_store.currentFireSent=true;store_wiederholen();
     assert(!g_store.currentFireSent&&g_store.taubeIndex==0&&g_store.ergebnisseCount==0);
     g_store.currentFireSent=true;store_eintragen(2);
     store_wiederholen();assert(g_store.ergebnisseCount==1&&g_store.currentFireSent);
     store_eintragen(2);assert(g_store.ergebnisseCount==2&&g_store.spieler[0].punkte==4);
+    store_wiederholen();
+    assert(g_store.ergebnisseCount==2&&g_store.spielerIndex==1&&g_store.taubeIndex==0);
     store_wiederholen();
     assert(g_store.ergebnisseCount==0&&g_store.spielerIndex==0&&g_store.taubeIndex==0&&g_store.spieler[0].punkte==0);
     for(int players=2;players<=6;players++)for(int mode:{MODUS_HARAKIRI,MODUS_HARAKIRI_CUSTOM})
@@ -293,6 +301,7 @@ int main() {
     journal_status=0;assert(active_game_restore());assert(!g_store.harakiriOrdersReady);
     setup(MODUS_HARAKIRI,255,2);g_store.harakiriOrdersReady=true;
     assert(active_game_checkpoint());
+    store_record_game_end(g_store.spielId);
     active_game_mark_ended();g_store.harakiriOrdersReady=false;g_store.screen=SCREEN_DASHBOARD;
     older=1-newest();snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/ACTIVE%d.BIN",older);
     assert(unlink(name)==0&&mkdir(name,0700)==0);
@@ -324,6 +333,7 @@ int main() {
         char temp[160];snprintf(temp,sizeof(temp),ACTIVE_GAME_ROOT "/ACTIVE%d.TMP",slot);
         assert(mkdir(temp,0700)==0);
     }
+    store_record_game_end(g_store.spielId);
     active_game_mark_ended();g_store.harakiriOrdersReady=false;g_store.screen=SCREEN_DASHBOARD;
     assert(!active_game_checkpoint()&&!g_store.activeGameStorageError&&!active_game_is_open());
     for(int slot=0;slot<2;slot++){

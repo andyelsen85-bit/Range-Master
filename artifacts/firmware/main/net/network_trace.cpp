@@ -1,5 +1,6 @@
 #include "network_trace.h"
 #include "network_test.h"
+#include "socket_census.h"
 #include "bounded_dns.h"
 #include "coprocessor.h"
 #include "terminal_logs.h"
@@ -102,7 +103,6 @@ void network_trace_end(esp_err_t result,int status) {
     bool failed=result!=ESP_OK||status>=400;
     bool emit=true;uint32_t count=1;int64_t first=t->start;
     if(failed) {
-        if(result!=ESP_OK)(void)network_test_start(true);
         char key[160];snprintf(key,sizeof(key),"%.90s %.45s %d/%d",t->host,t->path,(int)result,status);
         portENTER_CRITICAL(&errorLock);
         ErrorRun *entry=nullptr;
@@ -154,6 +154,7 @@ extern "C" int __wrap_lwip_select(int nfds,fd_set *read,fd_set *write,fd_set *ex
 extern "C" int __real_lwip_connect(int,const struct sockaddr*,socklen_t);
 extern "C" int __wrap_lwip_connect(int fd,const struct sockaddr *addr,socklen_t length) {
     auto *t=current();if(t)t->tcpStart=now();
+    if(t)socket_census_owner(fd,t->host,t->path);
     int result=__real_lwip_connect(fd,addr,length);if(t&&result==0)t->tcpEnd=now();return result;
 }
 extern "C" int __real_mbedtls_ssl_handshake(mbedtls_ssl_context*);

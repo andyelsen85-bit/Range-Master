@@ -15,6 +15,26 @@
 #include <dirent.h>
 #include <strings.h>
 #include <sys/stat.h>
+#ifdef ESP_PLATFORM
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "esp_log.h"
+static SemaphoreHandle_t writer_mutex;
+static TaskHandle_t writer_task;
+static std::atomic<unsigned> dirty_revision{0},saved_revision{0};
+static std::atomic<int64_t> dirty_at{0};
+static std::atomic<bool> force_checkpoint{false};
+static std::atomic<unsigned> attempted_revision{0};
+static void writer_lock(){
+    if(!writer_mutex)writer_mutex=xSemaphoreCreateMutex();
+    configASSERT(writer_mutex);xSemaphoreTake(writer_mutex,portMAX_DELAY);
+}
+static void writer_unlock(){xSemaphoreGive(writer_mutex);}
+#else
+static void writer_lock(){}
+static void writer_unlock(){}
+#endif
 
 #ifndef ACTIVE_GAME_ROOT
 #define ACTIVE_GAME_ROOT "/fatfs"
@@ -46,12 +66,14 @@ static std::atomic<bool> had_active{false};
 static std::atomic<uint32_t> next_generation{0};
 static uint32_t committed_generation=0;
 static int committed_slot=-1;
+static ActiveRecord *last_written=nullptr; // PSRAM; compared only under writer mutex
 static std::atomic<bool> pending_clear{false};
 static std::atomic<int64_t> retry_at{0};
 static std::atomic<unsigned> retry_step{0};
 bool active_game_is_open(){return g_store.activeGameOpen||had_active.load();}
 void active_game_mark_ended() {
-    store_record_game_end(g_store.spielId);
+    // RAM-only. Callers have already durably recorded the finished journal or
+    // cancellation intent. The small ended-ID guard is flushed off LVGL.
     ++next_generation;
     g_store.activeGameOpen=false;g_store.activeGameStorageError=false;
     had_active=false;pending_clear=true;retry_at=0;retry_step=0;
@@ -194,7 +216,10 @@ static bool write_slot(int slot,ActiveRecord *r) {
         terminal_log_add("data_loss_risk","ERROR",message);return false;
     }
     if(f) {
-        ok=storage_write_committed(f,r,sizeof(*r),&complete);
+        // A/B already retains the last committed copy. One fsync per new slot,
+        // not one for the header and a second for its payload.
+        complete=fwrite(r,1,sizeof(*r),f)==sizeof(*r);
+        ok=complete&&fflush(f)==0&&fsync(fileno(f))==0;
         if(fclose(f)!=0)ok=false;
     }
     if(!ok){int error=errno;if(!complete)(void)unlink(temp);
@@ -212,27 +237,32 @@ static bool write_slot(int slot,ActiveRecord *r) {
 bool active_game_remap() {
     if(!initialized)return true;
     if(blocked)return false;
+    writer_lock();
     game_journal_storage_lock();
-    if(committed_slot<0){game_journal_storage_unlock();return true;}
+    if(committed_slot<0){game_journal_storage_unlock();writer_unlock();return true;}
     auto *r=(ActiveRecord*)heap_caps_malloc(sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     bool present=false,ok=r&&read(committed_slot,r,&present);
     if(ok) {
         remap_record(r);
+    }
+    game_journal_storage_unlock();
+    if(ok) {
         // Identity-only rewrite: keep the gameplay revision. A newer score
         // already captured by LVGL must not be superseded by this disk copy.
         int other=1-committed_slot;
         ok=write_slot(other,r);
         if(ok){committed_slot=other;ok=write_slot(1-other,r);}
+        if(ok&&last_written)*last_written=*r;
     }
-    heap_caps_free(r);game_journal_storage_unlock();return ok;
+    heap_caps_free(r);writer_unlock();return ok;
 }
 
 bool active_game_checkpoint() {
     if(!initialized)return true; // NVS normalization precedes the FAT mount.
     if(blocked)return false; // Never overwrite an unrecognized active record.
-    bool acquired=false;
-    if(!ui_manager_snapshot_lock(&acquired))return false;
     auto *r=(ActiveRecord*)heap_caps_calloc(1,sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    bool acquired=false;
+    if(!ui_manager_snapshot_lock(&acquired)){heap_caps_free(r);return false;}
     if(!r){g_store.activeGameStorageError=g_store.activeGameOpen||g_store.harakiriOrdersReady||
             (g_store.screen==SCREEN_SPIEL&&g_store.spielerCount>0);
         if(acquired)ui_manager_unlock();
@@ -254,20 +284,28 @@ bool active_game_checkpoint() {
                 g_store.customLaeufe[g_store.modus-MODUS_CUSTOM_1] : 2);
     }
     if(acquired)ui_manager_unlock();
-    game_journal_storage_lock();
+    writer_lock();
     bool ok=true;
     if(r->generation>committed_generation) {
         // Rewrite only the older slot: the last committed file always survives.
+        game_journal_storage_lock();
         remap_record(r); // includes snapshots captured before RAM publication
+        game_journal_storage_unlock();
         int slot=committed_slot==0?1:0;
-        ok=write_slot(slot,r);
+        bool identical=last_written&&last_written->active==r->active&&
+            !memcmp(&last_written->data,&r->data,sizeof(r->data));
+        if(!identical)ok=write_slot(slot,r);
         if(ok) {
-            committed_generation=r->generation;committed_slot=slot;had_active=r->active;
+            committed_generation=r->generation;
+            if(!identical)committed_slot=slot;
+            had_active=r->active;
+            if(!last_written)last_written=(ActiveRecord*)heap_caps_malloc(sizeof(ActiveRecord),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+            if(last_written)*last_written=*r;
             if(!r->active)pending_clear=false;
         }
     }
     uint32_t generation=r->generation;bool snapshot_active=r->active;
-    game_journal_storage_unlock();heap_caps_free(r);
+    writer_unlock();heap_caps_free(r);
     // A delayed ACK/settings save must never clear the error from a newer,
     // failed score checkpoint. Recheck its generation under the UI lock.
     if(ui_manager_snapshot_lock(&acquired)) {
@@ -276,6 +314,54 @@ bool active_game_checkpoint() {
     }
     return ok;
 }
+
+#ifdef ESP_PLATFORM
+bool active_game_checkpoint_pending(){return dirty_revision.load()!=saved_revision.load();}
+void active_game_schedule() {
+    dirty_at=esp_timer_get_time();++dirty_revision;
+    if(writer_task)xTaskNotifyGive(writer_task);
+}
+bool active_game_flush() {
+    if(xTaskGetCurrentTaskHandle()!=writer_task) {
+        if(!writer_task)return false;
+        active_game_schedule();
+        unsigned target=dirty_revision.load();
+        force_checkpoint=true;xTaskNotifyGive(writer_task);
+        int64_t deadline=esp_timer_get_time()+5000000;
+        while(attempted_revision.load()<target&&esp_timer_get_time()<deadline)
+            vTaskDelay(pdMS_TO_TICKS(5));
+        return saved_revision.load()>=target;
+    }
+    unsigned revision=dirty_revision.load();
+    int64_t start=esp_timer_get_time();
+    bool ok=active_game_checkpoint();
+    if(ok)saved_revision=revision; // never acknowledge a newer, uncaptured score
+    attempted_revision=revision;
+    int ms=(esp_timer_get_time()-start)/1000;
+    esp_log_level_t level=ms>2000?ESP_LOG_WARN:ESP_LOG_INFO;
+    ESP_LOG_LEVEL(level,"checkpoint",
+        "checkpoint_ms=%d nvs_ms=0 fat_ms=%d queue_depth=%u ok=%d",
+        ms,ms,active_game_checkpoint_pending()?1u:0u,ok);
+    return ok;
+}
+static void checkpoint_worker(void*) {
+    for(;;) {
+        ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(50));
+        // Game end is a hard durability point, performed by this same writer.
+        game_store_flush_finished();
+        if(active_game_checkpoint_pending()&&
+           (force_checkpoint.exchange(false)||esp_timer_get_time()-dirty_at.load()>=250000)) {
+            if(!active_game_flush())vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+}
+void active_game_writer_init() {
+    if(writer_task)return;
+    if(!writer_mutex)writer_mutex=xSemaphoreCreateMutex();
+    if(!writer_mutex||xTaskCreate(checkpoint_worker,"game_writer",16384,nullptr,1,&writer_task)!=pdPASS)
+        terminal_log_add("data_loss_risk","ERROR","Spielstand-Hintergrundtask nicht verfügbar");
+}
+#endif
 
 void active_game_retry_finished_checkpoint() {
     store_record_game_end(""); // retry a small NVS guard without holding LVGL
@@ -287,9 +373,15 @@ void active_game_retry_finished_checkpoint() {
     if(retry&&now<retry_at)retry=false;
     if(acquired)ui_manager_unlock();
     if(retry) {
+#ifdef ESP_PLATFORM
+        // Maintenance requests work; it is not a second FAT writer. Do not
+        // reset the idle deadline on every maintenance tick.
+        if(!active_game_checkpoint_pending())active_game_schedule();
+#else
         static const int seconds[]={1,5,30};
         if(active_game_checkpoint()){retry_step=0;retry_at=0;}
         else {retry_at=now+(int64_t)seconds[retry_step<2?retry_step++:2]*1000000;}
+#endif
     }
 }
 
@@ -372,6 +464,7 @@ bool active_game_restore() {
         } else if(best->active) {
             // Finished journal OR durable credit cancellation wins.
             g_store.harakiriOrdersReady=false;
+            store_record_game_end(best->data.spielId);
             active_game_mark_ended();
             if(cancelled)terminal_log_add("game","WARN","Storniertes Spiel nach Neustart nicht fortgesetzt; Kredit-Storno bleibt erhalten");
         }

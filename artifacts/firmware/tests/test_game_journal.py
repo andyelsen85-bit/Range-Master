@@ -283,6 +283,11 @@ class DurableGames(unittest.TestCase):
                 using TickType_t=uint32_t;
                 constexpr size_t HTTP_BUF_SIZE=65536;
                 void game_store_save(){++save_calls;}
+                void game_store_save_settings(){++save_calls;}
+                static bool finish_game_commit(FinishedGame&);
+                void kredit_events_lock(){}
+                void kredit_events_unlock(){}
+                bool reconcile_lineup_with_credits_unlocked(){return false;}
                 void portal_live_changed(int){}
                 void store_reconcile_lineup_with_credits(){}
                 void clear_active_game_credit_tracking(GameStore*){}
@@ -577,6 +582,7 @@ class DurableGames(unittest.TestCase):
                 }
             '''
             actual=production_function(ROOT/"game_store.cpp","static void _store_finish_game(void)\n{")
+            actual+="\n"+production_function(ROOT/"game_store.cpp","static bool finish_game_commit(FinishedGame &fg) {")
             actual+="\n"+production_function(ROOT.parent/"net/http_sync.cpp","esp_err_t http_push_pending_games(void)\n{")
             harness=harness.replace("int main(int argc,char**argv)",actual+"\nint main(int argc,char**argv)")
             (temp / "harness.cpp").write_text(textwrap.dedent(harness))

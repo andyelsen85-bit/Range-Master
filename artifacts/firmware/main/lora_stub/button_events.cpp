@@ -3,6 +3,8 @@
 #include "../../../lora-common/fire_link.h"
 #include "esp_websocket_client.h"
 #include "esp_http_client.h"
+#include "gateway_http.h"
+#include "network_trace.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -199,12 +201,14 @@ void fallback(const Shared &s) {
     HttpBody body{};
     esp_http_client_config_t cfg{};cfg.url=url;cfg.timeout_ms=1200;
     cfg.disable_auto_redirect=true;cfg.event_handler=httpEvent;cfg.user_data=&body;
-    auto client=esp_http_client_init(&cfg);
+    auto client=gateway_http_acquire(&cfg);
     if(!client) return;
     esp_http_client_set_header(client,"X-TrapMaster-Auth",mac);
+    network_trace_begin(url,"gateway-events",0);
     esp_err_t rc=esp_http_client_perform(client);
     int code=esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
+    network_trace_end(rc,code);
+    gateway_http_release(client,rc);
     if(rc!=ESP_OK||code!=200||body.overflow) return;
     cJSON *json=cJSON_Parse(body.bytes);if(!json) return;
     uint32_t boot,next;

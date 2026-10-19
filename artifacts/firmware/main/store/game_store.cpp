@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <atomic>
 #include <time.h>
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
@@ -12,6 +13,8 @@
 #include "freertos/semphr.h"
 #include "freertos/idf_additions.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "lora_stub.h"
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
 #include "esp_random.h"
@@ -74,6 +77,18 @@ static_assert(VERKAUF_PRICE_REVISION_UNALLOCATED == 0,
 
 // Forward declaration (defined later in this file)
 static void _store_finish_game(void);
+static bool finish_game_commit(FinishedGame &fg);
+#ifdef ESP_PLATFORM
+static EXT_RAM_BSS_ATTR FinishedGame s_finishing_game;
+static std::atomic<bool> s_finish_pending{false};
+bool game_store_finish_pending(){return s_finish_pending.load();}
+void game_store_flush_finished() {
+    if(!s_finish_pending.load())return;
+    if(lora_request_busy())return; // collect the asynchronous physical ACK first
+    if(finish_game_commit(s_finishing_game))s_finish_pending=false;
+    else vTaskDelay(pdMS_TO_TICKS(1000));
+}
+#endif
 
 // g_store is large (~40 KB with email fields) — place in SPIRAM to keep
 // internal DRAM free for IDF's small BSS sections (FreeRTOS, panic, etc.)
@@ -2397,6 +2412,9 @@ bool store_start_spiel(void)
 
 bool store_cancel_spiel(void)
 {
+#ifdef ESP_PLATFORM
+    if(s_finish_pending.load())return false;
+#endif
     GameStore *s = &g_store;
     if (s->screen != SCREEN_SPIEL) return false;
 
@@ -2475,6 +2493,7 @@ bool store_cancel_spiel(void)
 
     // Never call _store_finish_game here: a quit must not create results,
     // history, a pending game, or a result screen.
+    store_record_game_end(s->spielId);
     active_game_mark_ended();
     clear_active_game_credit_tracking(s);
     memset(s->spieler, 0, sizeof(s->spieler));
@@ -2646,7 +2665,7 @@ void store_eintragen(int punkte)
         }
     }
     portal_live_changed(1);
-    game_store_save();
+    game_store_save_game_checkpoint();
 }
 
 void store_account_acknowledged_clays(int count)
@@ -2656,12 +2675,15 @@ void store_account_acknowledged_clays(int count)
     // become clay consumption.
     if (count <= 0 || g_store.screen != SCREEN_SPIEL) return;
     g_store.activeAcknowledgedClays += count;
-    game_store_save();
+    game_store_save_game_checkpoint();
 }
 
 // ── _store_finish_game ───────────────────────────────────────
 static void _store_finish_game(void)
 {
+#ifdef ESP_PLATFORM
+    if(s_finish_pending.load())return;
+#endif
     GameStore *s = &g_store;
 
     // Build FinishedGame
@@ -2706,17 +2728,48 @@ static void _store_finish_game(void)
     // The full record must be durable before reporting the game as finished.
     fg.base.finishedAt[0]='\0';
     snprintf(fg.base.finishedAt,sizeof(fg.base.finishedAt),"%.31s",fg.finishedAt);
+#ifdef ESP_PLATFORM
+    s_finishing_game=fg; // only RAM copying on the final-score callback
+    s_finish_pending=true;
+    active_game_schedule();
+#else
+    (void)finish_game_commit(fg);
+#endif
+}
+
+static bool finish_game_commit(FinishedGame &fg) {
+    GameStore *s=&g_store;
+#ifdef ESP_PLATFORM
+    bool captured=false;
+    if(!ui_manager_snapshot_lock(&captured))return false;
+    fg.base.confirmedLaunches=s->activeAcknowledgedClays;
+    if(captured)ui_manager_unlock();
+#endif
     // A failed active checkpoint must not prevent the complete finished record
     // reaching its FAT journal or bounded emergency NVS slot.
     if(s->harakiriOrdersReady)(void)active_game_checkpoint();
     if(!game_journal_save(&fg)) {
         if(!game_journal_hold_pending(&fg)) {
             terminal_log_add("data_loss_risk","ERROR","Fertiges Spiel weder im Archiv noch im NVS gesichert; Speicher erneut versuchen");
-            s->activeGameStorageError=true;return;
+            bool acquired=false;
+            if(ui_manager_snapshot_lock(&acquired)) {
+                s->activeGameStorageError=true;
+                if(acquired)ui_manager_unlock();
+            }
+            return false;
         }
         terminal_log_add("data_loss_risk","WARN","Fertiges Spiel im NVS gesichert; Spielarchiv wird erneut versucht");
         // Keep the complete game in RAM and one bounded NVS emergency slot.
         // The worker retries FAT at 1s/5s/30s; a portal ACK also releases it.
+    }
+    // End marker and journal are durable before RAM/UI publication.
+    store_record_game_end(fg.base.externalId);
+    bool acquired=false;
+    if(!ui_manager_snapshot_lock(&acquired))return false;
+    if(strcmp(s->spielId,fg.base.externalId)) {
+        if(acquired)ui_manager_unlock();
+        terminal_log_add("data_loss_risk","ERROR","Abschluss gespeichert, aber Spiel-ID in RAM geändert");
+        return false;
     }
     // Store in history (ring buffer)
     if (s->historyCount < MAX_HISTORY) {
@@ -2746,9 +2799,14 @@ static void _store_finish_game(void)
     s->activeAcknowledgedClays = 0;
     s->screen         = SCREEN_RESULTATE;
     active_game_mark_ended();
-    store_reconcile_lineup_with_credits();
-    game_store_save();
+    kredit_events_lock();
+    (void)reconcile_lineup_with_credits_unlocked();
+    kredit_events_unlock();
+    if(acquired)ui_manager_unlock();
+    game_store_save_settings();
+    active_game_schedule();
     ESP_LOGI(TAG, "Game finished, navigating to resultate");
+    return true;
 }
 
 void store_dismiss_resultate(void)
@@ -2759,15 +2817,20 @@ void store_dismiss_resultate(void)
 
 void store_wiederholen(void)
 {
+#ifdef ESP_PLATFORM
+    if(s_finish_pending.load())return;
+#endif
     {
         if(g_store.activeGameStorageError)return;
         const SequenzEintrag *current=store_sequence_entry(&g_store,g_store.spielerIndex,g_store.taubeIndex);
-        if(current && g_store.currentFireSent && !current->isDoublette) {
+        bool unscoredPair=current&&current->isPair&&!current->isDoublette;
+        if(current && !current->isDoublette &&
+           (g_store.currentFireSent||(unscoredPair&&!g_store.repeatCurrentLaunch))) {
             // Deliberately repeat the current unscored launch, including the
             // uncertain pre-reboot launch. Do not undo another player's score.
             g_store.currentFireSent=false;g_store.activeGameResumed=false;
             g_store.repeatCurrentLaunch=true;
-            game_store_save();return;
+            game_store_save_game_checkpoint();return;
         }
         // A partially scored pair cannot be relaunched; finish its second
         // result before undoing the whole unit.
@@ -2801,7 +2864,7 @@ void store_wiederholen(void)
         g_store.spielerIndex=player;
         g_store.taubeIndex=last.taube-remove;
         g_store.currentFireSent=false;
-        game_store_save();return;
+        game_store_save_game_checkpoint();return;
     }
 }
 
@@ -2812,7 +2875,11 @@ void store_skip_taube(void)
 
 void store_retry_active_game_save(void)
 {
+#ifdef ESP_PLATFORM
+    active_game_schedule();
+#else
     g_store.activeGameStorageError=!active_game_checkpoint();
+#endif
     if(!g_store.activeGameStorageError &&
        g_store.taubeIndex>=g_store.sequenzLen)_store_finish_game();
 }
@@ -2820,6 +2887,9 @@ void store_retry_active_game_save(void)
 bool store_finish_open_game(void) {
     if(!g_store.activeGameOpen||g_store.screen!=SCREEN_SPIEL)return false;
     _store_finish_game();
+#ifdef ESP_PLATFORM
+    if(game_store_finish_pending())return true;
+#endif
     return !g_store.activeGameOpen&&g_store.screen==SCREEN_RESULTATE;
 }
 
@@ -3567,8 +3637,9 @@ static void queue_boot_sync_if_pending(void)
 }
 
 // ── Persistence (JSON in NVS) ─────────────────────────────────
-void game_store_save(void)
+void game_store_save_settings(void)
 {
+    int64_t started=esp_timer_get_time();
     nvs_lock();
     // Save key settings & pending queue to NVS as JSON strings.
     // Full game history is large; store in FAT partition in production.
@@ -3642,8 +3713,14 @@ void game_store_save(void)
         nvs_set_i32(s_nvs, "sp_up_cnt", g_store.spielerUpdateCount);
     nvs_commit(s_nvs);
     nvs_unlock();
-    (void)active_game_checkpoint();
+    ESP_LOGI(TAG,"settings_nvs_ms=%lld",(long long)((esp_timer_get_time()-started)/1000));
     (void)day_players_flush();
+}
+
+void game_store_save_game_checkpoint(void){active_game_schedule();}
+void game_store_save(void) {
+    game_store_save_settings();
+    game_store_save_game_checkpoint();
 }
 
 // ── Init ─────────────────────────────────────────────────────

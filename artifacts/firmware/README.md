@@ -48,6 +48,10 @@ Aktive und noch nicht übertragene Spiele, FAT-8.3-Pfadprüfung und die
 Hardware-Abnahme sind in [ACTIVE_GAME_RECOVERY.md](ACTIVE_GAME_RECOVERY.md)
 beschrieben. Kein `erase-flash`, keine NVS-/FAT-Löschung für dieses Update.
 
+Boot-, Wertungs-, Socket- und FIRE-Latenz auf dem echten Terminal:
+[PERFORMANCE_VALIDATION.md](PERFORMANCE_VALIDATION.md). Native Builds ersetzen
+die dort aufgeführten Messungen auf Terminal und Gateway nicht.
+
 ## Inventar & Tag: Oberfläche und Schriftprüfung
 
 Der Bildschirm zeigt Tagesbeginn und Tagesschluss gleichzeitig. Beide Spalten

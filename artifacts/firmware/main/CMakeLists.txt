@@ -11,12 +11,15 @@ idf_component_register(
         "store/game_journal.cpp"
         "store/storage_admin.cpp"
         "store/active_game.cpp"
+        "store/fat_selftest.cpp"
         "ui/screen_inventory.cpp"
         "store/offline_cache.cpp"
         "net/coprocessor.cpp"
         "net/http_sync.cpp"
         "net/network_trace.cpp"
         "net/network_test.cpp"
+        "net/socket_census.cpp"
+        "net/gateway_http.cpp"
         "net/bounded_dns.cpp"
         "net/portal_runtime.cpp"
         "net/portal_queue_json.cpp"
@@ -70,6 +73,7 @@ idf_component_register(
         nvs_flash
         json
         esp_timer
+        esp_app_format
         lwip
         freertos
         log

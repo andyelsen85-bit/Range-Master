@@ -35,6 +35,9 @@ static esp_err_t gateway_timing_event(esp_http_client_event_t *event) {
 #include "../../../lora-common/trapmaster_auth.h"
 #include "../../../lora-common/fire_link.h"
 #include "esp_wifi.h"
+#include "gateway_http.h"
+#include "active_game.h"
+#include "ui_manager.h"
 
 static const char *TAG = "lora_stub";
 static QueueHandle_t s_gateway_queue;
@@ -69,6 +72,7 @@ typedef struct {
     char nonce_hex[tm_auth::NONCE_HEX_LEN + 1];
     bool manual; // FIRE and operator-initiated health; autonomous health is false
     bool gameLaunch; // only live-game ACKs contribute to clay accounting
+    char gameId[40];
     uint8_t machine_mask; // immutable operator-confirmed test selection
     char gateway_url[MAX_URL_LEN];
     char gateway_token[MAX_KEY_LEN];
@@ -89,6 +93,10 @@ struct FireTrace {uint32_t t0,t1,t2,t3,t4;int status,rssi;unsigned retries;bool 
 [[maybe_unused]] static unsigned s_trace_next;
 [[maybe_unused]] static uint32_t s_trace_cursor;
 [[maybe_unused]] static char s_trace_gateway[32]{};
+[[maybe_unused]] static bool s_receipt_pending=false,s_reply_accepted=false,s_reply_ack=false,s_reply_first_ack=false,s_reply_second_sent=false;
+[[maybe_unused]] static GatewayRequest s_receipt_request{};
+[[maybe_unused]] static char s_receipt_url[MAX_URL_LEN+96]{},s_receipt_mac[tm_auth::MAC_HEX_LEN+1]{};
+[[maybe_unused]] static uint32_t s_receipt_started;
 
 static void set_status(const char *text)
 {
@@ -283,6 +291,7 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
                                        int *last_http, int timeout_ms, int attempts)
 {
     bool success = false;
+    s_reply_accepted=s_reply_ack=s_reply_first_ack=s_reply_second_sent=false;
     *last_http = 0;
     s_transport_retries=0;
     s_transport_ambiguous=false;
@@ -294,7 +303,7 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
         cfg.disable_auto_redirect = true;
         FireHttpBody body;
         cfg.event_handler=fire_http_event;cfg.user_data=&body;
-        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        esp_http_client_handle_t client = gateway_http_acquire(&cfg);
         if (!client) {
             set_status("Gateway client unavailable");
             break;
@@ -307,12 +316,17 @@ static bool perform_authenticated_get(const char *url, const char *mac_hex,
         *last_http = esp_http_client_get_status_code(client);
         cJSON *json=cJSON_Parse(body.body);
         bool progress=json&&cJSON_IsTrue(cJSON_GetObjectItem(json,"progress"));
-        if(json)cJSON_Delete(json);
+        if(json) {
+            s_reply_accepted=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"accepted"));
+            s_reply_ack=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"ack"));
+            s_reply_first_ack=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"firstAck"));
+            s_reply_second_sent=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json,"secondSent"));
+            cJSON_Delete(json);
+        }
         if (err == ESP_OK && *last_http >= 200 && *last_http < 300&&!progress) {
             success = true;
         }
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
+        gateway_http_release(client,err);
         // Retry only transport failures, with this exact URL/MAC/nonce. Never
         // acquire another nonce or retry a final busy/auth/storage rejection.
         if (err == ESP_OK&&!progress) break;
@@ -344,6 +358,25 @@ static bool perform_fire_transport(const GatewayRequest *request,const char *url
     s_transport_retries+=ws.attempts;
     s_transport_ambiguous|=ws.ambiguous;
     return result;
+}
+
+static void poll_fire_receipt() {
+    int status=0;
+    bool ok=perform_authenticated_get(s_receipt_url,s_receipt_mac,&status,300,1);
+    bool expired=(uint32_t)(esp_timer_get_time()/1000)-s_receipt_started>=30000;
+    if(ok&&s_reply_accepted&&!expired)return;
+    if(!ok&&status==0&&!expired)return;
+    int count=s_receipt_request.kind==GATEWAY_REQUEST_FIRE_PAIR?
+        (s_reply_first_ack?1:0)+(s_reply_second_sent&&s_reply_ack?1:0):
+        (s_reply_ack?(s_receipt_request.machine==MASCHINE_H?2:1):0);
+    bool acquired=false;
+    if(ok&&count&&ui_manager_snapshot_lock(&acquired)) {
+        if(g_store.screen==SCREEN_SPIEL&&!strcmp(g_store.spielId,s_receipt_request.gameId))
+            store_account_acknowledged_clays(count);
+        if(acquired)ui_manager_unlock();
+    }
+    if(expired||!ok)terminal_log_add("gateway","WARN","Asynchrone FIRE-Quittung fehlt; keine unbestätigten Tauben gezählt, kein neuer Schuss");
+    s_receipt_pending=false;set_request_busy(false);
 }
 
 struct NonceResponse {
@@ -400,7 +433,7 @@ static bool perform_health_get(const char *url, const char *mac_hex, HealthFailu
         cfg.event_handler=gateway_timing_event;
         cfg.user_data=background?(void*)1:nullptr;
         cfg.disable_auto_redirect = true;
-        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        esp_http_client_handle_t client = gateway_http_acquire(&cfg);
         if (!client) { failure->error = ESP_ERR_NO_MEM; return false; }
         esp_http_client_set_header(client, "X-TrapMaster-Auth", mac_hex);
         network_trace_begin(url,"gateway-health",attempt);
@@ -410,8 +443,7 @@ static bool perform_health_get(const char *url, const char *mac_hex, HealthFailu
         failure->socket_errno = esp_http_client_get_errno(client);
         int tls_flags = 0;
         esp_http_client_get_and_clear_last_tls_error(client, &failure->tls_error, &tls_flags);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
+        gateway_http_release(client,failure->error);
         if (failure->error == ESP_OK) {
             // A final HTTP response is not a dropped SYN. Never retry a 401.
             return failure->http_status >= 200 && failure->http_status < 300;
@@ -467,14 +499,13 @@ static bool fetch_gateway_nonce(GatewayRequest *request, int *last_http, bool ba
         cfg.disable_auto_redirect = true;
         cfg.event_handler = nonce_http_event;
         cfg.user_data = &response;
-        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        esp_http_client_handle_t client = gateway_http_acquire(&cfg);
         if (!client) { set_status("Gateway-Nonce-Client nicht verfügbar."); return false; }
         network_trace_begin(url,"gateway-info",attempt);
         esp_err_t err = esp_http_client_perform(client);
         network_trace_end(err,err==ESP_OK?esp_http_client_get_status_code(client):0);
         *last_http = esp_http_client_get_status_code(client);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
+        gateway_http_release(client,err);
         if (err == ESP_OK && *last_http == 200 && !response.overflow) {
             cJSON *root = cJSON_Parse(response.body);
             cJSON *nonce = root ? cJSON_GetObjectItemCaseSensitive(root, "nonce") : nullptr;
@@ -512,13 +543,13 @@ static void fetch_gateway_traces(const GatewayRequest &request) {
     GatewayTraceBody body{bytes};
     esp_http_client_config_t cfg{};cfg.url=url;cfg.timeout_ms=300;
     cfg.disable_auto_redirect=true;cfg.event_handler=gateway_trace_event;cfg.user_data=&body;
-    auto client=esp_http_client_init(&cfg);
+    auto client=gateway_http_acquire(&cfg);
     if(!client){heap_caps_free(bytes);return;}
     esp_http_client_set_header(client,"X-TrapMaster-Auth",auth);
     network_trace_begin(url,"gateway-events",0);
     esp_err_t result=esp_http_client_perform(client);
     network_trace_end(result,result==ESP_OK?esp_http_client_get_status_code(client):0);
-    const int status=esp_http_client_get_status_code(client);esp_http_client_cleanup(client);
+    const int status=esp_http_client_get_status_code(client);gateway_http_release(client,result);
     cJSON *root=result==ESP_OK&&status==200&&!body.overflow?cJSON_Parse(bytes):nullptr;
     heap_caps_free(bytes);if(!root)return;
     cJSON *id=cJSON_GetObjectItem(root,"gatewayId"),*rows=cJSON_GetObjectItem(root,"entries");
@@ -674,7 +705,8 @@ static void gateway_worker(void *arg)
     GatewayRequest request;
     char url[MAX_URL_LEN + 96];
     for (;;) {
-        if (xQueueReceive(s_gateway_queue, &request, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        if (xQueueReceive(s_gateway_queue, &request, pdMS_TO_TICKS(s_receipt_pending?250:1000)) != pdTRUE) {
+            if(s_receipt_pending){poll_fire_receipt();continue;}
             TickType_t now = xTaskGetTickCount();
             if(cop_wifi_is_connected() && !lora_request_busy() && g_store.gatewayUrl[0] &&
                 g_store.gatewayToken[0] && (!s_has_prefetched ||
@@ -750,6 +782,18 @@ static void gateway_worker(void *arg)
         }
 
         bool request_ready = false;
+        if(request.gameLaunch) {
+            // Durable pre-launch reservation is a hard boundary, but never
+            // blocks LVGL. Recheck after the flush: cancellation/navigation
+            // while the worker waited must not authorize a physical launch.
+            bool safe=active_game_flush(),acquired=false;
+            if(ui_manager_snapshot_lock(&acquired)) {
+                safe=safe&&g_store.screen==SCREEN_SPIEL&&g_store.activeGameOpen&&
+                    g_store.currentFireSent&&!strcmp(request.gameId,g_store.spielId);
+                if(acquired)ui_manager_unlock();
+            } else safe=false;
+            if(!safe){set_status("Schuss gesperrt: Spielstand nicht gesichert/geändert");set_request_busy(false);continue;}
+        }
         s_transport_retries=0;
         s_transport_ambiguous=false;
         s_send_ms=s_first_byte_ms=0;
@@ -777,8 +821,17 @@ static void gateway_worker(void *arg)
         }
         s_last_fire_ms=(uint32_t)(esp_timer_get_time()/1000);
         record_fire_trace(request,fire_started,nonce_ready,s_last_fire_ms,last_http,success,rssi);
+        ESP_LOGI(TAG,"fire_ms=%lu http=%d ack=%d",
+            (unsigned long)(s_last_fire_ms-fire_started),last_http,success&&last_http!=202);
 
         if (success) {
+            if(request.gameLaunch&&last_http==202) {
+                s_receipt_request=request;
+                snprintf(s_receipt_url,sizeof(s_receipt_url),"%s",url);
+                snprintf(s_receipt_mac,sizeof(s_receipt_mac),"%s",mac_hex);
+                s_receipt_started=(uint32_t)(esp_timer_get_time()/1000);
+                s_receipt_pending=true;
+            }
             s_health_history.success(); // a successful FIRE is also fresh reachability evidence
             // 202 explicitly means the gateway did not observe a FIRE ACK.
             // Tests use the untagged API, so they cannot affect a game total.
@@ -819,7 +872,7 @@ static void gateway_worker(void *arg)
             set_status("Gateway unreachable");
             set_gateway_state(GATEWAY_UNREACHABLE);
         }
-        set_request_busy(false);
+        if(!s_receipt_pending)set_request_busy(false);
         if(cop_wifi_is_connected()&&!s_has_prefetched) {
             GatewayRequest next{};copy_gateway_config(&next);int code=0;
             if(fetch_gateway_nonce(&next,&code,true)) {
@@ -965,6 +1018,7 @@ bool lora_fire_machine_game(Maschine m)
     request.pressed_ms=(uint32_t)(esp_timer_get_time()/1000);
     s_last_fire_ms=request.pressed_ms;
     request.kind = GATEWAY_REQUEST_FIRE; request.manual = true; request.gameLaunch = true;
+    snprintf(request.gameId,sizeof(request.gameId),"%s",g_store.spielId);
     request.machine = m; copy_gateway_config(&request);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {
         set_request_busy(false); set_status("Gateway queue unavailable"); return false;
@@ -1019,6 +1073,7 @@ bool lora_fire_doublette_game(Maschine first, Maschine second, uint16_t delay_ms
     request.pressed_ms=(uint32_t)(esp_timer_get_time()/1000);
     s_last_fire_ms=request.pressed_ms;
     request.kind = GATEWAY_REQUEST_FIRE_PAIR; request.manual = true; request.gameLaunch = true;
+    snprintf(request.gameId,sizeof(request.gameId),"%s",g_store.spielId);
     request.machine = first; request.second_machine = second; request.delay_ms = delay_ms;
     copy_gateway_config(&request);
     if (xQueueSend(s_gateway_queue, &request, 0) != pdTRUE) {

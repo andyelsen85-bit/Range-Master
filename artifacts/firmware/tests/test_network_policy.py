@@ -66,6 +66,7 @@ vprintf_like_t logger=original;
 void sdk(const char *format,...){va_list a;va_start(a,format);logger(format,a);va_end(a);}
 int network_rssi(){return -52;}int network_disconnect_reason(){return 8;}
 bool network_test_start(bool){return false;}
+void socket_census_owner(int,const char*,const char*){}
 int bounded_getaddrinfo(const char*,const char*,const addrinfo*,addrinfo**,int64_t){clockUs+=5000;return 0;}
 extern "C" int __real_lwip_connect(int,const sockaddr*,socklen_t){clockUs+=10000;return 0;}
 extern "C" int __real_mbedtls_ssl_handshake(mbedtls_ssl_context*){clockUs+=30000;return 0;}

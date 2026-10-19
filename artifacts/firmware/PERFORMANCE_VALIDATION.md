@@ -1,0 +1,96 @@
+# Real-terminal performance validation
+
+## Scope and current evidence
+
+These changes target the ESP32-P4 terminal and Heltec Wireless Stick V3 gateway.
+No portal changes, emulator execution, device flash, NVS erase or FAT formatting
+is part of this work. Native target compilation is not hardware validation.
+There is no connected serial terminal/gateway in this workspace, so the runtime
+acceptance checks below remain **unverified**. Do not replace them with host
+timings or invented device logs.
+
+## Behaviour
+
+- Boot validates the filename registry without I/O and performs a cached quick
+  lifecycle probe for three representative short-name patterns, without fsync.
+  The full pattern probe is launched only once after the first UI frame has had
+  time to render. Its NVS version combines the pattern registry, filename helper
+  version and firmware ELF identity. Unchanged boots skip the full probe.
+  Each full pattern releases filesystem locks before the next; a game or dirty
+  checkpoint aborts the remaining probe. An aborted probe is not marked complete.
+- Score entry changes RAM and widgets only. One low-priority writer coalesces
+  checkpoints after 250 ms idle. A/B snapshots retain the last committed slot;
+  each new snapshot uses one fsync and no backup rewrite. Identical payloads
+  are skipped. A cold power cut can therefore lose scores entered during the
+  coalescing/flash interval; it must never authorize an automatic repeat fire.
+- FIRE reserves the current launch in RAM, then the gateway worker waits for
+  the single writer's durable checkpoint before transmitting. No flash wait is
+  performed by the score/FIRE input callback.
+- Final scoring queues a complete finished-game snapshot. The writer saves the
+  journal (or emergency NVS fallback) before publishing results. A progress
+  message is displayed while finishing; further scoring and cancellation are
+  refused during that transition. Credit cancellation retains its existing
+  synchronous durable VOID_USE boundary, never a compensating GRANT.
+- Automatic ping tests are disabled. The settings button runs at most 10 seconds
+  with one raw ICMP socket, at 1-second send intervals. Starting/continuing a
+  game aborts the diagnostic. Fewer than four free sockets refuses admission;
+  a socket-exhaustion failure stops the whole diagnostic.
+- A single mutex-owned persistent gateway HTTP handle serves command, nonce,
+  health, trace and fallback-event requests. Error paths destroy the handle.
+  The gateway itself has two bounded keep-alive HTTP peer slots and retains the
+  existing authenticated parser/handlers. The terminal socket limit is 24.
+- Gateway HTTP/WebSocket FIRE admission returns 202 immediately. Transmission,
+  optional relay ACK and doublette delays advance in the main loop without
+  waiting loops. Remote frames can be received, durably deduplicated and ACKed
+  while a FIRE waits for its relay ACK or pair delay (radio TX is half-duplex).
+  **202 is acceptance, not proof of physical launch.** For game launches the
+  terminal checks completion with the exact same signed nonce, without renewing
+  it or issuing a new command. Only observed ACKs add confirmed-clay counts.
+  Game completion waits for that bounded receipt check before journaling counts.
+- The gateway WiFi setup page exposes **Relay ACK erforderlich**, persisted in
+  NVS and defaulting OFF. Turn it ON when relays requiring ACKs are installed.
+  Status exposes `relayAckRequired`. HTTP acceptance latency and radio completion
+  are deliberately separate.
+- C6 version RPC is attempted no more than twice per boot, with one warning.
+  **The C6 slave still needs flashing with tools/flash_c6_slave.sh.**
+- WDH at an unscored doublette first clears the launch flag without changing
+  player/run/position. A second WDH undoes the previous complete launch unit.
+  A pair with its first result already entered is not silently relaunched.
+
+## Safe hardware procedure
+
+1. Synchronize durable pending data. Keep storage partitions and NVS intact.
+   Use the existing terminal USB `idf.py -p PORT flash` procedure: **never
+   erase-flash**. This change does not alter the partition table.
+2. Flash the matching gateway firmware separately; retain private provisioning.
+   Initially disconnect physical traps and leave **Relay ACK erforderlich** OFF.
+3. Capture serial logs from power-on through the whole scenario. Record firmware
+   identities for terminal and gateway, boot type and WiFi conditions.
+4. Measure the acceptance checks below. Repeat with an unchanged second boot
+   (quick mode) and a changed build (full probe after the usable UI).
+5. With traps still disconnected, inject a failed checkpoint, retry it, cancel
+   a game and complete a game. Verify no duplicate launch, no lost finished
+   record, no re-created GRANT, and no result screen before durable persistence.
+6. Only after disconnected checks pass, validate configured real relay ACKs
+   under the range's normal physical safety procedure.
+
+## Required evidence (paste actual lines, not examples with fabricated values)
+
+| Scenario | Required log / acceptance |
+| --- | --- |
+| Cold boot | `boot ready in N ms`, N < 20000 |
+| Name probe | `fat selftest done in N ms mode=quick` and, on changed builds only, `mode=full complete=1` after UI ready |
+| 10 touch scores | Ten `score_ui_ms=... source=touch queue_depth=...` entries; verify visible post highlight and next state <100 ms |
+| 10 remote scores | Ten `score_ui_ms=... source=remote queue_depth=...` entries, including event-queue residence |
+| Checkpoints | `checkpoint_ms=... nvs_ms=0 fat_ms=... queue_depth=... ok=1`; settings NVS is logged separately as `settings_nvs_ms` |
+| Coalescing | Rapid inputs may produce fewer checkpoints than scores; wait >250 ms after isolated scores to get one checkpoint per score |
+| Complete game | No `ping_sock`, `create socket failed`, TLS socket errors or errno=23; finish journal/receipt counts correct |
+| Five disconnected FIREs | Five `fire_ms=... http=202 ack=0` entries; no 3-second relay wait in admission |
+| Socket census | `sockets: open=... max=24 free=...` before/during/after game; descriptor/port/last-traced host and endpoint listed every 10 seconds |
+| C6 | At most two version RPC attempts per boot; one mismatch/unknown warning |
+| Doublette WDH | First press retains player/run/clay and clears launch; second press returns to previous complete unit, including first unit/no previous result |
+
+`score_ui_ms` measures callback-to-widget update for touch and received-event to
+widget update for remote input; it is not a panel scan-out measurement. Verify
+visible response separately on the physical screen. Warning thresholds are
+150 ms for score widget updates and 2000 ms for checkpoint writes.

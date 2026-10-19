@@ -10,4 +10,4 @@ enum SpielActionResult {
 SpielActionResult spiel_action_fire();
 SpielActionResult spiel_action_repeat();
 SpielActionResult spiel_action_skip();
-SpielActionResult spiel_action_score(int points);
+SpielActionResult spiel_action_score(int points,uint32_t receivedMs=0);

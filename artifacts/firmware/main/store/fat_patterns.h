@@ -2,6 +2,7 @@
 #include "fat_name.h"
 #include <fcntl.h>
 #include <unistd.h>
+#include <initializer_list>
 
 struct FatPattern {const char *base,*extension;bool cache;};
 inline constexpr FatPattern FAT_PATTERNS[]={
@@ -29,8 +30,24 @@ inline bool fat_test_owned(const char *path,bool allow_missing=true) {
     if(!owned)errno=read_error?read_error:!closed?(errno?errno:EIO):EILSEQ;
     return owned;
 }
-inline bool fat_patterns_self_test(const char *root,char *error,size_t capacity) {
-    for(const auto &pattern:FAT_PATTERNS) {
+inline bool fat_patterns_validate(const char *root) {
+    for(const auto &p:FAT_PATTERNS) {
+        char directory[160],name[192];
+        snprintf(directory,sizeof(directory),"%s%s",root,p.cache?"/TMCACHE":"");
+        if(!fat_name(name,sizeof(name),p.base,p.extension,directory))return false;
+    }
+    for(unsigned i=0;i<200;i++) {
+        char base[9],name[192];snprintf(base,sizeof(base),"J%03u",i);
+        for(const char *extension:{"REC","PRT","BAK"})
+            if(!fat_name(name,sizeof(name),base,extension,root))return false;
+    }
+    return true;
+}
+inline bool fat_patterns_self_test(const char *root,char *error,size_t capacity,
+                                   int only=-1,bool durable=true) {
+    for(size_t index=0;index<sizeof(FAT_PATTERNS)/sizeof(FAT_PATTERNS[0]);++index) {
+        if(only>=0&&index!=(size_t)only)continue;
+        const auto &pattern=FAT_PATTERNS[index];
         char actual[192],from[192],to[192],base[9],destination[9],directory[160];
         snprintf(directory,sizeof(directory),"%s%s",root,pattern.cache?"/TMCACHE":"");
         if(!fat_name(actual,sizeof(actual),pattern.base,pattern.extension,directory))return false;
@@ -46,7 +63,7 @@ inline bool fat_patterns_self_test(const char *root,char *error,size_t capacity)
             if(fd<0)goto failed;
             created=true;step="write";
             bool ok=write(fd,"RM-FAT-SELFTEST-v1",sizeof("RM-FAT-SELFTEST-v1"))==(ssize_t)sizeof("RM-FAT-SELFTEST-v1");
-            if(ok){step="fsync";ok=fsync(fd)==0;}
+            if(ok&&durable){step="fsync";ok=fsync(fd)==0;}
             int saved=errno;
             if(close(fd)!=0&&ok){ok=false;step="close";saved=errno;}
             errno=saved;if(!ok)goto failed;

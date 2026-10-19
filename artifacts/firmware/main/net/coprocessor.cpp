@@ -36,6 +36,7 @@ static portMUX_TYPE s_fw_lock=portMUX_INITIALIZER_UNLOCKED;
 static char s_fw_version[128]="C6: Version noch nicht abgefragt";
 static bool s_fw_checked=false;
 static bool s_fw_query_warned=false;
+static unsigned s_fw_attempts=0;
 int network_rssi(){return s_rssi.load();}
 int network_disconnect_reason(){return s_last_disconnect_reason.load();}
 void cop_firmware_version(char *out,size_t capacity) {
@@ -56,6 +57,7 @@ static void disable_power_save_worker(void *)
         if(s_wifi_connected) {
             wifi_ap_record_t ap{};if(esp_wifi_sta_get_ap_info(&ap)==ESP_OK)s_rssi.store(ap.rssi);
             if(!s_fw_checked) {
+                ++s_fw_attempts;
                 esp_hosted_coprocessor_fwver_t version{};
                 esp_err_t version_result=esp_hosted_get_coprocessor_fwversion(&version);
                 if(version_result==ESP_OK) {
@@ -71,9 +73,10 @@ static void disable_power_save_worker(void *)
                     portENTER_CRITICAL(&s_fw_lock);snprintf(s_fw_version,sizeof(s_fw_version),"%s",label);portEXIT_CRITICAL(&s_fw_lock);
                     if(!s_fw_query_warned) {
                         terminal_log_add("wifi","WARN",label);
-                        ESP_LOGW(TAG,"C6 version RPC failed: %s; retry in background",esp_err_to_name(version_result));
+                        ESP_LOGW(TAG,"C6 version RPC failed: %s; at most one retry this boot",esp_err_to_name(version_result));
                         s_fw_query_warned=true;
                     }
+                    if(s_fw_attempts>=2)s_fw_checked=true;
                 }
             }
         }

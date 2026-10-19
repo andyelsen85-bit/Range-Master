@@ -172,9 +172,9 @@ static void remote_buttons_tick()
             case 1: result = spiel_action_fire(); break;
             case 2: result = spiel_action_repeat(); break;
             case 3: result = spiel_action_skip(); break;
-            case 4: result = spiel_action_score(0); break;
-            case 5: result = spiel_action_score(1); break;
-            case 6: result = spiel_action_score(2); break;
+            case 4: result = spiel_action_score(0,e.receivedMs); break;
+            case 5: result = spiel_action_score(1,e.receivedMs); break;
+            case 6: result = spiel_action_score(2,e.receivedMs); break;
         }
         if (result == SPIEL_ACTION_OK) {
             s_remote_has_action = true;s_remote_last_action = now;

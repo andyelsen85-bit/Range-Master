@@ -65,12 +65,41 @@ static bool bench_interlock_asserted()
 // gateway object so both the library and this sketch link cleanly.
 SSD1306Wire gatewayDisplay(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_64_32, RST_OLED);
 class GatewayWebServer : public WebServer {
+    WiFiClient peers[2];
+    uint32_t used[2]{};
+protected:
+    size_t _currentClientWrite(const char *bytes,size_t length) override {
+        if(length>=7&&!memcmp(bytes,"HTTP/1.",7)) {
+            String header;header.concat(bytes,length);
+            header.replace("Connection: close\r\n","Connection: keep-alive\r\n");
+            size_t written=_currentClient.write((const uint8_t*)header.c_str(),header.length());
+            return written==header.length()?length:0;
+        }
+        return _currentClient.write((const uint8_t*)bytes,length);
+    }
 public:
     using WebServer::WebServer;
-    WiFiClient detachClient() {
-        WiFiClient client = _currentClient;
-        _currentClient = WiFiClient();
-        return client;
+    void handleClient() {
+        // WebServer normally forces Connection: close after every request.
+        // Keep two bounded clients, using its existing parser/auth handlers.
+        // Never wait on an idle keep-alive connection; remote IRQs run on every
+        // loop, including while an HTTP peer is idle.
+        for(unsigned i=0;i<2;i++) {
+            if(peers[i]&&(!peers[i].connected()||millis()-used[i]>10000))peers[i].stop();
+            if(!peers[i]||!peers[i].connected()) {
+                auto incoming=_server.accept();
+                if(incoming){peers[i]=incoming;used[i]=millis();}
+            }
+            if(!peers[i].connected()||!peers[i].available())continue;
+            _currentClient=peers[i];_currentClient.setTimeout(100);
+            if(_parseRequest(_currentClient)) {
+                _contentLength=CONTENT_LENGTH_NOT_SET;
+                _clearResponseHeaders();
+                _handleRequest();
+            } else peers[i].stop();
+            used[i]=millis();
+            _currentClient=WiFiClient();
+        }
     }
 };
 GatewayWebServer server(80);
@@ -104,6 +133,10 @@ static volatile bool radioBusy = false;
 static String lastResult = "Starting";
 static String lastMachine = "-";
 static bool lastAck = false;
+static bool relayAckRequired=false;
+static char relayAckAttrs[80]={};
+static WiFiManagerParameter relayAckParam(
+    "tm_relay_ack","Relay ACK erforderlich","",2,relayAckAttrs,WFM_LABEL_AFTER);
 static bool networkSettingsSaved = false;
 static uint32_t lastHttpRequestMs = 0;
 static uint32_t lastIdleLogMs = 0;
@@ -251,11 +284,19 @@ static void configureNetworkPortal()
     wifiManager.addParameter(&staticModeParam);
     wifiManager.addParameter(&staticAddressParam);
     wifiManager.addParameter(&staticGatewayParam);
+    snprintf(relayAckAttrs,sizeof(relayAckAttrs),"type='checkbox' value='1'%s",relayAckRequired?" checked":"");
+    relayAckParam.setValue(relayAckRequired?"1":"",2);
+    wifiManager.addParameter(&relayAckParam);
 }
 
 static void saveNetworkSettings()
 {
     networkSettingsSaved = false;
+    bool ackRequired=wifiManager.server&&wifiManager.server->hasArg("tm_relay_ack");
+    if(preferences.putBool("relay_ack",ackRequired)!=sizeof(bool)) {
+        lastResult="Relay ACK setting save failed";return;
+    }
+    relayAckRequired=ackRequired;
     // An unchecked HTML checkbox is intentionally absent from the form, making
     // this test reliable when the operator switches back from static to DHCP.
     bool useStatic = wifiManager.server &&
@@ -413,8 +454,8 @@ static void admitFire(const uint8_t *nonce, bool pair, char first, char second,
         return;
     case tm_gateway::Admission::Busy:
         // Identical running commands receive progress, NEVER another radio TX.
-        reply(entry&&entry==pendingFire?102:409,
-              entry&&entry==pendingFire?"{\"progress\":true}":"{\"ok\":false,\"error\":\"busy\"}");
+        reply(entry&&entry==pendingFire?202:409,
+              entry&&entry==pendingFire?"{\"ok\":true,\"accepted\":true,\"ack\":false}":"{\"ok\":false,\"error\":\"busy\"}");
         return;
     case tm_gateway::Admission::Cached:
         reply(entry->status, entry->response);
@@ -422,13 +463,8 @@ static void admitFire(const uint8_t *nonce, bool pair, char first, char second,
     case tm_gateway::Admission::Start:
         pendingFire = entry;
         traceStart(first,received?received:millis());
-        pendingSocket=socket;
-        if(socket<0)pendingClient = server.detachClient();
-        else {
-            memcpy(pendingServer,buttonClients[socket].server,sizeof(pendingServer));
-            memcpy(pendingConnection,buttonClients[socket].client,sizeof(pendingConnection));
-            reply(102,"{\"progress\":true}");
-        }
+        pendingSocket=-1;
+        reply(202,"{\"ok\":true,\"accepted\":true,\"ack\":false}");
         return; // execution is outside the handler, never nested inside it
     }
 }
@@ -535,11 +571,10 @@ static bool waitForFlag(volatile bool &flag, uint32_t timeoutMs)
     return flag;
 }
 
-static bool sendFire(char machine, bool *ack, bool wait_for_ack)
+static bool startFire(char machine)
 {
     if (radioBusy || !tm_protocol::valid_machine(machine)) return false;
     radioBusy = true;
-    *ack = false;
     uint32_t counter = ++nextCounter;
     if (counter == 0) { // counter wrap would reuse a nonce under the same key
         lastResult = "Counter exhausted";
@@ -570,31 +605,6 @@ static bool sendFire(char machine, bool *ack, bool wait_for_ack)
     txTimeout = false;
     if(!activeTrace.tx)activeTrace.tx=millis();
     Radio.Send(frame, sizeof(frame));
-    if (!waitForFlag(txDone, TX_TIMEOUT_MS) || txTimeout) {
-        lastResult = "LoRa TX failed";
-        radioBusy = false;
-        return false;
-    }
-    activeTrace.done=millis();
-
-    if (!wait_for_ack) {
-        lastAck = false;
-        lastMachine = String(machine);
-        lastResult = "sent, ACK skipped";
-        radioBusy = false;
-        renderStatus();
-        return true;
-    }
-
-    Radio.Rx(ACK_TIMEOUT_MS);
-    *ack = waitForFlag(ackReceived, ACK_TIMEOUT_MS);
-    if(*ack)activeTrace.ack=millis();
-    lastAck = *ack;
-    lastMachine = String(machine);
-    lastResult = *ack ? "sent + ACK" : "sent, no ACK";
-    radioBusy = false;
-    Radio.Rx(0);
-    renderStatus();
     return true;
 }
 
@@ -716,79 +726,59 @@ static void finishPendingFire(int status, const char *body)
     // Cache even failures before writing the socket. A lost HTTP response must
     // never permit a second transmission; these results use preallocated RAM.
     nonces.finish(pendingFire, status, body, millis());
-    if(pendingSocket>=0) {
-        // Never deliver a completed action to a different connection reusing
-        // the same socket index. Reconnect retrieves the cached nonce result.
-        const auto &c=buttonClients[pendingSocket];
-        if(c.auth&&!strcmp(c.server,pendingServer)&&!strcmp(c.client,pendingConnection))
-            socketFireReply((uint8_t)pendingSocket,pendingFire->nonce,status,pendingFire->response);
-    } else {
-    pendingClient.printf("HTTP/1.1 %d Result\r\nContent-Type: application/json\r\n"
-                         "Content-Length: %u\r\nConnection: close\r\n"
-                         "Cache-Control: no-store\r\n\r\n%s",
-                         status, (unsigned)strlen(pendingFire->response),
-                         pendingFire->response);
-    pendingClient.stop();
-    pendingClient = WiFiClient();
-    }
+    Serial.printf("FIRE async complete status=%d result=%s\n",status,body);
     traceFinish(status);pendingSocket=-1;
     pendingFire = nullptr;
 }
 
 static void runPendingFire()
 {
-    if (!pendingFire) return;
-    const char first = pendingFire->first, second = pendingFire->second;
-    const uint32_t delay_ms = pendingFire->delay;
-    if (!pendingFire->pair) {
-        bool ack = false;
-        if (!sendFire(first, &ack, true)) {
-            finishPendingFire(lastResult == "Counter save failed" ? 503 : 502,
-                              "{\"ok\":false,\"error\":\"LoRa send failed; do not retry as new fire\"}");
-            return;
+    enum Phase {IDLE,TX,ACK,PAIR_DELAY};
+    static Phase phase=IDLE;
+    static uint32_t since=0;
+    static bool second=false,firstAck=false,requireAck=false;
+    if(!pendingFire){phase=IDLE;return;}
+    if(phase==IDLE) {
+        if(remoteTx)return;
+        second=false;firstAck=false;requireAck=relayAckRequired;
+        if(!startFire(pendingFire->first)) {
+            finishPendingFire(503,"{\"ok\":false,\"error\":\"radio start failed; do not retry as new fire\"}");return;
         }
-        char body[128];
-        snprintf(body, sizeof(body), "{\"ok\":true,\"machine\":\"%c\",\"ack\":%s}",
-                 first, ack ? "true" : "false");
-        finishPendingFire(ack ? 200 : 202, body);
-        return;
+        phase=TX;since=millis();return;
     }
-    bool first_ack = false;
-    // Zero means launch both machines back-to-back. We wait only for the
-    // first radio transmission to complete, not its ACK, so a valid 0-second
-    // doublette cannot be delayed by the ACK timeout.
-    bool wait_for_first_ack = delay_ms > 0;
-    if (!sendFire(first, &first_ack, wait_for_first_ack)) {
-        finishPendingFire(lastResult == "Counter save failed" ? 503 : 502,
-                    "{\"ok\":false,\"error\":\"first machine send failed; do not retry\"}");
-        return;
+    if(phase==TX) {
+        if(!txDone&&!txTimeout&&millis()-since<TX_TIMEOUT_MS)return;
+        radioBusy=false;
+        if(txTimeout||!txDone) {
+            finishPendingFire(502,"{\"ok\":false,\"error\":\"TX failed; do not retry as new fire\"}");
+            phase=IDLE;Radio.Rx(0);return;
+        }
+        activeTrace.done=millis();Radio.Rx(0);
+        since=millis();phase=ACK;
     }
-    if (wait_for_first_ack && !first_ack) {
-        finishPendingFire(202,
-                    "{\"ok\":false,\"partial\":true,\"firstAck\":false,\"secondSent\":false}");
-        return;
+    if(phase==ACK) {
+        bool wait=requireAck&&(!pendingFire->pair||second||pendingFire->delay>0);
+        if(wait&&!ackReceived&&millis()-since<ACK_TIMEOUT_MS)return;
+        lastAck=ackReceived;lastMachine=String(second?pendingFire->second:pendingFire->first);
+        lastResult=lastAck?"sent + ACK":requireAck?"sent, no ACK":"sent, ACK not required";
+        if(lastAck)activeTrace.ack=millis();
+        if(!second)firstAck=lastAck;
+        if(!pendingFire->pair||second||(wait&&!lastAck)) {
+            char body[192];
+            snprintf(body,sizeof(body),"{\"ok\":true,\"ack\":%s,\"firstAck\":%s,\"secondSent\":%s,\"ackRequired\":%s}",
+                lastAck?"true":"false",firstAck?"true":"false",second?"true":"false",requireAck?"true":"false");
+            finishPendingFire(lastAck?200:202,body);phase=IDLE;renderStatus();return;
+        }
+        since=millis();phase=PAIR_DELAY;
     }
-    uint32_t started = millis();
-    while (millis() - started < delay_ms) {
-        server.handleClient(); // answer busy throughout the pair delay
-        buttonSocketTick();
-        Radio.IrqProcess();
-        delay(1);
+    if(phase==PAIR_DELAY&&millis()-since>=pendingFire->delay&&!remoteTx) {
+        second=true;
+        if(!startFire(pendingFire->second)) {
+            finishPendingFire(503,"{\"ok\":false,\"partial\":true,\"secondSent\":false}");
+            phase=IDLE;return;
+        }
+        since=millis();phase=TX;
     }
-    bool second_ack = false;
-    char body[tm_gateway::RESPONSE_BYTES];
-    if (!sendFire(second, &second_ack, true)) {
-        snprintf(body, sizeof(body), "{\"ok\":false,\"partial\":true,\"firstAck\":%s,"
-                 "\"firstAckWaited\":%s,\"secondSent\":false}",
-                 first_ack ? "true" : "false", wait_for_first_ack ? "true" : "false");
-        finishPendingFire(lastResult == "Counter save failed" ? 503 : 502, body);
-        return;
-    }
-    snprintf(body, sizeof(body), "{\"ok\":true,\"first\":\"%c\",\"second\":\"%c\","
-             "\"firstAck\":%s,\"firstAckWaited\":%s,\"secondAck\":%s}", first, second,
-             first_ack ? "true" : "false", wait_for_first_ack ? "true" : "false",
-             second_ack ? "true" : "false");
-    finishPendingFire(second_ack ? 200 : 202, body);
 }
 
 static void handleStatus()
@@ -804,7 +794,8 @@ static void handleStatus()
                   ",\"lastRequestAgoMs\":" + String(millis() - lastHttpRequestMs) +
                   ",\"lastMachine\":\"" + lastMachine +
                   "\",\"lastResult\":\"" + lastResult +
-                  "\",\"lastAck\":" + String(lastAck ? "true" : "false") + "}";
+                  "\",\"lastAck\":" + String(lastAck ? "true" : "false") +
+                  ",\"relayAckRequired\":" + String(relayAckRequired?"true":"false") + "}";
     server.send(200, "application/json", body);
 }
 
@@ -856,6 +847,7 @@ void setup()
         while (true) delay(1000);
     }
     loadNetworkSettings();
+    relayAckRequired=preferences.getBool("relay_ack",false);
     applyNetworkSettings();
     configureNetworkPortal();
     wifiManager.setSaveParamsCallback(saveNetworkSettings);
@@ -879,6 +871,7 @@ void setup()
         ESP.restart();
     }
 
+    relayAckRequired=preferences.getBool("relay_ack",false);
     nextCounter = preferences.getULong("counter", 0);
     initRadio();
     buttonEventsInit();
@@ -911,7 +904,7 @@ void loop()
     server.handleClient();
     buttonSocketTick();
     // A started ACK is short; complete it before letting FIRE own the radio.
-    if (!remoteTx) runPendingFire();
+    runPendingFire();
     Radio.IrqProcess();
     if (remoteTx && (txDone || txTimeout || millis()-remoteTxStarted>TX_TIMEOUT_MS)) {
         remoteTx=false;

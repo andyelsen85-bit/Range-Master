@@ -10,4 +10,13 @@ size_t active_game_record_size();
 bool active_game_repair_safe_locked(); // read-only CRC proof; caller holds journal lock
 bool active_game_inspect_repair_locked(ActiveGameRepairInspection *out);
 bool active_game_is_open();
-void active_game_mark_ended();
+void active_game_mark_ended(); // RAM only; caller first persists journal/cancel intent
+#ifdef ESP_PLATFORM
+void active_game_writer_init();
+void active_game_schedule();
+bool active_game_flush(); // worker only; never wait while holding the LVGL lock
+bool active_game_checkpoint_pending();
+#else
+inline void active_game_schedule(){(void)active_game_checkpoint();}
+inline bool active_game_checkpoint_pending(){return false;}
+#endif

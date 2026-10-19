@@ -1882,7 +1882,7 @@ static lv_obj_t *build_system_tab(lv_obj_t *parent)
     // ── Firmware / board info ─────────────────────────────────
     auto *network_button=lv_btn_create(parent);
     lv_obj_set_size(network_button,340,56);
-    auto *network_title=lv_label_create(network_button);lv_label_set_text(network_title,"Netzwerktest (30 s)");
+    auto *network_title=lv_label_create(network_button);lv_label_set_text(network_title,"Netzwerktest (max. 10 s)");
     lv_obj_center(network_title);
     lv_obj_add_event_cb(network_button,[](lv_event_t*){network_test_start();},LV_EVENT_CLICKED,nullptr);
     s_network_test_label=lv_label_create(parent);lv_obj_set_width(s_network_test_label,LV_PCT(100));

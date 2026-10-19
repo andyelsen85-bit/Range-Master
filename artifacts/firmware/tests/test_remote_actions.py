@@ -16,6 +16,11 @@ STUBS=r'''
 #include <cstring>
 #include <deque>
 enum SpielActionResult { SPIEL_ACTION_OK,SPIEL_ACTION_IGNORED,SPIEL_ACTION_SCORE_FIRST,SPIEL_ACTION_RADIO_BUSY };
+SpielActionResult spiel_action_score(int,uint32_t=0);
+using esp_log_level_t=int;
+constexpr int ESP_LOG_WARN=2,ESP_LOG_INFO=3;
+#define ESP_LOG_LEVEL(level,tag,fmt,...) ((void)(level))
+bool active_game_checkpoint_pending(){return false;}
 enum {SCREEN_SPIEL,SCREEN_DASHBOARD,MASCHINE_H=7};
 struct SequenzEintrag { bool isPair,isDoublette;int maschine,partner,delayMs; };
 struct {int taubeIndex=0,sequenzLen=2,ergebnisseCount=0,spielerCount=1,screen=SCREEN_SPIEL;
@@ -26,6 +31,7 @@ struct {int taubeIndex=0,sequenzLen=2,ergebnisseCount=0,spielerCount=1,screen=SC
 } g_store;
 template<class Store> static const SequenzEintrag *store_sequence_entry(const Store *s,int,int c){return &s->sequenz[c];}
 void game_store_save(){}
+void game_store_save_game_checkpoint(){}
 void portal_live_changed(int){}
 bool portal_queue_game_started(){return true;}
 bool portal_queue_release(){return true;}

@@ -34,3 +34,17 @@ make retained pointers safe across later rebuilds.
 surviving objects. Drop focus for deleted rows rather than guessing which new
 row should inherit it. Test both deletion and survival under the host LVGL
 AddressSanitizer build, then verify on hardware when available.
+
+## Successful flash writes must not be on the scoring path
+
+Keep per-score durability out of touch and remote handlers; successful FAT
+writes must be evaluated for latency, not just checked for correctness.
+
+**Why:** Fixing invalid FAT names turned instant EINVAL failures into successful
+fsyncs taking about 600 ms on the real terminal. This exposed previously hidden
+input latency and made exhaustive boot probes take roughly two minutes.
+
+**How to apply:** Coalesce active checkpoints off the UI thread, preserve
+explicit durability boundaries for physical FIRE and game completion, and
+measure boot/input/flash times on the real target. Host filesystem timing and
+emulator responsiveness cannot establish those hardware acceptance criteria.

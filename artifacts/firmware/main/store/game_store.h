@@ -519,6 +519,12 @@ extern GameStore g_store;
 // ── Lifecycle ────────────────────────────────────────────────
 void game_store_init(void);
 void game_store_save(void);
+void game_store_save_settings(void);
+void game_store_save_game_checkpoint(void);
+#ifdef ESP_PLATFORM
+void game_store_flush_finished(); // single checkpoint writer; no UI lock across flash
+bool game_store_finish_pending();
+#endif
 
 // ── WiFi network profiles ─────────────────────────────────────
 int  store_wifi_network_count(void);

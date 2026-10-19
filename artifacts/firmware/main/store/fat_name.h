@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cerrno>
 #include <cctype>
+inline constexpr unsigned FAT_NAME_VERSION=2;
 
 // The mounted volume has LFN disabled. Never append a second extension.
 // Also used for directory entries: reject unknown names, never delete them.

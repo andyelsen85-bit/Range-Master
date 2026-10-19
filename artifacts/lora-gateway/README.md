@@ -6,6 +6,27 @@ HTTP requests and the gateway owns the SX1262 radio.
 
 ## Before first flash
 
+### Asynchronous FIRE and relay ACK setting
+
+FIRE admission now returns **202 immediately**; this means accepted, not a
+confirmed physical launch. Radio TX, optional ACK timeout and pair delays run
+as a non-blocking state machine. Remote button frames retain durable
+counter-before-ACK deduplication and are serviced during ACK waits/pair delays.
+The radio remains half-duplex during actual transmissions.
+
+The WiFi setup page offers **Relay ACK erforderlich**, persisted and OFF by
+default for installations without relays. Enable it for real relay ACK checks.
+`/status` exposes `relayAckRequired`. Reusing the same signed FIRE nonce reads
+the pending/cached outcome and must never launch an additional clay; the
+terminal uses that to collect final acknowledgements asynchronously.
+
+The HTTP server supports two bounded keep-alive peers. Matching terminal
+firmware serializes nonce, health, events, trace and command HTTP requests on
+one reusable client. Hardware acceptance steps are documented in
+[`../firmware/PERFORMANCE_VALIDATION.md`](../firmware/PERFORMANCE_VALIDATION.md).
+Do not interpret earlier synchronous-response examples below as a guarantee
+that a fresh FIRE request waits for an ACK.
+
 ### Private configuration
 
 The Arduino sketch is in the nested folder

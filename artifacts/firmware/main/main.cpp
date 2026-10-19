@@ -36,6 +36,8 @@
 #include "gsl3680_touch.h"
 #include "ui_manager.h"
 #include "game_store.h"
+#include "fat_selftest.h"
+#include "socket_census.h"
 #include "day_player_events.h"
 #include "network_test.h"
 #include "portal_runtime.h"
@@ -290,6 +292,9 @@ static void lvgl_task(void *arg)
     ui_manager_init();   // builds all screens, shows SCREEN_DASHBOARD
 
     ESP_LOGI(TAG, "UI ready — entering LVGL loop");
+    ESP_LOGI(TAG, "boot ready in %lld ms",(long long)(esp_timer_get_time()/1000));
+    active_game_writer_init();
+    fat_selftest_after_ui();
 
     // ── 6. Main LVGL loop ─────────────────────────────────────
     for (;;) {
@@ -338,6 +343,7 @@ extern "C" void app_main(void)
 
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
     coprocessor_init();
+    socket_census_init();
 
     // ── Persistent WiFi supervisor (stored credentials + backoff) ──
     coprocessor_autoconnect();
