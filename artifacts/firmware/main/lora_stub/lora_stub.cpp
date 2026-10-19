@@ -785,16 +785,14 @@ static void gateway_worker(void *arg)
 
         bool request_ready = false;
         if(request.gameLaunch) {
-            // Durable pre-launch reservation is a hard boundary, but never
-            // blocks LVGL. Recheck after the flush: cancellation/navigation
-            // while the worker waited must not authorize a physical launch.
-            bool safe=active_game_flush(),acquired=false;
+            // RAM reservation admits FIRE. Do not wait for FAT before radio.
+            bool safe=true,acquired=false;
             if(ui_manager_snapshot_lock(&acquired)) {
                 safe=safe&&g_store.screen==SCREEN_SPIEL&&g_store.activeGameOpen&&
                     g_store.currentFireSent&&!strcmp(request.gameId,g_store.spielId);
                 if(acquired)ui_manager_unlock();
             } else safe=false;
-            if(!safe){set_status("Schuss gesperrt: Spielstand nicht gesichert/geändert");set_request_busy(false);continue;}
+            if(!safe){set_status("Schuss gesperrt: Spielstand geändert");set_request_busy(false);continue;}
         }
         s_transport_retries=0;
         s_transport_ambiguous=false;
@@ -804,6 +802,17 @@ static void gateway_worker(void *arg)
         if(esp_wifi_sta_get_ap_info(&ap)==ESP_OK)rssi=ap.rssi;
         uint32_t nonce_ready=fire_started;
         if (prepare_fire_request(&request, url, sizeof(url), mac_hex, &last_http)) {
+            // Nonce preparation can wait on the network: recheck navigation/
+            // cancellation immediately before admission as well.
+            if(request.gameLaunch) {
+                bool acquired=false,safe=false;
+                if(ui_manager_snapshot_lock(&acquired)) {
+                    safe=g_store.screen==SCREEN_SPIEL&&g_store.activeGameOpen&&
+                        g_store.currentFireSent&&!strcmp(request.gameId,g_store.spielId);
+                    if(acquired)ui_manager_unlock();
+                }
+                if(!safe){set_status("Schuss gesperrt: Spielstand geändert");set_request_busy(false);continue;}
+            }
             request_ready = true;
             nonce_ready=(uint32_t)(esp_timer_get_time()/1000);
             success = perform_fire_transport(&request,url,mac_hex,&last_http,
@@ -825,6 +834,11 @@ static void gateway_worker(void *arg)
         record_fire_trace(request,fire_started,nonce_ready,s_last_fire_ms,last_http,success,rssi);
         ESP_LOGI(TAG,"fire_ms=%lu http=%d ack=%d",
             (unsigned long)(s_last_fire_ms-fire_started),last_http,success&&last_http!=202);
+        if(request.gameLaunch) {
+            ESP_LOGI(TAG,"start_to_fire_ms=%lu",(unsigned long)(s_last_fire_ms-fire_started));
+            // The writer persists immediately, but never delays the 202/UI path.
+            active_game_request_flush();
+        }
 
         if (success) {
             if(request.gameLaunch&&last_http==202) {

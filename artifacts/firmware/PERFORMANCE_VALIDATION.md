@@ -11,21 +11,33 @@ timings or invented device logs.
 
 ## Behaviour
 
-- Boot validates the filename registry without I/O and performs a cached quick
-  lifecycle probe for three representative short-name patterns, without fsync.
-  The full pattern probe is launched only once after the first UI frame has had
-  time to render. Its NVS version combines the pattern registry, filename helper
-  version and firmware ELF identity. Unchanged boots skip the full probe.
-  Each full pattern releases filesystem locks before the next; a game or dirty
-  checkpoint aborts the remaining probe. An aborted probe is not marked complete.
+- Boot validates the entire filename registry without file I/O. Only the small
+  volume write probe calls fsync before UI ready. Journal scanning/recovery is
+  retained; the journal self-test and second volume write probe run after UI
+  ready, at low priority, with no active game and writer idle for two seconds.
+  Boot logs durations for settings, cache load, journal scan, restore,
+  coprocessor and display, plus `write_probe_ms`.
+  The full pattern probe's NVS version combines the pattern registry, filename
+  helper version and firmware ELF identity. Unchanged boots skip full testing.
+  Each successful pattern commits `progress_ver`/`next` in the `fat_probe` NVS
+  namespace. Idle interruptions log their precise reason and resume in the same
+  worker; reboot resumes at the committed index. A changed identity resets the
+  index. Completion is marked only after every pattern passes. Flash failures
+  retry later; no failed/aborted run is marked complete.
 - Score entry changes RAM and widgets only. One low-priority writer coalesces
   checkpoints after 250 ms idle. A/B snapshots retain the last committed slot;
   each new snapshot uses one fsync and no backup rewrite. Identical payloads
   are skipped. A cold power cut can therefore lose scores entered during the
   coalescing/flash interval; it must never authorize an automatic repeat fire.
-- FIRE reserves the current launch in RAM, then the gateway worker waits for
-  the single writer's durable checkpoint before transmitting. No flash wait is
-  performed by the score/FIRE input callback.
+- FIRE reserves the current launch in RAM, rechecks cancellation/navigation
+  before transmission (including after nonce preparation), transmits without
+  waiting for FAT, then requests an immediate asynchronous checkpoint.
+  `fire_ms` and `start_to_fire_ms` measure button press to admission reply;
+  HTTP 202 remains admission only, not relay acknowledgement.
+  Restored active games always treat the current unit as an uncertain launch,
+  even when the saved v2 flag was false or an explicit repeat had been selected.
+  WDH must first explicitly release that unit again; reboot never authorizes
+  automatic fire. Recently uncheckpointed scores can still be lost on power cut.
 - Final scoring queues a complete finished-game snapshot. The writer saves the
   journal (or emergency NVS fallback) before publishing results. A progress
   message is displayed while finishing; further scoring and cancellation are
@@ -114,15 +126,15 @@ testing on a safe, disconnected physical test rig.
 
 | Scenario | Required log / acceptance |
 | --- | --- |
-| Cold boot | `boot ready in N ms`, N < 20000 |
-| Name probe | `fat selftest done in N ms mode=quick` and, on changed builds only, `mode=full complete=1` after UI ready |
+| Cold boot | `boot ready in N ms`, N < 12000 on an unchanged build; blocking-item duration lines |
+| Name probe | I/O-free `mode=quick`, and, on changed builds only, `mode=full complete=1` after UI ready; `paused reason=... next=N/37` then resume without restarting completed patterns |
 | 10 touch scores | Ten `score_ui_ms=... source=touch queue_depth=...` entries; verify visible post highlight and next state <100 ms |
 | 10 remote scores | Ten `score_ui_ms=... source=remote queue_depth=...` entries, including event-queue residence |
 | Checkpoints | `checkpoint_ms=... nvs_ms=0 fat_ms=... queue_depth=... ok=1`; settings NVS is logged separately as `settings_nvs_ms` |
 | Coalescing | Rapid inputs may produce fewer checkpoints than scores; wait >250 ms after isolated scores to get one checkpoint per score |
 | Complete game | No `ping_sock`, `create socket failed`, TLS socket errors or errno=23; finish journal/receipt counts correct |
-| Five disconnected FIREs | Five `fire_ms=... http=202 ack=0` entries; no 3-second relay wait in admission |
-| Socket census | `sockets: open=... max=24 free=...` before/during/after game; descriptor/port/last-traced host and endpoint listed every 10 seconds |
+| Five disconnected FIREs | Five `fire_ms=... http=202 ack=0` and `start_to_fire_ms=...` entries, each <300 ms; no checkpoint wait before transmission |
+| Socket census | `sockets: open=... max=24 free=...`; gateway WebSocket, HTTP server listener/client, httpd UDP control and other bound UDP ports labelled; no connection attempts until WiFi is connected, retries 1/2/5/10 seconds |
 | C6 | At most two version RPC attempts per boot; one mismatch/unknown warning |
 | Doublette WDH | First press retains player/run/clay and clears launch; second press returns to previous complete unit, including first unit/no previous result |
 

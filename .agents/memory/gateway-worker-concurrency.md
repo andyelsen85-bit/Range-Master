@@ -48,3 +48,17 @@ all-machine test, hiding ACKs and the final report despite continued firing.
 **How to apply:** Keep test results separate from general gateway status and read
 their completion flag with the same atomic snapshot. A screen/data refresh must
 not clear test polling or erase already displayed results.
+
+FIRE must not wait for a durable checkpoint before transmission. Admit from the
+RAM reservation, retain cancellation/navigation rechecks, then immediately ask
+the independent writer to persist without blocking the admission response.
+Every restored active unit is an uncertain launch, regardless of its saved
+launch/repeat flags.
+
+**Why:** The operator measured about one second of FAT latency before every
+launch and explicitly chose transmit-first behaviour. A saved false flag can
+therefore predate a physical launch and cannot authorize a repeat after reboot.
+
+**How to apply:** Keep finish/cancellation durability boundaries unchanged.
+Require a new explicit operator repeat decision after recovery; never restore
+the old assumption that a valid checkpoint with false proves no launch.

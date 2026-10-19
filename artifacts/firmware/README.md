@@ -16,8 +16,10 @@ Use the same colours when labelling the six-button wireless remote. A doublette
 is two separate 0/2 scores, maximum four points. WDH first releases an unscored
 launch without changing position or scores; a second WDH undoes the previous
 complete unit. A half-scored pair must be completed before undoing both results.
-The explicit stage survives reboot. Legacy or damaged checkpoints conservatively
-require an operator decision before another launch. Do not downgrade firmware
+After every reboot the current unit is an uncertain launch: WDH must explicitly
+release it again, even when the saved checkpoint flag was false or a repeat had
+already been selected. FIRE is now sent before its asynchronous checkpoint;
+never automatically repeat a shot after restarting. Do not downgrade firmware
 with an unfinished game; older firmware cannot read the new active-checkpoint
 version. Finished-game journal records and partition layout have not changed.
 

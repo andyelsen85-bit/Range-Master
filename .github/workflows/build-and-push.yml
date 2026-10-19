@@ -44,6 +44,7 @@ jobs:
       - name: Check durable game recovery and storage authorization
         run: |
           python3 artifacts/firmware/tests/test_game_journal.py
+          python3 artifacts/firmware/tests/test_fat_selftest_resume.py
           python3 artifacts/firmware/tests/test_storage_admin.py
           python3 artifacts/firmware/tests/test_storage_recovery.py
           python3 artifacts/firmware/tests/test_http_failure_policy.py

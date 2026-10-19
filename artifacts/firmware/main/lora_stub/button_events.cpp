@@ -5,6 +5,7 @@
 #include "esp_http_client.h"
 #include "gateway_http.h"
 #include "network_trace.h"
+#include "coprocessor.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -267,6 +268,14 @@ void worker(void *) {
             if(socketClient) stopSocket();
             vTaskDelay(pdMS_TO_TICKS(100));continue;
         }
+        // Do not start the component's socket task while WiFi is down: its
+        // internal connect path otherwise reports a misleading errno=118 ERROR.
+        if(!cop_wifi_is_connected()) {
+            if(socketClient)stopSocket();
+            attemptAt=nowMs()+1000;
+            retry=0;
+            vTaskDelay(pdMS_TO_TICKS(100));continue;
+        }
         if(socketClient && lost.exchange(false)) {
             if(authenticated && nowMs()-started>=5000) down=nowMs();
             stopSocket();attemptAt=nowMs()+delays[retry<3?retry++:3];
@@ -303,7 +312,7 @@ void worker(void *) {
             if(!socketClient || esp_websocket_register_events(socketClient,WEBSOCKET_EVENT_ANY,websocketEvent,nullptr)!=ESP_OK ||
                esp_websocket_client_start(socketClient)!=ESP_OK) {
                 stopSocket();attemptAt=now+delays[retry<3?retry++:3];
-                ESP_LOGE(TAG,"WebSocket startup failed; free internal=%u",
+                ESP_LOGW(TAG,"WebSocket startup failed; free internal=%u",
                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             } else attemptAt=now+4000; // hello must arrive promptly
         }

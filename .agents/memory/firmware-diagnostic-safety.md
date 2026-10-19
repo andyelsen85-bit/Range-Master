@@ -17,3 +17,16 @@ task handle. Panic-loop recovery may disable optional probes, but it must
 retain game persistence and the shared DNS/networking services used by normal
 portal and FIRE traffic. Do not make an optional test's initializer the owner
 of those required services.
+
+Background flash probes must resume from committed pattern progress after idle
+interruptions rather than restart or silently exit. Log the exact pause reason,
+and require two seconds of checkpoint-writer idle time between active work and
+diagnostic writes. Keep filename validation I/O-free and avoid repeating the
+volume/journal write probes before the first usable UI.
+
+**Why:** Physical logs showed a nearly 20-second boot and a full FAT test that
+never completed because ordinary game/checkpoint activity aborted its worker.
+
+**How to apply:** Retain journal recovery scans and pending-data safeguards;
+defer diagnostic round trips, not essential recovery, and distinguish measured
+device timing from native compilation or deterministic host tests.

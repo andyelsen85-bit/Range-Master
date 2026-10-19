@@ -333,16 +333,24 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     // ── Game store (loads settings from NVS) ──────────────────
+    int64_t boot_step=esp_timer_get_time();
     game_store_init();
+    ESP_LOGI(TAG,"boot settings_ms=%lld",(long long)((esp_timer_get_time()-boot_step)/1000));
     // Portal snapshots are independent from NVS outboxes. Load them before any
     // LVGL screen is constructed so an offline boot has a usable roster/catalog.
+    boot_step=esp_timer_get_time();
     offline_cache_load();
+    ESP_LOGI(TAG,"boot cache_load_ms=%lld",(long long)((esp_timer_get_time()-boot_step)/1000));
+    boot_step=esp_timer_get_time();
     if(!game_journal_init())
         terminal_log_add("data_loss_risk","ERROR","Spielarchiv nicht verfügbar; neue Spiele bleiben gesperrt");
-    (void)offline_cache_recheck(); // acknowledged archive pruning may have freed space
+    (void)offline_cache_recheck(false); // capacity only; no second boot fsync
+    ESP_LOGI(TAG,"boot journal_scan_ms=%lld",(long long)((esp_timer_get_time()-boot_step)/1000));
+    boot_step=esp_timer_get_time();
     day_players_init();
     if(!active_game_restore())
         terminal_log_add("data_loss_risk","ERROR","Offenes Harakiri-Spiel konnte nicht geladen werden");
+    ESP_LOGI(TAG,"boot restore_ms=%lld",(long long)((esp_timer_get_time()-boot_step)/1000));
     // Required by normal portal/FIRE traffic even in a protective boot.
     // Optional network diagnostics must never own these shared services.
     bounded_dns_init();
@@ -353,7 +361,9 @@ extern "C" void app_main(void)
     backlight_init();
 
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
+    boot_step=esp_timer_get_time();
     coprocessor_init();
+    ESP_LOGI(TAG,"boot coprocessor_ms=%lld",(long long)((esp_timer_get_time()-boot_step)/1000));
 
     // ── Persistent WiFi supervisor (stored credentials + backoff) ──
     coprocessor_autoconnect();
@@ -362,7 +372,9 @@ extern "C" void app_main(void)
     lora_stub_init();
 
     // ── Display hardware init ─────────────────────────────────
+    boot_step=esp_timer_get_time();
     s_panel = jd9365_panel_init();
+    ESP_LOGI(TAG,"boot display_ms=%lld",(long long)((esp_timer_get_time()-boot_step)/1000));
     if (!s_panel) {
         ESP_LOGE(TAG, "Display init failed — halting");
         for (;;) vTaskDelay(pdMS_TO_TICKS(1000));

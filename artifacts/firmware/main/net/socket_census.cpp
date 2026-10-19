@@ -33,6 +33,12 @@ static int census(bool log) {
         int port=0;
         if(lwip_getpeername(fd,(sockaddr*)&peer,&size)==0&&peer.sin_family==AF_INET)
             port=ntohs(peer.sin_port);
+        sockaddr_in local{};size=sizeof(local);
+        int local_port=0,accepting=0;
+        if(lwip_getsockname(fd,(sockaddr*)&local,&size)==0&&local.sin_family==AF_INET)
+            local_port=ntohs(local.sin_port);
+        size=sizeof(accepting);
+        (void)lwip_getsockopt(fd,SOL_SOCKET,SO_ACCEPTCONN,&accepting,&size);
         const char *owner=port==81?"gateway-ws":port==80?"http":port==443?"portal-TLS":"other/listen";
         if(port==81)++ws;else if(port==80)++gateway;else if(port==443)++tls;else ++other;
         if(log) {
@@ -42,6 +48,21 @@ static int census(bool log) {
             memcpy(line.detail,owners[fd-LWIP_SOCKET_OFFSET],sizeof(line.detail)-1);
             line.detail[sizeof(line.detail)-1]=0;
             portEXIT_CRITICAL(&owner_lock);
+            // Descriptor numbers are reused. Known socket roles override a
+            // stale trace label left by an earlier HTTP connection on this fd.
+            if(port==81)snprintf(line.detail,sizeof(line.detail),"gateway-websocket-client");
+            else if(accepting) {
+                line.kind="listen";line.port=local_port;
+                snprintf(line.detail,sizeof(line.detail),"%s port=%d",
+                    local_port==80?"httpd-config-server":"tcp-server",local_port);
+            } else if(type==SOCK_DGRAM) {
+                line.kind="udp";line.port=local_port;
+                snprintf(line.detail,sizeof(line.detail),"%s port=%d",
+                    local_port==32768?"httpd-control":
+                    local_port==5353?"mdns":local_port==68?"dhcp":"udp-bound",local_port);
+            } else if(local_port==80) {
+                snprintf(line.detail,sizeof(line.detail),"httpd-config-client");
+            } else if(!line.detail[0])snprintf(line.detail,sizeof(line.detail),"tcp local=%d peer=%d",local_port,port);
         }
     }
     if(log) {

@@ -478,6 +478,11 @@ bool game_journal_recheck_ready() {
     if(needs_probe)ok=game_journal_self_test();
     s_ready=ok;return ok;
 }
+bool game_journal_background_self_test() {
+    bool ok=game_journal_self_test();
+    if(!ok)s_ready=false; // failed diagnostics must never silently admit games
+    return ok;
+}
 bool game_journal_self_test() {
     auto *record=(Record*)heap_caps_calloc(1,sizeof(Record),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!record){journal_failure("self-test/alloc","/fatfs",ENOMEM);return false;}
@@ -759,8 +764,12 @@ bool game_journal_init() {
         s_retry_attempt=0;s_retry_at=esp_timer_get_time()+1000000;
     } else if(state<0)s_ready=false;
     game_journal_storage_unlock();heap_caps_free(fallback);
-    bool tested=game_journal_self_test();
-    if(!tested)s_ready=false;
+    // Target boot already has one FAT write/fsync probe. The larger journal
+    // round trip is deferred until UI ready and idle. Keep host recovery tests
+    // exercising the synchronous probe.
+#ifndef ESP_PLATFORM
+    if(!game_journal_self_test())s_ready=false;
+#endif
     // A failed write probe blocks new games, not reading/uploading durable
     // pending work from an otherwise readable full volume.
     return scanned && state>=0;

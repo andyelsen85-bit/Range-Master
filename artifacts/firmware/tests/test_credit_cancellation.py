@@ -22,6 +22,7 @@ STUBS=r'''
 #define ESP_LOGI(...) ((void)0)
 GameStore g_store{},durable{};
 void active_game_mark_ended(){g_store.activeGameOpen=false;g_store.activeGameStorageError=false;}
+void store_record_game_end(const char*){} // ended-ID guard is outside this credit-codec fixture
 static char s_credit_cancelled_game_id[40]{};
 static std::vector<unsigned char> disk;
 static bool storage_ok=true;

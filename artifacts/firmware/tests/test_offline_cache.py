@@ -42,7 +42,8 @@ STUBS = r"""
 #include <dirent.h>
 #include <sys/stat.h>
 #include "fat_name.h"
-static bool fat_patterns_self_test(const char*,char *error,size_t capacity){if(capacity)error[0]=0;return true;}
+static bool fat_patterns_validate(const char*){return true;}
+static bool fat_patterns_self_test(const char*,char *error,size_t capacity,int=-1,bool=true){if(capacity)error[0]=0;return true;}
 static bool fat_test_owned(const char*,bool=true){return false;}
 #include "game_store.h"
 #include "storage_repair.h"
@@ -317,7 +318,7 @@ bool logged(const std::string &text) {
 }
 void reset() {
     g_store = {}; s_mounted = s_mount_attempted = false; s_wl = WL_INVALID_HANDLE;
-    s_census_done=false;s_cleaning=false;s_storage_blocked=false;s_disk_pending=0;
+    s_census_done=false;s_cleaning=false;s_storage_blocked=false;s_disk_pending=0;s_write_probe_ok=false;
     s_repair_pending=false;repair_intent=0;active_safe=queue_safe=true;clock_us=0;
     active_latch=false;
     memset(s_saved_known,0,sizeof(s_saved_known));
@@ -337,6 +338,14 @@ int main() {
     assert(logged("total=9895936") && logged("write(16): ret=16 errno=0"));
     assert(logged("fsync: ret=0 errno=0") && logged("close: ret=0 errno=0"));
     assert(offline_cache_mount() && mounts == 1);
+    // Capacity-only boot validation neither writes nor masks a previous
+    // failed write probe. Only a successful real probe can reopen admission.
+    fsync_error=EIO;
+    assert(offline_cache_recheck(false));
+    assert(!offline_cache_recheck());
+    fsync_error=0;
+    assert(!offline_cache_recheck(false));
+    assert(offline_cache_recheck());
 
     reset();protected_journal=true;fresh=true;probe_fails=true;
     (void)offline_cache_mount();

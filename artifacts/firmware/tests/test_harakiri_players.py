@@ -254,8 +254,12 @@ int main() {
     assert(g_store.taubeIndex==clay&&g_store.spielerIndex==player);
     assert(!memcmp(saved,g_store.harakiriOrder,sizeof(saved)));
     assert(store_sequence_entry(&g_store,player,clay)->maschine==machine);
-    assert(!g_store.currentFireSent&&!g_store.activeGameResumed);
+    // The saved false flag can predate a RAM-admitted physical launch.
+    assert(g_store.currentFireSent&&g_store.activeGameResumed&&!g_store.repeatCurrentLaunch);
     assert(!strcmp(g_store.activeGameCreditUseIds[0],"original-use-event"));
+    // Persist the new conservative restart flag before testing identical-write
+    // elision. Restore intentionally changed the previously saved false flag.
+    assert(active_game_checkpoint());
     // A failed replacement must retain the committed slot and permutations.
     auto newest=[]() {
         uint32_t gen[2]={};
@@ -327,15 +331,17 @@ int main() {
     assert(rmdir(name)==0);active_game_retry_finished_checkpoint();
     assert(!g_store.activeGameStorageError);
     ended_games.clear(); // subsequent independent trials reuse this fixture's UUID
-    // Normal game: reboot between repeat stages preserves the explicit retry.
+    // Reboot always requires a new explicit repeat decision, even if the saved
+    // checkpoint was between repeat stages.
     for(int mode:{MODUS_NORMAL,MODUS_HARAKIRI}) {
     remapped=false;setup(mode,127,3);persist=true;int initial_player=g_store.spielerIndex;
     g_store.currentFireSent=true;assert(active_game_checkpoint());store_eintragen(2);
     int prior_player=g_store.spielerIndex,prior_clay=g_store.taubeIndex;
     g_store.currentFireSent=true;assert(active_game_checkpoint());store_wiederholen();
     memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
-    assert(g_store.harakiriOrdersReady==(mode==MODUS_HARAKIRI)&&!g_store.currentFireSent&&g_store.repeatCurrentLaunch);
+    assert(g_store.harakiriOrdersReady==(mode==MODUS_HARAKIRI)&&g_store.currentFireSent&&!g_store.repeatCurrentLaunch);
     assert(g_store.spielerIndex==prior_player&&g_store.taubeIndex==prior_clay&&g_store.ergebnisseCount==1);
+    store_wiederholen();assert(!g_store.currentFireSent&&g_store.repeatCurrentLaunch&&g_store.ergebnisseCount==1);
     store_wiederholen();assert(g_store.spielerIndex==initial_player&&g_store.ergebnisseCount==0&&g_store.spieler[initial_player].punkte==0);
     g_store.currentFireSent=true;assert(active_game_checkpoint());store_wiederholen();store_wiederholen();
     assert(g_store.repeatCurrentLaunch&&!g_store.currentFireSent&&g_store.ergebnisseCount==0&&g_store.spielerIndex==initial_player);

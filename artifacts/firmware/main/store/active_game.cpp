@@ -25,6 +25,8 @@ static SemaphoreHandle_t writer_mutex;
 static TaskHandle_t writer_task;
 static std::atomic<unsigned> dirty_revision{0},saved_revision{0};
 static std::atomic<int64_t> dirty_at{0};
+static std::atomic<bool> writer_busy{false};
+static std::atomic<int64_t> writer_activity{0};
 static std::atomic<bool> force_checkpoint{false};
 static std::atomic<unsigned> attempted_revision{0};
 static void writer_lock(){
@@ -318,6 +320,14 @@ bool active_game_checkpoint() {
 
 #ifdef ESP_PLATFORM
 bool active_game_checkpoint_pending(){return dirty_revision.load()!=saved_revision.load();}
+bool active_game_writer_idle_for(unsigned milliseconds) {
+    return !writer_busy.load()&&!active_game_checkpoint_pending()&&
+        esp_timer_get_time()-writer_activity.load()>=(int64_t)milliseconds*1000;
+}
+void active_game_request_flush() {
+    force_checkpoint=true;
+    active_game_schedule();
+}
 void active_game_schedule() {
     dirty_at=esp_timer_get_time();++dirty_revision;
     if(writer_task)xTaskNotifyGive(writer_task);
@@ -350,11 +360,14 @@ static void checkpoint_worker(void*) {
     for(;;) {
         ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(50));
         // Game end is a hard durability point, performed by this same writer.
+        bool work=game_store_finish_pending()||active_game_checkpoint_pending();
+        if(work){writer_busy=true;writer_activity=esp_timer_get_time();}
         game_store_flush_finished();
         if(active_game_checkpoint_pending()&&
            (force_checkpoint.exchange(false)||esp_timer_get_time()-dirty_at.load()>=250000)) {
             if(!active_game_flush())vTaskDelay(pdMS_TO_TICKS(1000));
         }
+        if(work){writer_activity=esp_timer_get_time();writer_busy=false;}
     }
 }
 void active_game_writer_init() {
@@ -455,10 +468,11 @@ bool active_game_restore() {
             g_store.activeGameOpen=true;
             // A physical shot may have happened just before power loss.
             // Never authorize a duplicate automatically after restart.
-            // Legacy writers queued radio work before persisting the flag.
-            // Only v2's durable pre-launch reservation makes false trustworthy.
-            g_store.currentFireSent=invalid||best->version==1||best->data.currentFireSent;
-            g_store.repeatCurrentLaunch=!invalid&&best->version>=2&&best->data.repeatCurrentLaunch;
+            // FIRE is admitted from RAM before the checkpoint completes.
+            // Even a valid v2 record with false may predate a physical launch.
+            // Require an explicit operator repeat for every restored unit.
+            g_store.currentFireSent=true;
+            g_store.repeatCurrentLaunch=false;
             g_store.activeGameResumed=g_store.currentFireSent;
             terminal_log_add("game","WARN","Spiel fortgesetzt; letzte Einheit vor erneutem Auslösen prüfen");
             if(invalid)terminal_log_add("data_loss_risk","WARN",

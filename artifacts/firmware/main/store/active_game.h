@@ -16,6 +16,8 @@ void active_game_writer_init();
 void active_game_schedule();
 bool active_game_flush(); // worker only; never wait while holding the LVGL lock
 bool active_game_checkpoint_pending();
+bool active_game_writer_idle_for(unsigned milliseconds);
+void active_game_request_flush(); // request immediate checkpoint without waiting
 #else
 inline void active_game_schedule(){(void)active_game_checkpoint();}
 inline bool active_game_checkpoint_pending(){return false;}

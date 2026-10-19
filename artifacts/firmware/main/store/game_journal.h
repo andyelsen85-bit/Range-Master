@@ -24,6 +24,7 @@ bool game_journal_recheck_ready(); // clears transient failure only after a fres
 void game_journal_maintenance(); // worker context, 1s/5s/30s retry; never LVGL timer
 bool game_journal_is_file(const char *name);
 bool game_journal_self_test();
+bool game_journal_background_self_test();
 bool game_journal_read(const char *id,FinishedGame *out);
 // Only the authenticated, exported and twice-confirmed recovery path may call.
 bool game_journal_discard(const char *id);

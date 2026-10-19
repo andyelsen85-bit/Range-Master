@@ -40,16 +40,15 @@ const char *offline_cache_path_error(){return s_path_error;}
 static const char *TAG = "offline_cache";
 static const char *ROOT = "/fatfs/TMCACHE";
 static bool s_patterns_checked=false;
+static bool s_write_probe_ok=false;
 static bool check_path_patterns() {
     if(s_patterns_checked)return !s_path_error[0];
     s_patterns_checked=true;
     int64_t start=esp_timer_get_time();
     bool ok=fat_patterns_validate("/fatfs");
     if(!ok)snprintf(s_path_error,sizeof(s_path_error),"FAT: ungültiges Dateinamensmuster");
-    // Reserved scratch names with the same shapes as ACTIVE0, ROSTER and J000.
-    // No fsync here: full durability probes run once, after the UI is ready.
-    for(int index:{0,4,25})
-        if(ok)ok=fat_patterns_self_test("/fatfs",s_path_error,sizeof(s_path_error),index,false);
+    // Validate every name without touching flash before UI. Real scratch
+    // write/rename/read/delete probes run in the resumable background worker.
     if(!ok) {
         terminal_log_add("data_loss_risk","ERROR",s_path_error);
         ESP_LOGE(TAG,"%s",s_path_error);
@@ -574,7 +573,7 @@ static bool cache_self_test(void) {
     return written == (ssize_t)sizeof(bytes) && synced == 0 && closed == 0;
 }
 
-static bool inspect_volume(bool *bad_capacity) {
+static bool inspect_volume(bool *bad_capacity,bool write_probe=true) {
     uint64_t total = 0, free_bytes = 0;
     const esp_err_t info_err = esp_vfs_fat_info("/fatfs", &total, &free_bytes);
     ESP_LOGI(TAG, "FAT info: result=%s total=%llu free=%llu bytes",
@@ -594,7 +593,13 @@ static bool inspect_volume(bool *bad_capacity) {
              (unsigned)CONFIG_WL_SECTOR_SIZE);
     const bool geometry_ok = sector != 0 && CACHE_ALLOCATION_UNIT >= sector &&
                              CACHE_ALLOCATION_UNIT % sector == 0;
-    const bool writable = cache_self_test();
+    int64_t began=esp_timer_get_time();
+    // A capacity-only boot recheck must not turn an earlier failed write
+    // probe into permission to start games. Only a real probe can clear it.
+    if(write_probe)s_write_probe_ok=cache_self_test();
+    const bool writable = s_write_probe_ok;
+    if(write_probe)ESP_LOGI(TAG,"boot/storage write_probe_ms=%lld",
+        (long long)((esp_timer_get_time()-began)/1000));
     const auto usage=volume_usage("validation",false);
     const bool lost=usage.proven&&usage.total&&usage.lost*CACHE_ALLOCATION_UNIT>usage.total/20;
     return info_err == ESP_OK && !*bad_capacity && geometry_ok && writable&&!lost;
@@ -789,10 +794,10 @@ bool offline_cache_storage_warning(char *out,size_t size) {
     else snprintf(out,size,"Spielarchiv nicht verfügbar. Einstellungen > System > Speicher reparieren. Offene oder ungeprüfte Daten werden niemals gelöscht.");
     return true;
 }
-bool offline_cache_recheck(void) {
+bool offline_cache_recheck(bool write_probe) {
     lock_cache();
     bool bad=false;
-    bool ok=s_wl!=WL_INVALID_HANDLE && inspect_volume(&bad);
+    bool ok=s_wl!=WL_INVALID_HANDLE && inspect_volume(&bad,write_probe);
     if(ok) {int result=mkdir(ROOT,0755);ok=result==0 || errno==EEXIST;}
     if(ok)ok=check_path_patterns();
     s_mounted=ok;s_storage_blocked=!ok;update_health();
