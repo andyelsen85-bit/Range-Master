@@ -73,6 +73,10 @@ int esp_http_client_perform(Client *client) {
 int esp_http_client_get_status_code(Client *client) { return client->code; }
 void esp_http_client_close(Client *) {}
 void esp_http_client_cleanup(Client *client) { delete client; }
+esp_http_client_handle_t gateway_http_acquire(const esp_http_client_config_t *config) {
+    return esp_http_client_init(config);
+}
+void gateway_http_release(Client *client,esp_err_t) {esp_http_client_cleanup(client);}
 #define pdMS_TO_TICKS(value) (value)
 void vTaskDelay(int ms) { delays += ms; }
 // The real cJSON parser belongs to the SDK. These mocks expose the requested
@@ -87,7 +91,7 @@ cJSON *cJSON_Parse(const char *body) {
     node->valuestring = node->value.data(); return node;
 }
 cJSON *cJSON_GetObjectItemCaseSensitive(cJSON *node, const char *name) {
-    assert(std::string(name) == "nonce"); return node;
+    return std::string(name) == "nonce"?node:nullptr;
 }
 bool cJSON_IsString(cJSON *node) { return node != nullptr; }
 // Fire progress is not returned by these nonce/retry fixtures.
