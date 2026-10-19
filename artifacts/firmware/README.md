@@ -44,6 +44,36 @@ device verification.
 
 # TrapMaster ESP32-P4 Firmware
 
+## Socket-Konfiguration und Schutzstart
+
+`sdkconfig.defaults` setzt `CONFIG_LWIP_MAX_SOCKETS=24`. Ein vorhandenes
+`sdkconfig` kann diesen Standard übersteuern. Der Build bricht bei weniger als
+16 Sockets absichtlich ab. In diesem Fall das lokale `sdkconfig` außerhalb
+des Projekts sichern, eigene Board-Einstellungen berücksichtigen und im
+Verzeichnis `artifacts/firmware` ausführen:
+
+```sh
+rm sdkconfig && idf.py reconfigure
+idf.py build
+```
+
+Beim Start muss für die Standardkonfiguration
+`CONFIG_LWIP_MAX_SOCKETS=24` erscheinen. Dies regeneriert nur die Build-Konfiguration:
+**kein `erase-flash`, keine NVS-/FAT-Löschung**.
+
+Die Socket-Diagnose startet erst nach `UI ready`, mit 8192 Byte PSRAM-Stack
+und kurzen, einzelnen Socket-Zeilen. Sie meldet ihren Stack-Wasserstand nach
+dem ersten Lauf. Spielstand-Writer, FAT-Hintergrundtest, Netzwerktest und
+Gateway-Worker melden ihn einmal nach 60 Sekunden; ein bereits beendeter
+FAT-Test meldet dann seinen vor dem Task-Ende gesicherten Wert. Unter
+1024 Byte freiem Stack erscheint eine WARN-Meldung.
+
+Nach drei aufeinanderfolgenden Panic-Resets deaktiviert der RTC-gestützte
+Schutzstart Socket-Diagnose, FAT-Hintergrundtest und Netzwerktest für diesen
+Boot. UI, Spielspeicherung und Gateway bleiben aktiv. Ein stabiler Betrieb
+von 60 Sekunden ab UI-Bereitschaft löscht den Panic-Zähler ohne NVS-Schreibzugriff;
+die optionalen Tasks bleiben bis zum nächsten Boot ausgeschaltet.
+
 Aktive und noch nicht übertragene Spiele, FAT-8.3-Pfadprüfung und die
 Hardware-Abnahme sind in [ACTIVE_GAME_RECOVERY.md](ACTIVE_GAME_RECOVERY.md)
 beschrieben. Kein `erase-flash`, keine NVS-/FAT-Löschung für dieses Update.

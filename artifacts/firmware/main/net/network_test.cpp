@@ -1,4 +1,5 @@
 #include "network_test.h"
+#include "runtime_safety.h"
 #include "network_trace.h"
 #include "socket_census.h"
 #include "bounded_dns.h"
@@ -45,6 +46,7 @@ uint16_t checksum(const uint8_t *p,size_t n) {
     return htons((uint16_t)~sum);
 }
 void run(void*) {
+    runtime_task_watch(RuntimeTask::NetworkTest);
     for(;;) {
         ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
         int64_t deadline=esp_timer_get_time()+10000000;
@@ -121,11 +123,15 @@ void run(void*) {
 }
 }
 void network_test_init() {
-    bounded_dns_init();network_trace_install_log_filter();
+    if(!runtime_optional_tasks_allowed())return;
     if(!worker&&xTaskCreate(run,"network_test",6144,nullptr,1,&worker)!=pdPASS)
         status("Netzwerktest: zu wenig RAM");
 }
 bool network_test_start(bool automatic) {
+    if(!runtime_optional_tasks_allowed()) {
+        status("Netzwerktest im Schutzstart deaktiviert");
+        return false;
+    }
     if(automatic||!worker)return false; // Never triggered by a failed request.
     if(busy()){status("Netzwerktest nicht möglich: Spiel aktiv");return false;}
     if(socket_census_free()<4){status("Sockets erschöpft");return false;}

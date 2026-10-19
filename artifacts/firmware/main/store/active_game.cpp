@@ -16,6 +16,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #ifdef ESP_PLATFORM
+#include "runtime_safety.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -345,6 +346,7 @@ bool active_game_flush() {
     return ok;
 }
 static void checkpoint_worker(void*) {
+    runtime_task_watch(RuntimeTask::Checkpoint);
     for(;;) {
         ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(50));
         // Game end is a hard durability point, performed by this same writer.

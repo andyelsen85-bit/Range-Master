@@ -36,6 +36,7 @@ static esp_err_t gateway_timing_event(esp_http_client_event_t *event) {
 #include "../../../lora-common/fire_link.h"
 #include "esp_wifi.h"
 #include "gateway_http.h"
+#include "runtime_safety.h"
 #include "active_game.h"
 #include "ui_manager.h"
 
@@ -702,6 +703,7 @@ static void perform_machine_test_batch(const GatewayRequest *batch)
 
 static void gateway_worker(void *arg)
 {
+    runtime_task_watch(RuntimeTask::Gateway);
     GatewayRequest request;
     char url[MAX_URL_LEN + 96];
     for (;;) {

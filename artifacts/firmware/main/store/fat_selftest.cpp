@@ -1,4 +1,5 @@
 #include "fat_selftest.h"
+#include "runtime_safety.h"
 #include "fat_patterns.h"
 #include "active_game.h"
 #include "game_store.h"
@@ -7,6 +8,7 @@
 #include "esp_app_desc.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,6 +22,7 @@ static bool busy() {
     return active||active_game_checkpoint_pending();
 }
 static void run(void*) {
+    runtime_task_watch(RuntimeTask::FatSelftest);
     vTaskDelay(pdMS_TO_TICKS(1000)); // let the first UI frame reach the panel
     int64_t began=esp_timer_get_time();
     uint32_t hash=2166136261u;
@@ -49,10 +52,15 @@ static void run(void*) {
     if(!ok)terminal_log_add("storage","WARN",error);
     if(full)ESP_LOGI("fat_selftest","fat selftest done in %lld ms mode=full complete=%d",
         (long long)((esp_timer_get_time()-began)/1000),ok);
-    vTaskDelete(nullptr);
+    runtime_task_finished(RuntimeTask::FatSelftest);
+    vTaskDeleteWithCaps(nullptr);
 }
 void fat_selftest_after_ui() {
+    if(!runtime_optional_tasks_allowed())return;
     if(started.exchange(true))return;
-    if(xTaskCreate(run,"fat_selftest",4096,nullptr,1,nullptr)!=pdPASS)
+    // This worker commits NVS/flash. Keep its enlarged stack internal;
+    // enabling external stacks is not proof that cache-off flash paths are safe.
+    if(xTaskCreateWithCaps(run,"fat_selftest",8192,nullptr,1,nullptr,
+                          MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)!=pdPASS)
         terminal_log_add("storage","WARN","FAT-Selbsttest: Hintergrundtask nicht verfügbar");
 }

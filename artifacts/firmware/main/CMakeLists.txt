@@ -19,6 +19,7 @@ idf_component_register(
         "net/network_trace.cpp"
         "net/network_test.cpp"
         "net/socket_census.cpp"
+        "net/runtime_safety.cpp"
         "net/gateway_http.cpp"
         "net/bounded_dns.cpp"
         "net/portal_runtime.cpp"

@@ -38,6 +38,9 @@
 #include "game_store.h"
 #include "fat_selftest.h"
 #include "socket_census.h"
+#include "runtime_safety.h"
+#include "bounded_dns.h"
+#include "network_trace.h"
 #include "day_player_events.h"
 #include "network_test.h"
 #include "portal_runtime.h"
@@ -293,7 +296,10 @@ static void lvgl_task(void *arg)
 
     ESP_LOGI(TAG, "UI ready — entering LVGL loop");
     ESP_LOGI(TAG, "boot ready in %lld ms",(long long)(esp_timer_get_time()/1000));
+    runtime_ui_ready();
     active_game_writer_init();
+    socket_census_init();
+    network_test_init();
     fat_selftest_after_ui();
 
     // ── 6. Main LVGL loop ─────────────────────────────────────
@@ -302,6 +308,7 @@ static void lvgl_task(void *arg)
         ui_manager_before_frame();
         uint32_t delay_ms = lv_timer_handler();
         ui_manager_unlock();
+        runtime_safety_tick();
         // lv_timer_handler() returns ms until the next timer fires.
         // Cap at LVGL_TASK_MAX_DELAY_MS so we don't starve other tasks.
         if (delay_ms > LVGL_TASK_MAX_DELAY_MS) delay_ms = LVGL_TASK_MAX_DELAY_MS;
@@ -312,6 +319,7 @@ static void lvgl_task(void *arg)
 // ── app_main ──────────────────────────────────────────────────
 extern "C" void app_main(void)
 {
+    runtime_boot_begin();
     ESP_LOGI(TAG, "TrapMaster firmware " APP_VERSION " — Phase 2 LVGL UI");
 
     // ── NVS ───────────────────────────────────────────────────
@@ -335,15 +343,17 @@ extern "C" void app_main(void)
     day_players_init();
     if(!active_game_restore())
         terminal_log_add("data_loss_risk","ERROR","Offenes Harakiri-Spiel konnte nicht geladen werden");
+    // Required by normal portal/FIRE traffic even in a protective boot.
+    // Optional network diagnostics must never own these shared services.
+    bounded_dns_init();
+    network_trace_install_log_filter();
     portal_runtime_init();
-    network_test_init();
 
     // ── Backlight ─────────────────────────────────────────────
     backlight_init();
 
     // ── Co-processor: ESP-Hosted SDIO + WiFi stack ───────────
     coprocessor_init();
-    socket_census_init();
 
     // ── Persistent WiFi supervisor (stored credentials + backoff) ──
     coprocessor_autoconnect();

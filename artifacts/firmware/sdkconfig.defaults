@@ -38,6 +38,7 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # (CAPS_ALLOC only exposes PSRAM via heap_caps_malloc — plain malloc()
 # would stay in internal DRAM, exhausting it as LVGL allocates widgets.)
 CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
 # ALWAYSINTERNAL=0: all plain malloc()/free() calls prefer PSRAM.
 # Without this, any allocation ≤512 B goes to internal RAM first.
 # lv_obj_t (52 B), LVGL styles, FreeRTOS primitives, and esp_hosted

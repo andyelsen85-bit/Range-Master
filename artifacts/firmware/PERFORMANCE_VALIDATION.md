@@ -59,6 +59,42 @@ timings or invented device logs.
 
 ## Safe hardware procedure
 
+### Socket configuration and panic recovery
+
+An existing `sdkconfig` overrides `sdkconfig.defaults`. Defaults request
+`CONFIG_LWIP_MAX_SOCKETS=24`; compiling with fewer than 16 now fails at a
+static assertion. Back up the local configuration outside the project, preserve
+board-specific overrides, then run from `artifacts/firmware`:
+
+```sh
+rm sdkconfig && idf.py reconfigure
+idf.py build
+```
+
+This is build configuration only, never permission to erase NVS/FAT. Confirm
+the actual serial boot line says `CONFIG_LWIP_MAX_SOCKETS=24`.
+
+The census starts after `UI ready` on an 8192-byte PSRAM stack. Counts/heap and
+each open descriptor are separate short lines; there is no aggregate peer
+buffer on its stack. Its first run reports `task=socket_census stack_hwm=N bytes`.
+The background FAT test uses an enlarged 8192-byte **internal** stack because
+its NVS/FAT writes can enter cache-off flash paths.
+After 60 seconds, expect one report each for `game_writer`, `fat_selftest`,
+`network_test` and `gateway_http`. Finished FAT tasks retain a saved watermark
+and report `state=finished`; deleted task handles are never inspected.
+Any value below 1024 bytes must be WARN and investigated on the physical target.
+
+Three consecutive `ESP_RST_PANIC` resets trigger a protective boot: census,
+background FAT selftest and network diagnostic tasks are not created, including
+when the manual test button is pressed. Essential game storage and gateway work
+remain enabled. RTC NOINIT holds a checked counter without changing NVS.
+After the UI stays up 60 seconds, the streak is cleared, but optional tasks stay
+off for that boot. A non-panic reset starts a new consecutive-panic sequence.
+Verify the single `boot` WARN and usable UI during controlled panic-recovery
+testing on a safe, disconnected physical test rig.
+
+### Flash and measure
+
 1. Synchronize durable pending data. Keep storage partitions and NVS intact.
    Use the existing terminal USB `idf.py -p PORT flash` procedure: **never
    erase-flash**. This change does not alter the partition table.
