@@ -120,6 +120,13 @@
       "when": 1792347772927,
       "tag": "0016_kiosk_device_pin",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792432027574,
+      "tag": "0017_terminal_player_identity",
+      "breakpoints": true
     }
   ]
 }

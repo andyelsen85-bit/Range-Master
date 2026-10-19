@@ -27,3 +27,18 @@ repair them. A concurrent game finish can otherwise recreate that old identity.
 snapshots, retain the local-player update on persistence failure, then publish
 the bounded RAM transition. Never let array reordering change the player an
 operator's open form or queued action targets.
+
+Local-player creates must be idempotent by the stable create-event identity,
+never by player name. Persist the returned portal identity before trying local
+remaps; retain it and the pending create until every durable ledger is updated.
+Do not regenerate a create identity on retry or silently merge historical
+same-name duplicates.
+
+**Why:** A lost response or failed terminal remap previously caused another
+portal player to be created on retry. The user explicitly requires separate
+same-name people to remain separate unless the operator chooses otherwise.
+
+**How to apply:** Preserve create-event IDs through persistence upgrades.
+Also keep local negative IDs unique across creates and reboots: reusing an
+acknowledged ID while a journal remap registry still holds it can attribute a
+new player's games to the earlier player.

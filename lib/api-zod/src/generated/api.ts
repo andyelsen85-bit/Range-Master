@@ -450,6 +450,32 @@ export const PostSyncSpielerResponse = zod.object({
 
 
 /**
+ * @summary Resolve an idempotent terminal-created player identity
+ */
+export const postSyncSpielerNeuBodyExternalIdMin = 8;
+export const postSyncSpielerNeuBodyExternalIdMax = 120;
+
+export const postSyncSpielerNeuBodyNameMax = 100;
+
+
+
+export const PostSyncSpielerNeuBody = zod.object({
+  "externalId": zod.string().min(postSyncSpielerNeuBodyExternalIdMin).max(postSyncSpielerNeuBodyExternalIdMax),
+  "name": zod.string().min(1).max(postSyncSpielerNeuBodyNameMax),
+  "email": zod.string().email().nullish()
+})
+
+
+
+
+export const PostSyncSpielerNeuResponse = zod.object({
+  "id": zod.number().int().min(1),
+  "name": zod.string(),
+  "externalId": zod.string()
+})
+
+
+/**
  * @summary Upload game results from ESP32
  */
 export const postSyncSpieleBodySpieleItemLaufMax = 2;

@@ -13,6 +13,7 @@
     "test:credits": "node --import tsx/esm --test ../../lib/db/tests/void-credit-use.test.mjs",
     "test:rounds": "node --import tsx/esm --test ../../lib/db/tests/round-participations.test.mjs",
     "test:sync-contract": "node --import tsx/esm --test ../../lib/db/tests/sync-contract.test.mjs",
+    "test:local-players": "node --import tsx/esm --test ../../lib/db/tests/local-player-identity.test.mjs",
     "test:isolated": "node --import tsx/esm ../../lib/db/tests/api-unit-isolated.mjs",
     "test": "node --import tsx/esm --test src/routes/rangliste-compute.test.ts src/routes/spieler.test.ts src/routes/admin-purge.test.ts src/routes/sync-history.test.ts src/routes/terminal-logs.test.ts src/lib/bills.test.ts src/lib/immutable-events.test.ts src/lib/sync-manifest.test.ts src/lib/terminal-config.test.ts src/lib/gameday.test.ts"
   },

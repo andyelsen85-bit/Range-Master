@@ -116,6 +116,8 @@ import type {
   TerminalLogAcknowledgement,
   TerminalLogPage,
   TerminalLogUpload,
+  TerminalSpielerIdentity,
+  TerminalSpielerInput,
   UploadGameManifest200
 } from './api.schemas';
 
@@ -1697,6 +1699,77 @@ export const usePostSyncSpieler = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getPostSyncSpielerMutationOptions(options));
+    }
+
+export const getPostSyncSpielerNeuUrl = () => {
+
+
+
+
+  return `/api/sync/spieler-neu`
+}
+
+/**
+ * @summary Resolve an idempotent terminal-created player identity
+ */
+export const postSyncSpielerNeu = async (terminalSpielerInput: TerminalSpielerInput, options?: Parameters<typeof customFetch>[1]): Promise<TerminalSpielerIdentity> => {
+
+  return customFetch<TerminalSpielerIdentity>(getPostSyncSpielerNeuUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(terminalSpielerInput)
+  }
+);}
+
+
+
+
+
+export const getPostSyncSpielerNeuMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postSyncSpielerNeu>>, TError,{data: BodyType<TerminalSpielerInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof postSyncSpielerNeu>>, TError,{data: BodyType<TerminalSpielerInput>}, TContext> => {
+
+const mutationKey = ['postSyncSpielerNeu'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postSyncSpielerNeu>>, {data: BodyType<TerminalSpielerInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postSyncSpielerNeu(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostSyncSpielerNeuMutationResult = NonNullable<Awaited<ReturnType<typeof postSyncSpielerNeu>>>
+    export type PostSyncSpielerNeuMutationBody = BodyType<TerminalSpielerInput>
+    export type PostSyncSpielerNeuMutationError = ErrorType<void>
+
+    /**
+ * @summary Resolve an idempotent terminal-created player identity
+ */
+export const usePostSyncSpielerNeu = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postSyncSpielerNeu>>, TError,{data: BodyType<TerminalSpielerInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof postSyncSpielerNeu>>,
+        TError,
+        {data: BodyType<TerminalSpielerInput>},
+        TContext
+      > => {
+      return useMutation(getPostSyncSpielerNeuMutationOptions(options));
     }
 
 export const getPostSyncSpieleUrl = () => {

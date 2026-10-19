@@ -188,4 +188,6 @@ export * from './terminalLogEntryType';
 export * from './terminalLogPage';
 export * from './terminalLogRow';
 export * from './terminalLogUpload';
+export * from './terminalSpielerIdentity';
+export * from './terminalSpielerInput';
 export * from './uploadGameManifest200';

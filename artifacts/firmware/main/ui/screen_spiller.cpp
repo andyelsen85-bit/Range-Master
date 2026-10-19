@@ -188,6 +188,13 @@ static void add_local_cb(lv_event_t *e)
     if (!name || strlen(name) == 0) return;
     int new_id;
     store_add_lokal_spieler(name, &new_id);
+    if(!new_id) {
+        if(s_lbl_status) {
+            lv_label_set_text(s_lbl_status,"Spieler nicht gespeichert. Speicher/Warteschlange prüfen.");
+            lv_obj_set_style_text_color(s_lbl_status,lv_color_hex(CLR_DANGER),0);
+        }
+        return; // retain the entered name instead of suggesting success
+    }
     lv_textarea_set_text(s_ta_new_name, "");
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_keyboard_set_textarea(s_kb, NULL);

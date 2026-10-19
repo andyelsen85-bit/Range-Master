@@ -879,8 +879,8 @@ router.post("/sales", requireApiKey, async (req, res): Promise<void> => {
 // Returns the new portal ID so the terminal can replace its local negative ID.
 router.post("/spieler-neu", requireApiKey, async (req, res) => {
   const body = z.object({
-    externalId: z.string().min(8),
-    name: z.string().min(1).max(100),
+    externalId: z.string().trim().min(8).max(120),
+    name: z.string().trim().min(1).max(100),
     email: z.string().email().nullable().optional(),
   }).parse(req.body);
 
@@ -890,10 +890,22 @@ router.post("/spieler-neu", requireApiKey, async (req, res) => {
       name: body.name,
       email: body.email ?? null,
       portalAktiv: false,
+      terminalExternalId: body.externalId,
     })
-    .returning({ id: spielerTable.id, name: spielerTable.name });
+    .onConflictDoUpdate({
+      target: spielerTable.terminalExternalId,
+      targetWhere: sql`${spielerTable.terminalExternalId} IS NOT NULL`,
+      // A retry retrieves the identity, never overwrites an operator's edits.
+      set: { terminalExternalId: sql`${spielerTable.terminalExternalId}`,
+        updatedAt: sql`${spielerTable.updatedAt}` },
+    })
+    .returning({ id: spielerTable.id, name: spielerTable.name,
+      created: sql<boolean>`(xmax = 0)` });
 
-  return res.status(201).json({ id: row.id, name: row.name, externalId: body.externalId });
+  req.log.info({ audit: "terminal.player.create", externalId: body.externalId,
+    playerId: row.id, created: row.created }, "Terminal player identity resolved");
+  return res.status(row.created ? 201 : 200)
+    .json({ id: row.id, name: row.name, externalId: body.externalId });
 });
 
 // ─── Player updates from the terminal ────────────────────────────────────────

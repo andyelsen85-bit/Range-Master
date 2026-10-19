@@ -995,6 +995,28 @@ export interface ModusBreakdownEntry {
   durchschnittProzent: number;
 }
 
+export interface TerminalSpielerInput {
+  /**
+     * @minLength 8
+     * @maxLength 120
+     */
+  externalId: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  name: string;
+  /** @nullable */
+  email?: string | null;
+}
+
+export interface TerminalSpielerIdentity {
+  /** @minimum 1 */
+  id: number;
+  name: string;
+  externalId: string;
+}
+
 export interface SyncSpieler {
   id: number;
   name: string;

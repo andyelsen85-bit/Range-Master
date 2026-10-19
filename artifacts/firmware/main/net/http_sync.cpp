@@ -47,6 +47,7 @@ static portMUX_TYPE s_error_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_session_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_last_error[384];
 static char s_contract_error[160];
+static std::atomic<int> s_waiting_local_games{0};
 
 typedef struct {
     esp_http_client_handle_t client;
@@ -408,7 +409,11 @@ void http_sync_copy_last_error(char *out, size_t out_len)
 {
     if (!out || !out_len) return;
     portENTER_CRITICAL(&s_error_lock);
-    snprintf(out, out_len, "%s", s_contract_error[0]?s_contract_error:s_last_error);
+    const char *error=s_contract_error[0]?s_contract_error:s_last_error;
+    int waiting=s_waiting_local_games.load();
+    if(waiting>0)snprintf(out,out_len,"%d Spiele warten auf neue Spieler%s%.180s",
+        waiting,error[0]?": ":"",error);
+    else snprintf(out, out_len, "%s", error);
     portEXIT_CRITICAL(&s_error_lock);
 }
 
@@ -1477,10 +1482,39 @@ bool http_pending_game_discard(const char *id,const char *pin,const char *token,
     game_journal_maintenance();(void)game_journal_recheck_ready();return true;
 }
 // ── http_push_pending_games ────────────────────────────────────
+static void log_waiting_local_player(int id,int *seen,int *seen_count)
+{
+    for(int i=0;i<*seen_count;i++)if(seen[i]==id)return;
+    if(*seen_count>=MAX_PORTAL_SPIELER)return;
+    seen[(*seen_count)++]=id;
+    char name[MAX_NAME_LEN]={};
+    const char *reason="Portal-ID noch nicht bestätigt";
+    bool acquired=false;
+    if(ui_manager_snapshot_lock(&acquired)) {
+        for(int i=0;i<g_store.portalSpielerCount;i++)
+            if(g_store.portalSpieler[i].id==id)
+                snprintf(name,sizeof(name),"%s",g_store.portalSpieler[i].name);
+        for(int i=0;i<g_store.spielerUpdateCount;i++) {
+            const auto &entry=g_store.spielerUpdates[i];
+            if(entry.used&&entry.typ==SPIELER_CREATE&&entry.spielerId==id) {
+                snprintf(name,sizeof(name),"%s",entry.name);
+                if(entry.portalId>0)reason="Zuordnung noch nicht dauerhaft gespeichert";
+                break;
+            }
+        }
+        if(acquired)ui_manager_unlock();
+    }
+    char message[240];
+    snprintf(message,sizeof(message),"Spiel wartet auf lokalen Spieler '%.63s' (%d): %s",
+        name[0]?name:"unbekannt",id,reason);
+    ESP_LOGI(TAG,"%s",message);
+    terminal_log_add("sync","INFO",message);
+}
 esp_err_t http_push_pending_games(void)
 {
     (void)game_journal_retry_acks();
     s_pending_push_accepted=0;s_pending_push_failed=0;
+    s_waiting_local_games=0;
     if (g_store.pendingGamesCount == 0) {(void)game_journal_recheck_ready();return ESP_OK;}
 
     char *resp = (char *)malloc(HTTP_BUF_SIZE);
@@ -1498,22 +1532,24 @@ esp_err_t http_push_pending_games(void)
     snapshot_count=g_store.pendingGamesCount<snapshot_count?g_store.pendingGamesCount:snapshot_count;
     memcpy(snapshot,g_store.pendingGames,snapshot_count*sizeof(PendingGame));
     sync_commit_end("game-snapshot",snapshot_started);
+    int waiting_ids[MAX_PORTAL_SPIELER]={},waiting_count=0;
     for (int i = 0; i < snapshot_count; i++) {
         // Local identities must be remapped before submission, never discarded.
         bool has_local = false;
         for (int j = 0; j < snapshot[i].teilnahmen_count; j++) {
             if (snapshot[i].teilnahmen[j].spielerId < 0) {
                 has_local = true;
-                break;
+                log_waiting_local_player(snapshot[i].teilnahmen[j].spielerId,waiting_ids,&waiting_count);
             }
         }
         for(int j=0;j<snapshot[i].ergebnisse_count;j++)
-            if(snapshot[i].ergebnisse[j].spielerId<0) has_local=true;
+            if(snapshot[i].ergebnisse[j].spielerId<0) {
+                has_local=true;
+                log_waiting_local_player(snapshot[i].ergebnisse[j].spielerId,waiting_ids,&waiting_count);
+            }
         if (has_local) {
-            cJSON *data=cJSON_CreateObject();
-            cJSON_AddStringToObject(data,"externalId",snapshot[i].externalId);
-            terminal_log_add("data_loss_risk","ERROR","Spiel wartet auf lokale Spieler-ID",data);
-            cJSON_Delete(data); overall=ESP_ERR_INVALID_STATE;
+            ++s_waiting_local_games;
+            overall=ESP_ERR_INVALID_STATE;
             continue;
         }
 
@@ -1779,6 +1815,70 @@ esp_err_t http_fetch_spielhistorie(void)
     });
 }
 
+// One CREATE is a durable receipt followed by idempotent remapping. A remap
+// failure never causes another HTTP create once portalId is known.
+static esp_err_t sync_create_local_player(SpielerUpdateEntry *e)
+{
+    if(e->portalId<=0) {
+        cJSON *object=cJSON_CreateObject();
+        if(!object)return ESP_ERR_NO_MEM;
+        cJSON_AddStringToObject(object,"externalId",e->externalId);
+        cJSON_AddStringToObject(object,"name",e->name);
+        if(e->email[0])cJSON_AddStringToObject(object,"email",e->email);
+        char *body=cJSON_PrintUnformatted(object);
+        cJSON_Delete(object);
+        if(!body)return ESP_ERR_NO_MEM;
+        char response[256]={};
+        esp_err_t result=http_post_json("/api/sync/spieler-neu",body,response,sizeof(response));
+        free(body);
+        if(result!=ESP_OK)return result;
+        cJSON *json=cJSON_Parse(response);
+        const cJSON *id=json?cJSON_GetObjectItem(json,"id"):nullptr;
+        int portal_id=cJSON_IsNumber(id)&&id->valuedouble>0&&id->valuedouble<=2147483647.0?
+            (int)id->valuedouble:0;
+        if(!portal_id||id->valuedouble!=portal_id) {
+            cJSON_Delete(json);
+            set_http_error("POST","/api/sync/spieler-neu","invalid response");
+            return ESP_FAIL;
+        }
+        e->portalId=portal_id;
+        cJSON_Delete(json);
+    }
+    // Also retry this save when the previous cycle failed to persist its
+    // receipt. Never call spieler-neu again just because the local save failed.
+    if(!store_save_spieler_updates())return ESP_FAIL;
+    int old_id=e->spielerId,new_id=e->portalId;
+    if(old_id!=new_id&&!game_journal_remap(old_id,new_id)) {
+        terminal_log_add("sync","WARN","Spielerzuordnung bleibt vorgemerkt: Archiv konnte nicht umgestellt werden");
+        return ESP_FAIL;
+    }
+    TickType_t commit_started;
+    if(!sync_commit_begin("player-remap",&commit_started))return ESP_ERR_TIMEOUT;
+    store_remap_spieler_id(old_id,new_id);
+    sync_commit_end("player-remap",commit_started);
+    if(!store_save_player_identity()) {
+        terminal_log_add("sync","WARN","Spielerzuordnung bleibt vorgemerkt: lokale Speicherung fehlgeschlagen");
+        return ESP_FAIL;
+    }
+    if(!sync_commit_begin("player-create-ack",&commit_started))return ESP_ERR_TIMEOUT;
+    e->used=false;
+    sync_commit_end("player-create-ack",commit_started);
+    if(!store_save_spieler_updates()) {
+        // A failed acknowledgement is not completion. Retain the receipt for
+        // retry even if publication is currently busy.
+        e->used=true;
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG,"player_remap name=%.63s local=%d portal=%d complete=1",e->name,old_id,new_id);
+    note_pushed("spieler",1);
+    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
+    (void)offline_cache_save(OFFLINE_CACHE_HISTORY);
+    (void)offline_cache_save(OFFLINE_CACHE_CREDITS);
+    (void)offline_cache_save(OFFLINE_CACHE_SALES);
+    (void)offline_cache_save(OFFLINE_CACHE_BILLS);
+    return ESP_OK;
+}
+
 // ── http_push_spieler_updates ─────────────────────────────────
 esp_err_t http_push_spieler_updates(void)
 {
@@ -1793,83 +1893,15 @@ esp_err_t http_push_spieler_updates(void)
         SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
         if (!e->used || e->typ != SPIELER_CREATE) continue;
 
-        cJSON *req_obj = cJSON_CreateObject();
-        cJSON_AddStringToObject(req_obj, "externalId", e->externalId);
-        cJSON_AddStringToObject(req_obj, "name",       e->name);
-        if (e->email[0]) cJSON_AddStringToObject(req_obj, "email", e->email);
-        char *body = cJSON_PrintUnformatted(req_obj);
-        cJSON_Delete(req_obj);
-        if (!body) {
-            overall = ESP_ERR_NO_MEM;
-            set_http_error("POST", "/api/sync/spieler-neu", "JSON allocation failed");
-            continue;
-        }
-
-        char *resp = (char *)malloc(256);
-        if (resp) {
-            esp_err_t cerr = http_post_json("/api/sync/spieler-neu", body, resp, 256);
-            if (cerr == ESP_OK) {
-                // Parse { "id": <portal_id>, "name": "...", "externalId": "..." }
-                int new_id = 0;
-                cJSON *j = cJSON_Parse(resp);
-                if (j) {
-                    cJSON *id_item = cJSON_GetObjectItem(j, "id");
-                    if (cJSON_IsNumber(id_item)) new_id = (int)id_item->valuedouble;
-                    cJSON_Delete(j);
-                }
-                if (new_id > 0) {
-                    int old_id = e->spielerId;          // negative local ID
-                    // Do not acknowledge/remove the durable local-player
-                    // update until every game file has the portal identity.
-                    if(!game_journal_remap(old_id,new_id)) {
-                        terminal_log_add("data_loss_risk","ERROR","Spielerzuordnung bleibt vorgemerkt: Archiv konnte nicht umgestellt werden");
-                        free(resp);free(body);
-                        return ESP_FAIL;
-                    }
-                    // One coherent remap covers lineup, credit balances and
-                    // every durable outbox. Persistence follows the short
-                    // publication window, never inside it.
-                    TickType_t commit_started;
-                    if (!sync_commit_begin("player-remap", &commit_started)) {
-                        free(resp);
-                        free(body);
-                        return ESP_ERR_TIMEOUT;
-                    }
-                    store_remap_spieler_id(old_id, new_id);
-                    e->used = false;    // mark done — compacted below
-                    sync_commit_end("player-remap", commit_started);
-                    ESP_LOGD(TAG, "Spieler '%s' created in portal → id=%d (was local %d)",
-                             e->name, new_id, old_id);
-                    note_pushed("spieler",1);
-                    game_store_save();
-                    (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
-                    (void)offline_cache_save(OFFLINE_CACHE_HISTORY);
-                    (void)offline_cache_save(OFFLINE_CACHE_CREDITS);
-                    (void)offline_cache_save(OFFLINE_CACHE_SALES);
-                    (void)offline_cache_save(OFFLINE_CACHE_BILLS);
-                } else {
-                    ESP_LOGW(TAG, "spieler-neu: bad response for '%s' — retaining", e->name);
-                    overall = ESP_FAIL;
-                    set_http_error("POST", "/api/sync/spieler-neu",
-                                   "invalid response");
-                }
-            } else {
-                ESP_LOGW(TAG, "spieler-neu: HTTP error for '%s': %s", e->name, esp_err_to_name(cerr));
-                overall = cerr;
-            }
-            free(resp);
-        } else {
-            overall = ESP_ERR_NO_MEM;
-            set_http_error("POST", "/api/sync/spieler-neu", "response allocation failed");
-        }
-        free(body);
+        esp_err_t created=sync_create_local_player(e);
+        if(created!=ESP_OK)overall=created;
     }
 
     // ── Pass 2: push profile updates and password resets for portal players ───
     int update_count = 0;
     for (int i = 0; i < g_store.spielerUpdateCount; i++) {
         SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
-        if (e->used && e->typ != SPIELER_CREATE) update_count++;
+        if (e->used && e->typ != SPIELER_CREATE && e->spielerId>0) update_count++;
     }
 
     if (update_count > 0) {
@@ -1879,7 +1911,7 @@ esp_err_t http_push_spieler_updates(void)
 
         for (int i = 0; i < g_store.spielerUpdateCount; i++) {
             SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
-            if (!e->used || e->typ == SPIELER_CREATE) continue;
+            if (!e->used || e->typ == SPIELER_CREATE || e->spielerId<=0) continue;
             cJSON *item = cJSON_CreateObject();
             cJSON_AddStringToObject(item, "externalId", e->externalId);
             cJSON_AddNumberToObject(item, "spielerId",  (double)e->spielerId);
@@ -1910,7 +1942,7 @@ esp_err_t http_push_spieler_updates(void)
                     }
                     for (int i = 0; i < g_store.spielerUpdateCount; i++) {
                         SpielerUpdateEntry *e = &g_store.spielerUpdates[i];
-                        if (e->used && e->typ != SPIELER_CREATE) e->used = false;
+                        if (e->used && e->typ != SPIELER_CREATE && e->spielerId>0) e->used = false;
                     }
                     sync_commit_end("player-update-ack", commit_started);
                     ESP_LOGD(TAG, "Pushed %d spieler update(s)", update_count);

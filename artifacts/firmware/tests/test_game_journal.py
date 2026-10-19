@@ -584,6 +584,8 @@ class DurableGames(unittest.TestCase):
             '''
             actual=production_function(ROOT/"game_store.cpp","static void _store_finish_game(void)\n{")
             actual+="\n"+production_function(ROOT/"game_store.cpp","static bool finish_game_commit(FinishedGame &fg) {")
+            actual+="\nstatic int s_waiting_local_games=0;\n"
+            actual+="\n"+production_function(ROOT.parent/"net/http_sync.cpp","static void log_waiting_local_player(")
             actual+="\n"+production_function(ROOT.parent/"net/http_sync.cpp","esp_err_t http_push_pending_games(void)\n{")
             harness=harness.replace("int main(int argc,char**argv)",actual+"\nint main(int argc,char**argv)")
             (temp / "harness.cpp").write_text(textwrap.dedent(harness))

@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
+#include <ctype.h>
 #include <atomic>
 #include <time.h>
 #include <sys/time.h>
@@ -26,6 +28,7 @@
 #include "cJSON.h"
 
 #include "game_store.h"
+#include "spieler_update_compat.h"
 #include "day_player_events.h"
 #include "credit_outbox.h"
 #include "portal_runtime.h"
@@ -232,6 +235,8 @@ static void nvs_reopen_after_failure(void)
 static bool queue_kredit_event_unlocked(int spieler_id, const char *typ, int anzahl);
 static int find_kredit_slot(const GameStore *s, int spieler_id);
 static bool save_kredit_state_unlocked(void);
+static bool s_spieler_updates_unreadable=false;
+static int s_next_local_id=-1;
 static esp_err_t set_counted_blob(const char *key, const void *data,
                                   int count, size_t item_size);
 static esp_err_t set_ammo_blob_unlocked(void);
@@ -2002,6 +2007,28 @@ void store_apply_portal_roster(const PortalSpieler *spieler, int count)
     reconcile_lineup_with_roster();
 }
 
+bool store_save_spieler_updates()
+{
+    if(s_spieler_updates_unreadable)return false;
+    nvs_lock();
+    esp_err_t err=set_counted_blob("sp_updates",g_store.spielerUpdates,
+        g_store.spielerUpdateCount,sizeof(SpielerUpdateEntry));
+    if(err==ESP_OK)err=nvs_set_i32(s_nvs,"sp_up_cnt",g_store.spielerUpdateCount);
+    if(err==ESP_OK)err=nvs_set_i32(s_nvs,"next_local",s_next_local_id);
+    if(err==ESP_OK)err=nvs_commit(s_nvs);
+    if(err!=ESP_OK)nvs_reopen_after_failure();
+    nvs_unlock();
+    return err==ESP_OK;
+}
+bool store_save_player_identity()
+{
+    // Keep CREATE used=true until all identity-keyed durable outboxes have
+    // committed. Partial persistence is retried with the same portal receipt.
+    payment_state_lock();
+    bool ok=save_kredit_state_unlocked()&&save_sale_state_unlocked()==ESP_OK&&save_payment_state_unlocked();
+    payment_state_unlock();
+    return ok&&day_players_flush()&&store_save_spieler_updates();
+}
 void store_remap_spieler_id(int old_id, int new_id)
 {
     if (old_id == new_id || old_id == 0 || new_id == 0) return;
@@ -2031,6 +2058,7 @@ void store_remap_spieler_id(int old_id, int new_id)
     for (int i = 0; i < g_store.pendingKreditEventCount; ++i) if (g_store.pendingKreditEvents[i].spielerId == old_id) g_store.pendingKreditEvents[i].spielerId = new_id;
     for (int i = 0; i < g_store.activeGameCreditCount; ++i) if (g_store.activeGameCreditPlayerIds[i] == old_id) g_store.activeGameCreditPlayerIds[i] = new_id;
     for (int i = 0; i < g_store.pendingVerkaufEventCount; ++i) if (g_store.pendingVerkaufEvents[i].spielerId == old_id) g_store.pendingVerkaufEvents[i].spielerId = new_id;
+    for (int i = 0; i < g_store.pendingPaymentEventCount; ++i) if (g_store.pendingPaymentEvents[i].spielerId == old_id) g_store.pendingPaymentEvents[i].spielerId = new_id;
     for (int g = 0; g < g_store.pendingGamesCount; ++g) {
         for (int t = 0; t < g_store.pendingGames[g].teilnahmen_count; ++t) if (g_store.pendingGames[g].teilnahmen[t].spielerId == old_id) g_store.pendingGames[g].teilnahmen[t].spielerId = new_id;
         for (int r = 0; r < g_store.pendingGames[g].ergebnisse_count; ++r) if (g_store.pendingGames[g].ergebnisse[r].spielerId == old_id) g_store.pendingGames[g].ergebnisse[r].spielerId = new_id;
@@ -2045,7 +2073,9 @@ void store_remap_spieler_id(int old_id, int new_id)
         for (int t = 0; t < g_store.lastFinished.base.teilnahmen_count; ++t) if (g_store.lastFinished.base.teilnahmen[t].spielerId == old_id) g_store.lastFinished.base.teilnahmen[t].spielerId = new_id;
         for (int r = 0; r < g_store.lastFinished.base.ergebnisse_count; ++r) if (g_store.lastFinished.base.ergebnisse[r].spielerId == old_id) g_store.lastFinished.base.ergebnisse[r].spielerId = new_id;
     }
-    for (int u = 0; u < g_store.spielerUpdateCount; ++u) if (g_store.spielerUpdates[u].spielerId == old_id) g_store.spielerUpdates[u].spielerId = new_id;
+    for (int u = 0; u < g_store.spielerUpdateCount; ++u)
+        if (g_store.spielerUpdates[u].spielerId == old_id&&g_store.spielerUpdates[u].typ!=SPIELER_CREATE)
+            g_store.spielerUpdates[u].spielerId = new_id;
     // Persistence and FAT snapshots are intentionally performed by the sync
     // caller after its short UI commit window has closed.
 }
@@ -3080,13 +3110,38 @@ void store_load_portal_spieler(void)
 
 void store_add_lokal_spieler(const char *name, int *out_id)
 {
-    static int s_local_id = -1;
+    if(out_id)*out_id=0;
+    if(s_spieler_updates_unreadable||!name||!name[0]||g_store.portalSpielerCount>=MAX_PORTAL_SPIELER||
+       g_store.spielerUpdateCount>=MAX_SPIELER_UPDATES)return;
+    while(isspace((unsigned char)*name))++name;
+    size_t length=strlen(name);
+    while(length&&isspace((unsigned char)name[length-1]))--length;
+    if(!length)return;
+    char trimmed[MAX_NAME_LEN]={};
+    if(length>=sizeof(trimmed))length=sizeof(trimmed)-1;
+    memcpy(trimmed,name,length);name=trimmed;
+    if(s_next_local_id==INT_MIN)return;
+    int local_id=s_next_local_id;
+    // Boot must not reuse a negative ID still referenced by an older CREATE.
+    for(int i=0;i<g_store.portalSpielerCount;i++) {
+        if(g_store.portalSpieler[i].id==INT_MIN)return;
+        if(g_store.portalSpieler[i].id<=local_id)local_id=g_store.portalSpieler[i].id-1;
+    }
+    for(int i=0;i<g_store.spielerUpdateCount;i++)
+        if(g_store.spielerUpdates[i].used&&g_store.spielerUpdates[i].spielerId==INT_MIN)return;
+        else if(g_store.spielerUpdates[i].used&&g_store.spielerUpdates[i].spielerId<=local_id)
+            local_id=g_store.spielerUpdates[i].spielerId-1;
+    if(local_id==INT_MIN)return;
+    // Never reuse an old negative ID: the journal's live remap registry can
+    // still contain it after its CREATE has been acknowledged and compacted.
+    s_next_local_id=local_id-1;
     PortalSpieler *ps = &g_store.portalSpieler[g_store.portalSpielerCount];
-    ps->id        = s_local_id--;
+    memset(ps,0,sizeof(*ps));
+    ps->id        = local_id;
     ps->lokal     = true;
     ps->portalAktiv = false;
-    strncpy(ps->name, name, MAX_NAME_LEN - 1);
-    ps->name[MAX_NAME_LEN - 1] = '\0';
+    ps->aktiv     = true;
+    memcpy(ps->name,trimmed,sizeof(ps->name));
     g_store.portalSpielerCount++;
     if (out_id) *out_id = ps->id;
 
@@ -3096,14 +3151,24 @@ void store_add_lokal_spieler(const char *name, int *out_id)
         e->used      = true;
         e->spielerId = ps->id;   // negative local ID; sync replaces with portal ID
         e->typ       = SPIELER_CREATE;
-        snprintf(e->externalId, sizeof(e->externalId), "new-%08x", (unsigned)esp_random());
-        strncpy(e->name, name, MAX_NAME_LEN - 1);
-        e->name[MAX_NAME_LEN - 1] = '\0';
+        e->portalId  = 0;
+        snprintf(e->externalId, sizeof(e->externalId), "new%08x%08x%08x%08x",
+                 (unsigned)esp_random(),(unsigned)esp_random(),(unsigned)esp_random(),(unsigned)esp_random());
+        memcpy(e->name,trimmed,sizeof(e->name));
         e->email[0]    = '\0';
         e->portalAktiv = false;
         ESP_LOGI(TAG, "Queued CREATE for local spieler '%s' (localId=%d)", name, ps->id);
     }
 
+    if(!store_save_spieler_updates()) {
+        --g_store.spielerUpdateCount;
+        memset(&g_store.spielerUpdates[g_store.spielerUpdateCount],0,sizeof(SpielerUpdateEntry));
+        --g_store.portalSpielerCount;
+        memset(ps,0,sizeof(*ps));
+        if(out_id)*out_id=0;
+        terminal_log_add("data_loss_risk","ERROR","Lokaler Spieler konnte nicht dauerhaft vorgemerkt werden");
+        return;
+    }
     game_store_save();
     (void)offline_cache_save(OFFLINE_CACHE_ROSTER);
 }
@@ -3707,10 +3772,11 @@ void game_store_save_settings(void)
     nvs_set_blob(s_nvs, "credits", g_store.kredite, sizeof(g_store.kredite));
     if (set_credit_events_blob_unlocked() == ESP_OK)
         nvs_set_i32(s_nvs, "credit_evt_cnt", g_store.pendingKreditEventCount);
-    if (set_counted_blob("sp_updates", g_store.spielerUpdates,
+    if (!s_spieler_updates_unreadable&&set_counted_blob("sp_updates", g_store.spielerUpdates,
                          g_store.spielerUpdateCount,
                          sizeof(g_store.spielerUpdates[0])) == ESP_OK)
         nvs_set_i32(s_nvs, "sp_up_cnt", g_store.spielerUpdateCount);
+    nvs_set_i32(s_nvs,"next_local",s_next_local_id);
     nvs_commit(s_nvs);
     nvs_unlock();
     ESP_LOGI(TAG,"settings_nvs_ms=%lld",(long long)((esp_timer_get_time()-started)/1000));
@@ -3895,12 +3961,30 @@ void game_store_init(void)
         memset(g_store.portalSpieler, 0, sizeof(g_store.portalSpieler));
         g_store.portalSpielerCount = 0;
     }
+    int32_t next_local=-1;
+    if(nvs_get_i32(s_nvs,"next_local",&next_local)==ESP_OK&&next_local<0)
+        s_next_local_id=next_local;
     if (!load_counted_blob_compat("sp_updates", "sp_up_cnt",
                                   g_store.spielerUpdates, MAX_SPIELER_UPDATES,
                                   sizeof(g_store.spielerUpdates[0]),
                                   &g_store.spielerUpdateCount)) {
-        memset(g_store.spielerUpdates, 0, sizeof(g_store.spielerUpdates));
-        g_store.spielerUpdateCount = 0;
+        size_t stored_bytes=0;
+        bool present=nvs_get_blob(s_nvs,"sp_updates",nullptr,&stored_bytes)!=ESP_ERR_NVS_NOT_FOUND;
+        auto *legacy=(LegacySpielerUpdateEntry*)heap_caps_calloc(MAX_SPIELER_UPDATES,
+            sizeof(LegacySpielerUpdateEntry),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        int count=0;
+        bool loaded=legacy&&load_counted_blob_compat("sp_updates","sp_up_cnt",
+            legacy,MAX_SPIELER_UPDATES,sizeof(*legacy),&count);
+        if(loaded) {
+            for(int i=0;i<count;i++)spieler_update_upgrade(legacy[i],&g_store.spielerUpdates[i]);
+            g_store.spielerUpdateCount=count;
+        } else {
+            memset(g_store.spielerUpdates,0,sizeof(g_store.spielerUpdates));
+            g_store.spielerUpdateCount=0;
+            s_spieler_updates_unreadable=present;
+            if(present)terminal_log_add("data_loss_risk","ERROR","Lokale Spielerwarteschlange konnte nicht geladen werden; NVS bleibt erhalten");
+        }
+        heap_caps_free(legacy);
     }
     // Reconcile after the FAT roster cache is loaded; doing it here would
     // erase a valid persisted lineup merely because NVS no longer stores the
@@ -4006,7 +4090,7 @@ void game_store_init(void)
                                              g_store.pendingPaymentEventCount,
                                              sizeof(g_store.pendingPaymentEvents[0]));
             if (migration == ESP_OK)
-                migration = set_counted_blob("sp_updates", g_store.spielerUpdates,
+                migration = s_spieler_updates_unreadable?ESP_ERR_INVALID_STATE:set_counted_blob("sp_updates", g_store.spielerUpdates,
                                              g_store.spielerUpdateCount,
                                              sizeof(g_store.spielerUpdates[0]));
             if (migration == ESP_OK) migration = set_credit_events_blob_unlocked();

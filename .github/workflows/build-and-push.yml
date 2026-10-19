@@ -37,6 +37,7 @@ jobs:
       - run: corepack enable && corepack prepare pnpm@10.26.1 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @workspace/api-server test:sync-contract
+      - run: pnpm --filter @workspace/api-server test:local-players
       - name: Check PIN and persistent stand-PC access
         run: pnpm --filter @workspace/api-server test:kiosk
       - name: Check queue eligibility and durable day-player delivery
@@ -45,6 +46,7 @@ jobs:
         run: |
           python3 artifacts/firmware/tests/test_game_journal.py
           python3 artifacts/firmware/tests/test_fat_selftest_resume.py
+          python3 artifacts/firmware/tests/test_local_players.py
           python3 artifacts/firmware/tests/test_storage_admin.py
           python3 artifacts/firmware/tests/test_storage_recovery.py
           python3 artifacts/firmware/tests/test_http_failure_policy.py

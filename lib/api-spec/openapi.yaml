@@ -402,6 +402,35 @@ paths:
                     type: integer
                 required: [synced]
 
+  /sync/spieler-neu:
+    post:
+      operationId: postSyncSpielerNeu
+      tags: [sync]
+      summary: Resolve an idempotent terminal-created player identity
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminalSpielerInput"
+      responses:
+        "200":
+          description: Existing identity returned without changing the profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalSpielerIdentity"
+        "201":
+          description: New player created with portal access disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalSpielerIdentity"
+        "400":
+          description: Invalid name or external identity
+
   /sync/spiele:
     post:
       operationId: postSyncSpiele
@@ -1972,6 +2001,32 @@ components:
             required: [versuche, treffer, quote]
       required: [spielerId, gesamtSpiele, gesamtSchuesse, gesamtTreffer, durchschnitt, bestPunkte, trefferquote, maschinen, tauben]
 
+    TerminalSpielerInput:
+      type: object
+      required: [externalId, name]
+      properties:
+        externalId:
+          type: string
+          minLength: 8
+          maxLength: 120
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: [string, "null"]
+          format: email
+    TerminalSpielerIdentity:
+      type: object
+      required: [id, name, externalId]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+        externalId:
+          type: string
     SyncSpieler:
       type: object
       properties:

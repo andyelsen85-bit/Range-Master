@@ -180,6 +180,7 @@ typedef struct {
     char             name[MAX_NAME_LEN];
     char             email[MAX_EMAIL_LEN];
     bool             portalAktiv;
+    int              portalId; // durable CREATE receipt; spielerId stays local until completion
 } SpielerUpdateEntry;
 
 typedef struct {
@@ -562,6 +563,8 @@ void store_apply_portal_roster(const PortalSpieler *spieler, int count);
 /** Reconcile persisted lineup IDs after side-effect-free FAT cache restoration. */
 void store_reconcile_lineup_after_cache_load(void);
 void store_remap_spieler_id(int old_id, int new_id);
+bool store_save_spieler_updates(); // checked durable create/remap receipt
+bool store_save_player_identity(); // checked identity-keyed ledgers, plus day-player slots
 void store_add_lokal_spieler(const char *name, int *out_id);
 bool store_set_lineup_post(int post, int spieler_id);
 void store_clear_lineup(void);
