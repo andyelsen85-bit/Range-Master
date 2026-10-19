@@ -48,3 +48,15 @@ input latency and made exhaustive boot probes take roughly two minutes.
 explicit durability boundaries for physical FIRE and game completion, and
 measure boot/input/flash times on the real target. Host filesystem timing and
 emulator responsiveness cannot establish those hardware acceptance criteria.
+
+Native target compilation and CI regression checks are separate acceptance
+boundaries; neither substitutes for physical performance measurements.
+
+**Why:** The target build passed after background checkpointing was introduced,
+but the extracted CI harnesses still assumed synchronous writes and one-stage
+doublette undo, and lacked a newly required SDK-mock include.
+
+**How to apply:** When modifying those boundaries, keep harness dependencies
+and fault injection consistent with the intended contract, while asserting
+the new no-I/O and two-stage behaviour explicitly. Run existing CI checks as
+CI checks; never present their results as hardware timing proof.

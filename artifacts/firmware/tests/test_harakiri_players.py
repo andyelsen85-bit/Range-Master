@@ -217,7 +217,18 @@ int main() {
         store_wiederholen();assert(!g_store.currentFireSent&&g_store.ergebnisseCount==before);
         store_eintragen(2);
         if(entry.isPair)store_eintragen(0);
+        int nextPlayer=g_store.spielerIndex,nextClay=g_store.taubeIndex;
+        int after=g_store.ergebnisseCount;
+        const auto *next=store_sequence_entry(&g_store,nextPlayer,nextClay);
+        bool rearmPair=next&&next->isPair&&!next->isDoublette&&!g_store.repeatCurrentLaunch;
         store_wiederholen();
+        if(rearmPair) {
+            // Stage one belongs to the newly current unscored pair. Only
+            // stage two may undo the previous player's complete launch.
+            assert(g_store.spielerIndex==nextPlayer&&g_store.taubeIndex==nextClay);
+            assert(g_store.ergebnisseCount==after&&g_store.repeatCurrentLaunch);
+            store_wiederholen();
+        }
         assert(g_store.spielerIndex==player&&g_store.taubeIndex==clay);
         assert(g_store.ergebnisseCount==before&&g_store.spieler[player].punkte==points);
         store_skip_taube();if(entry.isPair)store_skip_taube();
@@ -258,9 +269,16 @@ int main() {
     char name[160];int older=1-newest();
     snprintf(name,sizeof(name),ACTIVE_GAME_ROOT "/ACTIVE%d.BIN",older);
     assert(unlink(name)==0&&mkdir(name,0700)==0);
+    // Identical state must perform no I/O, even when the alternate slot is
+    // unwritable. Change a persisted field before injecting a write failure.
+    assert(active_game_checkpoint());
+    g_store.activeAcknowledgedClays++;
     assert(!active_game_checkpoint());assert(rmdir(name)==0);
     memset(&g_store,0,sizeof(g_store));assert(active_game_restore());
     assert(g_store.ergebnisseCount==count&&!memcmp(saved,g_store.harakiriOrder,sizeof(saved)));
+    // Populate the repaired alternate slot with a genuinely new snapshot;
+    // another identical request intentionally does not rotate generations.
+    g_store.activeAcknowledgedClays++;
     assert(active_game_checkpoint());
     // Simulate an interrupted flash write; use the other validated checkpoint,
     // warn, and retain the same player permutations rather than regenerating.

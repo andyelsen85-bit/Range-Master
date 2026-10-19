@@ -259,6 +259,7 @@ class DurableGames(unittest.TestCase):
                 #include "esp_timer.h"
                 #include "esp_heap_caps.h"
                 #include "active_game.h"
+                #include "ui_manager.h"
                 #include <cassert>
                 #include <cstdio>
                 #include <cstring>
