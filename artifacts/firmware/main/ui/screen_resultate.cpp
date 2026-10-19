@@ -10,6 +10,7 @@
 #include "game_store.h"
 #include "screen_resultate.h"
 #include "scorecard_render.h"
+#include "ui_time_fmt.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_winner;
@@ -96,15 +97,10 @@ lv_obj_t *screen_resultate_create(void)
     s_table = lv_table_create(s_scr);
     lv_obj_add_flag(s_table,LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
     lv_obj_add_event_cb(s_table,[](lv_event_t *e){scorecard_render_draw(e,&s_scorecard_state);},LV_EVENT_DRAW_TASK_ADDED,NULL);
-    lv_obj_set_size(s_table, DISPLAY_LOGICAL_W - 40,
-                    DISPLAY_LOGICAL_H - 80 - 106 - 20);
+    lv_obj_set_size(s_table, DISPLAY_LOGICAL_W - 32,
+                    DISPLAY_LOGICAL_H - 80 - 106 - 16);
+    lv_obj_set_style_pad_all(s_table, 0, 0);
     lv_obj_align(s_table, LV_ALIGN_TOP_MID, 0, 80 + 106);
-    lv_table_set_col_cnt(s_table, 5);
-    lv_table_set_col_width(s_table, 0, 50);  // Rank
-    lv_table_set_col_width(s_table, 1, 360); // Name
-    lv_table_set_col_width(s_table, 2, 110); // LAUF 1
-    lv_table_set_col_width(s_table, 3, 110); // LAUF 2
-    lv_table_set_col_width(s_table, 4, 110); // TOTAL
     lv_obj_set_style_text_font(s_table, UI_FONT_16, 0);
     lv_obj_set_style_text_color(s_table, lv_color_hex(CLR_TEXT), 0);
     lv_obj_set_style_text_color(s_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);
@@ -113,12 +109,6 @@ lv_obj_t *screen_resultate_create(void)
     lv_obj_set_style_bg_opa(s_table, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_bg_color(s_table, lv_color_hex(CLR_CARD), 0);
     lv_obj_set_style_border_color(s_table, lv_color_hex(CLR_BORDER), 0);
-
-    lv_table_set_cell_value(s_table, 0, 0, "#");
-    lv_table_set_cell_value(s_table, 0, 1, "SPIELER");
-    lv_table_set_cell_value(s_table, 0, 2, "LAUF 1");
-    lv_table_set_cell_value(s_table, 0, 3, "LAUF 2");
-    lv_table_set_cell_value(s_table, 0, 4, "GESAMT");
 
     return s_scr;
 }
@@ -132,9 +122,10 @@ void screen_resultate_refresh(void)
     int n = fg->spieler_count;
 
     // Meta line
-    char buf[128];
+    char buf[128], when[32];
+    fmt_local_time(fg->finishedAt, when, sizeof(when));
     snprintf(buf, sizeof(buf), "%s   |   %s   |   %d TAUBEN/LAUF",
-             fg->finishedAt,
+             when,
              modus_label(fg->base.modus),
              fg->base.taubenProLauf);
     lv_label_set_text(s_lbl_meta, buf);
@@ -154,5 +145,5 @@ void screen_resultate_refresh(void)
         lv_label_set_text(s_lbl_max, buf);
     }
 
-    scorecard_render(s_table,fg,&s_scorecard_state);
+    scorecard_render(s_table,fg,&s_scorecard_state,true);
 }

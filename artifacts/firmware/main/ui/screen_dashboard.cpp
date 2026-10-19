@@ -11,6 +11,7 @@
 #include "ui_time_fmt.h"
 #include "lvgl.h"
 #include "ui_fonts.h"
+#include "ui_layout.h"
 #include "display_text.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -28,6 +29,8 @@
 static lv_obj_t *s_scr;
 static lv_obj_t *s_lbl_sync_status;
 static lv_obj_t *s_lbl_pending;
+static lv_obj_t *s_lbl_last_sync;
+static int s_rendered_sync_status = -1;
 static lv_obj_t *s_lbl_wifi;
 static lv_obj_t *s_lbl_gateway;
 static lv_obj_t *s_lbl_clock;
@@ -45,6 +48,18 @@ static GatewayReachability s_rendered_gateway_state = (GatewayReachability)-1;
 #define HEADER_H     80
 #define CONTENT_W   (DISPLAY_LOGICAL_W - SIDEBAR_W)
 #define CONTENT_H   (DISPLAY_LOGICAL_H - HEADER_H)
+
+// Sync card lines 1-2 must fit fully on one line: use UI_FONT_14, stepping
+// down to UI_FONT_12 only when the measured text is wider than the card.
+#define SYNC_LINE_W (SIDEBAR_W - 32 - 2 * 14 - 2 * 2)
+static void fit_line_font(lv_obj_t *label)
+{
+    lv_point_t size{};
+    lv_text_get_size(&size, lv_label_get_text(label), UI_FONT_14, 0, 0, 32767, LV_TEXT_FLAG_NONE);
+    const lv_font_t *want = size.x <= SYNC_LINE_W ? UI_FONT_14 : UI_FONT_12;
+    if (lv_obj_get_style_text_font(label, LV_PART_MAIN) != want)
+        lv_obj_set_style_text_font(label, want, LV_PART_MAIN);
+}
 
 static void set_label_text_if_changed(lv_obj_t *label, const char *text)
 {
@@ -210,7 +225,7 @@ static void shutdown_open_cb(lv_event_t *e)
     lv_obj_clear_flag(s_shutdown_modal, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *dialog = lv_obj_create(s_shutdown_modal);
-    lv_obj_set_size(dialog, 560, 270);
+    lv_obj_set_size(dialog, 560, 280);
     lv_obj_align(dialog, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_style(dialog, &g_style_card, 0);
     lv_obj_set_style_pad_all(dialog, 24, 0);
@@ -233,7 +248,7 @@ static void shutdown_open_cb(lv_event_t *e)
     lv_obj_set_style_text_color(s_shutdown_message, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *actions = lv_obj_create(dialog);
-    lv_obj_set_size(actions, LV_PCT(100), 54);
+    lv_obj_set_size(actions, LV_PCT(100), 60);
     lv_obj_set_style_bg_opa(actions, LV_OPA_0, 0);
     lv_obj_set_style_border_width(actions, 0, 0);
     lv_obj_set_style_pad_all(actions, 0, 0);
@@ -245,7 +260,7 @@ static void shutdown_open_cb(lv_event_t *e)
 
     lv_obj_t *confirm = lv_btn_create(actions);
     lv_obj_add_style(confirm, &g_style_btn_danger, 0);
-    lv_obj_set_size(confirm, 250, 54);
+    lv_obj_set_size(confirm, 250, 56);
     lv_obj_add_event_cb(confirm, shutdown_confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *confirm_label = lv_label_create(confirm);
     lv_label_set_text(confirm_label, LV_SYMBOL_POWER "  SYNC & AUSSCHALTEN");
@@ -254,7 +269,7 @@ static void shutdown_open_cb(lv_event_t *e)
 
     lv_obj_t *cancel = lv_btn_create(actions);
     lv_obj_add_style(cancel, &g_style_btn_secondary, 0);
-    lv_obj_set_size(cancel, 160, 54);
+    lv_obj_set_size(cancel, 160, 56);
     lv_obj_add_event_cb(cancel, shutdown_cancel_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cancel_label = lv_label_create(cancel);
     lv_label_set_text(cancel_label, "ABBRECHEN");
@@ -350,23 +365,31 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_border_width(sidebar, 2, 0);
     lv_obj_set_style_border_color(sidebar, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_pad_all(sidebar, 16, 0);
-    lv_obj_set_style_pad_row(sidebar, 10, 0);
+    lv_obj_set_style_pad_row(sidebar, 8, 0);
     lv_obj_set_flex_flow(sidebar, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(sidebar, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(sidebar, LV_OBJ_FLAG_SCROLLABLE);
 
+    // Own status row above the button column (hidden once inventory exists).
+    s_inventory_warning=lv_label_create(sidebar);
+    lv_label_set_text(s_inventory_warning,LV_SYMBOL_WARNING "  Inventar fehlt");
+    lv_obj_set_style_text_color(s_inventory_warning,lv_color_hex(CLR_WARN),0);
+    lv_obj_set_style_text_font(s_inventory_warning,UI_FONT_14,0);
+    lv_label_set_long_mode(s_inventory_warning,LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_inventory_warning,SIDEBAR_W-32);
+
     // 1. Large primary "SPILL START" button (140 px tall)
-    big_btn(sidebar, LV_SYMBOL_PLAY, "SPIEL START", 140, SCREEN_START);
+    big_btn(sidebar, LV_SYMBOL_PLAY, "SPIEL START", 104, SCREEN_START);
 
     // 2. "SPILLER VUM DAG" (credits) - full width, 88 px
     sec_btn(sidebar, LV_SYMBOL_CHARGE, "SPIELER DES TAGES",
-            SIDEBAR_W - 32, 88, SCREEN_KREDITE);
+            SIDEBAR_W - 32, 76, SCREEN_KREDITE);
 
     // 3. Row: "SPILLER" | "ASTELLUNGEN" side-by-side
     // Inner width = SIDEBAR_W - 2*pad(16) = 288. Half = (288-8)/2 = 140 px each.
     lv_obj_t *row = lv_obj_create(sidebar);
-    lv_obj_set_size(row, SIDEBAR_W - 32, 88);
+    lv_obj_set_size(row, SIDEBAR_W - 32, 76);
     lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
     lv_obj_set_style_border_width(row, 0, 0);
     lv_obj_set_style_pad_all(row, 0, 0);
@@ -375,12 +398,12 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    sec_btn(row, LV_SYMBOL_LIST,     "SPIELER",    140, 88, SCREEN_SPILLER);
-    sec_btn(row, LV_SYMBOL_SETTINGS, "EINSTELLUNGEN",140, 88, SCREEN_EINSTELLUNGEN);
+    sec_btn(row, LV_SYMBOL_LIST,     "SPIELER",    140, 76, SCREEN_SPILLER);
+    sec_btn(row, LV_SYMBOL_SETTINGS, "EINSTELLUNGEN",140, 76, SCREEN_EINSTELLUNGEN);
 
     // 4. "SPILLGESCHICHT" - muted ghost style
     lv_obj_t *hist_btn = lv_btn_create(sidebar);
-    lv_obj_set_size(hist_btn, SIDEBAR_W - 32, 68);
+    lv_obj_set_size(hist_btn, SIDEBAR_W - 32, 56);
     lv_obj_set_style_bg_color(hist_btn, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_bg_opa(hist_btn, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(hist_btn, 0, 0);
@@ -404,17 +427,14 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_color(hist_lbl, lv_color_hex(CLR_MUTED), 0);
 
     lv_obj_t *inventory=lv_button_create(sidebar);
-    lv_obj_add_style(inventory,&g_style_btn_secondary,0);lv_obj_set_size(inventory,SIDEBAR_W-32,54);
+    lv_obj_add_style(inventory,&g_style_btn_secondary,0);lv_obj_set_size(inventory,SIDEBAR_W-32,56);
     lv_obj_t *inventory_label=lv_label_create(inventory);lv_label_set_text(inventory_label,"INVENTAR & TAG");
     lv_obj_set_style_text_font(inventory_label,UI_FONT_14,0);lv_obj_center(inventory_label);
     lv_obj_add_event_cb(inventory,[](lv_event_t*){screen_inventory_open(false);},LV_EVENT_CLICKED,NULL);
-    s_inventory_warning=lv_label_create(sidebar);lv_label_set_text(s_inventory_warning,"Inventar fehlt");
-    lv_obj_set_style_text_color(s_inventory_warning,lv_color_hex(CLR_WARN),0);
-    lv_obj_set_style_text_font(s_inventory_warning,UI_FONT_14,0);
     // 5. Graceful shutdown: sync first, then put the ESP32 into deep sleep.
     lv_obj_t *shutdown_btn = lv_btn_create(sidebar);
     lv_obj_add_style(shutdown_btn, &g_style_btn_danger, 0);
-    lv_obj_set_size(shutdown_btn, SIDEBAR_W - 32, 50);
+    lv_obj_set_size(shutdown_btn, SIDEBAR_W - 32, 56);
     lv_obj_add_event_cb(shutdown_btn, shutdown_open_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *shutdown_label = lv_label_create(shutdown_btn);
     lv_label_set_text(shutdown_label, LV_SYMBOL_POWER "  AUSSCHALTEN");
@@ -443,23 +463,32 @@ lv_obj_t *screen_dashboard_create(void)
     lv_obj_set_style_text_color(q_hdr, lv_color_hex(CLR_MUTED), 0);
     lv_obj_set_style_text_letter_space(q_hdr, 1, 0);
 
+    // Three fixed lines: status chip, pending actions, last sync.
+    s_lbl_sync_status = lv_label_create(queue);
+    lv_label_set_text(s_lbl_sync_status, "BEREIT");
+    s_rendered_sync_status = -1;
+    lv_obj_set_style_text_font(s_lbl_sync_status, UI_FONT_14, 0);
+    lv_obj_set_style_text_color(s_lbl_sync_status, lv_color_hex(CLR_MUTED), 0);
+    lv_label_set_long_mode(s_lbl_sync_status, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(s_lbl_sync_status, LV_PCT(100));
+
     s_lbl_pending = lv_label_create(queue);
-    lv_label_set_text(s_lbl_pending, "0 AKTIONEN AUSSTEHEND");
+    lv_label_set_text(s_lbl_pending, "Offline-Warteschlange: 0 Aktionen");
     lv_obj_set_style_text_font(s_lbl_pending, UI_FONT_14, 0);
     lv_obj_set_style_text_color(s_lbl_pending, lv_color_hex(CLR_TEXT), 0);
-    lv_label_set_long_mode(s_lbl_pending, LV_LABEL_LONG_WRAP);
+    lv_label_set_long_mode(s_lbl_pending, LV_LABEL_LONG_CLIP);
     lv_obj_set_width(s_lbl_pending, LV_PCT(100));
 
-    s_lbl_sync_status = lv_label_create(queue);
-    lv_label_set_text(s_lbl_sync_status, "BEREET");
-    lv_obj_set_style_text_font(s_lbl_sync_status, UI_FONT_12, 0);
-    lv_obj_set_style_text_color(s_lbl_sync_status, lv_color_hex(CLR_MUTED), 0);
-    lv_label_set_long_mode(s_lbl_sync_status, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(s_lbl_sync_status, LV_PCT(100));
+    s_lbl_last_sync = lv_label_create(queue);
+    lv_label_set_text(s_lbl_last_sync, "Letzter Sync noch nie");
+    lv_obj_set_style_text_font(s_lbl_last_sync, UI_FONT_12, 0);
+    lv_obj_set_style_text_color(s_lbl_last_sync, lv_color_hex(CLR_MUTED), 0);
+    lv_label_set_long_mode(s_lbl_last_sync, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_lbl_last_sync, LV_PCT(100));
 
     lv_obj_t *sync_btn = lv_btn_create(queue);
     lv_obj_add_style(sync_btn, &g_style_btn_primary, 0);
-    lv_obj_set_size(sync_btn, LV_PCT(100), 50);
+    lv_obj_set_size(sync_btn, LV_PCT(100), 56);
     lv_obj_add_event_cb(sync_btn, sync_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *sync_lbl = lv_label_create(sync_btn);
@@ -483,39 +512,37 @@ void screen_dashboard_refresh(void)
 
     // Sync status label
     char buf[128];
-    switch (sync_state.status) {
-        case SYNC_IDLE:
-            set_label_text_if_changed(s_lbl_sync_status, "BEREET");
-            break;
-        case SYNC_RUNNING:
-            set_label_text_if_changed(s_lbl_sync_status,
-                                       LV_SYMBOL_REFRESH " SYNCHRONISIERT...");
-            break;
-        case SYNC_SUCCESS:
-            set_label_text_if_changed(s_lbl_sync_status,
-                                       LV_SYMBOL_OK " SYNCHRONISIERT");
-            break;
-        case SYNC_ERROR:
-            snprintf(buf, sizeof(buf),
-                      LV_SYMBOL_WARNING " Fehler: %.40s", sync_state.error);
-            set_label_text_if_changed(s_lbl_sync_status, buf);
-            break;
+    int chip = sync_state.status == SYNC_ERROR ? UI_SYNC_ERROR :
+               sync_state.status == SYNC_RUNNING ? UI_SYNC_RUNNING :
+               sync_state.status == SYNC_SUCCESS ? UI_SYNC_OK : UI_SYNC_IDLE;
+    const char *symbol = chip == UI_SYNC_ERROR || !g_store.offlineCacheHealthy ? LV_SYMBOL_WARNING :
+                         chip == UI_SYNC_RUNNING ? LV_SYMBOL_REFRESH :
+                         chip == UI_SYNC_OK ? LV_SYMBOL_OK : LV_SYMBOL_REFRESH;
+    snprintf(buf, sizeof(buf), "%s  %s", symbol, ui_sync_chip_text(chip, g_store.offlineCacheHealthy));
+    set_label_text_if_changed(s_lbl_sync_status, buf);
+    fit_line_font(s_lbl_sync_status);
+
+    int rendered = chip * 2 + (g_store.offlineCacheHealthy ? 1 : 0);
+    if (rendered != s_rendered_sync_status) {
+        s_rendered_sync_status = rendered;
+        uint32_t color = chip == UI_SYNC_ERROR ? CLR_DANGER :
+                         !g_store.offlineCacheHealthy ? CLR_WARN :
+                         chip == UI_SYNC_OK ? CLR_SUCCESS :
+                         chip == UI_SYNC_RUNNING ? CLR_WARN : CLR_MUTED;
+        lv_obj_set_style_text_color(s_lbl_sync_status, lv_color_hex(color), 0);
     }
 
     // Pending games
-    char last_sync[32]="noch nie";
+    char last_sync[32]="";
     if(g_store.lastSuccessfulSyncAt>1700000000) {
         struct tm local{};time_t last=g_store.lastSuccessfulSyncAt;localtime_r(&last,&local);
         strftime(last_sync,sizeof(last_sync),"%d.%m.%Y %H:%M",&local);
     }
-    snprintf(buf, sizeof(buf), "%d AKTIONEN - %s - LETZTER SYNC: %s",
-             store_pending_action_count(),
-             !g_store.offlineCacheHealthy ? "CACHE NICHT VERFÜGBAR" :
-             g_store.offlineCacheLoaded ? "OFFLINE-CACHE" : "KEIN CACHE",
-             last_sync);
+    ui_pending_actions_text(store_pending_action_count(), buf, sizeof(buf));
     set_label_text_if_changed(s_lbl_pending, buf);
-    lv_obj_set_style_text_color(s_lbl_pending,
-        lv_color_hex(g_store.offlineCacheHealthy ? CLR_TEXT : CLR_WARN), 0);
+    fit_line_font(s_lbl_pending);
+    ui_last_sync_text(last_sync, buf, sizeof(buf));
+    set_label_text_if_changed(s_lbl_last_sync, buf);
 
     // WiFi
     CopWifiState wifi_state = cop_wifi_state();
@@ -601,7 +628,7 @@ void screen_dashboard_refresh(void)
             }
 
             lv_obj_t *row = lv_obj_create(s_history_list);
-            lv_obj_set_size(row, LV_PCT(100), 52);
+            lv_obj_set_size(row, LV_PCT(100), 56);
             lv_obj_set_style_bg_color(row, lv_color_hex(CLR_CARD), 0);
             lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
             lv_obj_set_style_border_color(row, lv_color_hex(CLR_BORDER), 0);

@@ -40,7 +40,7 @@ void lv_text_get_size(lv_point_t*p,const char*s,const lv_font_t*f,int,int,int,in
 struct lv_draw_task_t { lv_draw_dsc_base_t base; lv_draw_fill_dsc_t *fill; };
 struct lv_event_t { void *data; lv_draw_task_t *task=nullptr; };
 lv_draw_label_dsc_t *lv_draw_task_get_label_dsc(lv_draw_task_t*){return nullptr;}
-constexpr int LV_PART_ITEMS=1;
+constexpr int LV_PART_ITEMS=1,LV_TEXT_ALIGN_CENTER=2;
 lv_draw_task_t *lv_event_get_draw_task(lv_event_t *e) { return e->task; }
 void *lv_draw_task_get_draw_dsc(lv_draw_task_t *task) { return &task->base; }
 lv_draw_fill_dsc_t *lv_draw_task_get_fill_dsc(lv_draw_task_t *task) { return task->fill; }
@@ -131,7 +131,7 @@ STYLES = "\n".join(
         "lv_obj_set_style_border_width", "lv_obj_set_style_radius",
         "lv_obj_set_style_pad_hor", "lv_obj_set_style_pad_ver",
         "lv_obj_set_flex_flow", "lv_obj_set_flex_align", "lv_obj_set_style_text_font",
-        "lv_obj_set_style_text_color", "lv_label_set_long_mode"
+        "lv_obj_set_style_text_color", "lv_label_set_long_mode", "lv_obj_set_style_text_align"
     ]
 ) + "\n"
 

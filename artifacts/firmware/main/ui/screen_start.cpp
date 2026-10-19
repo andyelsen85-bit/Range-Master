@@ -14,6 +14,7 @@
 #include "active_game.h"
 #include "game_journal.h"
 #include "screen_open_games.h"
+#include "ui_layout.h"
 
 static lv_obj_t *s_scr;
 static lv_obj_t *s_player_rows[MAX_SPIELER];
@@ -169,6 +170,9 @@ static void update_modus_styles(void)
                 ? lv_color_hex(CLR_PRIMARY)
                 : lv_color_hex(CLR_SIDEBAR), 0);
         lv_obj_set_style_bg_opa(s_modus_btns[i], LV_OPA_COVER, 0);
+        lv_obj_t *label = lv_obj_get_child(s_modus_btns[i], 0);
+        if (label) lv_obj_set_style_text_color(label, lv_color_hex(
+            i == (int)g_store.modus ? 0xFFFFFF : CLR_TEXT), 0);
         lv_obj_invalidate(s_modus_btns[i]);
     }
 }
@@ -186,11 +190,9 @@ static void machine_toggle_cb(lv_event_t *e)
     Maschine m = (Maschine)(intptr_t)lv_event_get_user_data(e);
     g_store.maschinenAktiv[m] = !g_store.maschinenAktiv[m];
     lv_obj_t *btn = lv_event_get_target_obj(e);
-    if (g_store.maschinenAktiv[m]) {
-        lv_obj_add_style(btn, &g_style_btn_primary, 0);
-    } else {
-        lv_obj_add_style(btn, &g_style_btn_secondary, 0);
-    }
+    lv_obj_remove_style(btn, &g_style_btn_primary, 0);
+    lv_obj_remove_style(btn, &g_style_btn_secondary, 0);
+    lv_obj_add_style(btn, g_store.maschinenAktiv[m] ? &g_style_btn_primary : &g_style_btn_secondary, 0);
 }
 
 // ── screen_start_create ───────────────────────────────────────
@@ -247,7 +249,8 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_bg_opa(left, LV_OPA_0, 0);
     lv_obj_set_style_border_width(left, 0, 0);
     lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(left, 10, 0);
+    lv_obj_set_style_pad_row(left, 8, 0);
+    lv_obj_set_style_pad_all(left, 0, 0);
 
     lv_obj_t *players_hdr = lv_label_create(left);
     lv_label_set_text(players_hdr, "SPIELER ZUWEISEN");
@@ -255,7 +258,8 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_text_color(players_hdr, lv_color_hex(CLR_TEXT), 0);
 
     lv_obj_t *tools = lv_obj_create(left);
-    lv_obj_set_size(tools, LV_PCT(100), 42);
+    lv_obj_set_size(tools, LV_PCT(100), 56);
+    lv_obj_clear_flag(tools, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_opa(tools, LV_OPA_0, 0);
     lv_obj_set_style_border_width(tools, 0, 0);
     lv_obj_set_style_pad_all(tools, 0, 0);
@@ -264,7 +268,7 @@ lv_obj_t *screen_start_create(void)
     const char *tool_names[] = {"ALLE LÖSCHEN", "MISCHEN"};
     for (int t = 0; t < 2; ++t) {
         lv_obj_t *btn = lv_btn_create(tools);
-        lv_obj_set_size(btn, 150, 38);
+        lv_obj_set_size(btn, 170, 56);
         lv_obj_add_style(btn, t == 0 ? &g_style_btn_secondary : &g_style_btn_primary, 0);
         lv_obj_add_event_cb(btn, lineup_action_cb, LV_EVENT_CLICKED, (void *)(intptr_t)t);
         lv_obj_t *lbl = lv_label_create(btn); lv_label_set_text(lbl, tool_names[t]); lv_obj_center(lbl);
@@ -280,7 +284,8 @@ lv_obj_t *screen_start_create(void)
 
     for (int i = 0; i < MAX_SPIELER; i++) {
         lv_obj_t *row = lv_obj_create(left);
-        lv_obj_set_size(row, LV_PCT(100), 52);
+        lv_obj_set_size(row, LV_PCT(100), 72);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_bg_color(row, lv_color_hex(CLR_CARD), 0);
         lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
         lv_obj_add_style(row, &g_style_card, 0);
@@ -302,7 +307,7 @@ lv_obj_t *screen_start_create(void)
         lv_obj_set_width(dd,0);
         lv_dropdown_set_options(dd, opts ? opts : "-"); // safe if malloc failed
         lv_obj_set_flex_grow(dd, 1);
-        lv_obj_set_height(dd, 40);
+        lv_obj_set_height(dd, 56);
         lv_obj_set_style_text_font(dd, UI_FONT_14, 0);
         lv_obj_set_style_bg_color(dd, lv_color_hex(CLR_BORDER), 0);
         lv_obj_set_style_text_color(dd, lv_color_hex(CLR_TEXT), 0);
@@ -315,7 +320,7 @@ lv_obj_t *screen_start_create(void)
             lv_obj_t *move = lv_btn_create(row);
             // Make the reorder controls easy to hit with a finger and keep
             // the existing 10px row spacing between them.
-            lv_obj_set_size(move, 48, 44);
+            lv_obj_set_size(move, 56, 56);
             lv_obj_add_style(move, &g_style_btn_secondary, 0);
             intptr_t action = ((intptr_t)(i + 1) << 8) | (dir == 0 ? 1 : 2);
             lv_obj_add_event_cb(move, lineup_action_cb, LV_EVENT_CLICKED, (void *)action);
@@ -341,6 +346,8 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_border_width(right, 0, 0);
     lv_obj_set_flex_flow(right, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(right, 14, 0);
+    lv_obj_set_style_pad_all(right, 0, 0);
+    lv_obj_clear_flag(right, LV_OBJ_FLAG_SCROLLABLE);
 
     // Modus buttons
     lv_obj_t *modus_hdr = lv_label_create(right);
@@ -356,14 +363,19 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_bg_opa(modus_grid, LV_OPA_0, 0);
     lv_obj_set_style_border_width(modus_grid, 0, 0);
     lv_obj_set_style_pad_all(modus_grid, 0, 0);
-    lv_obj_set_flex_flow(modus_grid, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_pad_row(modus_grid, 8, 0);
-    lv_obj_set_style_pad_column(modus_grid, 8, 0);
+    lv_obj_clear_flag(modus_grid, LV_OBJ_FLAG_SCROLLABLE);
+    // Right column width = screen - 2*16 pad - 480 left - 16 gap.
+    const int right_w = DISPLAY_LOGICAL_W - 32 - 480 - 16;
+    const int MODE_COLS = 4, MODE_H = 56, MODE_GAP = 8;
+    lv_obj_set_height(modus_grid, 2 * MODE_H + MODE_GAP);
 
     for (int order = 0; order < MODUS_COUNT; order++) {
         int m = mode_order[order];
         lv_obj_t *mb = lv_btn_create(modus_grid);
-        lv_obj_set_size(mb, m == MODUS_HARAKIRI_CUSTOM ? 160 : 130, 44);
+        UiGridCell cell = ui_grid_cell(right_w, MODE_COLS, MODE_H, MODE_GAP, order);
+        lv_obj_set_pos(mb, cell.x, cell.y);
+        lv_obj_set_size(mb, cell.w, cell.h);
+        lv_obj_set_style_pad_all(mb, 4, 0);
         lv_obj_set_style_bg_color(mb,
             (m == (int)g_store.modus) ? lv_color_hex(CLR_PRIMARY) : lv_color_hex(CLR_SIDEBAR), 0);
         lv_obj_set_style_bg_opa(mb, LV_OPA_COVER, 0);
@@ -373,8 +385,11 @@ lv_obj_t *screen_start_create(void)
         s_modus_btns[m] = mb;
         lv_obj_t *ml = lv_label_create(mb);
         lv_label_set_text(ml, MODUS_NAMES[m]);
-        lv_obj_set_style_text_font(ml, UI_FONT_14, 0);
-        lv_obj_set_style_text_color(ml, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_set_style_text_font(ml, UI_FONT_16, 0);
+        lv_obj_set_style_text_color(ml, lv_color_hex(m == (int)g_store.modus ? 0xFFFFFF : CLR_TEXT), 0);
+        lv_label_set_long_mode(ml, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(ml, cell.w - 8);
+        lv_obj_set_style_text_align(ml, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(ml);
     }
 
@@ -391,12 +406,13 @@ lv_obj_t *screen_start_create(void)
     lv_obj_set_style_pad_all(mach_row, 0, 0);
     lv_obj_set_flex_flow(mach_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(mach_row, 8, 0);
+    lv_obj_clear_flag(mach_row, LV_OBJ_FLAG_SCROLLABLE);
 
     static const char *MACH_LABELS[] = {"A","B","C","D","E","F","G","H"};
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         lv_obj_t *mb = lv_btn_create(mach_row);
-        lv_obj_add_style(mb, &g_style_btn_primary, 0);
-        lv_obj_set_size(mb, 52, 52);
+        lv_obj_add_style(mb, g_store.maschinenAktiv[m] ? &g_style_btn_primary : &g_style_btn_secondary, 0);
+        lv_obj_set_size(mb, 60, 56);
         lv_obj_add_event_cb(mb, machine_toggle_cb, LV_EVENT_CLICKED, (void*)(intptr_t)m);
         s_maschinen_btns[m] = mb;
         lv_obj_t *ml = lv_label_create(mb);
@@ -446,11 +462,10 @@ void screen_start_refresh(void)
     // Sync machine button states
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         if (!s_maschinen_btns[m]) continue;
-        if (g_store.maschinenAktiv[m]) {
-            lv_obj_add_style(s_maschinen_btns[m], &g_style_btn_primary, 0);
-        } else {
-            lv_obj_add_style(s_maschinen_btns[m], &g_style_btn_secondary, 0);
-        }
+        lv_obj_remove_style(s_maschinen_btns[m], &g_style_btn_primary, 0);
+        lv_obj_remove_style(s_maschinen_btns[m], &g_style_btn_secondary, 0);
+        lv_obj_add_style(s_maschinen_btns[m], g_store.maschinenAktiv[m]
+            ? &g_style_btn_primary : &g_style_btn_secondary, 0);
         lv_obj_invalidate(s_maschinen_btns[m]);
     }
     char pending[256];

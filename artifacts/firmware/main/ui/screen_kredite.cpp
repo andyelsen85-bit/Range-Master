@@ -349,18 +349,18 @@ static void bill_cb(lv_event_t *e)
     lv_obj_set_style_text_font(hint, UI_FONT_12, 0);
     lv_obj_set_style_text_color(hint, lv_color_hex(CLR_MUTED), 0);
     lv_obj_t *actions = lv_obj_create(card);
-    lv_obj_set_size(actions, LV_PCT(100), 60); lv_obj_set_style_bg_opa(actions, LV_OPA_0, 0);
+    lv_obj_set_size(actions, LV_PCT(100), 56); lv_obj_set_style_bg_opa(actions, LV_OPA_0, 0);
     lv_obj_set_style_border_width(actions, 0, 0); lv_obj_set_style_pad_all(actions, 0, 0);
     lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(actions, 16, 0);
     lv_obj_t *cancel = lv_btn_create(actions); lv_obj_add_style(cancel, &g_style_btn_secondary, 0);
-    lv_obj_set_size(cancel, 180, 52); lv_obj_add_event_cb(cancel, [](lv_event_t *) { close_bill_modal(); }, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_size(cancel, 180, 56); lv_obj_add_event_cb(cancel, [](lv_event_t *) { close_bill_modal(); }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cl = lv_label_create(cancel); lv_label_set_text(cl, "ZURÜCK");
     lv_obj_set_style_text_font(cl, UI_FONT_14, 0);
     lv_obj_set_style_text_color(cl, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(cl);
     lv_obj_t *paid = lv_btn_create(actions);
     lv_obj_add_style(paid, store_payment_pending(sid) ? &g_style_btn_secondary : &g_style_btn_primary, 0);
-    lv_obj_set_size(paid, 260, 52);
+    lv_obj_set_size(paid, 260, 56);
     lv_obj_add_event_cb(paid, paid_cb, LV_EVENT_CLICKED, (void *)(intptr_t)sid);
     lv_obj_t *pl = lv_label_create(paid);
     bool already_paid = bill_data && bill_data->state == BILL_PAID;
@@ -484,9 +484,10 @@ static void build_player_list(void)
         lv_obj_t *row = lv_obj_create(s_player_list);
         // Each player gets enough vertical room for the labelled control
         // groups; compact single-row controls clipped on the touch display.
-        lv_obj_set_size(row, LV_PCT(100), 132);
+        lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_add_style(row, &g_style_card, 0);
-        lv_obj_set_style_pad_all(row, 10, 0);
+        lv_obj_set_style_pad_all(row, 8, 0);
+        lv_obj_set_style_pad_hor(row, 16, 0);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START,
@@ -498,7 +499,10 @@ static void build_player_list(void)
         // Keep the player details in a generous first column. The controls
         // belong to a separate, wider column so their complete group can be
         // aligned against the right edge instead of being clipped.
-        lv_obj_set_size(info, 420, LV_SIZE_CONTENT);
+        lv_obj_set_size(info, 0, LV_SIZE_CONTENT);
+        lv_obj_set_flex_grow(info, 1);
+        lv_obj_set_style_pad_all(info, 0, 0);
+        lv_obj_set_style_pad_row(info, 2, 0);
         lv_obj_set_style_bg_opa(info, LV_OPA_0, 0);
         lv_obj_set_style_border_width(info, 0, 0);
         lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
@@ -532,25 +536,26 @@ static void build_player_list(void)
         // Keep every operation in an explicitly labelled group.  This makes
         // the two ammunition calibers unambiguous and leaves tap spacing.
         lv_obj_t *btn_grp = lv_obj_create(row);
-        lv_obj_set_size(btn_grp, 760, 104);
+        lv_obj_set_size(btn_grp, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(btn_grp, LV_OPA_0, 0);
         lv_obj_set_style_border_width(btn_grp, 0, 0);
         lv_obj_set_style_pad_all(btn_grp, 0, 0);
-        lv_obj_set_style_pad_bottom(btn_grp, 8, 0);
+        lv_obj_clear_flag(btn_grp, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_flex_flow(btn_grp, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn_grp, LV_FLEX_ALIGN_END,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(btn_grp, 10, 0);
-        lv_obj_set_scroll_dir(btn_grp, LV_DIR_HOR);
-        lv_obj_set_scrollbar_mode(btn_grp, LV_SCROLLBAR_MODE_AUTO);
+                              LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+        lv_obj_set_style_pad_column(btn_grp, 14, 0);
         auto control_group = [&](const char *caption, int width, uint32_t color) {
             lv_obj_t *group = lv_obj_create(btn_grp);
-            lv_obj_set_size(group, width, 94);
+            lv_obj_set_size(group, width, LV_SIZE_CONTENT);
+            lv_obj_clear_flag(group, LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_set_style_bg_opa(group, LV_OPA_0, 0);
             lv_obj_set_style_border_width(group, 0, 0);
             lv_obj_set_style_pad_all(group, 0, 0);
             lv_obj_set_flex_flow(group, LV_FLEX_FLOW_COLUMN);
             lv_obj_set_style_pad_row(group, 3, 0);
+            lv_obj_set_flex_align(group, LV_FLEX_ALIGN_START,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
             lv_obj_t *label = lv_label_create(group);
             lv_label_set_text(label, caption);
             lv_obj_set_style_text_font(label, UI_FONT_14, 0);
@@ -558,24 +563,24 @@ static void build_player_list(void)
             return group;
         };
 
-        lv_obj_t *bill_group = control_group("RECHNUNG", 92, CLR_MUTED);
+        lv_obj_t *bill_group = control_group("RECHNUNG", 112, CLR_MUTED);
         lv_obj_t *bill = lv_btn_create(bill_group);
         lv_obj_add_style(bill, &g_style_btn_secondary, 0);
-        lv_obj_set_size(bill, 90, 62);
+        lv_obj_set_size(bill, 112, 56);
         lv_obj_add_event_cb(bill, bill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)sid);
         lv_obj_t *bill_label = lv_label_create(bill);
         lv_label_set_text(bill_label, store_payment_pending(sid) ? "AUSSTEHEND" : "RECHNUNG");
         lv_obj_set_style_text_font(bill_label, UI_FONT_12, 0);
         lv_obj_center(bill_label);
 
-        lv_obj_t *credit_group = control_group("KREDIT", 116, CLR_PRIMARY);
+        lv_obj_t *credit_group = control_group("KREDIT", 124, CLR_PRIMARY);
         lv_obj_t *credit_buttons = lv_obj_create(credit_group);
-        lv_obj_set_size(credit_buttons, 116, 64); lv_obj_set_style_bg_opa(credit_buttons, LV_OPA_0, 0);
+        lv_obj_set_size(credit_buttons, 124, 56); lv_obj_clear_flag(credit_buttons, LV_OBJ_FLAG_SCROLLABLE); lv_obj_set_style_bg_opa(credit_buttons, LV_OPA_0, 0);
         lv_obj_set_style_border_width(credit_buttons, 0, 0); lv_obj_set_style_pad_all(credit_buttons, 0, 0);
-        lv_obj_set_flex_flow(credit_buttons, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(credit_buttons, 4, 0);
+        lv_obj_set_flex_flow(credit_buttons, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(credit_buttons, 8, 0);
         // -1
         lv_obj_t *btn_minus = lv_btn_create(credit_buttons);
-        lv_obj_set_size(btn_minus, 56, 62);
+        lv_obj_set_size(btn_minus, 58, 56);
         lv_obj_set_style_bg_color(btn_minus, lv_color_hex(CLR_WARN), 0);
         lv_obj_set_style_bg_opa(btn_minus, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(btn_minus, 8, 0);
@@ -593,7 +598,7 @@ static void build_player_list(void)
         // +1
         lv_obj_t *btn_plus = lv_btn_create(credit_buttons);
         lv_obj_add_style(btn_plus, &g_style_btn_primary, 0);
-        lv_obj_set_size(btn_plus, 56, 62);
+        lv_obj_set_size(btn_plus, 58, 56);
         lv_obj_add_event_cb(btn_plus, grant_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)sid);
         lv_obj_t *bpl = lv_label_create(btn_plus);
@@ -626,16 +631,16 @@ static void build_player_list(void)
         for (size_t action = 0; action < sizeof(ammo_actions) / sizeof(ammo_actions[0]); ++action) {
             if (action == 0 || action == 2) {
                 const uint32_t caliber_color = action == 0 ? CAL12_COLOR : CAL20_COLOR;
-                lv_obj_t *ammo_group = control_group(action == 0 ? "CAL.12" : "CAL.20", 116, caliber_color);
+                lv_obj_t *ammo_group = control_group(action == 0 ? "CAL.12" : "CAL.20", 124, caliber_color);
                 lv_obj_t *buttons = lv_obj_create(ammo_group);
-                lv_obj_set_size(buttons, 116, 64); lv_obj_set_style_bg_opa(buttons, LV_OPA_0, 0);
+                lv_obj_set_size(buttons, 124, 56); lv_obj_clear_flag(buttons, LV_OBJ_FLAG_SCROLLABLE); lv_obj_set_style_bg_opa(buttons, LV_OPA_0, 0);
                 lv_obj_set_style_border_width(buttons, 0, 0); lv_obj_set_style_pad_all(buttons, 0, 0);
-                lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(buttons, 4, 0);
+                lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_column(buttons, 8, 0);
                 ammo_buttons[action / 2] = buttons;
             }
             lv_obj_t *ammo = lv_btn_create(ammo_buttons[action / 2]);
             const uint32_t caliber_color = action < 2 ? CAL12_COLOR : CAL20_COLOR;
-            lv_obj_set_size(ammo, 56, 62);
+            lv_obj_set_size(ammo, 58, 56);
             lv_obj_add_style(ammo, &g_style_btn_secondary, 0);
             lv_obj_set_style_border_width(ammo, 2, 0);
             lv_obj_set_style_border_color(ammo, lv_color_hex(caliber_color), 0);
@@ -654,9 +659,9 @@ static void build_player_list(void)
         }
 
         // X (remove from today's list)
-        lv_obj_t *remove_group = control_group("LÖSCHEN", 92, CLR_DANGER);
+        lv_obj_t *remove_group = control_group("LÖSCHEN", 112, CLR_DANGER);
         lv_obj_t *btn_del = lv_btn_create(remove_group);
-        lv_obj_set_size(btn_del, 90, 62);
+        lv_obj_set_size(btn_del, 112, 56);
         lv_obj_set_style_bg_color(btn_del, lv_color_hex(CLR_DANGER), 0);
         lv_obj_set_style_bg_opa(btn_del, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(btn_del, 8, 0);
@@ -700,10 +705,16 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_hor(hdr, 20, 0);
+    lv_obj_set_style_pad_hor(hdr, 16, 0);
+    lv_obj_set_style_pad_ver(hdr, 0, 0);
+    lv_obj_set_style_pad_column(hdr, 12, 0);
 
     lv_obj_t *title = lv_label_create(hdr);
     lv_label_set_text(title, LV_SYMBOL_CHARGE "  SPIELER DES TAGES");
+    // Title takes the free space so queue + ZURÜCK sit right-aligned together.
+    lv_obj_set_width(title, 0);
+    lv_obj_set_flex_grow(title, 1);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(title, UI_FONT_22, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(CLR_PRIMARY), 0);
 
@@ -712,15 +723,18 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_add_event_cb(back, [](lv_event_t *e) {
         ui_manager_show(SCREEN_DASHBOARD);
     }, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_size(back, 170, 56);
     lv_obj_t *bl2 = lv_label_create(back);
     lv_label_set_text(bl2, LV_SYMBOL_HOME "  ZURÜCK");
-    lv_obj_set_style_text_font(bl2, UI_FONT_14, 0);
+    lv_obj_set_style_text_font(bl2, UI_FONT_16, 0);
     lv_obj_set_style_text_color(bl2, lv_color_hex(CLR_TEXT), 0);
     lv_obj_center(bl2);
 
     // Add player row
     lv_obj_t *add_row = lv_obj_create(s_scr);
-    lv_obj_set_size(add_row, DISPLAY_LOGICAL_W - 40, 60);
+    // 56 px controls + 2*8 px padding.
+    lv_obj_set_size(add_row, DISPLAY_LOGICAL_W - 40, 72);
+    lv_obj_set_style_pad_ver(add_row, 8, 0);
     lv_obj_align(add_row, LV_ALIGN_TOP_MID, 0, 78);
     lv_obj_add_style(add_row, &g_style_card, 0);
     lv_obj_set_flex_flow(add_row, LV_FLEX_FLOW_ROW);
@@ -734,7 +748,7 @@ lv_obj_t *screen_kredite_create(void)
     lv_obj_set_style_text_color(add_lbl, lv_color_hex(CLR_TEXT), 0);
 
     s_dd_add = lv_dropdown_create(add_row);
-    lv_obj_set_size(s_dd_add, 300, 44);
+    lv_obj_set_size(s_dd_add, 300, 56);
     lv_obj_set_style_text_font(s_dd_add, UI_FONT_14, 0);
     lv_obj_set_style_bg_color(s_dd_add, lv_color_hex(CLR_BORDER), 0);
     lv_obj_set_style_text_color(s_dd_add, lv_color_hex(CLR_TEXT), 0);
@@ -742,7 +756,7 @@ lv_obj_t *screen_kredite_create(void)
 
     lv_obj_t *add_btn = lv_btn_create(add_row);
     lv_obj_add_style(add_btn, &g_style_btn_primary, 0);
-    lv_obj_set_size(add_btn, 120, 44);
+    lv_obj_set_size(add_btn, 160, 56);
     lv_obj_add_event_cb(add_btn, add_player_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *abl = lv_label_create(add_btn);
     lv_label_set_text(abl, "+ HINZUFÜGEN");
@@ -752,16 +766,18 @@ lv_obj_t *screen_kredite_create(void)
 
     s_lbl_status = lv_label_create(s_scr);
     lv_label_set_text(s_lbl_status, "");
-    lv_obj_align(s_lbl_status, LV_ALIGN_TOP_MID, 0, 148);
-    lv_obj_set_style_text_font(s_lbl_status, UI_FONT_14, 0);
-    lv_label_set_long_mode(s_lbl_status, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(s_lbl_status, DISPLAY_LOGICAL_W - 40);
+    // Fixed one-line status strip (reserved 26 px) directly under the
+    // dropdown row, so the card list never jumps when a message appears.
+    lv_obj_set_size(s_lbl_status, DISPLAY_LOGICAL_W - 40, 26);
+    lv_obj_align(s_lbl_status, LV_ALIGN_TOP_MID, 0, 78 + 72 + 4);
+    lv_obj_set_style_text_font(s_lbl_status, UI_FONT_16, 0);
+    lv_label_set_long_mode(s_lbl_status, LV_LABEL_LONG_DOT);
 
     // Player list
     s_player_list = lv_obj_create(s_scr);
     lv_obj_set_size(s_player_list, DISPLAY_LOGICAL_W - 40,
-                    DISPLAY_LOGICAL_H - 70 - 68 - 30 - 10);
-    lv_obj_align(s_player_list, LV_ALIGN_TOP_MID, 0, 70 + 68 + 30);
+                    DISPLAY_LOGICAL_H - (78 + 72 + 4 + 26 + 4) - 16);
+    lv_obj_align(s_player_list, LV_ALIGN_TOP_MID, 0, 78 + 72 + 4 + 26 + 4);
     lv_obj_set_style_bg_color(s_player_list, lv_color_hex(CLR_BG), 0);
     lv_obj_set_style_bg_opa(s_player_list, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(s_player_list, 0, 0);

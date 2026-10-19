@@ -20,5 +20,6 @@ jobs:
           python3 artifacts/firmware/tests/test_network_policy.py
           python3 artifacts/firmware/tests/test_fat_selftest_resume.py
           python3 artifacts/firmware/tests/test_local_players.py
+          python3 artifacts/firmware/tests/test_ui_layout.py
           python3 artifacts/firmware/tests/test_fat_paths.py
           python3 artifacts/firmware/tests/test_pending_recovery.py

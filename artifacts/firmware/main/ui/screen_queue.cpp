@@ -2,6 +2,7 @@
 #include "portal_runtime.h"
 #include "game_store.h"
 #include "ui_fonts.h"
+#include "ui_layout.h"
 #include "screen_start.h"
 #include "coprocessor.h"
 #include <stdio.h>
@@ -84,7 +85,8 @@ static void open(lv_event_t*) {
 void screen_queue_button(lv_obj_t *screen) {
  int index=buttons[0]?1:0;
  if(buttons[index])return;
- buttons[index]=button(screen,"Warteschlange",open);labels[index]=lv_obj_get_child(buttons[index],0);
+ char initial[32];ui_queue_button_text(0,initial,sizeof(initial));
+ buttons[index]=button(screen,initial,open);labels[index]=lv_obj_get_child(buttons[index],0);
  lv_obj_add_flag(buttons[index],LV_OBJ_FLAG_FLOATING);
  auto *header=lv_obj_get_child(screen,0);
  if(header&&lv_obj_get_style_flex_flow(header,LV_PART_MAIN)==LV_FLEX_FLOW_ROW) {
@@ -94,11 +96,15 @@ void screen_queue_button(lv_obj_t *screen) {
   int last=lv_obj_get_child_count(header)-1;
   if(last>0)lv_obj_move_to_index(buttons[index],last-1);
  }
- lv_obj_set_width(buttons[index],210);
+ lv_obj_set_width(buttons[index],230);
+ lv_obj_set_style_pad_all(buttons[index],0,0);
  lv_obj_set_style_text_font(labels[index],UI_FONT_16,0);
+ lv_obj_set_style_text_align(labels[index],LV_TEXT_ALIGN_CENTER,0);
+ lv_obj_center(labels[index]);
  // The rightmost 190px belong exclusively to Back; queue never covers it.
- lv_obj_align(buttons[index],LV_ALIGN_TOP_RIGHT,-200,8);
- lv_obj_set_height(buttons[index],52);
+ // Same 56 px height as the mode buttons; header is 70 px -> 7 px top.
+ lv_obj_align(buttons[index],LV_ALIGN_TOP_RIGHT,-200,7);
+ lv_obj_set_height(buttons[index],56);
  lv_obj_add_event_cb(buttons[index],deleted,LV_EVENT_DELETE,nullptr);
  lastCount=-1;
 }
@@ -108,7 +114,7 @@ void screen_queue_tick() {
   lastConnected=connected;
   lastEnabled=current.enabled;
   lastCount=current.total;lastReserved=reserved;
-  char text[64];snprintf(text,sizeof(text),"Warteschlange (%d)",current.total);
+  char text[64];ui_queue_button_text(current.total,text,sizeof(text));
   for(int i=0;i<2;i++)if(buttons[i]) {
    lv_label_set_text(labels[i],text);
    if(current.enabled||reserved)lv_obj_remove_flag(buttons[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(buttons[i],LV_OBJ_FLAG_HIDDEN);

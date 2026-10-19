@@ -53,6 +53,14 @@ static inline void scorecard_render(lv_obj_t *table,const FinishedGame *game,Sco
         lv_obj_set_style_pad_hor(table,2,LV_PART_ITEMS);
         lv_obj_set_style_pad_ver(table,std::max(1,(layout.row-(int)font->line_height-2)/2),LV_PART_ITEMS);
         lv_obj_clear_flag(table,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_text_align(table,LV_TEXT_ALIGN_CENTER,LV_PART_ITEMS);
+        // TOTAL must fit on one line in the real font with the real 2 px
+        // cell padding; widen the total column (taken from the name column)
+        // instead of wrapping, cropping or substituting a glyph.
+        lv_point_t caption{};
+        lv_text_get_size(&caption,"TOTAL",font,0,0,32767,LV_TEXT_FLAG_NONE);
+        int needed=scorecard_total_needed(caption.x,2);
+        if(needed>layout.total){layout.name-=needed-layout.total;layout.total=needed;}
     }
     lv_table_set_col_cnt(table,columns+2);lv_table_set_row_cnt(table,n+1);
     lv_table_set_col_width(table,0,fit?layout.name:150);lv_table_set_cell_value(table,0,0,"SPIELER");
@@ -63,9 +71,11 @@ static inline void scorecard_render(lv_obj_t *table,const FinishedGame *game,Sco
         history_scorecard_heading(game,run,clay,heading,sizeof(heading));
         if(history_scorecard_pair_at(game,run,clay))state->pair[col+1]=1;
         else if(history_scorecard_pair_at(game,run,clay-1))state->pair[col+1]=2;
+        if(!heading[0])snprintf(heading,sizeof(heading),"-");
         lv_table_set_col_width(table,col+1,fit?layout.clay:34);lv_table_set_cell_value(table,0,col+1,heading);
     }
     lv_table_set_col_width(table,columns+1,fit?layout.total:76);lv_table_set_cell_value(table,0,columns+1,"TOTAL");
+    lv_table_set_cell_ctrl(table,0,columns+1,LV_TABLE_CELL_CTRL_TEXT_CROP);
     for(int p=0;p<n;p++){
         int sid=game->spielerIds[p];
         char shown[sizeof(game->spielerNamen[p])];
@@ -87,6 +97,7 @@ static inline void scorecard_render(lv_obj_t *table,const FinishedGame *game,Sco
         state->nameFont[p]=font;
         lv_table_set_cell_value(table,p+1,0,shown);
         lv_table_set_cell_ctrl(table,p+1,0,LV_TABLE_CELL_CTRL_TEXT_CROP);
+        lv_table_set_cell_ctrl(table,p+1,columns+1,LV_TABLE_CELL_CTRL_TEXT_CROP);
         for(int col=0;col<columns;col++){
             const Ergebnis *r=history_scorecard_result(game,sid,col/shape.clays+1,col%shape.clays+1);char score[16];
             if(r&&r->punkte>=0){snprintf(score,sizeof(score),"%d",r->punkte);state->points[p][col]=r->punkte;}
