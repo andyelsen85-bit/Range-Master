@@ -614,6 +614,13 @@ static lv_obj_t *build_mach_tab(lv_obj_t *parent)
     lv_obj_set_style_text_font(section, UI_FONT_16, 0);
     lv_obj_set_style_text_color(section, lv_color_hex(CLR_PRIMARY), 0);
 
+    char terminal[40];
+    if(http_terminal_id(terminal,sizeof(terminal))) {
+        lv_obj_t *identity=lv_label_create(parent);
+        lv_label_set_text_fmt(identity,"Handy-Maschinentest: %s",terminal);
+        lv_obj_set_style_text_font(identity,UI_FONT_16,0);
+        lv_obj_set_style_text_color(identity,lv_color_hex(CLR_TEXT),0);
+    }
     for (int m = 0; m < MASCHINE_COUNT; m++) {
         lv_obj_t *row = lv_obj_create(parent);
         lv_obj_set_size(row, LV_PCT(100), 50);

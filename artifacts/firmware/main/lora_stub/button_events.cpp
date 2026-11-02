@@ -102,8 +102,12 @@ void websocketEvent(void *,esp_event_base_t,int32_t type,void *data) {
 bool admit(const cJSON *json,uint32_t boot,const char *sn,const char *cn,const Shared &s,bool ws) {
     uint32_t id,src,btn,age;
     if(!number(json,"id",id)||!number(json,"src",src)||!number(json,"btn",btn)||
-       !number(json,"age_ms",age)||src<1||src>8||btn<1||btn>6) return false;
+       !number(json,"age_ms",age)||src<1||src>8||btn<1||btn>14) return false;
     tm_buttons::Event e{id,(uint8_t)src,(uint8_t)btn,0};
+    if(btn>6) {
+        if(!tm_buttons::hex(text(json,"target"),12)) return false;
+        memcpy(e.target,text(json,"target"),13);
+    }
     char expected[17];
     if(!tm_buttons::event_mac(s.config.key,sn,cn,boot,e,age,expected)||
        !tm_buttons::equal(expected,text(json,"sig"),16)) {
@@ -116,6 +120,8 @@ bool admit(const cJSON *json,uint32_t boot,const char *sn,const char *cn,const S
         cursor.after=id;return true; // reject, no UI command and no delivery ACK
     }
     if(verdict==tm_buttons::Cursor::ACCEPT) {
+        // Authenticated but addressed elsewhere: retire it, never queue it.
+        if(btn>6&&strcmp(e.target,s.config.terminal)) {cursor.after=id;return true;}
         RemoteButtonEvent command{(uint8_t)src,(uint8_t)btn,nowMs()-age,s.generation};
         if(xQueueSend(commands,&command,0)!=pdPASS) {
             ESP_LOGW(TAG,"UI queue full: cursor/ACK unchanged");return false;
@@ -319,7 +325,7 @@ void worker(void *) {
         if(socketClient&&!authenticated&&(int32_t)(now-attemptAt)>=0) lost=true;
         if(authenticated && now-started>=5000) retry=0;
         // down is deliberately not reset by unsuccessful connection attempts.
-        if(!firing&&!authenticated && now-down>5000 && s.config.enabled&&s.config.gameActive && now-lastHttp>=2000) {
+        if(!firing&&!authenticated && now-down>5000 && s.config.enabled && now-lastHttp>=2000) {
             lastHttp=now;fallback(s);
         }
         vTaskDelay(pdMS_TO_TICKS(25));

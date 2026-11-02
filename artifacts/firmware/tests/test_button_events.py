@@ -108,6 +108,20 @@ int main(){
     assert(process(wire,s)&&cursor.boot==999&&cursor.after==10&&queued.size()==count);
     parsed={};num(parsed,"resync",1);num(parsed,"boot",1000);num(parsed,"next",20);
     assert(!process(wire,s)&&cursor.boot==999&&cursor.after==10);
+    strcpy(s.config.terminal,"010203040506");cursor={123,10};
+    tm_buttons::Event test{11,1,7,0,"010203040506"};char signature[17];
+    assert(tm_buttons::event_mac(s.config.key,serverNonce,clientNonce,123,test,0,signature));
+    cJSON tj;num(tj,"id",11);num(tj,"src",1);num(tj,"btn",7);num(tj,"age_ms",0);
+    str(tj,"sig",signature);str(tj,"target",test.target);
+    assert(admit(&tj,123,serverNonce,clientNonce,s,true)&&queued.back().btn==7);
+    const auto before=queued.size();
+    test.id=12;strcpy(test.target,"aabbccddeeff");num(tj,"id",12);str(tj,"target",test.target);
+    assert(tm_buttons::event_mac(s.config.key,serverNonce,clientNonce,123,test,0,signature));
+    str(tj,"sig",signature);
+    assert(admit(&tj,123,serverNonce,clientNonce,s,true)&&queued.size()==before&&cursor.after==12);
+    num(tj,"id",13);str(tj,"target",s.config.terminal);
+    assert(!admit(&tj,123,serverNonce,clientNonce,s,true)&&queued.size()==before);
+    puts("PASS addressed test only queued for matching terminal; target tampering rejected");
     puts("PASS actual terminal: signature/session/age validation, queue-before-ACK, no ACK on overflow/stale");
     puts("PASS failed ACK dedupe, signed HTTP nonce binding, hello/auth and no-replay boot resync");
 }

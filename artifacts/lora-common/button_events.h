@@ -44,24 +44,29 @@ inline bool auth_mac(const char *key,const char *server,const char *client,
         (unsigned long)after,(unsigned long)boot,client);
     return mac(key,text,out);
 }
-struct Event { uint32_t id; uint8_t src,btn; uint32_t t_ms; };
+struct Event { uint32_t id; uint8_t src,btn; uint32_t t_ms; char target[13]{}; };
+inline bool valid_button(uint8_t btn) { return btn>=1&&btn<=14; }
 inline bool event_mac(const char *key,const char *server,const char *client,
                       uint32_t boot,const Event &e,uint32_t age,char *out) {
-    if(!hex(server,16)||!hex(client,32)||e.src<1||e.src>8||e.btn<1||e.btn>6) return false;
+    if(!hex(server,16)||!hex(client,32)||e.src<1||e.src>8||!valid_button(e.btn)) return false;
+    if(e.btn>6&&!hex(e.target,12)) return false;
     char text[160];
     snprintf(text,sizeof(text),"evt|%lu|%lu|%u|%u|%lu|%s|%s",
         (unsigned long)boot,(unsigned long)e.id,e.src,e.btn,
         (unsigned long)age,client,server);
+    if(e.btn>6) {size_t n=strlen(text);snprintf(text+n,sizeof(text)-n,"|%s",e.target);}
     return mac(key,text,out,8);
 }
 struct Ring {
     Event items[32]{};
     uint32_t next=0;
     uint8_t count=0;
-    bool append(uint8_t src,uint8_t btn,uint32_t now) {
-        if(next==UINT32_MAX || src<1||src>8||btn<1||btn>6) return false;
+    bool append(uint8_t src,uint8_t btn,uint32_t now,const char *target=nullptr) {
+        if(next==UINT32_MAX || src<1||src>8||!valid_button(btn)||
+           (btn>6&&!hex(target,12))) return false;
         ++next;
         items[(next-1)%32]={next,src,btn,now};
+        if(btn>6) memcpy(items[(next-1)%32].target,target,13);
         if(count<32) ++count;
         return true;
     }
@@ -77,7 +82,8 @@ struct Cursor {
     uint32_t boot=0,after=0;
     enum Verdict { ACCEPT, DUPLICATE, STALE, INVALID };
     Verdict check(uint32_t b,const Event &e,uint32_t age) const {
-        if(b!=boot || !e.id || e.src<1||e.src>8||e.btn<1||e.btn>6) return INVALID;
+        if(b!=boot || !e.id || e.src<1||e.src>8||!valid_button(e.btn)||
+           (e.btn>6&&!hex(e.target,12))) return INVALID;
         if(e.id<=after) return DUPLICATE;
         return age>MAX_AGE_MS ? STALE : ACCEPT;
     }

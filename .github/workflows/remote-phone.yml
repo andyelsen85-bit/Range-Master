@@ -1,0 +1,43 @@
+name: Remote phone and addressed machine-test safety
+on:
+  push:
+    paths:
+      - "artifacts/lora-remote/**"
+      - "artifacts/lora-common/**"
+      - "artifacts/lora-gateway/**"
+      - "artifacts/firmware/main/lora_stub/**"
+      - "artifacts/firmware/main/ui/ui_manager.cpp"
+      - "artifacts/firmware/tests/test_button_events.py"
+      - "artifacts/firmware/tests/test_remote_actions.py"
+      - ".github/workflows/remote-phone.yml"
+  pull_request:
+    paths:
+      - "artifacts/lora-remote/**"
+      - "artifacts/lora-common/**"
+      - "artifacts/lora-gateway/**"
+      - "artifacts/firmware/**"
+      - ".github/workflows/remote-phone.yml"
+jobs:
+  phone-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native crypto prerequisites
+        run: |
+          sudo apt-get update && sudo apt-get install -y libmbedtls-dev pkg-config
+          if ! pkg-config --exists mbedcrypto; then
+            echo "Providing pkg-config metadata for the installed distribution mbedTLS library"
+            mkdir -p "$RUNNER_TEMP/mbedtls-pc"
+            printf 'Name: mbedcrypto\nDescription: Distribution mbedTLS crypto\nVersion: 2.28\nLibs: -lmbedcrypto\nCflags:\n' > "$RUNNER_TEMP/mbedtls-pc/mbedcrypto.pc"
+            echo "PKG_CONFIG_PATH=$RUNNER_TEMP/mbedtls-pc" >> "$GITHUB_ENV"
+          fi
+      - name: PIN, physical and phone controls, gateway and terminal regressions
+        run: |
+          python3 artifacts/lora-remote/tests/test_phone_policy.py
+          python3 artifacts/lora-remote/tests/test_phone_http.py
+          python3 artifacts/lora-remote/tests/test_remote.py
+          python3 artifacts/lora-remote/tests/test_remote_reprovision.py
+          python3 artifacts/lora-common/tests/test_button_protocol.py
+          python3 artifacts/lora-gateway/tests/test_remote_events.py
+          python3 artifacts/firmware/tests/test_button_events.py
+          python3 artifacts/firmware/tests/test_remote_actions.py

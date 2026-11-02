@@ -6,4 +6,5 @@
 #elif __has_include("../TrapMasterRemote.local.h")
 #include "../TrapMasterRemote.local.h"
 #endif
+static_assert(TM_REMOTE_ID=='1',"Remote1 must use sender ID '1'");
 #include "../TrapMasterRemote.ino"

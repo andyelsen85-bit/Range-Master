@@ -58,6 +58,18 @@ The container's native IDF invocation needs `IDF_PYTHON_ENV_PATH` pointing to
 the existing workspace `.pythonlibs`; IDF's default Python environment path
 does not exist. Use the installed ROM ELF directory matching the pinned SDK.
 
+For headless builds with a prepopulated target-only toolchain, the generic
+SDK export script can reject missing debugger or other-chip tools even when
+the actual P4 compiler and build dependencies are installed.
+
+**Why:** Generic SDK environment setup blocked a valid P4 build by requiring
+unrelated Xtensa/debugger tools; the target build succeeded with its existing
+compiler, managed Python environment and matching ROM ELF directory.
+
+**How to apply:** Inspect the installed target tools first. Do not install an
+entire multi-chip SDK merely to satisfy generic environment setup for a
+headless P4 compile.
+
 **Why:** Calling the existing IDF tool with workspace Python still fails before
 compilation if IDF tries to validate its nonexistent default environment.
 

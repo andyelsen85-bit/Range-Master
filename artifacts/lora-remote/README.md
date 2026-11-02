@@ -3,6 +3,12 @@
 Heltec **Wireless Stick V3, 433 MHz**, powered through USB-C. This is an
 operating remote, **not an emergency stop or safety interlock**.
 
+**Handy-Modus:** offener, nur auf Anforderung gestarteter WLAN-Hotspot mit
+PIN, sechs Tasten und separater adressierter Maschinentest-Seite:
+[Bedienung, Sicherheit und Update aller drei Geräte](HANDY_MODE.md).
+Beide Schlüssel sperren und Skip drei Sekunden halten; beim normalen Boot
+bleibt WLAN aus.
+
 ### Button label colours
 
 Match the terminal's authoritative `../firmware/main/ui/score_colors.h`:
@@ -25,15 +31,47 @@ maximum four points.
 3. Verify every GPIO against the actual **Wireless Stick V3 board revision,
    schematic and exposed headers**, then define all inputs below. The firmware
    rejects missing, duplicate and known reserved GPIOs.
-4. Open `TrapMasterRemote1/TrapMasterRemote1.ino`. This wrapper fixes sender
-   ID to ASCII `'1'`. Another handheld needs its own unique ID `'2'`…`'8'`
-   and its own NVS counter. Never deploy two handhelds with the same ID.
+4. For the first handheld open `TrapMasterRemote1/TrapMasterRemote1.ino`
+   (ASCII ID `'1'`); for the second open
+   `TrapMasterRemote2/TrapMasterRemote2.ino` (ASCII ID `'2'`).
+   Both include the same implementation; no separate Arduino codebase is needed.
+   Copy the example configuration to the corresponding folder's
+   `TrapMasterRemote.local.h`. Do not override `TM_REMOTE_ID` in that header:
+   each wrapper checks its identity at compile time. Additional handhelds need
+   unique IDs `'3'`…`'8'` and their own NVS counters. Never deploy two handhelds
+   with the same ID.
 5. Fit a suitable antenna before transmitting. Confirm the site's 433 MHz
    channel, power and duty-cycle regulations.
 
 The remote matches existing relay parameters: 433000000 Hz, bandwidth setting
 0 (125 kHz), SF7, coding-rate setting 1, preamble 8, variable payload,
 CRC enabled, normal IQ and the same Heltec LoRa sync-word default.
+
+### Two remotes were accidentally flashed as ID '1'
+
+Both then use the gateway's same replay-counter slot. A lower counter receives
+no ACK; an equal counter is acknowledged as a retry without a second event.
+This can look intermittent; it is not evidence that a separate project or
+gateway pairing is missing.
+
+Stop using the duplicate-ID devices until safely reprovisioned, and isolate
+trap operation during commissioning. Since both devices may have emitted the
+same AES-GCM nonce with the same key, the preferred full cleanup is to rotate
+the shared LoRa AES key on the gateway, all relays and both remotes, in addition
+to assigning the second remote ID '2'.
+Keep the terminal-to-gateway HMAC key separate; this issue concerns the LoRa key.
+Do not share private keys in logs, chat or Git.
+
+**A wrapper alone is not an identity migration.** Existing firmware stops with
+`Sender identity changed: provision safely with a NEW AES key`.
+Updated firmware shows **ID gesperrt / USB-Log**, with a numeric reason in
+Serial. Do not erase NVS, reset counters or remove the check.
+
+If only gateway and remotes are accessible, use the supported
+[remote-only key rotation and guarded identity migration](REMOTE_RECOVERY.md).
+That recovery leaves the relay key unchanged, stops future remote nonce
+collisions and preserves counters. It does not retroactively undo possible
+old-key nonce reuse; rotate the relay key later when the relays are accessible.
 
 ### Wiring: direct buttons
 
@@ -103,7 +141,8 @@ Individual switch diodes are recommended to prevent matrix ghosting.
 
 ## Power bank and sleep
 
-`TM_REMOTE_SLEEP_MODE=0` is the default. WiFi and Bluetooth are off;
+`TM_REMOTE_SLEEP_MODE=0` is the default. WiFi is off unless Handy-Modus was
+physically requested; Bluetooth is off.
 the CPU stays awake, the radio idles and the OLED dims after 20 seconds
 but **never turns off while awake**.
 
@@ -121,7 +160,8 @@ or a button press; no periodic CPU wake is used. In matrix sleep, all rows
 are LOW and the two columns are monitored. A wake press in a previously
 armed group is debounced and sent; cold-boot held buttons remain ignored.
 If ULP setup fails, the remote logs the failure and remains awake.
-The OLED is turned off only during deep sleep.
+The OLED is turned off only during deep sleep. While Handy-Modus is active,
+deep sleep is suspended; its shutdown restores the selected sleep policy.
 
 ## Gateway and terminal
 

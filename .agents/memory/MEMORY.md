@@ -39,7 +39,7 @@
 - [All-machine test scope](machine-test-scope.md) — “all machines” tests include only enabled machines; sequential commands, not simultaneous launches.
 - [Scorecard column labels](scorecard-labels.md) — use machine letters repeated in shooting order, without round or numeric position prefixes.
 - [Doublettes and Harakiri](doublette-scoring.md) — pairs score 2/0 per clay; Harakiri uses independent, game-stable player orders and machine-aligned scorecards.
-- [Wireless remote safety](remote-button-safety.md) — persist before ACK; bind event HMACs to both connection nonces and age; verified GPIOs only.
+- [Wireless remote safety](remote-button-safety.md) — durable ACKs, session-bound events, independent phone/physical gates, and terminal-addressed machine tests.
 - [Daily backup and inventory policy](gameday-policies.md) — protected backups never bypass the daily cap; zero stock is valid and sales units must match.
 - [Drizzle SQL array bindings](drizzle-array-bindings.md) — use explicit bound membership lists; JS-array interpolation is not a PostgreSQL array parameter.
 - [Gateway network addressing](gateway-network-addressing.md) — WiFiManager static-field visibility is conditional; clear live DHCP state without erasing replay counters.

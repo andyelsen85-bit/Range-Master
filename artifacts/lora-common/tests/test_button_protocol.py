@@ -37,6 +37,19 @@ int main() {
     assert(!memcmp(relay,legacy,12)&&relay[9]==0&&relay[10]==0&&relay[11]==0);
     tm_protocol::DecodedPacket decoded{};
     assert(tm_protocol::decrypt(relay,sizeof(relay),&decoded));
+    uint8_t test[tm_protocol::TEST_FRAME_LEN],target[6]={1,2,3,4,5,6};
+    for(uint8_t m='A';m<='H';++m) {
+        assert(tm_protocol::encrypt_test('1',m,123,target,test));
+        assert(nonces.insert(std::string((char*)test,12)).second);
+        assert(tm_protocol::decrypt(test,sizeof(test),&decoded));
+        assert(decoded.command==tm_protocol::CMD_TEST_BASE+m-'A'&&
+               !memcmp(decoded.target,target,6));
+        test[tm_protocol::NONCE_LEN+tm_protocol::BODY_LEN]^=1;
+        assert(!tm_protocol::decrypt(test,sizeof(test),&decoded));
+        assert(!tm_protocol::decrypt(test,tm_protocol::FRAME_LEN,&decoded));
+    }
+    assert(!tm_protocol::encrypt('1',tm_protocol::CMD_TEST_BASE,124,relay));
+    assert(!tm_protocol::encrypt_test('A','A',124,target,test));
 
     const char *key="synthetic-private-auth-key";
     const char *sn="0011223344556677",*cn="00112233445566778899aabbccddeeff";
@@ -59,6 +72,13 @@ int main() {
     event.src=1;event.btn=6;assert(tm_buttons::event_mac(key,sn,cn,999,event,120,b));assert(!tm_buttons::equal(a,b,16));
     assert(!tm_buttons::equal(a,"000000000000000z",16));
     assert(!tm_buttons::auth_mac(key,"too short",cn,0,0,a));
+    tm_buttons::Event machineTest{58,1,7,0,"010203040506"};
+    assert(tm_buttons::event_mac(key,sn,cn,999,machineTest,0,a));
+    machineTest.target[0]='f';
+    assert(tm_buttons::event_mac(key,sn,cn,999,machineTest,0,b));
+    assert(!tm_buttons::equal(a,b,16)); // routing address is signed, not metadata
+    machineTest.target[0]='z';
+    assert(!tm_buttons::event_mac(key,sn,cn,999,machineTest,0,b));
 
     tm_buttons::Ring ring;
     for(unsigned i=1;i<=40;++i) assert(ring.append(i%8+1,i%6+1,i*10));

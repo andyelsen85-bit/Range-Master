@@ -22,9 +22,18 @@ static_assert(TM_REMOTE_ID>='1'&&TM_REMOTE_ID<='8',"Invalid remote ID");
 #if __has_include("remote_pins.h")
 #include "remote_pins.h"
 #include "remote_sleep.h"
+#include "remote_identity.h"
 #else
 #include "../remote_pins.h"
 #include "../remote_sleep.h"
+#include "../remote_identity.h"
+#endif
+#if defined(TM_PHONE_HOST_STUB)
+#include "phone_host_stub.h" // board-only adapter substituted by the sketch host harness
+#elif __has_include("phone_server.h")
+#include "phone_server.h"
+#else
+#include "../phone_server.h"
 #endif
 
 SSD1306Wire remoteDisplay(0x3c,500000,SDA_OLED,SCL_OLED,GEOMETRY_64_32,RST_OLED);
@@ -38,7 +47,12 @@ static uint32_t feedbackUntil=0,ledAt=0;
 static uint8_t activeButton=0,retries=0,ledEdges=0;
 static const char *feedback="";
 static volatile bool txDone=false,txFailed=false,acked=false;
-static uint8_t activeFrame[tm_protocol::FRAME_LEN];
+static uint8_t activeFrame[tm_protocol::TEST_FRAME_LEN];
+static size_t activeFrameLen=tm_protocol::FRAME_LEN;
+static bool phonePending=false,bootPinResetEligible=false;
+static uint32_t pendingPhoneEpoch=0;
+static bool gestureDown=false,gestureFired=false,resetFired=false;
+static uint32_t gestureStarted=0;
 static const char *buttonNames[]={"","SCHUSS","WIEDERH.","SKIP","0 PKT","1 PKT","2 PKT"};
 #if TM_REMOTE_SLEEP_MODE == 1
 RTC_DATA_ATTR static bool sleepArmed[2];
@@ -76,6 +90,13 @@ static void renderRemote() {
         statusText(1,y+8,armed[i]?"FREI":"GESPERRT");
     }
     remoteDisplay.setColor(WHITE);
+    if(phoneActive.load()) {
+        remoteDisplay.clear();
+        remoteDisplay.drawString(0,0,"Handy AN");
+        remoteDisplay.drawString(0,10,"192.168.4.1");
+        char keys[20];snprintf(keys,sizeof(keys),"S:%s P:%s",armed[0]?"an":"aus",armed[1]?"an":"aus");
+        remoteDisplay.drawString(0,21,keys);
+    }
     if((int32_t)(feedbackUntil-millis())>0) {
         remoteDisplay.setColor(BLACK);remoteDisplay.fillRect(0,8,64,16);
         remoteDisplay.setColor(WHITE);remoteDisplay.drawString(0,10,feedback);
@@ -84,12 +105,14 @@ static void renderRemote() {
 }
 static void feedbackRemote(bool ok) {
     static char text[32];
-    if(ok) snprintf(text,sizeof(text),"OK %s",buttonNames[activeButton]);
+    if(ok&&activeButton<=6) snprintf(text,sizeof(text),"OK %s",buttonNames[activeButton]);
+    else if(ok) snprintf(text,sizeof(text),"ACK Test %c",'A'+activeButton-7);
     else snprintf(text,sizeof(text),"keine Antwort");
     feedback=text;feedbackUntil=millis()+1000;ledEdges=ok?2:6;ledAt=millis();
-    Serial.printf("Button %u %s counter=%lu %s\n",activeButton,buttonNames[activeButton],
+    Serial.printf("Button %u %s counter=%lu %s\n",activeButton,activeButton<=6?buttonNames[activeButton]:"TEST",
         (unsigned long)activeCounter,ok?"ACK":"keine Antwort");
-    pending=waiting=transmitting=false;Radio.Sleep();renderRemote();
+    if(phonePending) phoneResult=ok?PHONE_ACK:PHONE_NO_ACK;
+    phonePending=false;pending=waiting=transmitting=false;Radio.Sleep();renderRemote();
 }
 static void onRemoteTxDone() { txDone=true; }
 static void onRemoteTxTimeout() { txFailed=true;Radio.Sleep(); }
@@ -130,23 +153,33 @@ static void readButtons(bool down[6]) {
     for(unsigned i=0;i<6;++i) down[i]=digitalRead(buttons[i])==LOW;
 #endif
 }
-static void startButton(uint8_t btn) {
-    if(pending||counter==UINT32_MAX) return;
+static bool startButton(uint8_t btn,const PhoneCommand *phone=nullptr) {
+    if(pending||counter==UINT32_MAX||btn<1||btn>14||(!phone&&btn>6)) return false;
+    if(phone&&!phoneAuthorized(btn,phone->epoch)) return false;
     uint32_t next=counter+1;
     if(remoteNvs.putULong("counter",next)!=sizeof(uint32_t)) {
-        feedback="NVS Fehler";feedbackUntil=millis()+1000;renderRemote();return;
+        feedback="NVS Fehler";feedbackUntil=millis()+1000;renderRemote();return false;
     }
     counter=activeCounter=next;activeButton=btn;retries=0;
-    if(!tm_protocol::encrypt(TM_REMOTE_ID,tm_protocol::CMD_BTN_BASE+btn,
-        activeCounter,activeFrame)) return;
+    activeFrameLen=btn>6?tm_protocol::TEST_FRAME_LEN:tm_protocol::FRAME_LEN;
+    bool encrypted=btn>6?
+        tm_protocol::encrypt_test(TM_REMOTE_ID,'A'+btn-7,activeCounter,phone->target,activeFrame):
+        tm_protocol::encrypt(TM_REMOTE_ID,tm_protocol::CMD_BTN_BASE+btn,activeCounter,activeFrame);
+    if(!encrypted) return false;
+    phonePending=phone!=nullptr;
+    pendingPhoneEpoch=phone?phone->epoch:0;
     pending=true;waiting=transmitting=false;nextAttempt=millis();acked=false;
+    if(phonePending) phoneResult=PHONE_SENT;
+    return true;
 }
 static void retryTick() {
     if(!pending) return;
     const uint32_t now=millis();
-    if(!armed[activeButton<=3?0:1]) {
+    if(phonePending?!phoneAuthorized(activeButton,pendingPhoneEpoch):!armed[activeButton<=3?0:1]) {
         pending=waiting=transmitting=false;Radio.Sleep();
-        Serial.println("Key locked: retries cancelled");return;
+        if(phonePending) phoneResult=PHONE_CANCELLED;
+        phonePending=false;
+        Serial.println("Authorization locked: retries cancelled");return;
     }
     if(acked) { feedbackRemote(true);return; }
     if(transmitting) {
@@ -165,7 +198,7 @@ static void retryTick() {
         // Every retransmission uses the exact saved frame/counter, never a new
         // nonce or a fresh logical button press.
         txDone=txFailed=false;transmitting=true;deadline=now+500;
-        Radio.Send(activeFrame,sizeof(activeFrame));
+        Radio.Send(activeFrame,activeFrameLen);
     }
 }
 void setup() {
@@ -185,6 +218,10 @@ void setup() {
     keyInputs[1].init(digitalRead(TM_KEY_SCORE_GPIO)==LOW,now);
     armed[0]=keyInputs[0].stable;armed[1]=keyInputs[1].stable;
     bool down[6];readButtons(down);
+    bootPinResetEligible=down[2]&&!armed[0]&&!armed[1];
+#if TM_REMOTE_SLEEP_MODE == 1
+    if(esp_sleep_get_wakeup_cause()==ESP_SLEEP_WAKEUP_ULP) bootPinResetEligible=false;
+#endif
     for(unsigned i=0;i<6;++i) {
         bool coldHeld=down[i];
 #if TM_REMOTE_SLEEP_MODE == 1
@@ -198,15 +235,24 @@ void setup() {
         feedback="NVS Fehler";feedbackUntil=UINT32_MAX;renderRemote();
         while(true) delay(1000);
     }
-    // Binding the durable identity prevents accidental nonce reuse by changing
-    // a build-time sender ID on a previously provisioned handheld.
-    uint8_t savedId=remoteNvs.getUChar("sender",0);
-    if((savedId && savedId!=TM_REMOTE_ID)||
-       (!savedId && remoteNvs.putUChar("sender",TM_REMOTE_ID)!=1)) {
-        Serial.println("Sender identity changed: provision safely with a NEW AES key");
+    uint8_t allowedFrom=0;
+#ifdef TM_REMOTE_MIGRATE_FROM_ID
+    static_assert(TM_REMOTE_MIGRATE_FROM_ID>='1'&&TM_REMOTE_MIGRATE_FROM_ID<='8',
+                  "Migration source must be ASCII '1'..'8'");
+    allowedFrom=TM_REMOTE_MIGRATE_FROM_ID;
+#endif
+    const auto identity=tm_remote_identity::bind(remoteNvs,TM_REMOTE_ID,allowedFrom);
+    if(identity!=tm_remote_identity::READY&&identity!=tm_remote_identity::MIGRATED) {
+        Serial.printf("Remote identity blocked: reason=%u (2=ID mismatch, 3=key not rotated, 4=NVS, 5=invalid binding)\n",
+                      (unsigned)identity);
+        remoteDisplay.clear();remoteDisplay.setColor(WHITE);
+        remoteDisplay.drawString(0,0,"ID gesperrt");remoteDisplay.drawString(0,14,"USB-Log");
+        remoteDisplay.display();
         while(true) delay(1000);
     }
-    counter=remoteNvs.getULong("counter",0);initRemoteRadio();
+    if(identity==tm_remote_identity::MIGRATED)
+        Serial.printf("Remote identity migrated %c -> %c with new remote key; counter retained\n",allowedFrom,TM_REMOTE_ID);
+    counter=remoteNvs.getULong("counter",0);initRemoteRadio();phoneInit();
 }
 void loop() {
     uint32_t now=millis();
@@ -223,11 +269,30 @@ void loop() {
         }
     }
     bool down[6];readButtons(down);
+    // One held button also works with matrix ghost suppression. Both physical
+    // keys must be locked; it cannot authorize a normal shooting button.
+    const bool gesture=down[2]&&!keyRaw[0]&&!keyRaw[1]&&!pending;
+    if(gesture&&!gestureDown) {gestureStarted=now;gestureFired=resetFired=false;}
+    if(gesture&&!gestureFired&&now-gestureStarted>=3000) {phoneToggle();gestureFired=true;}
+    if(gesture&&bootPinResetEligible&&!resetFired&&now-gestureStarted>=10000) {
+        phoneResetPin();resetFired=true;
+    }
+    if(!gesture) {bootPinResetEligible=false;gestureFired=resetFired=false;}
+    gestureDown=gesture;
     for(unsigned i=0;i<6;++i) {
         if(down[i]!=buttonInputs[i].raw) lastActivity=now;
         if(buttonInputs[i].sample(down[i],now,30,armed[i/3])) startButton(i+1);
     }
+    PhoneCommand phone{};
+    if(phoneTake(phone)) {
+        if(!startButton(phone.button,&phone)) phoneResult=pending?PHONE_BUSY:PHONE_ERROR;
+        else lastActivity=now;
+    }
     retryTick();Radio.IrqProcess();
+    static bool previousPhone=false;
+    if(previousPhone!=phoneActive.load()) {
+        previousPhone=phoneActive.load();redraw=true;lastActivity=now;
+    }
     if(ledEdges && (int32_t)(now-ledAt)>=0) {
         digitalWrite(LED,(ledEdges%2)==0?HIGH:LOW);--ledEdges;ledAt=now+100;
     }
@@ -237,7 +302,7 @@ void loop() {
     if(redraw) renderRemote();
 #if TM_REMOTE_SLEEP_MODE == 1
     bool held=false;for(bool value:down) held|=value;
-    if(wantDim&&!pending&&!held&&!ledEdges&&!feedbackUntil) {
+    if(wantDim&&!phoneActive.load()&&!pending&&!held&&!ledEdges&&!feedbackUntil) {
         sleepArmed[0]=armed[0];sleepArmed[1]=armed[1];
         Radio.Sleep();remoteDisplay.displayOff();
         if(!remoteSleep()) {

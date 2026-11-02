@@ -14,6 +14,7 @@
 #include "button_events.h"
 #include "click_sound.h"
 #include "esp_timer.h"
+#include "http_sync.h"
 
 #include "ui_manager.h"
 #include "game_store.h"
@@ -156,6 +157,18 @@ static void remote_buttons_tick()
         g_store.spielerCount > 0 && g_store.taubeIndex < g_store.sequenzLen;
     snprintf(config.url, sizeof(config.url), "%s", g_store.gatewayUrl);
     snprintf(config.key, sizeof(config.key), "%s", g_store.gatewayToken);
+    static bool identityRead=false;
+    static char terminal[13]={};
+    if(!identityRead) {
+        identityRead=true;
+        char identity[40];
+        if(http_terminal_id(identity,sizeof(identity))) {
+            for(unsigned i=0;i<12;++i) {
+                char c=identity[9+i];terminal[i]=c>='A'&&c<='F'?c-'A'+'a':c;
+            }
+        } // shared helper logs/fails visibly; no shared fallback identity
+    }
+    memcpy(config.terminal,terminal,sizeof(terminal));
     button_events_publish(config);
     const uint32_t now = lv_tick_get();
     if (s_remote_toast && (int32_t)(now - s_remote_toast_until) >= 0)
@@ -166,6 +179,18 @@ static void remote_buttons_tick()
         // a lockout is retained for a later, potentially different clay.
         if ((uint32_t)(esp_timer_get_time()/1000) - e.receivedMs > 3000) continue;
         if (s_remote_has_action && now - s_remote_last_action < 500) continue;
+        if(e.btn>=7&&e.btn<=14) {
+            const unsigned machine=e.btn-7;
+            if(g_store.activeGameOpen || !g_store.maschinenAktiv[machine]) {
+                remote_toast(g_store.activeGameOpen?"Maschinentest: Spiel aktiv":
+                             "Maschinentest: Maschine deaktiviert");continue;
+            }
+            if(lora_fire_machine((Maschine)machine)) {
+                s_remote_has_action=true;s_remote_last_action=now;
+                remote_toast("Fernbedienung: Maschinentest gesendet");
+            } else remote_toast("Maschinentest: Funk belegt");
+            continue;
+        }
         if (!config.gameActive) { remote_toast("Taster ignoriert");continue; }
         SpielActionResult result = SPIEL_ACTION_IGNORED;
         switch (e.btn) {

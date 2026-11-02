@@ -26,6 +26,7 @@ struct SequenzEintrag { bool isPair,isDoublette;int maschine,partner,delayMs; };
 struct {int taubeIndex=0,sequenzLen=2,ergebnisseCount=0,spielerCount=1,screen=SCREEN_SPIEL;
     int spielerIndex=0;
     bool activeGameStorageError=false,harakiriOrdersReady=false;
+    bool activeGameOpen=false,maschinenAktiv[8]{true,true,true,true,true,true,true,true};
     bool currentFireSent=false,remoteButtonsEnabled=true,repeatCurrentLaunch=false;
     SequenzEintrag sequenz[2]{};char gatewayUrl[256]="http://gateway",gatewayToken[256]="synthetic-auth-key";
 } g_store;
@@ -40,11 +41,15 @@ static bool busy=false,queueOk=true;static unsigned launches=0,scores=0,repeats=
 bool lora_request_busy(){return busy;}
 bool lora_fire_machine_game(int){if(queueOk) ++launches;return queueOk;}
 bool lora_fire_doublette_game(int,int,int){if(queueOk) ++launches;return queueOk;}
+using Maschine=int;
+static unsigned testLaunches=0;static int testMachine=-1;
+bool lora_fire_machine(Maschine m){if(busy)return false;++testLaunches;testMachine=m;return true;}
+bool http_terminal_id(char *out,size_t n){snprintf(out,n,"ESP32-P4-414243444546");return true;}
 void screen_spiel_refresh(){++refreshes;}
 void store_eintragen(int){++scores;++g_store.ergebnisseCount;g_store.currentFireSent=false;}
 void store_wiederholen(){++repeats;g_store.currentFireSent=false;}
 void store_skip_taube(){++skips;g_store.currentFireSent=false;}
-struct ButtonEventsConfig {bool enabled,gameActive;char url[256],key[256];};
+struct ButtonEventsConfig {bool enabled,gameActive;char url[256],key[256],terminal[13];};
 struct RemoteButtonEvent {uint8_t src,btn;uint32_t receivedMs,generation;};
 std::deque<RemoteButtonEvent> events;
 void button_events_publish(const ButtonEventsConfig&){}
@@ -90,6 +95,14 @@ int main(){
     g_store.screen=SCREEN_SPIEL;g_store.spielerCount=0;push(1,1);assert(launches==4);
     g_store.spielerCount=1;events.push_back({1,1,now-3001,0});remote_buttons_tick();assert(launches==4);
     assert(clicks==8);
+    // Tests are separate from games, preserve game scores, and obey enabled mask.
+    s_current=SCREEN_DASHBOARD;wait();push(1,7);
+    assert(testLaunches==1&&testMachine==0&&scores==3&&launches==4);
+    wait();g_store.maschinenAktiv[1]=false;push(1,8);assert(testLaunches==1);
+    wait();g_store.activeGameOpen=true;push(1,7);assert(testLaunches==1);
+    wait();g_store.activeGameOpen=false;busy=true;push(1,7);assert(testLaunches==1);
+    busy=false;wait();events.push_back({1,7,now-3001,0});remote_buttons_tick();assert(testLaunches==1);
+    puts("PASS terminal machine tests: no game required, disabled/active/busy/stale rejected, scores untouched");
     puts("PASS actual shared/UI actions: touch + two remotes, fire guard, queue rejection, score/skip/repeat");
     puts("PASS pair P1, second half, busy, non-game, staleness, 500ms lockout and accepted-only sound");
 }

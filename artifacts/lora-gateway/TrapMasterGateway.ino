@@ -519,7 +519,8 @@ static void onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     tm_protocol::DecodedPacket decoded = {};
     bool authenticated = tm_protocol::decrypt(payload, size, &decoded);
-    if (authenticated && tm_protocol::button_command(decoded.command)) {
+    if (authenticated && (tm_protocol::button_command(decoded.command) ||
+                          tm_protocol::test_command(decoded.command))) {
         buttonEnqueue(decoded);
     }
     if (authenticated &&

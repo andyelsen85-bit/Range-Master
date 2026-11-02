@@ -1,8 +1,17 @@
 #pragma once
-// Copy to TrapMasterRemote1/TrapMasterRemote.local.h (ignored by Git).
+// Copy to TrapMasterRemote1/TrapMasterRemote.local.h or
+// TrapMasterRemote2/TrapMasterRemote.local.h (both ignored by Git).
+// Sender identity comes from the entry sketch; do NOT define TM_REMOTE_ID here.
 // Provision the SAME private AES key as gateway/relays. No keys or GPIO
 // defaults are provided: verify against your board revision/header schematic.
 // #define TM_PROTOCOL_KEY_BYTES { sixteen private byte values }
+// Remote-only recovery without reflashing relays:
+// keep TM_PROTOCOL_KEY_BYTES unchanged; supply the SAME FRESH, DIFFERENT
+// 16-byte TM_REMOTE_KEY_BYTES in both remotes and the gateway.
+// #define TM_REMOTE_KEY_BYTES { sixteen fresh private byte values }
+// On Remote2 ONLY, if this board previously saved ID '1':
+// #define TM_REMOTE_MIGRATE_FROM_ID '1'
+// Remove the migration define after the successful one-time update.
 #define TM_REMOTE_SLEEP_MODE 0
 #define TM_REMOTE_MATRIX 0
 // #define TM_KEY_FIRE_GPIO ...

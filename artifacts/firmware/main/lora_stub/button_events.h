@@ -6,6 +6,7 @@
 struct ButtonEventsConfig {
     bool enabled,gameActive;
     char url[256],key[256];
+    char terminal[13]; // lower-case factory MAC, never a shared fallback
 };
 struct RemoteButtonEvent { uint8_t src,btn; uint32_t receivedMs,generation; };
 void button_events_init();

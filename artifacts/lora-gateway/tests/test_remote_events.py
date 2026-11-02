@@ -74,6 +74,23 @@ struct NvsMock {
         ++writes;order.emplace_back("persist");return fails?0:4;
     }
 } preferences;
+// Separate-key replay storage still exercises the real receive->persist->ACK
+// path, with the same failure/order observations as legacy counter storage.
+struct Preferences {
+    bool present=false;std::vector<uint8_t> blob;
+    bool begin(const char*,bool){return true;}
+    bool isKey(const char*){return present;}
+    size_t getBytesLength(const char*){return blob.size();}
+    size_t getBytes(const char*,void *out,size_t cap){
+        if(blob.size()>cap)return 0;
+        memcpy(out,blob.data(),blob.size());return blob.size();
+    }
+    size_t putBytes(const char*,const void *data,size_t len){
+        ++preferences.writes;order.emplace_back("persist");
+        if(preferences.fails)return 0;
+        const auto *p=(const uint8_t*)data;blob={p,p+len};present=true;return len;
+    }
+};
 struct RadioMock {
     unsigned sends=0,receives=0;
     void Rx(int){++receives;}
@@ -117,6 +134,10 @@ void authenticate(uint8_t n,uint32_t boot,uint32_t after,bool good=true){
     buttonSocketEvent(n,WStype_TEXT,nullptr,1);
 }
 int main(){
+#ifdef TM_REMOTE_KEY_BYTES
+    remoteCounterReady=remoteCounterLedger.begin(tm_protocol::REMOTE_KEY);
+    assert(remoteCounterReady);preferences.writes=0;order.clear();
+#endif
     buttonBoot=123;
     remote('1',10);assert(preferences.writes==1&&Radio.sends==1&&buttonRing.next==1);
     assert(order[0]=="persist"&&order[1]=="ack");
@@ -127,9 +148,9 @@ int main(){
     assert(Radio.sends==2&&remoteCounters[0]==10&&buttonRing.next==1);
     preferences.fails=false;remote('2',10,6);
     assert(Radio.sends==3&&buttonRing.next==2&&remoteCounters[1]==10);finish();
-    // Queued receive may not interrupt a FIRE/relay transaction.
-    pendingFire=(void*)1;remote('3',10);assert(Radio.sends==3&&remoteCount==1);
-    pendingFire=nullptr;radioBusy=true;buttonRadioTick();assert(Radio.sends==3);
+    // Only an actual radio TX owns the link, not an HTTP/FIRE wait.
+    pendingFire=(void*)1;radioBusy=true;remote('3',10);assert(Radio.sends==3&&remoteCount==1);
+    pendingFire=nullptr;buttonRadioTick();assert(Radio.sends==3);
     radioBusy=false;buttonRadioTick();assert(Radio.sends==4&&buttonRing.next==3);finish();
 
     buttonSocketEvent(0,WStype_CONNECTED,nullptr,0);
@@ -200,6 +221,8 @@ if __name__=="__main__":
     with tempfile.TemporaryDirectory(prefix="tm-gateway-buttons-") as directory:
         flags=mbedcrypto_flags(directory)
         p=Path(directory);cpp=p/"test.cpp";cpp.write_text(STUBS+globals_+funcs+MAIN)
-        subprocess.run(["g++","-std=c++17","-Wall","-Wextra","-Werror",
-            "-I",str(ROOT.parent/"lora-common"),str(cpp),*flags,"-o",str(p/"test")],check=True)
-        subprocess.run([str(p/"test")],check=True)
+        for split in (False,True):
+            subprocess.run(["g++","-std=c++17","-Wall","-Wextra","-Werror",
+                *(["-DTM_REMOTE_KEY_BYTES={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}"] if split else []),
+                "-I",str(ROOT),"-I",str(ROOT.parent/"lora-common"),str(cpp),*flags,"-o",str(p/"test")],check=True)
+            subprocess.run([str(p/"test")],check=True)

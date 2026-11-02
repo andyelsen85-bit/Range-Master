@@ -57,6 +57,24 @@ static bool socketFireReply(uint8_t n,const char *nonce,int status,const char *b
     return count<sizeof(output)&&eventSocket.frame(n,output);
 }
 static uint32_t buttonBoot=0,remoteCounters[8]{},remoteLastMs=0,remoteLastId=0;
+#ifdef TM_REMOTE_KEY_BYTES
+#if __has_include("../lora-common/remote_counter_store.h")
+#include "../lora-common/remote_counter_store.h"
+#else
+#include "../../lora-common/remote_counter_store.h"
+#endif
+static Preferences remoteCounterNvs;
+static tm_remote_counters::Ledger<Preferences> remoteCounterLedger(remoteCounterNvs);
+static bool remoteCounterReady=false;
+#endif
+static bool saveRemoteCounter(uint8_t sender,uint32_t counter) {
+#ifdef TM_REMOTE_KEY_BYTES
+    return remoteCounterReady&&remoteCounterLedger.save(sender-'1',counter);
+#else
+    char key[8];snprintf(key,sizeof(key),"rem_%c",sender);
+    return preferences.putULong(key,counter)==sizeof(uint32_t);
+#endif
+}
 static uint8_t remoteLastSrc=0,remoteLastBtn=0;
 static bool remoteDelivered=false;
 static tm_protocol::DecodedPacket remoteMailbox[8];
@@ -78,8 +96,8 @@ static bool buttonEventText(const tm_buttons::Event &e,uint32_t age,
                             const char *sn,const char *cn,char *out,size_t cap) {
     char sig[17];
     if(!tm_buttons::event_mac(GATEWAY_AUTH_KEY,sn,cn,buttonBoot,e,age,sig)) return false;
-    int n=snprintf(out,cap,"{\"id\":%lu,\"src\":%u,\"btn\":%u,\"age_ms\":%lu,\"sig\":\"%s\"}",
-        (unsigned long)e.id,e.src,e.btn,(unsigned long)age,sig);
+    int n=snprintf(out,cap,"{\"id\":%lu,\"src\":%u,\"btn\":%u,\"age_ms\":%lu,\"sig\":\"%s\",\"target\":\"%s\"}",
+        (unsigned long)e.id,e.src,e.btn,(unsigned long)age,sig,e.target);
     return n>0 && (size_t)n<cap;
 }
 static void buttonSocketEvent(uint8_t n,WStype_t type,uint8_t *payload,size_t len) {
@@ -152,14 +170,16 @@ static void buttonSocketTick() {
         }
         const auto *e=buttonRing.get(c.sent+1);
         if(e) {
-            char text[192];
+            char text[224];
             if(buttonEventText(*e,now-e->t_ms,c.server,c.client,text,sizeof(text)) &&
                 eventSocket.frame(n,text)) c.sent=e->id;
         }
     }
 }
 static bool buttonEnqueue(const tm_protocol::DecodedPacket &p) {
-    if(!tm_protocol::valid_remote(p.machine)||!tm_protocol::button_command(p.command)||remoteCount>=8) return false;
+    if(!tm_protocol::valid_remote(p.machine)||
+       (!tm_protocol::button_command(p.command)&&!tm_protocol::test_command(p.command))||
+       remoteCount>=8) return false;
     remoteMailbox[(remoteHead+remoteCount)%8]=p;++remoteCount;return true;
 }
 static void buttonRadioTick() {
@@ -179,16 +199,22 @@ static void buttonRadioTick() {
     if(p.counter<last) { Radio.Rx(0);return; }
     if(p.counter>last) {
         if(buttonRing.next==UINT32_MAX) { Radio.Rx(0);return; }
-        char key[8];snprintf(key,sizeof(key),"rem_%c",p.machine);
         const uint32_t started=millis();
-        if(preferences.putULong(key,p.counter)!=sizeof(uint32_t)) {
+        if(!saveRemoteCounter(p.machine,p.counter)) {
             Serial.println("Remote counter NVS failed: NO ACK/event");
             Radio.Rx(0);return;
         }
         last=p.counter; // durable before ACK; duplicates do not write NVS again
-        buttonRing.append(p.machine-'0',p.command-tm_protocol::CMD_BTN_BASE,millis());
+        char target[13]={};
+        const bool test=tm_protocol::test_command(p.command);
+        if(test) for(unsigned i=0;i<6;++i) {
+            target[2*i]=tm_auth::hex_digit(p.target[i]>>4);
+            target[2*i+1]=tm_auth::hex_digit(p.target[i]&15);
+        }
+        const uint8_t btn=test?7+p.command-tm_protocol::CMD_TEST_BASE:p.command-tm_protocol::CMD_BTN_BASE;
+        buttonRing.append(p.machine-'0',btn,millis(),test?target:nullptr);
         remoteLastId=buttonRing.next;remoteLastMs=millis();
-        remoteLastSrc=p.machine-'0';remoteLastBtn=p.command-tm_protocol::CMD_BTN_BASE;
+        remoteLastSrc=p.machine-'0';remoteLastBtn=btn;
         remoteDelivered=false;
         digitalWrite(LED,HIGH);
         Serial.printf("Remote %c button %u id=%lu persistMs=%lu\n",p.machine,
@@ -230,7 +256,7 @@ static void handleButtonEvents() {
         unsigned count=0;
         while(count<8) {
             const auto *e=buttonRing.get(id);if(!e) break;
-            char text[192];
+            char text[224];
             if(!buttonEventText(*e,millis()-e->t_ms,sn,cn.c_str(),text,sizeof(text))) break;
             if(count++) body+=",";
             body+=text;++id;
@@ -256,9 +282,17 @@ static bool buttonRenderStatus() {
 }
 static void buttonEventsInit() {
     do { buttonBoot=esp_random(); } while(!buttonBoot);
+#ifdef TM_REMOTE_KEY_BYTES
+    remoteCounterReady=remoteCounterLedger.begin(tm_protocol::REMOTE_KEY);
+    if(!remoteCounterReady) Serial.println("Remote replay NVS unavailable: remote ACKs disabled; relay state unchanged");
+#endif
     for(uint8_t i=0;i<8;++i) {
+#ifdef TM_REMOTE_KEY_BYTES
+        remoteCounters[i]=remoteCounterLedger.counter(i);
+#else
         char key[8];snprintf(key,sizeof(key),"rem_%c",'1'+i);
         remoteCounters[i]=preferences.getULong(key,0);
+#endif
     }
     pinMode(LED,OUTPUT);digitalWrite(LED,LOW);
     eventSocket.begin();eventSocket.onEvent(buttonSocketEvent);

@@ -29,3 +29,12 @@ need the Nix dynamic loader and zlib library path when run outside an FHS.
 **How to apply:** Keep these adjustments confined to temporary toolchain
 files. Never modify provisioning keys or production sources to fix host
 tool execution, and exclude private local headers from bench build copies.
+
+Native mbedTLS may expose deprecated APIs that the Heltec target deliberately
+removes. A successful host crypto test is not target API compatibility proof.
+
+**Why:** The Heltec SDK rejected the deprecated context-based PBKDF2 API even
+though native mbedTLS tests compiled it successfully.
+
+**How to apply:** Preserve SDK-version compatibility and compile the actual
+S3 target after crypto changes, not only the native policy tests.
