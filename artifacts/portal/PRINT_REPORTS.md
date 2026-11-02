@@ -52,6 +52,11 @@ reserves fixed columns/padding, applies `--print-scale` only to A4 fonts
 layout, resize, `beforeprint`, `afterprint` and the print button.
 The 80 mm receipt rules remain separate.
 
+The A4 on-screen paper preview uses the same fitted scorecard geometry as
+printing, rather than the scrolling table used by interactive scorecards.
+Annual summaries use four KPI columns in the preview as well; the best day
+has an unbroken date and a separate labelled points line.
+
 ## Verification
 
 ```sh

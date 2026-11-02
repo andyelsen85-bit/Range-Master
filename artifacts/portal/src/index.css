@@ -162,6 +162,26 @@
 .print-receipt { padding: 3mm; font-size: 11px; }
 .print-receipt .print-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .print-receipt .print-two-col { grid-template-columns: 1fr; }
+/* The paper preview must use the same scorecard geometry as the actual print.
+   Interactive scorecards deliberately scroll; reports must expose every total. */
+.print-a4 { padding: 10mm; font-size: 10pt; }
+.print-a4 .scorecard-paper,
+.print-a4 .scorecard-paper .overflow-x-auto { overflow: visible; }
+.print-a4 .slip-table { width: 100% !important; min-width: 0 !important; table-layout: fixed; }
+.print-a4 .slip-table .slip-cell { min-width: 0 !important; width: auto !important; font-size: max(7pt, calc(9pt * var(--print-scale, 1))) !important;
+  padding: 0.5mm 0.2mm !important; line-height: 1.15; white-space: normal; word-break: keep-all; }
+.print-a4 .slip-table th.slip-sticky { width: 24mm !important; padding-left: 1mm !important; }
+.print-a4 .slip-table th.slip-run-total { width: 10mm !important; }
+.print-a4 .slip-table th.slip-hit-total { width: 9mm !important; }
+.print-a4 .slip-table th.slip-zero-total { width: 5mm !important; }
+.print-a4 .slip-table th.slip-total { width: 15mm !important; }
+.print-a4 .slip-sticky { position: static !important; overflow-wrap: anywhere; word-break: break-word; }
+.print-a4 .scorecard-paper > div:first-child { font-size: max(7pt, calc(9pt * var(--print-scale, 1))); padding: 1mm 1.5mm; }
+.print-a4 .print-stats-grid > div { min-width: 0; }
+.print-a4 .print-stats-grid dt { min-height: 2.5em; line-height: 1.25; overflow-wrap: anywhere; }
+.print-a4.print-annual .print-stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.print-best-day-date { display: block; white-space: nowrap; }
+.print-best-day-points { display: block; font-size: 0.75em; font-weight: 600; }
 @page { size: A4 portrait; margin: 10mm; }
 /* Screen-side measurement mode: mirrors print table rules at 9 pt (removed before paint). */
 .print-measure { width: var(--measure-width, 190mm) !important; max-width: none !important; padding: 0 !important; box-sizing: content-box; }
@@ -190,16 +210,6 @@
   :is(div, main, section):has(.print-a4) { overflow: visible !important; max-width: none !important; height: auto !important; min-height: 0 !important; }
   .print-a4, .print-a4 * { overflow: visible !important; max-width: none !important; }
   .print-a4 { width: 100% !important; font-size: 10pt; }
-  .print-a4 .slip-table { width: 100% !important; min-width: 0 !important; table-layout: fixed; }
-  .print-a4 .slip-table .slip-cell { min-width: 0 !important; width: auto !important; font-size: max(7pt, calc(9pt * var(--print-scale, 1))) !important;
-    padding: 0.5mm 0.2mm !important; line-height: 1.15; white-space: normal; word-break: keep-all; }
-  .print-a4 .slip-table th.slip-sticky { width: 24mm !important; padding-left: 1mm !important; }
-  .print-a4 .slip-table th.slip-run-total { width: 10mm !important; }
-  .print-a4 .slip-table th.slip-hit-total { width: 9mm !important; }
-  .print-a4 .slip-table th.slip-zero-total { width: 5mm !important; }
-  .print-a4 .slip-table th.slip-total { width: 15mm !important; }
-  .print-a4 .slip-sticky { position: static !important; overflow-wrap: anywhere; word-break: break-word; }
-  .print-a4 .scorecard-paper > div:first-child { font-size: max(7pt, calc(9pt * var(--print-scale, 1))); padding: 1mm 1.5mm; }
   /* Annual report: stats + 12 months + footer on one A4 page. Receipt untouched. */
   .print-annual { font-size: 8.5pt; }
   .print-annual > header { margin-bottom: 2.5mm; padding-bottom: 1.5mm; }

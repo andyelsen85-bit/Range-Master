@@ -1,6 +1,7 @@
 import { modeLabel } from "@/components/scorecard";
 import { formatDay } from "@/lib/kiosk";
 import type { DayStats, TaubeStat } from "./types";
+import type { ReactNode } from "react";
 
 const fmt = (n: number, d = 1) => (Number.isFinite(n) ? n.toLocaleString("de-LU", { maximumFractionDigits: d, minimumFractionDigits: d }) : "–");
 
@@ -25,7 +26,10 @@ export function DayStatsBlock({ stats, title = "Statistik des Tages", annual }: 
         <Kpi label="Bestes Spiel" value={String(stats.bestPunkte)} />
         <Kpi label="Schnitt / Spiel" value={fmt(stats.durchschnitt)} />
         {annual && <Kpi label="Spieltage" value={String(stats.anzahlSpieltage ?? 0)} />}
-        {annual && <Kpi label="Bester Tag" value={stats.besterTag ? `${formatDay(stats.besterTag)} · ${stats.besterTagPunkte ?? 0}` : "–"} />}
+        {annual && <Kpi label="Bester Tag" value={stats.besterTag ? <>
+          <span className="print-best-day-date">{formatDay(stats.besterTag)}</span>
+          <span className="print-best-day-points">{stats.besterTagPunkte ?? 0} Punkte</span>
+        </> : "–"} />}
       </dl>
       <div className="grid sm:grid-cols-2 gap-6 print-two-col">
         <Bars title="Trefferquote pro Maschine" rows={maschinen.map(([k, v]) => [`Maschine ${k}`, v])} testid="bars-maschinen" />
@@ -52,7 +56,7 @@ export function DayStatsBlock({ stats, title = "Statistik des Tages", annual }: 
   );
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
+function Kpi({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="border border-[hsl(var(--slip-ink)/0.6)] rounded px-2 py-1.5">
       <dt className="text-[10px] uppercase tracking-widest font-bold text-[hsl(var(--slip-muted))]">{label}</dt>

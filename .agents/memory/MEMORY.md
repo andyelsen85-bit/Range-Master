@@ -50,3 +50,4 @@
 - [Sync build verification](sync-build-verification.md) — embedded build identity and authenticated production probes; an image push or 401 is not rollout proof.
 - [Storage recovery boundaries](storage-recovery-boundaries.md) — preserve 8.3 compatibility and separate offline recovery authorization from catering and portal login.
 - [Firmware diagnostic safety](firmware-diagnostic-safety.md) — UART logging can overflow small stacks; optional panic recovery must retain essential DNS and game persistence.
+- [GitHub workflow pushes](github-workflow-push.md) — canonical HTTPS may rewrite through the OAuth proxy; explicit port 443 can use the existing PAT directly.
